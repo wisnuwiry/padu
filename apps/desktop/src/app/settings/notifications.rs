@@ -394,8 +394,13 @@ impl Padu {
     }
 
     fn send_test_notification(&mut self, cx: &mut Context<Self>) {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let tag = format!("padu-test-notification-{timestamp}");
         crate::platform::show_task_notification(
-            "padu-test-notification",
+            &tag,
             &tr!("notifications.test_title"),
             &tr!("notifications.test_desc"),
             self.state.notification_sound_enabled,

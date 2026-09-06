@@ -248,17 +248,80 @@ pub fn play_notification_sound() {
     }
 }
 
-/// Deliver a macOS notification. GPUI owns the notification-center
-/// delegate (and therefore click responses); Padu supplies content here
-/// and configures sound according to user preferences.
+#[cfg(target_os = "macos")]
+mod notification_delegate {
+    use objc2::rc::Retained;
+    use objc2::{AnyThread, define_class, msg_send};
+    use objc2_foundation::NSObjectProtocol;
+    use objc2_user_notifications::{
+        UNNotification, UNNotificationPresentationOptions, UNUserNotificationCenter,
+        UNUserNotificationCenterDelegate,
+    };
+
+    define_class!(
+        #[unsafe(super(objc2::runtime::NSObject))]
+        #[name = "PaduNotificationDelegate"]
+        pub struct PaduNotificationDelegate;
+
+        impl PaduNotificationDelegate {}
+
+        unsafe impl NSObjectProtocol for PaduNotificationDelegate {}
+        unsafe impl UNUserNotificationCenterDelegate for PaduNotificationDelegate {
+            #[unsafe(method(userNotificationCenter:willPresentNotification:withCompletionHandler:))]
+            fn user_notification_center_will_present(
+                &self,
+                _center: &UNUserNotificationCenter,
+                _notification: &UNNotification,
+                completion_handler: &block2::DynBlock<dyn Fn(UNNotificationPresentationOptions)>,
+            ) {
+                completion_handler.call((
+                    UNNotificationPresentationOptions::Banner
+                        | UNNotificationPresentationOptions::Sound
+                        | UNNotificationPresentationOptions::List,
+                ));
+            }
+        }
+    );
+
+    impl PaduNotificationDelegate {
+        pub fn new() -> Retained<Self> {
+            let obj = Self::alloc().set_ivars(());
+            unsafe { msg_send![super(obj), init] }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn ensure_notification_delegate() {
+    use objc2::rc::Retained;
+    use objc2::runtime::ProtocolObject;
+    use objc2_foundation::NSBundle;
+    use objc2_user_notifications::UNUserNotificationCenter;
+    use std::sync::OnceLock;
+
+    if NSBundle::mainBundle().bundleIdentifier().is_none() {
+        return;
+    }
+
+    static DELEGATE: OnceLock<Retained<notification_delegate::PaduNotificationDelegate>> =
+        OnceLock::new();
+    DELEGATE.get_or_init(|| {
+        let delegate = notification_delegate::PaduNotificationDelegate::new();
+        let proto = ProtocolObject::from_ref(&*delegate);
+        UNUserNotificationCenter::currentNotificationCenter().setDelegate(Some(proto));
+        delegate
+    });
+}
+
+/// Deliver a macOS notification. We register a notification center delegate so
+/// alert banners and sounds are presented immediately even when the app is
+/// active in the foreground.
 #[cfg(target_os = "macos")]
 pub fn show_task_notification(tag: &str, title: &str, body: &str, sound: bool, _: &gpui::App) {
-    use block2::RcBlock;
-    use objc2::runtime::Bool;
-    use objc2_foundation::{NSBundle, NSError, NSString};
+    use objc2_foundation::{NSBundle, NSString};
     use objc2_user_notifications::{
-        UNAuthorizationOptions, UNMutableNotificationContent, UNNotificationRequest,
-        UNNotificationSound, UNUserNotificationCenter,
+        UNMutableNotificationContent, UNNotificationRequest, UNNotificationSound,
+        UNUserNotificationCenter,
     };
 
     // UserNotifications raises an Objective-C exception for an executable
@@ -267,36 +330,23 @@ pub fn show_task_notification(tag: &str, title: &str, body: &str, sound: bool, _
         return;
     }
 
-    let tag = tag.to_owned();
-    let title = title.to_owned();
-    let body = body.to_owned();
-    let authorization = RcBlock::new(move |granted: Bool, _error: *mut NSError| {
-        if !granted.as_bool() {
-            return;
-        }
+    ensure_notification_delegate();
 
-        let content = UNMutableNotificationContent::new();
-        content.setTitle(&NSString::from_str(&title));
-        content.setBody(&NSString::from_str(&body));
-        if sound {
-            content.setSound(Some(&UNNotificationSound::defaultSound()));
-        }
+    let content = UNMutableNotificationContent::new();
+    content.setTitle(&NSString::from_str(title));
+    content.setBody(&NSString::from_str(body));
+    if sound {
+        content.setSound(Some(&UNNotificationSound::defaultSound()));
+    }
 
-        // A nil trigger delivers immediately. The stable task tag replaces an
-        // older completion banner for the same task and comes back on click.
-        let request = UNNotificationRequest::requestWithIdentifier_content_trigger(
-            &NSString::from_str(&tag),
-            &content,
-            None,
-        );
-        UNUserNotificationCenter::currentNotificationCenter()
-            .addNotificationRequest_withCompletionHandler(&request, None);
-    });
+    // A nil trigger delivers immediately.
+    let request = UNNotificationRequest::requestWithIdentifier_content_trigger(
+        &NSString::from_str(tag),
+        &content,
+        None,
+    );
     UNUserNotificationCenter::currentNotificationCenter()
-        .requestAuthorizationWithOptions_completionHandler(
-            UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound,
-            &authorization,
-        );
+        .addNotificationRequest_withCompletionHandler(&request, None);
 }
 
 #[cfg(not(target_os = "macos"))]

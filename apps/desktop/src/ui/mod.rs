@@ -487,6 +487,7 @@ mod tests {
             "icons/arrow-left.svg",
             "icons/arrow-right.svg",
             "icons/arrow-up.svg",
+            "icons/bell.svg",
             "icons/stop.svg",
             "icons/check.svg",
             "icons/copy.svg",
