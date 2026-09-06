@@ -888,8 +888,8 @@ function AboutSettings({
       {/* Unified About + Version + Updates Card */}
       <div className="mt-[15px] flex w-full items-center justify-between gap-4 rounded-[13px] bg-[var(--raised)] p-5">
         <div className="flex min-w-0 flex-1 items-center gap-4">
-          <div className="flex size-12 shrink-0 items-center justify-center rounded-xl border bg-background text-[var(--accent)]">
-            <PaduIcon className="size-7" name="logo" />
+          <div className="flex size-[60px] shrink-0 items-center justify-center rounded-[15px] border border-border/40 bg-black text-white">
+            <PaduIcon className="size-9" name="logo" />
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
