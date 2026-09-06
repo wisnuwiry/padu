@@ -1087,6 +1087,7 @@ pub struct Padu {
     /// that lookup can reach cfprefsd.
     automatic_updates_enabled: bool,
     updater_status: crate::updater::UpdateStatus,
+    updater_checking: bool,
     updater_button_focus: FocusHandle,
     updater_button_hovered: bool,
     updater_button_focused: bool,
@@ -1804,6 +1805,7 @@ impl Padu {
         event: crate::updater::UpdaterEvent,
         cx: &mut Context<Self>,
     ) {
+        self.updater_checking = false;
         match event {
             crate::updater::UpdaterEvent::StatusChanged(status) => {
                 self.updater_status = status;
@@ -2948,6 +2950,7 @@ impl Padu {
                     .and_then(|updater| updater.0.as_ref())
                     .is_some_and(|updater| updater.automatically_checks_for_updates()),
                 updater_status,
+                updater_checking: false,
                 updater_button_focus,
                 updater_button_hovered: false,
                 updater_button_focused: false,

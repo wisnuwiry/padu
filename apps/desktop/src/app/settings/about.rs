@@ -5,6 +5,9 @@ impl Padu {
         let theme = Theme::current(cx);
         let version = env!("CARGO_PKG_VERSION");
         let status = self.updater_status;
+        let is_checking = self.updater_checking;
+        let is_updating = status == crate::updater::UpdateStatus::Updating;
+        let is_loading = is_checking || is_updating;
 
         let (host_name, host_address, is_remote) = if self.daemon.is_remote() {
             let active_host = self
@@ -49,21 +52,22 @@ impl Padu {
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(14.0))
+                            .gap(px(16.0))
                             .min_w_0()
                             .flex_1()
                             .child(
                                 div()
-                                    .w(px(46.0))
-                                    .h(px(46.0))
-                                    .rounded(px(11.0))
-                                    .bg(theme.surface)
+                                    .w(px(60.0))
+                                    .h(px(60.0))
+                                    .rounded(px(15.0))
+                                    .bg(gpui::black())
                                     .border_1()
                                     .border_color(theme.border)
+                                    .flex_none()
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .child(icon("icons/logo.svg", 26.0, theme.accent)),
+                                    .child(icon("icons/logo.svg", 36.0, gpui::white())),
                             )
                             .child(
                                 div()
@@ -148,7 +152,7 @@ impl Padu {
                                             }
                                         },
                                     ))
-                            } else if status == crate::updater::UpdateStatus::Updating {
+                            } else if is_loading {
                                 div()
                                     .id("updating-btn")
                                     .cursor_default()
@@ -219,15 +223,19 @@ impl Padu {
                                             theme.text_tertiary
                                         },
                                     )
-                                    .child(match status {
-                                        crate::updater::UpdateStatus::Updating => {
-                                            tr!("about.checking_for_updates").to_string()
-                                        }
-                                        crate::updater::UpdateStatus::Available => {
-                                            tr!("about.update_available").to_string()
-                                        }
-                                        crate::updater::UpdateStatus::Idle => {
-                                            tr!("about.up_to_date").to_string()
+                                    .child(if is_loading {
+                                        tr!("about.checking_for_updates").to_string()
+                                    } else {
+                                        match status {
+                                            crate::updater::UpdateStatus::Updating => {
+                                                tr!("about.checking_for_updates").to_string()
+                                            }
+                                            crate::updater::UpdateStatus::Available => {
+                                                tr!("about.update_available").to_string()
+                                            }
+                                            crate::updater::UpdateStatus::Idle => {
+                                                tr!("about.up_to_date").to_string()
+                                            }
                                         }
                                     }),
                             ),

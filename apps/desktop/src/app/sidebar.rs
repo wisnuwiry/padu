@@ -969,11 +969,48 @@ impl Padu {
     }
 
     pub(super) fn check_for_updates(&mut self, cx: &mut Context<Self>) {
-        if let Some(updater) = cx
+        if self.updater_checking {
+            return;
+        }
+        self.updater_checking = true;
+        cx.notify();
+
+        let has_updater = cx
             .try_global::<crate::updater::UpdaterState>()
             .and_then(|state| state.0.as_ref())
-        {
-            updater.check_for_updates();
+            .is_some();
+
+        if has_updater {
+            if let Some(updater) = cx
+                .try_global::<crate::updater::UpdaterState>()
+                .and_then(|state| state.0.as_ref())
+            {
+                updater.check_for_updates();
+            }
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(Duration::from_secs(3)).await;
+                let _ = this.update(cx, |this, cx| {
+                    if this.updater_checking {
+                        this.updater_checking = false;
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+        } else {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(Duration::from_millis(1000))
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    if this.updater_checking {
+                        this.updater_checking = false;
+                        this.show_success_toast(tr!("updater.up_to_date"));
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
         }
     }
 
