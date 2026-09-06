@@ -96,6 +96,7 @@ settings.providers: 服务商
 settings.usage: 用量
 settings.daemon: 主机与守护进程
 settings.computer_use: 电脑操作
+settings.notifications: 通知
 settings.about: 关于
 settings.general_keywords: 通用 本地 项目 对话 隐私 匿名 使用数据 分析 分享 更新 自动 版本
 settings.appearance_keywords: 外观 主题 系统 浅色 深色 语言 英语 中文 简体 字号 字体 大小 编辑器
@@ -106,7 +107,27 @@ settings.skills_keywords: 技能 技能库 智能体 禁用 启用 删除 claude
 settings.usage_keywords: 用量 令牌 费用 支出 缓存 每日 图表 模型 明细 历史 claude codex
 settings.daemon_keywords: 主机 远程 服务器 云主机 守护进程 服务 网页 网络 暴露 来源 令牌 端口 websocket ssh 局域网
 settings.computer_use_keywords: 电脑操作 屏幕录制 辅助功能 应用 控制 codex
+settings.notifications_keywords: 通知 提醒 声音 权限 系统 音频 测试 横幅 任务 完成
 settings.about_keywords: 关于 信息 版本 更新 检查更新 主机 已连接 github 仓库 赞助 支持
+notifications.system_permission: 系统权限
+notifications.system_permission_desc: 操作系统任务通知发送状态
+notifications.permission_granted: 已允许
+notifications.permission_denied: 已阻止
+notifications.permission_not_determined: 未请求
+notifications.permission_unsupported: 不可用
+notifications.request_permission: 允许通知
+notifications.open_settings: 打开系统设置
+notifications.task_completion: 任务通知
+notifications.task_completion_desc: 当智能体任务完成或需要确认时发送横幅通知
+notifications.sound: 通知声音
+notifications.sound_desc: 发送任务完成通知时播放提示音
+notifications.preview_sound: 试听声音
+notifications.test_title: 测试通知
+notifications.test_desc: 立即发送测试通知以检验横幅与提示音
+notifications.send_test: 发送测试
+notifications.test_sent: 测试通知已发送
+notifications.test_notification_title: Padu 测试
+notifications.test_notification_body: 通知和提示音运行正常！
 about.tagline: 面向本地编码智能体的高性能原生控制台
 about.app_version: 应用版本
 about.check_for_updates: 检查更新

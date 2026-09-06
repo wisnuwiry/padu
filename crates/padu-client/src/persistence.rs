@@ -89,6 +89,14 @@ fn default_right_panel_width() -> f32 {
     DEFAULT_RIGHT_PANEL_WIDTH
 }
 
+fn default_notifications_enabled() -> bool {
+    true
+}
+
+fn default_notification_sound_enabled() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RememberedModelTraits {
     provider: ProviderKind,
@@ -263,6 +271,10 @@ pub struct AppSettings {
     /// `None` -> local daemon (default). `Some(id)` -> remote profile.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_host_id: Option<String>,
+    #[serde(default = "default_notifications_enabled")]
+    pub notifications_enabled: bool,
+    #[serde(default = "default_notification_sound_enabled")]
+    pub notification_sound_enabled: bool,
 }
 
 impl Default for AppSettings {
@@ -278,6 +290,8 @@ impl Default for AppSettings {
             open_in_app: None,
             hosts: Vec::new(),
             active_host_id: None,
+            notifications_enabled: default_notifications_enabled(),
+            notification_sound_enabled: default_notification_sound_enabled(),
         }
     }
 }
@@ -464,6 +478,10 @@ pub struct PersistedState {
     pub hosts: Vec<HostProfile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_host_id: Option<String>,
+    #[serde(default = "default_notifications_enabled")]
+    pub notifications_enabled: bool,
+    #[serde(default = "default_notification_sound_enabled")]
+    pub notification_sound_enabled: bool,
     #[serde(skip)]
     daemon_settings_extra: BTreeMap<String, serde_json::Value>,
     #[serde(skip)]
@@ -511,6 +529,8 @@ impl PersistedState {
             open_in_app: None,
             hosts: Vec::new(),
             active_host_id: None,
+            notifications_enabled: true,
+            notification_sound_enabled: true,
             sidebar_visible: true,
             right_panel_visible: false,
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
@@ -637,6 +657,8 @@ impl PersistedState {
             open_in_app: self.open_in_app.clone(),
             hosts: self.hosts.clone(),
             active_host_id: self.active_host_id.clone(),
+            notifications_enabled: self.notifications_enabled,
+            notification_sound_enabled: self.notification_sound_enabled,
         }
     }
 
@@ -676,6 +698,8 @@ impl PersistedState {
         self.open_in_app = settings.open_in_app;
         self.hosts = settings.hosts;
         self.active_host_id = settings.active_host_id;
+        self.notifications_enabled = settings.notifications_enabled;
+        self.notification_sound_enabled = settings.notification_sound_enabled;
     }
 
     pub fn active_host_profile(&self) -> Option<&HostProfile> {

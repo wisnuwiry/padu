@@ -214,10 +214,52 @@ settings.usage_keywords:
   en: usage tokens cost spend cache daily chart model breakdown history claude codex
 settings.daemon_keywords:
   en: hosts host remote server devbox cloud daemon web network expose origin token port websocket ssh lan
+settings.notifications:
+  en: Notifications
 settings.computer_use_keywords:
   en: computer use screen recording accessibility apps control codex
+settings.notifications_keywords:
+  en: notifications alert sound permission system audio test banner task complete
 settings.about_keywords:
   en: about info version update updates host connected github repository repo sponsor contribute
+notifications.system_permission:
+  en: System Permission
+notifications.system_permission_desc:
+  en: macOS notification delivery status for task alerts
+notifications.permission_granted:
+  en: Allowed
+notifications.permission_denied:
+  en: Blocked
+notifications.permission_not_determined:
+  en: Not Requested
+notifications.permission_unsupported:
+  en: Unavailable
+notifications.request_permission:
+  en: Allow Notifications
+notifications.open_settings:
+  en: Open System Settings
+notifications.task_completion:
+  en: Task Notifications
+notifications.task_completion_desc:
+  en: Deliver a banner notification when an agent task finishes or needs review
+notifications.sound:
+  en: Notification Sound
+notifications.sound_desc:
+  en: Play an audible chime with task completion notifications
+notifications.preview_sound:
+  en: Preview Sound
+notifications.test_title:
+  en: Test Notification
+notifications.test_desc:
+  en: Send an immediate notification to test banner display and sound
+notifications.send_test:
+  en: Send Test
+notifications.test_sent:
+  en: Test notification sent
+notifications.test_notification_title:
+  en: Padu Test
+notifications.test_notification_body:
+  en: Notifications and sound are working correctly!
 about.tagline:
   en: A fast, native control plane for local coding agents
 about.app_version:

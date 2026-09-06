@@ -95,6 +95,7 @@ settings.providers: Penyedia
 settings.usage: Penggunaan
 settings.daemon: Host & Daemon
 settings.computer_use: Penggunaan Komputer
+settings.notifications: Notifikasi
 settings.about: Tentang
 settings.general_keywords: umum lokal proyek percakapan privasi analitik telemetri anonim bagikan pembaruan otomatis sparkle versi
 settings.appearance_keywords: tampilan tema sistem terang gelap bahasa inggris indonesia jepang mandarin font ukuran teks editor
@@ -105,7 +106,27 @@ settings.skills_keywords: skill keahlian pustaka agen nonaktifkan aktifkan hapus
 settings.usage_keywords: penggunaan token biaya pengeluaran cache harian grafik model rincian riwayat claude codex
 settings.daemon_keywords: host jarak jauh remote server devbox cloud daemon web jaringan ekspos origin token port websocket ssh lan
 settings.computer_use_keywords: penggunaan komputer perekaman layar aksesibilitas aplikasi kontrol codex
+settings.notifications_keywords: notifikasi pemberitahuan suara izin sistem audio uji tes spanduk tugas selesai
 settings.about_keywords: tentang info versi pembaruan perbarui host terhubung github repositori sponsor donasi berkontribusi
+notifications.system_permission: Izin Sistem
+notifications.system_permission_desc: Status pengiriman notifikasi sistem operasi untuk peringatan tugas
+notifications.permission_granted: Diizinkan
+notifications.permission_denied: Diblokir
+notifications.permission_not_determined: Belum Diminta
+notifications.permission_unsupported: Tidak Tersedia
+notifications.request_permission: Izinkan Notifikasi
+notifications.open_settings: Buka Pengaturan Sistem
+notifications.task_completion: Notifikasi Tugas
+notifications.task_completion_desc: Kirimkan spanduk notifikasi saat tugas agen selesai atau membutuhkan peninjauan
+notifications.sound: Suara Notifikasi
+notifications.sound_desc: Putar bunyi lonceng saat notifikasi penyelesaian tugas dikirimkan
+notifications.preview_sound: Uji Suara
+notifications.test_title: Uji Notifikasi
+notifications.test_desc: Kirimkan notifikasi langsung untuk menguji tampilan spanduk dan bunyi suara
+notifications.send_test: Kirim Notifikasi Uji
+notifications.test_sent: Notifikasi uji terkirim
+notifications.test_notification_title: Uji Coba Padu
+notifications.test_notification_body: Notifikasi dan suara berfungsi dengan baik!
 about.tagline: Control plane native yang cepat untuk local coding agent
 about.app_version: Versi Aplikasi
 about.check_for_updates: Periksa Pembaruan

@@ -100,6 +100,7 @@ settings.providers: プロバイダー
 settings.usage: 使用状況
 settings.daemon: ホストとデーモン
 settings.computer_use: コンピュータ操作
+settings.notifications: 通知
 settings.about: 情報
 settings.general_keywords: 一般 ローカル プロジェクト 会話 プライバシー 分析 テレメトリ 匿名 共有 アップデート 自動 バージョン
 settings.appearance_keywords: 外観 テーマ システム ライト ダーク 言語 英語 中国語 簡体字 日本語 フォント サイズ 文字 エディタ
@@ -110,7 +111,27 @@ settings.skills_keywords: スキル ライブラリ エージェント 無効 �
 settings.usage_keywords: 使用状況 トークン コスト 支出 キャッシュ 日別 グラフ モデル 内訳 履歴 claude codex
 settings.daemon_keywords: ホスト リモート サーバー クラウド デーモン ウェブ ネットワーク 公開 オリジン トークン ポート websocket ssh lan
 settings.computer_use_keywords: コンピュータ 操作 画面収録 アクセシビリティ アプリ 制御 codex
+settings.notifications_keywords: 通知 アラート 音 サウンド 権限 システム オーディオ テスト バナー タスク 完了
 settings.about_keywords: 情報 バージョン アップデート 更新 ホスト 接続 github リポジトリ スポンサー 支援
+notifications.system_permission: システム権限
+notifications.system_permission_desc: タスク通知のOS配信ステータス
+notifications.permission_granted: 許可
+notifications.permission_denied: ブロック
+notifications.permission_not_determined: 未要求
+notifications.permission_unsupported: 利用不可
+notifications.request_permission: 通知を許可
+notifications.open_settings: システム設定を開く
+notifications.task_completion: タスク通知
+notifications.task_completion_desc: エージェントのタスク完了時や確認が必要な時にバナー通知を表示
+notifications.sound: 通知音
+notifications.sound_desc: タスク完了通知の配信時にチャイム音を再生
+notifications.preview_sound: サウンド試聴
+notifications.test_title: 通知テスト
+notifications.test_desc: バナー表示とサウンド再生を今すぐテスト
+notifications.send_test: テスト通知を送信
+notifications.test_sent: テスト通知を送信しました
+notifications.test_notification_title: Padu テスト
+notifications.test_notification_body: 通知とサウンドは正常に動作しています！
 about.tagline: ローカルコーディングエージェントのための高速ネイティブコントロールプレーン
 about.app_version: アプリバージョン
 about.check_for_updates: アップデートを確認
