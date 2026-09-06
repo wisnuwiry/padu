@@ -540,5 +540,12 @@ mod tests {
                 "missing embedded icon: {path}"
             );
         }
+
+        for theme in ["themes/system.svg", "themes/light.svg", "themes/dark.svg"] {
+            assert!(
+                Assets.load(theme).unwrap().is_some(),
+                "missing embedded theme: {theme}"
+            );
+        }
     }
 }

@@ -24,108 +24,39 @@ impl Padu {
             .map(|preference| {
                 let selected = preference == selected_theme;
                 let weak = weak.clone();
-                let (preference_id, surface, panel, foreground, accent) = match preference {
-                    ThemePreference::System => (
-                        "system",
-                        rgb(0xe8edf5),
-                        rgb(0x202633),
-                        rgb(0x172033),
-                        rgb(0x6366f1),
-                    ),
-                    ThemePreference::Light => (
-                        "light",
-                        rgb(0xf8fafc),
-                        rgb(0xffffff),
-                        rgb(0x172033),
-                        rgb(0x4f46e5),
-                    ),
-                    ThemePreference::Dark => (
-                        "dark",
-                        rgb(0x151922),
-                        rgb(0x202633),
-                        rgb(0xf1f5f9),
-                        rgb(0x818cf8),
-                    ),
+                let preference_id = match preference {
+                    ThemePreference::System => "system",
+                    ThemePreference::Light => "light",
+                    ThemePreference::Dark => "dark",
                 };
-                // TODO: Replace this procedural preview with a branded SVG/image asset.
-                let pane = |surface: gpui::Rgba,
-                            panel: gpui::Rgba,
-                            foreground: gpui::Rgba,
-                            accent: gpui::Rgba| {
-                    div()
-                        .flex_1()
-                        .h_full()
-                        .bg(surface)
-                        .p(px(7.0))
-                        .flex()
-                        .flex_col()
-                        .gap(px(6.0))
-                        .child(div().h(px(7.0)).w_full().rounded(px(3.0)).bg(panel))
-                        .child(
-                            div()
-                                .flex_1()
-                                .flex()
-                                .gap(px(5.0))
-                                .child(div().w(px(16.0)).rounded(px(3.0)).bg(panel))
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .flex()
-                                        .flex_col()
-                                        .gap(px(4.0))
-                                        .child(
-                                            div()
-                                                .h(px(5.0))
-                                                .w(px(34.0))
-                                                .rounded(px(2.0))
-                                                .bg(foreground.opacity(0.65)),
-                                        )
-                                        .child(
-                                            div()
-                                                .h(px(5.0))
-                                                .w(px(24.0))
-                                                .rounded(px(2.0))
-                                                .bg(accent.opacity(0.7)),
-                                        ),
-                                ),
-                        )
+                let preview_path = match preference {
+                    ThemePreference::System => "themes/system.svg",
+                    ThemePreference::Light => "themes/light.svg",
+                    ThemePreference::Dark => "themes/dark.svg",
                 };
-                let preview = if preference == ThemePreference::System {
-                    div()
-                        .h(px(72.0))
-                        .w_full()
-                        .rounded(px(8.0))
-                        .overflow_hidden()
-                        .border_1()
-                        .border_color(rgb(0x8c96a8))
-                        .flex()
-                        .child(pane(
-                            rgb(0xf8fafc),
-                            rgb(0xffffff),
-                            rgb(0x172033),
-                            rgb(0x4f46e5),
-                        ))
-                        .child(div().h_full().w(px(1.0)).bg(rgb(0x8c96a8)))
-                        .child(pane(
-                            rgb(0x151922),
-                            rgb(0x202633),
-                            rgb(0xf1f5f9),
-                            rgb(0x818cf8),
-                        ))
-                } else {
-                    pane(surface, panel, foreground, accent)
-                        .h(px(72.0))
-                        .w_full()
-                        .rounded(px(8.0))
-                        .overflow_hidden()
-                        .border_1()
-                        .border_color(panel)
-                };
+                let preview = div()
+                    .w_full()
+                    .aspect_ratio(188.0 / 142.0)
+                    .rounded(px(6.0))
+                    .overflow_hidden()
+                    .border_1()
+                    .border_color(theme.border)
+                    .bg(theme.surface)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        img(preview_path)
+                            .size_full()
+                            .rounded(px(6.0))
+                            .object_fit(ObjectFit::Contain),
+                    );
 
                 div()
                     .id(SharedString::from(format!("theme-card-{preference_id}")))
                     .tab_index(0)
                     .flex_1()
+                    .max_w(px(140.0))
                     .min_w(px(0.0))
                     .p(px(7.0))
                     .rounded(px(10.0))
@@ -155,7 +86,12 @@ impl Padu {
                     )
             })
             .collect::<Vec<_>>();
-        let theme_selector = div().flex().w_full().gap(px(8.0)).children(theme_cards);
+        let theme_selector = div()
+            .flex()
+            .w_full()
+            .justify_end()
+            .gap(px(8.0))
+            .children(theme_cards);
 
         let selected_ui_font_size = self.state.ui_font_size;
         let weak = cx.entity().downgrade();
