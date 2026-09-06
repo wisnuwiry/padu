@@ -62,7 +62,10 @@ impl ComputerUseRuntime {
     }
 
     pub(super) fn stop(&self) {
-        stop_registered_processes(&self.config.process_directory, &self.config.server_path);
+        stop_registered_processes(
+            &self.config.process_directory,
+            &[&self.config.server_path, &self.config.repl_path],
+        );
     }
 }
 
@@ -148,16 +151,24 @@ pub(super) fn create_process_directory() -> anyhow::Result<PathBuf> {
     Ok(directory)
 }
 
-pub(super) fn stop_registered_processes(directory: &Path, helper_executable: &Path) {
-    let expected_executable =
-        fs::canonicalize(helper_executable).unwrap_or_else(|_| helper_executable.to_path_buf());
+pub(super) fn stop_registered_processes(directory: &Path, helper_executables: &[&Path]) {
+    let expected_executables: Vec<PathBuf> = helper_executables
+        .iter()
+        .map(|path| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()))
+        .collect();
     for (pid, registration) in registered_processes(directory) {
-        if process_executable(pid).as_deref() == Some(expected_executable.as_path()) {
-            // Unreachable off unix, where `process_executable` never resolves
-            // and the loop only clears stale registration files.
-            #[cfg(unix)]
-            unsafe {
-                libc::kill(pid, libc::SIGTERM);
+        if let Some(executable) = process_executable(pid) {
+            let canonical = fs::canonicalize(&executable).unwrap_or(executable);
+            if expected_executables
+                .iter()
+                .any(|expected| expected == &canonical)
+            {
+                // Unreachable off unix, where `process_executable` never resolves
+                // and the loop only clears stale registration files.
+                #[cfg(unix)]
+                unsafe {
+                    libc::kill(pid, libc::SIGTERM);
+                }
             }
         }
         let _ = fs::remove_file(registration);

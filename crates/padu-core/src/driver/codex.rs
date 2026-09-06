@@ -133,12 +133,14 @@ pub struct CodexDriver {
     interaction_mode: InteractionMode,
     computer_use_process_directory: Option<PathBuf>,
     computer_use_server_path: Option<PathBuf>,
+    computer_use_repl_path: Option<PathBuf>,
     computer_use_preview_monitor: Option<computer_use_runtime::ComputerUsePreviewMonitor>,
 }
 
 struct CodexComputerUseConfig {
     server_path: PathBuf,
     server: String,
+    repl_path: PathBuf,
     repl: String,
     skill_root: PathBuf,
     process_directory: PathBuf,
@@ -157,6 +159,7 @@ impl CodexComputerUseConfig {
         Ok(Self {
             server_path,
             server,
+            repl_path,
             repl,
             skill_root,
             process_directory,
@@ -240,6 +243,7 @@ impl CodexDriver {
         let computer_use_server_path = computer_use
             .as_ref()
             .map(|config| config.server_path.clone());
+        let computer_use_repl_path = computer_use.as_ref().map(|config| config.repl_path.clone());
         let title_binary = binary.clone();
         let title_cwd = cwd.clone();
         let mut command = crate::command_env::command(&binary);
@@ -885,6 +889,7 @@ impl CodexDriver {
             interaction_mode,
             computer_use_process_directory,
             computer_use_server_path,
+            computer_use_repl_path,
             computer_use_preview_monitor,
         })
     }
@@ -1030,11 +1035,17 @@ impl DriverControl for CodexDriver {
     }
 
     fn cancel_computer_use(&self) {
-        if let (Some(directory), Some(server_path)) = (
-            self.computer_use_process_directory.as_deref(),
-            self.computer_use_server_path.as_deref(),
-        ) {
-            computer_use_runtime::stop_registered_processes(directory, server_path);
+        if let Some(directory) = self.computer_use_process_directory.as_deref() {
+            let mut targets = Vec::new();
+            if let Some(server_path) = self.computer_use_server_path.as_deref() {
+                targets.push(server_path);
+            }
+            if let Some(repl_path) = self.computer_use_repl_path.as_deref() {
+                targets.push(repl_path);
+            }
+            if !targets.is_empty() {
+                computer_use_runtime::stop_registered_processes(directory, &targets);
+            }
         }
     }
 
@@ -2853,6 +2864,7 @@ mod tests {
             interaction_mode: InteractionMode::Build,
             computer_use_process_directory: None,
             computer_use_server_path: None,
+            computer_use_repl_path: None,
             computer_use_preview_monitor: None,
         };
 
@@ -2912,6 +2924,7 @@ mod tests {
         let config = CodexComputerUseConfig {
             server_path: PathBuf::from("/tmp/padu-computer-use-server"),
             server: toml_string("/tmp/padu-computer-use-server"),
+            repl_path: PathBuf::from("/tmp/padu"),
             repl: toml_string("/tmp/padu"),
             skill_root: PathBuf::from("/tmp/padu-computer-use-skill"),
             process_directory: PathBuf::from("/tmp/padu-computer-use-processes"),
@@ -2993,6 +3006,23 @@ mod tests {
             computer_use_runtime::process_executable(std::process::id() as i32),
             Some(current)
         );
+    }
+
+    #[test]
+    fn computer_use_cleanup_clears_registered_files_for_executables() {
+        let directory = std::env::temp_dir().join(format!(
+            "padu-computer-use-cleanup-test-{}",
+            Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("999999"), []).unwrap();
+        let other_path = PathBuf::from("/nonexistent/helper");
+        computer_use_runtime::stop_registered_processes(&directory, &[&other_path]);
+        assert_eq!(
+            computer_use_runtime::registered_processes(&directory).len(),
+            0
+        );
+        let _ = fs::remove_dir_all(directory);
     }
 
     #[test]
