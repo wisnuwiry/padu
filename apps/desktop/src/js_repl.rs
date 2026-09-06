@@ -123,7 +123,121 @@ struct Kernel {
     _runtime: Runtime,
 }
 
+struct ParentWatchdog {
+    running: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for ParentWatchdog {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::Release);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+#[cfg(unix)]
+fn start_parent_watchdog() -> ParentWatchdog {
+    let initial_ppid = unsafe { libc::getppid() };
+    if initial_ppid <= 1 {
+        std::process::exit(0);
+    }
+    start_parent_watchdog_with(initial_ppid, Duration::from_millis(300), || {
+        if let Some(directory) = std::env::var_os("PADU_COMPUTER_USE_PROCESS_DIRECTORY") {
+            let registration_path = PathBuf::from(directory).join(std::process::id().to_string());
+            let _ = fs::remove_file(registration_path);
+        }
+        std::process::exit(0);
+    })
+}
+
+#[cfg(unix)]
+fn start_parent_watchdog_with(
+    initial_ppid: i32,
+    poll_interval: Duration,
+    on_parent_dead: impl FnOnce() + Send + 'static,
+) -> ParentWatchdog {
+    let running = Arc::new(AtomicBool::new(true));
+    let thread_running = running.clone();
+    let thread = std::thread::Builder::new()
+        .name("padu-js-repl-parent-watchdog".into())
+        .spawn(move || {
+            let mut on_parent_dead = Some(on_parent_dead);
+            while thread_running.load(Ordering::Acquire) {
+                std::thread::sleep(poll_interval);
+                if !thread_running.load(Ordering::Acquire) {
+                    break;
+                }
+                let current_ppid = unsafe { libc::getppid() };
+                if current_ppid != initial_ppid
+                    || current_ppid <= 1
+                    || unsafe { libc::kill(initial_ppid, 0) } != 0
+                {
+                    if let Some(action) = on_parent_dead.take() {
+                        action();
+                    }
+                    break;
+                }
+            }
+        })
+        .ok();
+    ParentWatchdog { running, thread }
+}
+
+#[cfg(not(unix))]
+fn start_parent_watchdog() -> ParentWatchdog {
+    ParentWatchdog {
+        running: Arc::new(AtomicBool::new(false)),
+        thread: None,
+    }
+}
+
+struct ProcessDirectoryRegistration {
+    registration_path: Option<PathBuf>,
+}
+
+impl ProcessDirectoryRegistration {
+    fn register() -> Self {
+        let Some(directory) = std::env::var_os("PADU_COMPUTER_USE_PROCESS_DIRECTORY") else {
+            return Self {
+                registration_path: None,
+            };
+        };
+        let directory = PathBuf::from(directory);
+        if !directory.is_dir() {
+            return Self {
+                registration_path: None,
+            };
+        }
+        let pid = std::process::id();
+        let registration_path = directory.join(pid.to_string());
+        if let Err(error) = fs::write(&registration_path, b"") {
+            eprintln!(
+                "padu_js_repl: could not register PID in {}: {error:#}",
+                directory.display()
+            );
+            return Self {
+                registration_path: None,
+            };
+        }
+        Self {
+            registration_path: Some(registration_path),
+        }
+    }
+}
+
+impl Drop for ProcessDirectoryRegistration {
+    fn drop(&mut self) {
+        if let Some(path) = self.registration_path.take() {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
 pub fn serve_stdio() -> anyhow::Result<()> {
+    let _watchdog = start_parent_watchdog();
+    let _registration = ProcessDirectoryRegistration::register();
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     serve(BufReader::new(stdin.lock()), BufWriter::new(stdout.lock()))
@@ -1302,5 +1416,39 @@ mod tests {
         let image = decode_image_reference("data:image/png;base64,aGVsbG8=").unwrap();
         assert_eq!(image.mime_type, "image/png");
         assert_eq!(image.data, "aGVsbG8=");
+    }
+
+    #[test]
+    fn process_directory_registration_creates_and_cleans_up_pid_file() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "padu-repl-registration-test-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&temp_dir).unwrap();
+        unsafe {
+            std::env::set_var("PADU_COMPUTER_USE_PROCESS_DIRECTORY", &temp_dir);
+        }
+        let registration = ProcessDirectoryRegistration::register();
+        let pid_file = temp_dir.join(std::process::id().to_string());
+        assert!(pid_file.is_file());
+        drop(registration);
+        assert!(!pid_file.exists());
+        unsafe {
+            std::env::remove_var("PADU_COMPUTER_USE_PROCESS_DIRECTORY");
+        }
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn parent_watchdog_detects_dead_parent() {
+        let parent_died = Arc::new(AtomicBool::new(false));
+        let parent_died_signal = parent_died.clone();
+        // Use an invalid PID that does not exist to simulate dead parent
+        let _watchdog = start_parent_watchdog_with(999_999, Duration::from_millis(20), move || {
+            parent_died_signal.store(true, Ordering::Release);
+        });
+        thread::sleep(Duration::from_millis(80));
+        assert!(parent_died.load(Ordering::Acquire));
     }
 }
