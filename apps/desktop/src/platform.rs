@@ -232,19 +232,13 @@ pub fn open_system_notification_settings() {
 
 #[cfg(target_os = "macos")]
 pub fn play_notification_sound() {
-    use objc2_app_kit::NSSound;
-    use objc2_foundation::NSString;
-
-    let name = NSString::from_str("Hero");
-    if let Some(sound) = NSSound::soundNamed(&name) {
-        sound.play();
-    } else if let Some(sound) = NSSound::soundNamed(&NSString::from_str("Ping")) {
-        sound.play();
-    } else {
-        unsafe extern "C" {
-            fn NSBeep();
-        }
-        unsafe { NSBeep() };
+    #[link(name = "AudioToolbox", kind = "framework")]
+    unsafe extern "C" {
+        fn AudioServicesPlayAlertSound(in_system_sound_id: u32);
+    }
+    const K_SYSTEM_SOUND_ID_USER_PREFERRED_ALERT: u32 = 0x0000_1000;
+    unsafe {
+        AudioServicesPlayAlertSound(K_SYSTEM_SOUND_ID_USER_PREFERRED_ALERT);
     }
 }
 
