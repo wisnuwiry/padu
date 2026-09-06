@@ -10,6 +10,7 @@ import { toast } from 'sonner'
 import { ControlMenu } from '@/components/control-menu'
 import { HostDialog } from '@/components/host-dialog'
 import { KeybindingsSettings } from '@/components/keybindings-settings'
+import { NotificationsSettings } from '@/components/notifications-settings'
 import { SkillsSettings } from '@/components/skills-settings'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -41,6 +42,7 @@ export type SettingsPageId =
   | 'general'
   | 'appearance'
   | 'keybindings'
+  | 'notifications'
   | 'providers'
   | 'skills'
   | 'usage'
@@ -58,6 +60,7 @@ export const SETTINGS_PAGES: Array<{
   { id: 'general', label: 'General', labelKey: 'settings.general', icon: 'settings', keywords: 'general local projects conversations privacy analytics telemetry anonymous sharing', keywordsKey: 'settings.general_keywords' },
   { id: 'appearance', label: 'Appearance', labelKey: 'settings.appearance', icon: 'appearance', keywords: 'appearance theme system light dark language', keywordsKey: 'settings.appearance_keywords' },
   { id: 'keybindings', label: 'Keybindings', labelKey: 'settings.keybindings', icon: 'command', keywords: 'keybindings keyboard shortcuts hotkeys bindings shortcuts keys commands', keywordsKey: 'settings.keybindings_keywords' },
+  { id: 'notifications', label: 'Notifications', labelKey: 'settings.notifications', icon: 'bell', keywords: 'notifications sound alerts audio banner permission prompt notify test chime task complete', keywordsKey: 'settings.notifications_keywords' },
   { id: 'providers', label: 'Providers', labelKey: 'settings.providers', icon: 'bot', keywords: 'providers agents models cli version install detect claude codex cursor opencode amp grok pi omp oh my pi kimi', keywordsKey: 'settings.providers_keywords' },
   { id: 'skills', label: 'Skills', labelKey: 'settings.skills', icon: 'package', keywords: 'skills library agent disable enable delete shared', keywordsKey: 'settings.skills_keywords' },
   { id: 'usage', label: 'Usage', labelKey: 'settings.usage', icon: 'chartColumn', keywords: 'usage tokens cost spend cache daily monthly project model history', keywordsKey: 'settings.usage_keywords' },
@@ -164,6 +167,7 @@ export function SettingsView({
             {page === 'general' && <GeneralSettings onOpenOnboarding={onOpenOnboarding} />}
             {page === 'appearance' && <AppearanceSettings />}
             {page === 'keybindings' && <KeybindingsSettings />}
+            {page === 'notifications' && <NotificationsSettings />}
             {page === 'providers' && <ProvidersSettings />}
             {page === 'usage' && <UsageSettings projects={projects} />}
             {page === 'daemon' && <DaemonSettings />}

@@ -10,6 +10,7 @@ const sitemapPages = [
   '/settings/general',
   '/settings/appearance',
   '/settings/keybindings',
+  '/settings/notifications',
   '/settings/providers',
   '/settings/skills',
   '/settings/usage',

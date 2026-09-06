@@ -13,6 +13,7 @@ describe('keybindings settings parity', () => {
       'general',
       'appearance',
       'keybindings',
+      'notifications',
       'providers',
       'skills',
       'usage',

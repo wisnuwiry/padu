@@ -8,6 +8,7 @@ export const PADU_ICONS = {
   arrowRight: 'i-padu-arrow-right',
   arrowUp: 'i-padu-arrow-up',
   arrowUpRight: 'i-padu-arrow-up-right',
+  bell: 'i-padu-bell',
   bot: 'i-padu-bot',
   chartColumn: 'i-padu-chart-column',
   check: 'i-padu-check',
