@@ -214,10 +214,11 @@ enum BranchPickerAction {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum SettingsPage {
+pub(crate) enum SettingsPage {
     General,
     Appearance,
     Keybindings,
+    Notifications,
     Providers,
     Skills,
     Usage,
@@ -1431,6 +1432,10 @@ pub struct Padu {
     /// swapping in frozen page pixels while an overlay is open.
     scene_overlay_enabled: bool,
     settings_page: Option<SettingsPage>,
+    /// Cached notification permission status, refreshed when the Notifications
+    /// page is opened and after permission is requested.
+    notification_permission: crate::platform::NotificationPermissionStatus,
+
     /// The Skills page's library snapshot, scanned off-thread. Frames read
     /// only this; `None` means the first scan has not landed yet.
     skills_catalog: Option<Rc<crate::skills::SkillsCatalog>>,
@@ -1446,7 +1451,7 @@ pub struct Padu {
     skills_scrollbar: Rc<ScrollbarState>,
     /// The rows the list currently draws — sections and catalog indices —
     /// refreshed once per frame rather than per row.
-    skills_rows: RefCell<Vec<skills_page::SkillsRow>>,
+    skills_rows: RefCell<Vec<settings::SkillsRow>>,
     /// The skill directory the detail pane shows. `None` falls back to the
     /// first visible row, so the pane never opens empty.
     skills_selected: Option<PathBuf>,
@@ -1642,14 +1647,12 @@ mod runtime;
 mod sessions;
 mod settings;
 mod sidebar;
-mod skills_page;
 mod streaming;
 mod task_switcher;
 mod transcript;
 mod transcript_search;
 mod transcript_view;
 mod usage_meter;
-mod usage_page;
 mod window_chrome;
 
 pub use autocomplete::init as init_composer_autocomplete;
@@ -1665,9 +1668,9 @@ pub use host_dialog::init as init_host_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
 pub use onboarding::init as init_onboarding_keys;
 pub use settings::init as init_settings_keys;
+pub use settings::init_skills_keys;
 pub use sidebar::init as init_sidebar_keys;
 use sidebar::{SidebarGroup, SidebarRow};
-pub use skills_page::init as init_skills_keys;
 use streaming::*;
 use transcript::*;
 use transcript_view::ConversationNavigationRail;
@@ -2531,6 +2534,11 @@ impl Padu {
                     if this.settings_page == Some(SettingsPage::Skills) {
                         this.ensure_skills_catalog(true, cx);
                     }
+                    // Re-check notification permission whenever the window
+                    // regains focus while the Notifications page is open.
+                    if this.settings_page == Some(SettingsPage::Notifications) {
+                        this.check_and_update_notification_permission(cx);
+                    }
                 }
             })
             .detach();
@@ -3124,6 +3132,9 @@ impl Padu {
                 right_panel_pending_browser_focus: None,
                 scene_overlay_enabled,
                 settings_page: None,
+                notification_permission:
+                    crate::platform::NotificationPermissionStatus::NotDetermined,
+
                 skills_catalog: None,
                 skills_scan_generation: 0,
                 skills_scan_pending: false,

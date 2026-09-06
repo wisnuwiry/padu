@@ -57,7 +57,7 @@ pub fn init(cx: &mut App) {
 /// in [`Padu::sync_skills_rows`]: a changed row — catalog identity, enabled
 /// state, or selection — re-measures from that point on.
 #[derive(Clone, Debug, PartialEq)]
-pub(super) enum SkillsRow {
+pub(crate) enum SkillsRow {
     Section {
         label: SharedString,
         count: usize,
@@ -75,7 +75,7 @@ impl Padu {
     /// Start a background library scan unless a current-enough catalog (or an
     /// in-flight scan) already covers it. Results from superseded scans are
     /// discarded by generation.
-    pub(super) fn ensure_skills_catalog(&mut self, force: bool, cx: &mut Context<Self>) {
+    pub(crate) fn ensure_skills_catalog(&mut self, force: bool, cx: &mut Context<Self>) {
         if self.skills_scan_pending {
             return;
         }

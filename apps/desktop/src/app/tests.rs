@@ -1880,6 +1880,7 @@ fn settings_search_filters_pages_for_arrow_cycling() {
         SettingsPage::General,
         SettingsPage::Appearance,
         SettingsPage::Keybindings,
+        SettingsPage::Notifications,
         SettingsPage::Providers,
         SettingsPage::Skills,
         SettingsPage::Usage,
@@ -1893,6 +1894,7 @@ fn settings_search_filters_pages_for_arrow_cycling() {
 
     assert_eq!(pages("theme"), vec![SettingsPage::Appearance]);
     assert_eq!(pages("shortcut"), vec![SettingsPage::Keybindings]);
+    assert_eq!(pages("notification"), vec![SettingsPage::Notifications]);
     assert_eq!(pages("skill"), vec![SettingsPage::Skills]);
     assert_eq!(pages("sponsor"), vec![SettingsPage::About]);
 

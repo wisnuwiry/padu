@@ -38,7 +38,7 @@ fn provider_kind(provider: UsageProvider) -> ProviderKind {
 impl Padu {
     /// Switch the settings view to `page`, warming the Usage scan when that
     /// is where the user is heading.
-    pub(super) fn open_settings_page(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
+    pub(crate) fn open_settings_page(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
         // Secrets are revealed only for the current visit to the page. This
         // also masks the token again when the Daemon row is reselected.
         self.daemon_token_revealed = false;
@@ -51,6 +51,9 @@ impl Padu {
         }
         if page == SettingsPage::Skills {
             self.ensure_skills_catalog(false, cx);
+        }
+        if page == SettingsPage::Notifications {
+            self.check_and_update_notification_permission(cx);
         }
         cx.notify();
     }
@@ -69,7 +72,7 @@ impl Padu {
     /// (or an in-flight scan for the same window) already covers it. `force`
     /// is the refresh button. Results from superseded scans are discarded by
     /// generation, so a window change mid-scan cannot land stale data.
-    pub(super) fn ensure_usage_history(&mut self, force: bool, cx: &mut Context<Self>) {
+    pub(crate) fn ensure_usage_history(&mut self, force: bool, cx: &mut Context<Self>) {
         let window = self.effective_usage_window();
         let satisfied = self
             .usage_history
