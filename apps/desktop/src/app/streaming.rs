@@ -611,12 +611,15 @@ impl Padu {
                     self.splice_active_transcript_rows_after_visibility_change(previous_kinds);
                 }
                 if let Some(Some((title, body))) = task_notification {
-                    crate::platform::show_task_notification(
-                        &task_notification_tag(session_id),
-                        &title,
-                        &body,
-                        cx,
-                    );
+                    if self.state.notifications_enabled {
+                        crate::platform::show_task_notification(
+                            &task_notification_tag(session_id),
+                            &title,
+                            &body,
+                            self.state.notification_sound_enabled,
+                            cx,
+                        );
+                    }
                 }
             }
             DriverEvent::Error(error) => {

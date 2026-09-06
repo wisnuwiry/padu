@@ -141,11 +141,118 @@ fn parse_boolean_setting(value: &str) -> Option<bool> {
     }
 }
 
-/// Deliver an audible macOS notification. GPUI owns the notification-center
-/// delegate (and therefore click responses); Padu only supplies content here
-/// because GPUI's generic payload does not currently expose a sound field.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NotificationPermissionStatus {
+    Authorized,
+    Denied,
+    NotDetermined,
+    Unsupported,
+}
+
 #[cfg(target_os = "macos")]
-pub fn show_task_notification(tag: &str, title: &str, body: &str, _: &gpui::App) {
+pub fn check_notification_permission<F: FnOnce(NotificationPermissionStatus) + Send + 'static>(
+    callback: F,
+) {
+    use block2::RcBlock;
+    use objc2_foundation::NSBundle;
+    use objc2_user_notifications::{
+        UNAuthorizationStatus, UNNotificationSettings, UNUserNotificationCenter,
+    };
+    use std::ptr::NonNull;
+    use std::sync::{Arc, Mutex};
+
+    if NSBundle::mainBundle().bundleIdentifier().is_none() {
+        callback(NotificationPermissionStatus::Unsupported);
+        return;
+    }
+
+    let callback = Arc::new(Mutex::new(Some(callback)));
+    let cb = callback.clone();
+    let handler = RcBlock::new(move |settings: NonNull<UNNotificationSettings>| {
+        let status = match unsafe { settings.as_ref() }.authorizationStatus() {
+            UNAuthorizationStatus::Authorized | UNAuthorizationStatus::Provisional => {
+                NotificationPermissionStatus::Authorized
+            }
+            UNAuthorizationStatus::Denied => NotificationPermissionStatus::Denied,
+            UNAuthorizationStatus::NotDetermined => NotificationPermissionStatus::NotDetermined,
+            _ => NotificationPermissionStatus::NotDetermined,
+        };
+        if let Ok(mut lock) = cb.lock() {
+            if let Some(f) = lock.take() {
+                f(status);
+            }
+        }
+    });
+
+    UNUserNotificationCenter::currentNotificationCenter()
+        .getNotificationSettingsWithCompletionHandler(&handler);
+}
+
+#[cfg(target_os = "macos")]
+pub fn request_notification_permission<F: FnOnce(bool) + Send + 'static>(callback: F) {
+    use block2::RcBlock;
+    use objc2::runtime::Bool;
+    use objc2_foundation::{NSBundle, NSError};
+    use objc2_user_notifications::{UNAuthorizationOptions, UNUserNotificationCenter};
+    use std::sync::{Arc, Mutex};
+
+    if NSBundle::mainBundle().bundleIdentifier().is_none() {
+        callback(false);
+        return;
+    }
+
+    let callback = Arc::new(Mutex::new(Some(callback)));
+    let cb = callback.clone();
+    let handler = RcBlock::new(move |granted: Bool, _error: *mut NSError| {
+        if let Ok(mut lock) = cb.lock() {
+            if let Some(f) = lock.take() {
+                f(granted.as_bool());
+            }
+        }
+    });
+
+    UNUserNotificationCenter::currentNotificationCenter()
+        .requestAuthorizationWithOptions_completionHandler(
+            UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound,
+            &handler,
+        );
+}
+
+#[cfg(target_os = "macos")]
+pub fn open_system_notification_settings() {
+    use objc2_app_kit::NSWorkspace;
+    use objc2_foundation::{NSString, NSURL};
+
+    let url_str =
+        NSString::from_str("x-apple.systempreferences:com.apple.preference.notifications");
+    if let Some(url) = NSURL::URLWithString(&url_str) {
+        NSWorkspace::sharedWorkspace().openURL(&url);
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub fn play_notification_sound() {
+    use objc2_app_kit::NSSound;
+    use objc2_foundation::NSString;
+
+    let name = NSString::from_str("Hero");
+    if let Some(sound) = NSSound::soundNamed(&name) {
+        sound.play();
+    } else if let Some(sound) = NSSound::soundNamed(&NSString::from_str("Ping")) {
+        sound.play();
+    } else {
+        unsafe extern "C" {
+            fn NSBeep();
+        }
+        unsafe { NSBeep() };
+    }
+}
+
+/// Deliver a macOS notification. GPUI owns the notification-center
+/// delegate (and therefore click responses); Padu supplies content here
+/// and configures sound according to user preferences.
+#[cfg(target_os = "macos")]
+pub fn show_task_notification(tag: &str, title: &str, body: &str, sound: bool, _: &gpui::App) {
     use block2::RcBlock;
     use objc2::runtime::Bool;
     use objc2_foundation::{NSBundle, NSError, NSString};
@@ -171,7 +278,9 @@ pub fn show_task_notification(tag: &str, title: &str, body: &str, _: &gpui::App)
         let content = UNMutableNotificationContent::new();
         content.setTitle(&NSString::from_str(&title));
         content.setBody(&NSString::from_str(&body));
-        content.setSound(Some(&UNNotificationSound::defaultSound()));
+        if sound {
+            content.setSound(Some(&UNNotificationSound::defaultSound()));
+        }
 
         // A nil trigger delivers immediately. The stable task tag replaces an
         // older completion banner for the same task and comes back on click.
@@ -191,7 +300,25 @@ pub fn show_task_notification(tag: &str, title: &str, body: &str, _: &gpui::App)
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn show_task_notification(tag: &str, title: &str, body: &str, cx: &gpui::App) {
+pub fn check_notification_permission<F: FnOnce(NotificationPermissionStatus) + Send + 'static>(
+    callback: F,
+) {
+    callback(NotificationPermissionStatus::Authorized);
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn request_notification_permission<F: FnOnce(bool) + Send + 'static>(callback: F) {
+    callback(true);
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn open_system_notification_settings() {}
+
+#[cfg(not(target_os = "macos"))]
+pub fn play_notification_sound() {}
+
+#[cfg(not(target_os = "macos"))]
+pub fn show_task_notification(tag: &str, title: &str, body: &str, _sound: bool, cx: &gpui::App) {
     cx.show_system_notification(gpui::SystemNotification {
         tag: tag.to_owned().into(),
         title: title.to_owned().into(),
