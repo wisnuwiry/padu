@@ -171,7 +171,11 @@ fn append_sidebar_group_rows(
             rows.push(SidebarRow::ShowMore(group));
         }
     }
-    rows.push(SidebarRow::GroupSpacer);
+    if group == SidebarGroup::Pinned {
+        rows.push(SidebarRow::PinnedSeparator);
+    } else {
+        rows.push(SidebarRow::GroupSpacer);
+    }
 }
 
 fn updater_button_available_content(
@@ -220,6 +224,7 @@ const SIDEBAR_GROUP_HEADER_HEIGHT: f32 = 28.0;
 const SIDEBAR_GROUP_HEADER_BOTTOM_GAP: f32 = 2.0;
 const SIDEBAR_SHOW_MORE_ROW_HEIGHT: f32 = 30.0;
 const SIDEBAR_GROUP_SPACER_HEIGHT: f32 = 10.0;
+const SIDEBAR_PINNED_SEPARATOR_HEIGHT: f32 = 9.0;
 const SIDEBAR_GROUP_CHILD_PADDING: f32 = 25.0;
 const SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS: u64 = 3 * 24 * 60 * 60;
 const SIDEBAR_PROJECT_REVEAL_BATCH: usize = 30;
@@ -369,7 +374,8 @@ fn sidebar_row_height(row: SidebarRow, grouping: SidebarGrouping) -> Pixels {
             }
         }
         SidebarRow::ShowMore(_) => SIDEBAR_SHOW_MORE_ROW_HEIGHT,
-        SidebarRow::GroupSpacer | SidebarRow::PinnedSeparator => SIDEBAR_GROUP_SPACER_HEIGHT,
+        SidebarRow::GroupSpacer => SIDEBAR_GROUP_SPACER_HEIGHT,
+        SidebarRow::PinnedSeparator => SIDEBAR_PINNED_SEPARATOR_HEIGHT,
     })
 }
 
@@ -1549,9 +1555,6 @@ impl Padu {
                 .contains(&SidebarGroup::Pinned),
             false,
         );
-        if !pinned_sessions.is_empty() {
-            rows.push(SidebarRow::PinnedSeparator);
-        }
         match self.state.sidebar_grouping {
             SidebarGrouping::Updated => {
                 let mut grouped_sessions: [Vec<Uuid>; 6] = std::array::from_fn(|_| Vec::new());
@@ -1709,9 +1712,11 @@ impl Padu {
                 .into_any_element(),
             SidebarRow::PinnedSeparator => div()
                 .w_full()
-                .h(px(SIDEBAR_GROUP_SPACER_HEIGHT))
-                .border_b_1()
-                .border_color(Theme::current(cx).border)
+                .h(px(SIDEBAR_PINNED_SEPARATOR_HEIGHT))
+                .px(px(6.0))
+                .flex()
+                .items_center()
+                .child(div().w_full().h(px(1.0)).bg(Theme::current(cx).border))
                 .into_any_element(),
         }
     }
@@ -1786,6 +1791,9 @@ impl Padu {
                     .gap(px(5.0))
                     .when(show_folder_icon, |element| {
                         element.child(icon(folder_icon, 14.0, theme.text_secondary))
+                    })
+                    .when(group == SidebarGroup::Pinned, |element| {
+                        element.child(icon("icons/pin.svg", 14.0, theme.text_secondary))
                     })
                     .child(
                         div()
@@ -2253,9 +2261,6 @@ impl Padu {
                         .gap(px(5.0))
                         .child(dot)
                         .child(title)
-                        .when(session.pinned_at.is_some(), |element| {
-                            element.child(icon("icons/pin.svg", 12.0, theme.accent))
-                        })
                         .when(working, |element| {
                             element.child(motion::spin_slow(icon(
                                 "icons/loader-circle.svg",
@@ -2312,9 +2317,6 @@ impl Padu {
                         .line_height(sp(18.0))
                         .child(dot)
                         .child(title)
-                        .when(session.pinned_at.is_some(), |element| {
-                            element.child(icon("icons/pin.svg", 12.0, theme.accent))
-                        })
                         .when(working, |element| {
                             element.child(motion::spin_slow(icon(
                                 "icons/loader-circle.svg",
@@ -2951,6 +2953,18 @@ mod tests {
         assert_eq!(
             collapsed,
             vec![SidebarRow::Header(group), SidebarRow::GroupSpacer,]
+        );
+
+        let mut pinned = Vec::new();
+        append_sidebar_group_rows(&mut pinned, SidebarGroup::Pinned, &sessions, false, false);
+        assert_eq!(
+            pinned,
+            vec![
+                SidebarRow::Header(SidebarGroup::Pinned),
+                SidebarRow::Session(sessions[0]),
+                SidebarRow::Session(sessions[1]),
+                SidebarRow::PinnedSeparator,
+            ]
         );
     }
 
