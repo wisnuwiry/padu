@@ -1926,7 +1926,7 @@ impl Padu {
         let goal = session.thread_goal.as_ref()?;
         let session_id = session.id;
         let theme = Theme::current(cx);
-        let color = super::goal_dialog::goal_status_color(goal.status, &theme);
+        let color = crate::app::dialogs::goal::goal_status_color(goal.status, &theme);
         // Elapsed pursuit time accrues only while a turn actually runs,
         // matching how the provider accounts it.
         let live_elapsed_seconds = (goal.status == crate::model::ThreadGoalStatus::Active
@@ -1934,7 +1934,7 @@ impl Padu {
         .then(|| self.goal_observed_at.get(&session_id))
         .flatten()
         .map_or(0, |observed| observed.elapsed().as_secs() as i64);
-        let label = super::goal_dialog::goal_chip_label(goal, live_elapsed_seconds);
+        let label = crate::app::dialogs::goal::goal_chip_label(goal, live_elapsed_seconds);
         let objective = goal.objective.clone();
         let weak = cx.entity().downgrade();
         Some(

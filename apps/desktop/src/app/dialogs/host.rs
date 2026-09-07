@@ -4,7 +4,8 @@ use gpui::{KeyBinding, actions};
 
 use padu_client::persistence::{HostProfile, normalize_daemon_address};
 
-use super::*;
+use crate::app::*;
+use crate::ui::dialog::dialog_backdrop;
 
 actions!(padu_host_dialog, [ConfirmHostDialog, DismissHostDialog]);
 
@@ -25,11 +26,11 @@ pub fn init(cx: &mut App) {
     ]);
 }
 
-pub(super) struct HostDialogRequest {
+pub(crate) struct HostDialogRequest {
     pub editing_profile_id: Option<String>,
 }
 
-pub(super) struct HostDialogState {
+pub(crate) struct HostDialogState {
     pub editing_profile_id: Option<String>,
     pub name_input: Entity<TextInput>,
     pub address_input: Entity<TextInput>,
@@ -41,7 +42,7 @@ pub(super) struct HostDialogState {
 }
 
 impl Padu {
-    pub(super) fn request_host_dialog(
+    pub(crate) fn request_host_dialog(
         &mut self,
         editing_profile_id: Option<String>,
         cx: &mut Context<Self>,
@@ -125,7 +126,7 @@ impl Padu {
         cx.notify();
     }
 
-    pub(super) fn close_host_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn close_host_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.host_dialog_request = None;
         if self.host_dialog.take().is_none() {
             return;
@@ -135,7 +136,7 @@ impl Padu {
         cx.notify();
     }
 
-    pub(super) fn host_dialog_save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn host_dialog_save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(dialog) = &self.host_dialog else {
             return;
         };
@@ -200,7 +201,7 @@ impl Padu {
         self.switch_to_host(Some(profile_id), cx);
     }
 
-    pub(super) fn host_dialog_delete(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn host_dialog_delete(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(dialog) = &self.host_dialog else {
             return;
         };
@@ -208,17 +209,10 @@ impl Padu {
             return;
         };
 
-        let was_active = self.state.active_host_id.as_deref() == Some(&editing_id);
-        self.state.remove_host_profile(&editing_id);
-        let _ = self.store.write_app_settings(&self.state.app_settings());
-        self.close_host_dialog(window, cx);
-
-        if was_active {
-            self.switch_to_host(None, cx);
-        }
+        self.confirm_delete_host(editing_id, window, cx);
     }
 
-    pub(super) fn render_host_dialog(
+    pub(crate) fn render_host_dialog(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -533,28 +527,12 @@ impl Padu {
                     ),
             );
 
-        let scrim = if theme.is_dark {
-            gpui::hsla(0.0, 0.0, 0.0, 0.45)
-        } else {
-            gpui::hsla(0.0, 0.0, 0.0, 0.22)
-        };
-
-        let layer = div()
-            .id("host-dialog-layer")
-            .absolute()
-            .inset_0()
-            .occlude()
-            .bg(scrim)
-            .p(px(24.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|padu, _, window, cx| padu.close_host_dialog(window, cx)),
-            )
-            .child(card);
-
-        Some(gpui::deferred(layer).with_priority(5).into_any_element())
+        Some(dialog_backdrop(
+            "host-dialog-layer",
+            &theme,
+            cx,
+            |padu, window, cx| padu.close_host_dialog(window, cx),
+            card,
+        ))
     }
 }
