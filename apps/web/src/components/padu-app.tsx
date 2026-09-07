@@ -160,6 +160,11 @@ export function PaduApp() {
     text: string
     signal: number
   } | null>(null)
+  const [composerAttachment, setComposerAttachment] = useState<{
+    sessionId: string
+    paths: string[]
+    signal: number
+  } | null>(null)
   const [requestedPanel, setRequestedPanel] = useState<PanelSurface>('files')
   const [requestedFile, setRequestedFile] = useState<string | null>(null)
   const [requestedDiffSource, setRequestedDiffSource] = useState<ReviewDiffSource>('uncommitted')
@@ -1338,6 +1343,10 @@ export function PaduApp() {
                   projectId: activeProject.id,
                 })}
                 modelPickerSignal={modelPickerSignal}
+                attachmentSignal={composerAttachment?.sessionId === activeSession.id ? composerAttachment.signal : 0}
+                pendingAttachmentPaths={composerAttachment?.sessionId === activeSession.id ? composerAttachment.paths : undefined}
+                onAttachmentSignalHandled={() => setComposerAttachment((value) =>
+                  value?.sessionId === activeSession.id ? null : value)}
                 onAddProject={openProjectPicker}
                 onFocusSignalHandled={() => setFocusComposerSignal(0)}
                 onModelPickerSignalHandled={() => setModelPickerSignal(0)}
@@ -1416,6 +1425,10 @@ export function PaduApp() {
                   modelPickerSignal={modelPickerSignal}
                   prefillSignal={composerPrefill?.sessionId === current.id ? composerPrefill.signal : 0}
                   prefillText={composerPrefill?.sessionId === current.id ? composerPrefill.text : undefined}
+                  attachmentSignal={composerAttachment?.sessionId === current.id ? composerAttachment.signal : 0}
+                  pendingAttachmentPaths={composerAttachment?.sessionId === current.id ? composerAttachment.paths : undefined}
+                  onAttachmentSignalHandled={() => setComposerAttachment((value) =>
+                    value?.sessionId === current.id ? null : value)}
                   onAddProject={openProjectPicker}
                   onFocusSignalHandled={() => setFocusComposerSignal(0)}
                   onModelPickerSignalHandled={() => setModelPickerSignal(0)}
@@ -1529,6 +1542,13 @@ export function PaduApp() {
               }
             }}
             onPanelWidthChange={setRightPanelWidth}
+            onAddToChat={(path) => {
+              setComposerAttachment({
+                sessionId: panelSession.id,
+                signal: Date.now(),
+                paths: [path],
+              })
+            }}
           />
         )
       })}

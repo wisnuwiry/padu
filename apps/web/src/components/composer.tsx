@@ -128,6 +128,9 @@ export function Composer({
   initialComposerDraft,
   onComposerDraftChange,
   onComposerDraftSubmitted,
+  attachmentSignal,
+  pendingAttachmentPaths,
+  onAttachmentSignalHandled,
   onAddProject,
   onProjectless,
   onResume,
@@ -150,6 +153,9 @@ export function Composer({
   initialComposerDraft?: ComposerDraft
   onComposerDraftChange?: (draft: ComposerDraft) => void
   onComposerDraftSubmitted?: () => void
+  attachmentSignal?: number
+  pendingAttachmentPaths?: string[]
+  onAttachmentSignalHandled?: () => void
   onAddProject?: () => void
   onProjectless?: () => void
   onResume?: () => void
@@ -322,6 +328,20 @@ export function Composer({
     composerInput.current?.focus()
     onPrefillSignalHandled?.()
   }, [onPrefillSignalHandled, prefillSignal, prefillText])
+
+  useEffect(() => {
+    if (!attachmentSignal || !pendingAttachmentPaths?.length) return
+    for (const path of pendingAttachmentPaths) {
+      void addDaemonFile(path).then((ok) => {
+        if (ok) {
+          const name = path.split('/').pop() || path
+          toast.success(t('files.added_to_chat', { path: name }))
+        }
+      })
+    }
+    composerInput.current?.focus()
+    onAttachmentSignalHandled?.()
+  }, [attachmentSignal, onAttachmentSignalHandled, pendingAttachmentPaths, t])
 
   useEffect(() => {
     setFilePickerOpen(false)
