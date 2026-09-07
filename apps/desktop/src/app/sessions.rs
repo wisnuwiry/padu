@@ -294,6 +294,90 @@ impl Padu {
         cx.notify();
     }
 
+    pub(super) fn set_session_pinned(
+        &mut self,
+        session_id: Uuid,
+        pinned: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let response = self.daemon.client().request(
+            session_id,
+            Uuid::nil(),
+            padu_client::Command::SetSessionPinned { pinned },
+        );
+        match response {
+            Ok(padu_client::ResponsePayload::SessionMetadataUpdated { session }) => {
+                if let Some(local) = self
+                    .state
+                    .sessions
+                    .iter_mut()
+                    .find(|item| item.id == session_id)
+                {
+                    local.pinned_at = session.pinned_at;
+                    local.archived_at = session.archived_at;
+                }
+                self.sidebar_rows_fingerprint.set(None);
+                cx.notify();
+            }
+            Ok(_) => self.show_toast(tr!(
+                "errors.save_local_state",
+                error = "invalid daemon response"
+            )),
+            Err(error) => {
+                self.show_toast(tr!("errors.save_local_state", error = error.to_string()))
+            }
+        }
+    }
+
+    pub(super) fn set_session_archived(
+        &mut self,
+        session_id: Uuid,
+        archived: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let response = self.daemon.client().request(
+            session_id,
+            Uuid::nil(),
+            padu_client::Command::SetSessionArchived { archived },
+        );
+        match response {
+            Ok(padu_client::ResponsePayload::SessionMetadataUpdated { session }) => {
+                let was_selected = self.state.selected_session == Some(session_id);
+                if let Some(local) = self
+                    .state
+                    .sessions
+                    .iter_mut()
+                    .find(|item| item.id == session_id)
+                {
+                    local.pinned_at = session.pinned_at;
+                    local.archived_at = session.archived_at;
+                }
+                self.sidebar_rows_fingerprint.set(None);
+                if archived && was_selected {
+                    self.state.selected_session = None;
+                    let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+                    let next = rows.iter().find_map(|row| match row {
+                        SidebarRow::Session(id) => Some(*id),
+                        _ => None,
+                    });
+                    if let Some(next) = next {
+                        self.select_session(next, cx);
+                    } else if let Some(project_id) = self.state.selected_project {
+                        self.create_session_for(project_id, self.state.last_provider, cx);
+                    }
+                }
+                cx.notify();
+            }
+            Ok(_) => self.show_toast(tr!(
+                "errors.save_local_state",
+                error = "invalid daemon response"
+            )),
+            Err(error) => {
+                self.show_toast(tr!("errors.save_local_state", error = error.to_string()))
+            }
+        }
+    }
+
     pub(super) fn remove_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
         if self.response_fork_preparations.contains_key(&session_id) {
             self.show_toast(tr!("session.response_fork_in_progress"));

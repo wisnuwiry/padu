@@ -224,6 +224,7 @@ pub(crate) enum SettingsPage {
     Usage,
     Daemon,
     ComputerUse,
+    Archived,
     About,
 }
 
@@ -1074,6 +1075,7 @@ pub struct Padu {
     task_switcher: task_switcher::TaskSwitcherUi,
     model_search: Entity<TextInput>,
     settings_search: Entity<TextInput>,
+    archived_search: Entity<TextInput>,
     keybindings_search: Entity<TextInput>,
     daemon_port_input: Entity<TextInput>,
     daemon_origin_inputs: Vec<Entity<TextInput>>,
@@ -2161,6 +2163,11 @@ impl Padu {
                 .clear_on_escape()
                 .placeholder(tr!("settings.search"))
         });
+        let archived_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .placeholder(tr!("settings.archived_search"))
+        });
         let keybindings_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -2734,6 +2741,15 @@ impl Padu {
             )
             .detach();
             cx.subscribe(
+                &archived_search,
+                |_: &mut Self, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Edited) {
+                        cx.notify();
+                    }
+                },
+            )
+            .detach();
+            cx.subscribe(
                 &keybindings_search,
                 |_: &mut Self, _, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Edited) {
@@ -2937,6 +2953,7 @@ impl Padu {
                 branch_search,
                 branch_create_input,
                 settings_search,
+                archived_search,
                 keybindings_search,
                 daemon_port_input,
                 daemon_origin_inputs,

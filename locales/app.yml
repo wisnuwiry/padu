@@ -208,6 +208,24 @@ settings.providers_keywords:
   en: providers agents models cli version install detect claude codex cursor opencode amp grok pi
 settings.skills:
   en: Skills
+settings.archived:
+  en: Archived
+settings.archived_keywords:
+  en: archived archive hidden conversations tasks restore
+settings.archived_empty:
+  en: No archived conversations
+settings.archived_description:
+  en: Archived conversations are kept here until you restore or remove them.
+settings.archived_search:
+  en: Search archived conversations
+settings.archived_no_matches:
+  en: No archived conversations match your search
+settings.archived_project:
+  en: Project
+settings.archived_project_path:
+  en: Path
+settings.restore:
+  en: Restore
 settings.skills_keywords:
   en: skills skill library agent disable enable delete claude codex cursor opencode pi amp shared
 settings.usage_keywords:
@@ -846,6 +864,14 @@ sidebar.hours_ago:
   en: "%{count}h"
 sidebar.days_ago:
   en: "%{count}d"
+sidebar.pin:
+  en: Pin
+sidebar.pinned:
+  en: Pinned
+sidebar.unpin:
+  en: Unpin
+sidebar.archive:
+  en: Archive
 sidebar.unknown_project:
   en: Unknown project
 sidebar.close:
@@ -940,6 +966,13 @@ session.reverting_message:
   en: Reverting message…
 session.reverting_message_title:
   en: Reverting Message…
+session.pin:
+  en: Pin
+session.unpin:
+  en: Unpin
+session.archive:
+  en: Archive
+
 session.delete_title:
   en: Delete Conversation
 session.delete_message:
@@ -1691,6 +1724,8 @@ errors.daemon_disconnected:
   en: Padu daemon is disconnected
 errors.path_outside_workspace:
   en: This path is outside the active workspace on the daemon host
+errors.update_task:
+  en: "Couldn’t update task: %{error}"
 errors.rename_task:
   en: "Could not rename the task: %{error}"
 errors.remove_task:

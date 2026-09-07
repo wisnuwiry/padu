@@ -3,6 +3,7 @@ use super::*;
 
 mod about;
 mod appearance;
+mod archive;
 mod computer_use;
 mod daemon;
 mod general;
@@ -33,7 +34,7 @@ const SETTINGS_SEARCH_CONTEXT: &str = "SettingsSidebar > TextInput";
 
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
-const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 10] = [
+const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 11] = [
     (
         SettingsPage::General,
         "settings.general",
@@ -87,6 +88,12 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 10] = [
         "settings.computer_use",
         "icons/cursor-spark.svg",
         "settings.computer_use_keywords",
+    ),
+    (
+        SettingsPage::Archived,
+        "settings.archived",
+        "icons/package.svg",
+        "settings.archived_keywords",
     ),
     (
         SettingsPage::About,
@@ -400,6 +407,7 @@ impl Padu {
                         SettingsPage::Usage => tr!("settings.usage"),
                         SettingsPage::Daemon => tr!("settings.daemon"),
                         SettingsPage::ComputerUse => tr!("settings.computer_use"),
+                        SettingsPage::Archived => tr!("settings.archived"),
                         SettingsPage::About => tr!("settings.about"),
                     }),
             )
@@ -413,6 +421,7 @@ impl Padu {
                 SettingsPage::Usage => self.render_usage_settings(cx),
                 SettingsPage::Daemon => self.render_daemon_settings(cx),
                 SettingsPage::ComputerUse => self.render_computer_use_settings(cx),
+                SettingsPage::Archived => self.render_archived_settings(cx).into_any_element(),
                 SettingsPage::About => self.render_about_settings(cx),
             });
 
