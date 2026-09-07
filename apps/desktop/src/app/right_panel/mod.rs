@@ -796,14 +796,14 @@ mod tests {
     }
 
     #[test]
-    fn file_operation_dialog_kind_supports_delete_and_path_name_extraction() {
-        let delete_dialog = FileOperationDialogKind::Delete {
-            target: PathBuf::from("/project/src/index.ts"),
+    fn file_operation_dialog_kind_supports_rename_and_path_name_extraction() {
+        let rename_dialog = FileOperationDialogKind::Rename {
+            source: PathBuf::from("/project/src/index.ts"),
         };
         assert_eq!(
-            delete_dialog,
-            FileOperationDialogKind::Delete {
-                target: PathBuf::from("/project/src/index.ts")
+            rename_dialog,
+            FileOperationDialogKind::Rename {
+                source: PathBuf::from("/project/src/index.ts")
             }
         );
 

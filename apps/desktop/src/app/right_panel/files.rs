@@ -1889,6 +1889,40 @@ impl Padu {
         cx.notify();
     }
 
+    pub(crate) fn execute_delete_path(&mut self, target: PathBuf, cx: &mut Context<Self>) {
+        let Some(root) = self.selected_workspace_path().map(Path::to_path_buf) else {
+            return;
+        };
+        let Ok(relative_path) = target.strip_prefix(&root) else {
+            return;
+        };
+        let rel_str = relative_path.to_string_lossy().into_owned();
+        if self.right_panel_files_selected_path.as_deref() == Some(&rel_str) {
+            self.right_panel_files_selected_path = None;
+        }
+        let operation = padu_client::WorkspaceOperation::DeletePath {
+            root,
+            relative_path: relative_path.to_path_buf(),
+        };
+        let workspace = padu_client::WorkspaceClient::new(self.daemon.client());
+        cx.spawn(async move |padu, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { workspace.request(operation) })
+                .await;
+            let _ = padu.update(cx, |padu, cx| {
+                match result {
+                    Ok(padu_client::WorkspaceResult::Ack) => {
+                        padu.refresh_right_panel_working_tree(cx);
+                    }
+                    Ok(_) | Err(_) => padu.show_toast(tr!("files.operation_failed")),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     pub(crate) fn close_file_operation_dialog(
         &mut self,
         window: &mut Window,

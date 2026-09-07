@@ -1,18 +1,78 @@
 use gpui::{
-    AnyElement, App, Context, Div, ElementId, Hsla, Img, InteractiveElement, Interactivity,
-    KeyDownEvent, ParentElement, PathBuilder, Pixels, RenderOnce, ScrollHandle, SharedString,
-    Stateful, StyleRefinement, Styled, Svg, Window, canvas, div, img, point, prelude::*, px, rgb,
-    svg,
+    AnyElement, App, Context, Div, ElementId, FontWeight, Hsla, Img, InteractiveElement,
+    Interactivity, KeyDownEvent, ParentElement, PathBuilder, Pixels, RenderOnce, ScrollHandle,
+    SharedString, Stateful, StyleRefinement, Styled, Svg, Window, canvas, div, img, point,
+    prelude::*, px, rgb, svg,
 };
 
+pub mod dialog;
 pub mod menu;
 pub mod motion;
 pub mod scrollbar;
 pub mod text_field;
 pub mod tooltip;
 
+#[allow(unused_imports)]
+pub use dialog::ConfirmVariant;
+
 use crate::model::{ActivityKind, ProviderKind, SessionStatus};
 use crate::theme::{Theme, sp};
+
+pub fn kbd_badge_styled(
+    label: impl Into<SharedString>,
+    bg: Hsla,
+    text_color: Hsla,
+    border_color: Hsla,
+) -> AnyElement {
+    div()
+        .h(px(20.0))
+        .min_w(px(20.0))
+        .px(px(5.0))
+        .rounded(px(5.0))
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(bg)
+        .border_1()
+        .border_color(border_color)
+        .text_size(sp(11.0))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(text_color)
+        .child(label.into())
+        .into_any_element()
+}
+
+pub fn kbd_badge(label: impl Into<SharedString>, theme: &Theme) -> AnyElement {
+    kbd_badge_styled(
+        label,
+        theme.overlay_strong,
+        theme.text_tertiary,
+        theme.border,
+    )
+}
+
+pub fn kbd_badge_icon(
+    icon_path: &'static str,
+    bg: Hsla,
+    icon_color: Hsla,
+    border_color: Hsla,
+) -> AnyElement {
+    div()
+        .h(px(20.0))
+        .min_w(px(20.0))
+        .px(px(4.0))
+        .rounded(px(5.0))
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(bg)
+        .border_1()
+        .border_color(border_color)
+        .child(icon(icon_path, 9.5, icon_color))
+        .into_any_element()
+}
 
 /// A monochrome icon from the embedded set, tinted via text color. Sized in
 /// `sp` so icons keep pace with the chrome text they sit beside when the UI

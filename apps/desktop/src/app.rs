@@ -1226,12 +1226,12 @@ pub struct Padu {
     branch_operation_pending: bool,
     /// Window-modal Git commit/push UI. Its repository snapshot is filled
     /// off-thread; frames only read this in-memory value.
-    commit_dialog: Option<commit_dialog::CommitDialogState>,
-    delete_session_dialog: Option<delete_session_dialog::DeleteSessionDialogState>,
-    goal_dialog: Option<goal_dialog::GoalDialogState>,
-    goal_dialog_request: Option<goal_dialog::GoalDialogRequest>,
-    host_dialog: Option<host_dialog::HostDialogState>,
-    host_dialog_request: Option<host_dialog::HostDialogRequest>,
+    commit_dialog: Option<dialogs::commit::CommitDialogState>,
+    confirm_dialog: Option<dialogs::confirm::ConfirmDialogState>,
+    goal_dialog: Option<dialogs::goal::GoalDialogState>,
+    goal_dialog_request: Option<dialogs::goal::GoalDialogRequest>,
+    host_dialog: Option<dialogs::host::HostDialogState>,
+    host_dialog_request: Option<dialogs::host::HostDialogRequest>,
     host_switch_pending: bool,
     host_switch_generation: u64,
     onboarding: onboarding::OnboardingState,
@@ -1250,7 +1250,7 @@ pub struct Padu {
     /// Commit-message generation and Git mutation outlive the modal that
     /// started them. Keeping the operation on the app also lets every
     /// Environment surface reflect and gate the same in-flight action.
-    commit_operation: Option<commit_dialog::CommitOperationState>,
+    commit_operation: Option<dialogs::commit::CommitOperationState>,
     /// Slash commands discovered per (provider, project root, CLI override).
     /// Filesystem and CLI probes live off the UI thread; frames read this cache.
     slash_commands: QueryCache<(ProviderKind, PathBuf, Option<String>), Vec<SlashCommand>>,
@@ -1635,14 +1635,11 @@ mod autocomplete;
 mod background_work;
 mod branches;
 mod command_palette;
-mod commit_dialog;
 mod components;
 mod composer;
-mod delete_session_dialog;
+pub(crate) mod dialogs;
 mod drafts;
 mod file_search;
-mod goal_dialog;
-mod host_dialog;
 mod image_preview;
 mod onboarding;
 mod render;
@@ -1664,11 +1661,8 @@ use background_work::{
     BackgroundWorkRegistry, work_kind_icon, work_status_color, work_status_label,
 };
 pub use command_palette::init as init_command_palette;
-pub use commit_dialog::init as init_commit_dialog_keys;
 use components::*;
-pub use delete_session_dialog::init as init_delete_session_dialog_keys;
-pub use goal_dialog::init as init_goal_dialog_keys;
-pub use host_dialog::init as init_host_dialog_keys;
+pub use dialogs::init as init_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
 pub use onboarding::init as init_onboarding_keys;
 pub use right_panel::init_files_keys as init_right_panel_files_keys;
@@ -3038,7 +3032,7 @@ impl Padu {
                 visible_branch_snapshot: None,
                 branch_operation_pending: false,
                 commit_dialog: None,
-                delete_session_dialog: None,
+                confirm_dialog: None,
                 goal_dialog: None,
                 goal_dialog_request: None,
                 host_dialog: None,
