@@ -31,8 +31,6 @@
 
 > [!NOTE]
 > **Under Active Development**: Padu is in active development and early preview. You may encounter bugs, incomplete features, or rough edges. Bug reports and contributions are very welcome!
->
-> **Notice**: Padu is a fork of [Waku](https://github.com/egoist/waku), originally created by [egoist](https://github.com/egoist), licensed under GPL-3.0. See [NOTICE.md](NOTICE.md) for full attribution and details.
 
 ## Overview
 
