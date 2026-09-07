@@ -160,16 +160,29 @@ export function composerAutocompleteRows(
     .map(({ row }) => row)
 }
 
+export function trimToFilename(path: string): string {
+  const isDir = path.endsWith('/') || path.endsWith('\\')
+  const clean = path.replace(/[/\\]+$/, '')
+  const name = clean.split(/[/\\]/).pop() || clean
+  return isDir ? `${name}/` : name
+}
+
 export function replaceComposerTrigger(
   text: string,
   trigger: ComposerTrigger,
   row: ComposerAutocompleteRow,
 ): { text: string; cursor: number } {
-  const insert = row.kind === 'command'
-    ? `/${row.command.name} `
-    : `@${row.file.path} `
-  const next = `${text.slice(0, trigger.start)}${insert}${text.slice(trigger.end)}`
-  return { text: next, cursor: trigger.start + insert.length }
+  const before = text.slice(0, trigger.start)
+  const after = text.slice(trigger.end)
+  const value = row.kind === 'command'
+    ? `/${row.command.name}`
+    : `@${trimToFilename(row.file.path)}`
+  const prefix = before.length && !/\s$/u.test(before) ? ' ' : ''
+  const suffix = after.length && !/^\s/u.test(after) ? ' ' : ''
+  const insert = `${prefix}${value}${suffix}`
+  const next = `${before}${insert}${after}`
+  const existingSeparator = suffix ? 0 : (after.match(/^\s/u)?.[0].length ?? 0)
+  return { text: next, cursor: before.length + insert.length + existingSeparator }
 }
 
 export function expandCommandTemplate(template: string, args: string): string {

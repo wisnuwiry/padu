@@ -1,7 +1,18 @@
+use gpui::{KeyBinding, actions};
+
 use super::*;
-use crate::ui::dialog::{
-    ConfirmVariant, dialog_backdrop, dialog_cancel_button, dialog_card, dialog_confirm_button,
-};
+
+actions!(padu_inline_file, [CancelInlineFile, SubmitInlineFile]);
+
+pub(crate) const INLINE_FILE_PARENT_CONTEXT: &str = "InlineFileField";
+pub(crate) const INLINE_FILE_FIELD_CONTEXT: &str = "InlineFileField > TextInput";
+
+pub fn init_keys(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new("escape", CancelInlineFile, Some(INLINE_FILE_FIELD_CONTEXT)),
+        KeyBinding::new("enter", SubmitInlineFile, Some(INLINE_FILE_FIELD_CONTEXT)),
+    ]);
+}
 
 impl Padu {
     pub(crate) fn render_right_panel_files(
@@ -40,15 +51,45 @@ impl Padu {
             .right_panel_files_cursor
             .filter(|&index| index < entries.len());
 
+        let empty_menu = self.menu_handle(
+            SharedString::from("right-panel-working-tree-empty-context"),
+            cx,
+        );
+        let root_path = self.selected_workspace_path().map(Path::to_path_buf);
+        let weak = cx.entity().downgrade();
+
+        let inline_create = match &self.right_panel_inline_file_operation {
+            Some(InlineFileOperation {
+                kind: InlineFileOperationKind::CreateFile { parent, depth },
+                input,
+            }) => Some((false, parent.clone(), *depth, input.clone())),
+            Some(InlineFileOperation {
+                kind: InlineFileOperationKind::CreateDirectory { parent, depth },
+                input,
+            }) => Some((true, parent.clone(), *depth, input.clone())),
+            _ => None,
+        };
+        let renaming_source = match &self.right_panel_inline_file_operation {
+            Some(InlineFileOperation {
+                kind: InlineFileOperationKind::Rename { source },
+                input,
+            }) => Some((source.clone(), input.clone())),
+            _ => None,
+        };
+        let is_root_create = inline_create
+            .as_ref()
+            .is_some_and(|(_, parent, _, _)| root_path.as_ref() == Some(parent));
+        let mut rendered_inline_create = is_root_create;
+
         let mut list = div()
             .id("right-panel-working-tree")
             .track_focus(&focus)
             .tab_index(0)
             .key_context("WorkingTree")
             .size_full()
+            .min_h_full()
             .overflow_y_scroll()
             .track_scroll(&self.right_panel_files_scroll_handle)
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| {
@@ -62,12 +103,28 @@ impl Padu {
             .flex()
             .flex_col()
             .py(px(6.0));
+
+        if is_root_create {
+            if let Some((is_dir, _, depth, ref input)) = inline_create {
+                list = list.child(self.render_inline_create_row(is_dir, depth, input, cx));
+            }
+        }
+
         for (index, entry) in entries.into_iter().enumerate() {
             let relative_path = entry.relative_path.clone();
             let absolute_path = entry.absolute_path.clone();
             let is_dir = entry.is_dir;
+            let entry_depth = entry.depth;
             let selected = selected_path == Some(relative_path.as_str());
             let is_cursor = cursor_index == Some(index);
+            let is_renaming = renaming_source
+                .as_ref()
+                .is_some_and(|(src, _)| src == &absolute_path);
+            let rename_input = renaming_source
+                .as_ref()
+                .filter(|(src, _)| src == &absolute_path)
+                .map(|(_, inp)| inp);
+
             let row = div()
                 .id(index)
                 .h(px(30.0))
@@ -119,7 +176,9 @@ impl Padu {
                 } else {
                     div().w(px(14.0)).h(px(14.0)).flex_none().into_any_element()
                 })
-                .child(
+                .child(if let Some(input) = rename_input {
+                    self.render_inline_rename_widget(input, cx)
+                } else {
                     div()
                         .min_w_0()
                         .flex_1()
@@ -130,8 +189,9 @@ impl Padu {
                         } else {
                             theme.text_secondary
                         })
-                        .child(entry.name),
-                );
+                        .child(entry.name)
+                        .into_any_element()
+                });
             let menu = self.menu_handle(
                 SharedString::from(format!("right-panel-file-menu-{relative_path}")),
                 cx,
@@ -140,15 +200,17 @@ impl Padu {
             let menu_path = absolute_path.clone();
             let menu_relative = relative_path.clone();
 
-            let weak = cx.entity().downgrade();
-            let mut row = if is_dir {
+            let click_path = absolute_path.clone();
+            let row_weak = weak.clone();
+            let mut row = if is_renaming {
+                row
+            } else if is_dir {
                 row.on_click(cx.listener(move |this, _, window, cx| {
                     this.right_panel_files_cursor = Some(index);
                     let focus = this.transcript_control_focus("right-panel-working-tree", cx);
                     window.focus(&focus, cx);
-                    if !this.right_panel_expanded_paths.remove(&absolute_path) {
-                        this.right_panel_expanded_paths
-                            .insert(absolute_path.clone());
+                    if !this.right_panel_expanded_paths.remove(&click_path) {
+                        this.right_panel_expanded_paths.insert(click_path.clone());
                     }
                     this.refresh_right_panel_working_tree(cx);
                     cx.notify();
@@ -174,20 +236,49 @@ impl Padu {
                 move |_| {
                     let copy_path = menu_path.clone();
                     let copy_relative = menu_relative.clone();
-                    let rename_weak = weak.clone();
-                    let delete_weak = weak.clone();
-                    let new_file_weak = weak.clone();
-                    let new_folder_weak = weak.clone();
+                    let rename_weak = row_weak.clone();
+                    let delete_weak = row_weak.clone();
+                    let new_file_weak = row_weak.clone();
+                    let new_folder_weak = row_weak.clone();
+                    let chat_weak = row_weak.clone();
                     let mut items = Vec::new();
+
+                    // Add to Chat (for files and folders)
+                    let chat_relative = menu_relative.clone();
+                    let chat_is_dir = is_dir;
+                    items.push(
+                        MenuItem::new(tr!("files.add_to_chat"), move |window, cx| {
+                            let _ = chat_weak.update(cx, |this, cx| {
+                                let file_name = Path::new(&chat_relative)
+                                    .file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or(&chat_relative)
+                                    .to_owned();
+                                let mention_name = if chat_is_dir {
+                                    format!("{file_name}/")
+                                } else {
+                                    file_name.clone()
+                                };
+                                this.composer.update(cx, |composer, cx| {
+                                    composer.insert_mention(&mention_name, cx);
+                                });
+                                let focus = this.composer.read(cx).focus();
+                                window.focus(&focus, cx);
+                            });
+                        })
+                        .icon("icons/compose.svg"),
+                    );
+
                     if is_dir {
                         let parent = menu_path.clone();
+                        let depth = entry_depth + 1;
                         items.push(
                             MenuItem::new(tr!("files.new_file"), move |window, cx| {
                                 let _ = new_file_weak.update(cx, |this, cx| {
-                                    this.begin_file_operation_dialog(
-                                        FileOperationDialogKind::CreateFile {
-                                            parent: parent.clone(),
-                                        },
+                                    this.begin_inline_create(
+                                        false,
+                                        parent.clone(),
+                                        depth,
                                         window,
                                         cx,
                                     );
@@ -199,10 +290,48 @@ impl Padu {
                         items.push(
                             MenuItem::new(tr!("files.new_folder"), move |window, cx| {
                                 let _ = new_folder_weak.update(cx, |this, cx| {
-                                    this.begin_file_operation_dialog(
-                                        FileOperationDialogKind::CreateDirectory {
-                                            parent: parent.clone(),
-                                        },
+                                    this.begin_inline_create(
+                                        true,
+                                        parent.clone(),
+                                        depth,
+                                        window,
+                                        cx,
+                                    );
+                                });
+                            })
+                            .icon("icons/folder-new.svg"),
+                        );
+                    } else {
+                        let parent = menu_path
+                            .parent()
+                            .map(Path::to_path_buf)
+                            .unwrap_or_else(|| menu_path.clone());
+                        let depth = entry_depth;
+                        items.push(
+                            MenuItem::new(tr!("files.new_file"), move |window, cx| {
+                                let _ = new_file_weak.update(cx, |this, cx| {
+                                    this.begin_inline_create(
+                                        false,
+                                        parent.clone(),
+                                        depth,
+                                        window,
+                                        cx,
+                                    );
+                                });
+                            })
+                            .icon("icons/file.svg"),
+                        );
+                        let parent = menu_path
+                            .parent()
+                            .map(Path::to_path_buf)
+                            .unwrap_or_else(|| menu_path.clone());
+                        items.push(
+                            MenuItem::new(tr!("files.new_folder"), move |window, cx| {
+                                let _ = new_folder_weak.update(cx, |this, cx| {
+                                    this.begin_inline_create(
+                                        true,
+                                        parent.clone(),
+                                        depth,
                                         window,
                                         cx,
                                     );
@@ -214,7 +343,7 @@ impl Padu {
                     items.push(
                         MenuItem::new(tr!("files.copy_path"), {
                             let copy_path = copy_path.clone();
-                            let copy_weak = weak.clone();
+                            let copy_weak = row_weak.clone();
                             move |_, cx| {
                                 let path_string = copy_path.to_string_lossy().into_owned();
                                 let file_name = copy_path
@@ -236,7 +365,7 @@ impl Padu {
                     items.push(
                         MenuItem::new(tr!("files.copy_relative_path"), {
                             let copy_relative = copy_relative.clone();
-                            let copy_weak = weak.clone();
+                            let copy_weak = row_weak.clone();
                             move |_, cx| {
                                 let file_name = Path::new(&copy_relative)
                                     .file_name()
@@ -260,13 +389,7 @@ impl Padu {
                     items.push(
                         MenuItem::new(tr!("common.rename"), move |window, cx| {
                             let _ = rename_weak.update(cx, |this, cx| {
-                                this.begin_file_operation_dialog(
-                                    FileOperationDialogKind::Rename {
-                                        source: source.clone(),
-                                    },
-                                    window,
-                                    cx,
-                                );
+                                this.begin_inline_rename(source.clone(), window, cx);
                             });
                         })
                         .icon("icons/pencil.svg"),
@@ -276,7 +399,13 @@ impl Padu {
                     items.push(
                         MenuItem::new(tr!("files.delete"), move |window, cx| {
                             let _ = delete_weak.update(cx, |this, cx| {
-                                this.confirm_delete_path(target.clone(), window, cx);
+                                this.begin_file_operation_dialog(
+                                    FileOperationDialogKind::Delete {
+                                        target: target.clone(),
+                                    },
+                                    window,
+                                    cx,
+                                );
                             });
                         })
                         .icon("icons/trash.svg")
@@ -285,6 +414,28 @@ impl Padu {
                     items
                 },
             ));
+
+            if !is_root_create {
+                if let Some((is_dir, ref parent_path, create_depth, ref create_input)) =
+                    inline_create
+                {
+                    if &absolute_path == parent_path {
+                        list = list.child(self.render_inline_create_row(
+                            is_dir,
+                            create_depth,
+                            create_input,
+                            cx,
+                        ));
+                        rendered_inline_create = true;
+                    }
+                }
+            }
+        }
+
+        if !rendered_inline_create {
+            if let Some((is_dir, _, depth, ref input)) = inline_create {
+                list = list.child(self.render_inline_create_row(is_dir, depth, input, cx));
+            }
         }
 
         div()
@@ -379,6 +530,38 @@ impl Padu {
                                     ))
                             })
                             .child(
+                                icon_button("right-panel-new-file", "icons/file.svg", theme)
+                                    .tooltip(|window, cx| {
+                                        Tooltip::new(tr!("files.new_file")).build(window, cx)
+                                    })
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        if let Some(root) =
+                                            this.selected_workspace_path().map(Path::to_path_buf)
+                                        {
+                                            this.begin_inline_create(false, root, 0, window, cx);
+                                        }
+                                    })),
+                            )
+                            .child(
+                                icon_button(
+                                    "right-panel-new-folder",
+                                    "icons/folder-new.svg",
+                                    theme,
+                                )
+                                .tooltip(|window, cx| {
+                                    Tooltip::new(tr!("files.new_folder")).build(window, cx)
+                                })
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| {
+                                        if let Some(root) =
+                                            this.selected_workspace_path().map(Path::to_path_buf)
+                                        {
+                                            this.begin_inline_create(true, root, 0, window, cx);
+                                        }
+                                    },
+                                )),
+                            )
+                            .child(
                                 icon_button(
                                     "right-panel-refresh-files",
                                     "icons/rotate-cw.svg",
@@ -395,17 +578,60 @@ impl Padu {
                             ),
                     ),
             )
-            .child(
+            .child({
+                let empty_list = context_menu(
+                    list,
+                    SharedString::from("right-panel-working-tree-empty-context"),
+                    &empty_menu,
+                    move |_| {
+                        let mut items = Vec::new();
+                        if let Some(root) = root_path.clone() {
+                            let root_for_file = root.clone();
+                            let root_for_dir = root.clone();
+                            let weak_file = weak.clone();
+                            let weak_dir = weak.clone();
+                            items.push(
+                                MenuItem::new(tr!("files.new_file"), move |window, cx| {
+                                    let _ = weak_file.update(cx, |this, cx| {
+                                        this.begin_inline_create(
+                                            false,
+                                            root_for_file.clone(),
+                                            0,
+                                            window,
+                                            cx,
+                                        );
+                                    });
+                                })
+                                .icon("icons/file.svg"),
+                            );
+                            items.push(
+                                MenuItem::new(tr!("files.new_folder"), move |window, cx| {
+                                    let _ = weak_dir.update(cx, |this, cx| {
+                                        this.begin_inline_create(
+                                            true,
+                                            root_for_dir.clone(),
+                                            0,
+                                            window,
+                                            cx,
+                                        );
+                                    });
+                                })
+                                .icon("icons/folder-new.svg"),
+                            );
+                        }
+                        items
+                    },
+                );
                 div()
                     .flex_1()
                     .min_h_0()
                     .relative()
-                    .child(list)
+                    .child(empty_list)
                     .child(scrollbar::vertical(
                         &self.right_panel_files_scroll_handle,
                         &self.right_panel_files_scrollbar,
-                    )),
-            )
+                    ))
+            })
     }
 
     pub(crate) fn right_panel_working_tree_key_down(
@@ -505,18 +731,18 @@ impl Padu {
             }
             "f2" => {
                 let entry = &entries[current];
-                self.begin_file_operation_dialog(
-                    FileOperationDialogKind::Rename {
-                        source: entry.absolute_path.clone(),
-                    },
-                    window,
-                    cx,
-                );
+                self.begin_inline_rename(entry.absolute_path.clone(), window, cx);
                 cx.stop_propagation();
             }
             "delete" | "backspace" => {
                 let entry = &entries[current];
-                self.confirm_delete_path(entry.absolute_path.clone(), window, cx);
+                self.begin_file_operation_dialog(
+                    FileOperationDialogKind::Delete {
+                        target: entry.absolute_path.clone(),
+                    },
+                    window,
+                    cx,
+                );
                 cx.stop_propagation();
             }
             _ => {}
@@ -1251,95 +1477,355 @@ impl Padu {
         }
     }
 
-    pub(crate) fn begin_file_operation_dialog(
+    fn render_inline_create_row(
+        &self,
+        is_dir: bool,
+        depth: usize,
+        input: &Entity<TextInput>,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let theme = Theme::current(cx);
+        div()
+            .id("right-panel-inline-create-row")
+            .key_context(INLINE_FILE_PARENT_CONTEXT)
+            .on_action(cx.listener(|this, _: &SubmitInlineFile, window, cx| {
+                this.submit_inline_file_operation(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &CancelInlineFile, window, cx| {
+                this.cancel_inline_file_operation(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &crate::input::Clear, window, cx| {
+                this.cancel_inline_file_operation(window, cx);
+            }))
+            .h(px(30.0))
+            .min_h(px(30.0))
+            .flex_none()
+            .mx(px(8.0))
+            .pl(px(8.0 + depth as f32 * 16.0))
+            .pr(px(8.0))
+            .rounded(px(6.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .bg(theme.overlay)
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                match event.keystroke.key.as_str() {
+                    "enter" => {
+                        this.submit_inline_file_operation(window, cx);
+                        cx.stop_propagation();
+                    }
+                    "escape" => {
+                        this.cancel_inline_file_operation(window, cx);
+                        cx.stop_propagation();
+                    }
+                    _ => {}
+                }
+            }))
+            .child(div().w(px(10.0)).h(px(10.0)).flex_none())
+            .child(if is_dir {
+                icon("icons/folder.svg", 14.0, theme.text_tertiary).into_any_element()
+            } else {
+                icon("icons/file.svg", 14.0, theme.text_tertiary).into_any_element()
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h(px(24.0))
+                    .px(px(6.0))
+                    .rounded(px(5.0))
+                    .border_1()
+                    .border_color(theme.accent)
+                    .bg(theme.surface)
+                    .flex()
+                    .items_center()
+                    .child(input.clone()),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(2.0))
+                    .flex_none()
+                    .child(
+                        div()
+                            .id("inline-confirm-btn")
+                            .size(px(20.0))
+                            .rounded(px(4.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .cursor_pointer()
+                            .hover(|e| e.bg(theme.overlay_strong))
+                            .child(icon("icons/check.svg", 12.0, theme.accent))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.submit_inline_file_operation(window, cx);
+                            })),
+                    )
+                    .child(
+                        div()
+                            .id("inline-cancel-btn")
+                            .size(px(20.0))
+                            .rounded(px(4.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .cursor_pointer()
+                            .hover(|e| e.bg(theme.overlay_strong))
+                            .child(icon("icons/x.svg", 12.0, theme.text_tertiary))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.cancel_inline_file_operation(window, cx);
+                            })),
+                    ),
+            )
+    }
+
+    fn render_inline_rename_widget(
+        &self,
+        input: &Entity<TextInput>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        div()
+            .key_context(INLINE_FILE_PARENT_CONTEXT)
+            .on_action(cx.listener(|this, _: &SubmitInlineFile, window, cx| {
+                this.submit_inline_file_operation(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &CancelInlineFile, window, cx| {
+                this.cancel_inline_file_operation(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &crate::input::Clear, window, cx| {
+                this.cancel_inline_file_operation(window, cx);
+            }))
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                match event.keystroke.key.as_str() {
+                    "enter" => {
+                        this.submit_inline_file_operation(window, cx);
+                        cx.stop_propagation();
+                    }
+                    "escape" => {
+                        this.cancel_inline_file_operation(window, cx);
+                        cx.stop_propagation();
+                    }
+                    _ => {}
+                }
+            }))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h(px(24.0))
+                    .px(px(6.0))
+                    .rounded(px(5.0))
+                    .border_1()
+                    .border_color(theme.accent)
+                    .bg(theme.surface)
+                    .flex()
+                    .items_center()
+                    .child(input.clone()),
+            )
+            .child(
+                div()
+                    .id("inline-rename-confirm-btn")
+                    .size(px(20.0))
+                    .rounded(px(4.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .hover(|e| e.bg(theme.overlay_strong))
+                    .child(icon("icons/check.svg", 12.0, theme.accent))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.submit_inline_file_operation(window, cx);
+                    })),
+            )
+            .child(
+                div()
+                    .id("inline-rename-cancel-btn")
+                    .size(px(20.0))
+                    .rounded(px(4.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .hover(|e| e.bg(theme.overlay_strong))
+                    .child(icon("icons/x.svg", 12.0, theme.text_tertiary))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.cancel_inline_file_operation(window, cx);
+                    })),
+            )
+            .into_any_element()
+    }
+
+    pub(crate) fn begin_inline_create(
         &mut self,
-        kind: FileOperationDialogKind,
+        is_dir: bool,
+        parent: PathBuf,
+        depth: usize,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let initial = match &kind {
-            FileOperationDialogKind::Rename { source } => source
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or_default()
-                .to_owned(),
-            _ => String::new(),
-        };
-        let input =
-            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("files.name_placeholder")));
-        if !initial.is_empty() {
-            input.update(cx, |input, cx| input.set_content(initial, cx));
+        if !self.right_panel_expanded_paths.contains(&parent) {
+            self.right_panel_expanded_paths.insert(parent.clone());
+            self.refresh_right_panel_working_tree(cx);
         }
-        let focus = cx.focus_handle();
-        let focus_target = input.read(cx).focus();
-        let previous_focus = window.focused(cx);
-        self.right_panel_file_operation_dialog = Some(FileOperationDialog {
-            kind,
-            input,
-            focus,
-            previous_focus,
+        let input = cx.new(|cx| {
+            TextInput::new(window, cx).placeholder(if is_dir {
+                tr!("files.new_folder")
+            } else {
+                tr!("files.name_placeholder")
+            })
         });
-        window.on_next_frame(move |window, cx| window.focus(&focus_target, cx));
+        cx.subscribe(&input, |this: &mut Self, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Submit(_)) {
+                this.commit_inline_file_operation(cx);
+            }
+        })
+        .detach();
+        let focus = input.read(cx).focus();
+        let kind = if is_dir {
+            InlineFileOperationKind::CreateDirectory { parent, depth }
+        } else {
+            InlineFileOperationKind::CreateFile { parent, depth }
+        };
+        self.right_panel_inline_file_operation = Some(InlineFileOperation { kind, input });
+        window.on_next_frame(move |window, cx| window.focus(&focus, cx));
         cx.notify();
     }
 
-    pub(crate) fn close_file_operation_dialog(
+    pub(crate) fn begin_inline_rename(
+        &mut self,
+        source: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let name = source
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_owned();
+        let is_file = source.is_file();
+        let stem_len = if is_file {
+            source
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(|s| s.len())
+                .unwrap_or(name.len())
+        } else {
+            name.len()
+        };
+        let input = cx.new(|cx| TextInput::new(window, cx));
+        input.update(cx, |input, cx| {
+            input.set_content(name.clone(), cx);
+            if stem_len > 0 {
+                input.select_range(0..stem_len, cx);
+            } else {
+                input.select_all_text(cx);
+            }
+        });
+        cx.subscribe(&input, |this: &mut Self, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Submit(_)) {
+                this.commit_inline_file_operation(cx);
+            }
+        })
+        .detach();
+        let focus = input.read(cx).focus();
+        self.right_panel_inline_file_operation = Some(InlineFileOperation {
+            kind: InlineFileOperationKind::Rename { source },
+            input,
+        });
+        window.on_next_frame(move |window, cx| window.focus(&focus, cx));
+        cx.notify();
+    }
+
+    pub(crate) fn cancel_inline_file_operation(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(dialog) = self.right_panel_file_operation_dialog.take() else {
-            return;
-        };
-        if let Some(previous_focus) = dialog.previous_focus {
-            window.focus(&previous_focus, cx);
-        }
-        cx.notify();
-    }
-
-    pub(crate) fn submit_file_operation_dialog(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(dialog) = self.right_panel_file_operation_dialog.take() else {
-            return;
-        };
-        let name = dialog.input.read(cx).content().trim().to_owned();
-        if name.is_empty() || Path::new(&name).components().count() != 1 {
-            self.show_toast(tr!("files.invalid_name"));
-            self.right_panel_file_operation_dialog = Some(dialog);
+        if self.right_panel_inline_file_operation.take().is_some() {
+            let focus = self.transcript_control_focus("right-panel-working-tree", cx);
+            window.focus(&focus, cx);
             cx.notify();
-            return;
+        }
+    }
+
+    pub(crate) fn submit_inline_file_operation(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.commit_inline_file_operation(cx) {
+            let focus = self.transcript_control_focus("right-panel-working-tree", cx);
+            window.focus(&focus, cx);
+        }
+    }
+
+    pub(crate) fn commit_inline_file_operation(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(op) = self.right_panel_inline_file_operation.take() else {
+            return false;
+        };
+        let name = op.input.read(cx).content().trim().to_owned();
+        if name.is_empty() {
+            cx.notify();
+            return true;
+        }
+        if Path::new(&name).components().count() != 1 || name.contains('/') || name.contains('\\') {
+            self.show_toast(tr!("files.invalid_name"));
+            self.right_panel_inline_file_operation = Some(op);
+            cx.notify();
+            return false;
         }
         let Some(root) = self.selected_workspace_path().map(Path::to_path_buf) else {
-            return;
+            return true;
         };
-        let operation = match dialog.kind {
-            FileOperationDialogKind::CreateFile { parent } => {
-                let Ok(parent) = parent.strip_prefix(&root) else {
-                    return;
+        let (operation, is_create_file, created_rel) = match op.kind {
+            InlineFileOperationKind::CreateFile { parent, .. } => {
+                let Ok(parent_rel) = parent.strip_prefix(&root) else {
+                    return true;
                 };
-                padu_client::WorkspaceOperation::CreateFile {
-                    root: root.clone(),
-                    relative_path: parent.join(&name),
-                }
+                let relative_path = parent_rel.join(&name);
+                let rel_str = relative_path.to_string_lossy().into_owned();
+                (
+                    padu_client::WorkspaceOperation::CreateFile {
+                        root: root.clone(),
+                        relative_path,
+                    },
+                    true,
+                    Some(rel_str),
+                )
             }
-            FileOperationDialogKind::CreateDirectory { parent } => {
-                let Ok(parent) = parent.strip_prefix(&root) else {
-                    return;
+            InlineFileOperationKind::CreateDirectory { parent, .. } => {
+                let Ok(parent_rel) = parent.strip_prefix(&root) else {
+                    return true;
                 };
-                padu_client::WorkspaceOperation::CreateDirectory {
-                    root: root.clone(),
-                    relative_path: parent.join(&name),
-                }
+                (
+                    padu_client::WorkspaceOperation::CreateDirectory {
+                        root: root.clone(),
+                        relative_path: parent_rel.join(&name),
+                    },
+                    false,
+                    None,
+                )
             }
-            FileOperationDialogKind::Rename { source } => {
+            InlineFileOperationKind::Rename { source } => {
+                let current_name = source.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if current_name == name {
+                    cx.notify();
+                    return true;
+                }
                 let Ok(source_relative) = source.strip_prefix(&root) else {
-                    return;
+                    return true;
                 };
                 let Some(parent) = source_relative.parent() else {
-                    return;
+                    return true;
                 };
                 let new_relative = parent.join(&name);
                 if let Some(selected) = self.right_panel_files_selected_path.as_ref() {
@@ -1348,11 +1834,15 @@ impl Padu {
                             Some(new_relative.to_string_lossy().into_owned());
                     }
                 }
-                padu_client::WorkspaceOperation::RenamePath {
-                    root: root.clone(),
-                    from: source_relative.to_path_buf(),
-                    to: new_relative,
-                }
+                (
+                    padu_client::WorkspaceOperation::RenamePath {
+                        root: root.clone(),
+                        from: source_relative.to_path_buf(),
+                        to: new_relative,
+                    },
+                    false,
+                    None,
+                )
             }
         };
         let workspace = padu_client::WorkspaceClient::new(self.daemon.client());
@@ -1365,6 +1855,11 @@ impl Padu {
                 match result {
                     Ok(padu_client::WorkspaceResult::Ack) => {
                         padu.refresh_right_panel_working_tree(cx);
+                        if is_create_file {
+                            if let Some(rel) = created_rel {
+                                padu.open_right_panel_file(rel, cx);
+                            }
+                        }
                     }
                     Ok(_) | Err(_) => padu.show_toast(tr!("files.operation_failed")),
                 }
@@ -1372,10 +1867,25 @@ impl Padu {
             });
         })
         .detach();
-        window.focus(
-            &self.transcript_control_focus("right-panel-working-tree", cx),
-            cx,
-        );
+        cx.notify();
+        true
+    }
+
+    pub(crate) fn begin_file_operation_dialog(
+        &mut self,
+        kind: FileOperationDialogKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let focus = cx.focus_handle();
+        let focus_target = focus.clone();
+        let previous_focus = window.focused(cx);
+        self.right_panel_file_operation_dialog = Some(FileOperationDialog {
+            kind,
+            focus,
+            previous_focus,
+        });
+        window.on_next_frame(move |window, cx| window.focus(&focus_target, cx));
         cx.notify();
     }
 
@@ -1413,6 +1923,70 @@ impl Padu {
         .detach();
     }
 
+    pub(crate) fn close_file_operation_dialog(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(dialog) = self.right_panel_file_operation_dialog.take() else {
+            return;
+        };
+        if let Some(previous_focus) = dialog.previous_focus {
+            window.focus(&previous_focus, cx);
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn submit_file_operation_dialog(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(dialog) = self.right_panel_file_operation_dialog.take() else {
+            return;
+        };
+        let Some(root) = self.selected_workspace_path().map(Path::to_path_buf) else {
+            return;
+        };
+        let operation = match dialog.kind {
+            FileOperationDialogKind::Delete { target } => {
+                let Ok(relative_path) = target.strip_prefix(&root) else {
+                    return;
+                };
+                let rel_str = relative_path.to_string_lossy().into_owned();
+                if self.right_panel_files_selected_path.as_deref() == Some(&rel_str) {
+                    self.right_panel_files_selected_path = None;
+                }
+                padu_client::WorkspaceOperation::DeletePath {
+                    root: root.clone(),
+                    relative_path: relative_path.to_path_buf(),
+                }
+            }
+        };
+        let workspace = padu_client::WorkspaceClient::new(self.daemon.client());
+        cx.spawn(async move |padu, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { workspace.request(operation) })
+                .await;
+            let _ = padu.update(cx, |padu, cx| {
+                match result {
+                    Ok(padu_client::WorkspaceResult::Ack) => {
+                        padu.refresh_right_panel_working_tree(cx);
+                    }
+                    Ok(_) | Err(_) => padu.show_toast(tr!("files.operation_failed")),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        window.focus(
+            &self.transcript_control_focus("right-panel-working-tree", cx),
+            cx,
+        );
+        cx.notify();
+    }
+
     pub(crate) fn render_file_operation_dialog(
         &mut self,
         _window: &mut Window,
@@ -1420,57 +1994,84 @@ impl Padu {
     ) -> Option<AnyElement> {
         let dialog = self.right_panel_file_operation_dialog.as_ref()?;
         let theme = Theme::current(cx);
-        let title = match dialog.kind {
-            FileOperationDialogKind::CreateFile { .. } => tr!("files.new_file"),
-            FileOperationDialogKind::CreateDirectory { .. } => tr!("files.new_folder"),
-            FileOperationDialogKind::Rename { .. } => tr!("common.rename"),
-        };
-        let confirm_label = match dialog.kind {
-            FileOperationDialogKind::Rename { .. } => tr!("common.rename"),
-            _ => tr!("files.confirm"),
-        };
-        let cancel = dialog_cancel_button(
-            "file-operation-cancel",
-            tr!("common.cancel"),
-            &dialog.focus,
-            &theme,
-            cx,
-            |this, window, cx| this.close_file_operation_dialog(window, cx),
-        );
-        let confirm_focus = cx.focus_handle();
-        let confirm = dialog_confirm_button(
-            "file-operation-confirm",
-            confirm_label,
-            &confirm_focus,
-            ConfirmVariant::Default,
-            &theme,
-            cx,
-            |this, window, cx| this.submit_file_operation_dialog(window, cx),
-        );
+        let FileOperationDialogKind::Delete { ref target } = dialog.kind;
+        let title = tr!("files.delete");
+        let confirm_label = tr!("files.delete");
+        let cancel = div()
+            .id("file-operation-cancel")
+            .tab_index(0)
+            .h(px(30.0))
+            .px(px(12.0))
+            .gap(px(6.0))
+            .rounded(px(7.0))
+            .border_1()
+            .border_color(theme.border_strong)
+            .cursor_pointer()
+            .text_size(sp(12.5))
+            .text_color(theme.text_secondary)
+            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .hover(|e| e.bg(theme.overlay))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(tr!("common.cancel"))
+            .child(kbd_badge("Esc", &theme))
+            .on_click(
+                cx.listener(|this, _, window, cx| this.close_file_operation_dialog(window, cx)),
+            );
+        let (confirm_bg, confirm_text, badge_border) =
+            (theme.danger, gpui::white(), gpui::hsla(0.0, 0.0, 1.0, 0.25));
+        let confirm = div()
+            .id("file-operation-confirm")
+            .tab_index(0)
+            .h(px(30.0))
+            .px(px(14.0))
+            .gap(px(6.0))
+            .rounded(px(7.0))
+            .bg(confirm_bg)
+            .cursor_pointer()
+            .text_size(sp(12.5))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(confirm_text)
+            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .hover(|e| e.opacity(0.9))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(confirm_label)
+            .child(kbd_badge_icon(
+                "icons/corner-down-left.svg",
+                confirm_bg,
+                confirm_text,
+                badge_border,
+            ))
+            .on_click(
+                cx.listener(|this, _, window, cx| this.submit_file_operation_dialog(window, cx)),
+            )
+            .track_focus(&dialog.focus);
+        let target_name = target
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_owned();
         let body = div()
+            .text_size(sp(13.5))
+            .line_height(sp(20.0))
+            .text_color(theme.text_secondary)
+            .child(tr!("files.delete_confirm", name = target_name));
+        let card = div()
+            .id("file-operation-dialog")
+            .w(px(420.0))
+            .p(px(20.0))
+            .gap(px(16.0))
             .flex()
             .flex_col()
-            .gap(px(6.0))
-            .child(
-                div()
-                    .text_size(sp(12.5))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.text_secondary)
-                    .child(tr!("files.name_placeholder")),
-            )
-            .child(
-                div()
-                    .h(px(32.0))
-                    .px(px(10.0))
-                    .rounded(px(7.0))
-                    .border_1()
-                    .border_color(theme.border)
-                    .bg(theme.surface)
-                    .flex()
-                    .items_center()
-                    .child(dialog.input.clone()),
-            );
-        let card = dialog_card("file-operation-dialog", &theme, px(420.0))
+            .rounded(px(14.0))
+            .bg(theme.raised)
+            .border_1()
+            .border_color(theme.border_strong)
+            .shadow_lg()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()
                     .flex()
@@ -1478,10 +2079,17 @@ impl Padu {
                     .justify_between()
                     .child(
                         div()
-                            .text_size(sp(15.0))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(theme.text)
-                            .child(title),
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(icon("icons/trash.svg", 15.0, theme.danger))
+                            .child(
+                                div()
+                                    .text_size(sp(15.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(theme.text)
+                                    .child(title),
+                            ),
                     )
                     .child(
                         div()
@@ -1524,14 +2132,30 @@ impl Padu {
                     _ => {}
                 }
             }));
-
-        Some(dialog_backdrop(
-            "file-operation-layer",
-            &theme,
-            cx,
-            |this, window, cx| this.close_file_operation_dialog(window, cx),
-            card,
-        ))
+        let scrim = if theme.is_dark {
+            gpui::hsla(0.0, 0.0, 0.0, 0.45)
+        } else {
+            gpui::hsla(0.0, 0.0, 0.0, 0.25)
+        };
+        Some(
+            div()
+                .id("file-operation-layer")
+                .absolute()
+                .inset_0()
+                .occlude()
+                .bg(scrim)
+                .flex()
+                .items_center()
+                .justify_center()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, window, cx| {
+                        this.close_file_operation_dialog(window, cx);
+                    }),
+                )
+                .child(card)
+                .into_any_element(),
+        )
     }
 
     pub(crate) fn toggle_right_panel_hidden_files(&mut self, cx: &mut Context<Self>) {

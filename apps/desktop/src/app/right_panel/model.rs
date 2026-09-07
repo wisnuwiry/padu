@@ -1,15 +1,24 @@
 use super::*;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum FileOperationDialogKind {
-    CreateFile { parent: PathBuf },
-    CreateDirectory { parent: PathBuf },
+pub(crate) enum InlineFileOperationKind {
     Rename { source: PathBuf },
+    CreateFile { parent: PathBuf, depth: usize },
+    CreateDirectory { parent: PathBuf, depth: usize },
+}
+
+pub(crate) struct InlineFileOperation {
+    pub(crate) kind: InlineFileOperationKind,
+    pub(crate) input: Entity<TextInput>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum FileOperationDialogKind {
+    Delete { target: PathBuf },
 }
 
 pub(crate) struct FileOperationDialog {
     pub(crate) kind: FileOperationDialogKind,
-    pub(crate) input: Entity<TextInput>,
     pub(crate) focus: FocusHandle,
     pub(crate) previous_focus: Option<FocusHandle>,
 }
@@ -49,6 +58,23 @@ pub(crate) fn file_icon_for_path(path: &str) -> &'static str {
         .and_then(|name| name.to_str())
         .unwrap_or(path);
     file_icon_for_name(name)
+}
+
+/// The standalone SVGs in the file panel are naturally multicoloured. Chip
+/// icons are painted as alpha masks, so give them the same file-type colour
+/// language instead of tinting every icon with the accent colour.
+pub(crate) fn file_icon_color(path: &str) -> Hsla {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    match name {
+        "folder.svg" => gpui::hsla(0.12, 0.72, 0.58, 1.0),
+        "rust.svg" | "c.svg" | "cpp.svg" | "swift.svg" => gpui::hsla(0.05, 0.75, 0.58, 1.0),
+        "javascript.svg" | "typescript.svg" | "json.svg" => gpui::hsla(0.14, 0.78, 0.56, 1.0),
+        "python.svg" | "go.svg" | "dart.svg" => gpui::hsla(0.56, 0.65, 0.58, 1.0),
+        "html.svg" | "css.svg" | "sass.svg" | "scss.svg" => gpui::hsla(0.58, 0.72, 0.58, 1.0),
+        "markdown.svg" | "readme.svg" => gpui::hsla(0.58, 0.55, 0.68, 1.0),
+        "image.svg" | "audio.svg" | "video.svg" => gpui::hsla(0.82, 0.62, 0.64, 1.0),
+        _ => gpui::hsla(0.58, 0.20, 0.62, 1.0),
+    }
 }
 
 pub(crate) fn review_diff_gap_icon_path(
@@ -373,6 +399,7 @@ pub(crate) fn review_diff_flat_text(
         runs,
         links: Vec::new(),
         code_ranges: Vec::new(),
+        mention_ranges: Vec::new(),
     }
 }
 

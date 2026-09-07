@@ -346,6 +346,9 @@
     background: var(--code-wash);
     @apply rounded px-1 py-0.5 font-mono text-[0.9em];
   }
+  .markdown .mention-chip {
+    @apply inline-flex items-center gap-1.5 rounded-[8px] border border-border bg-[var(--inset)] px-2 py-0.5 font-mono text-[12px] font-medium text-foreground;
+  }
   .markdown pre {
     @apply max-w-full overflow-x-auto rounded-xl border bg-muted/45 p-4 font-mono text-[13px] leading-6;
   }

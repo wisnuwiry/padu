@@ -401,21 +401,47 @@ fn render_sent_message_attachments(
             right_panel::file_icon_for_path(&attachment.mention)
         };
         let attachment_image = attachment_images.get(index).and_then(|image| image.clone());
-        let mut tile = div()
-            .id(SharedString::from(format!(
-                "message-{message_id}-attachment-{index}"
-            )))
-            .w(px(96.0))
-            .h(px(80.0))
-            .rounded(px(9.0))
-            .overflow_hidden()
-            .border_1()
-            .border_color(theme.border)
-            .bg(theme.inset)
-            .track_focus(menu.trigger_focus_handle())
-            .tab_index(0)
-            .focus_visible(|style| style.border_color(theme.accent))
-            .tooltip(Tooltip::text(attachment.name.clone()));
+        let raw_name = if attachment.name.is_empty() {
+            &attachment.mention
+        } else {
+            &attachment.name
+        };
+        let display_name = super::composer::trim_to_filename(raw_name);
+        let mut tile = if attachment.is_image {
+            div()
+                .id(SharedString::from(format!(
+                    "message-{message_id}-attachment-{index}"
+                )))
+                .w(px(96.0))
+                .h(px(80.0))
+                .rounded(px(9.0))
+                .overflow_hidden()
+                .border_1()
+                .border_color(theme.border)
+                .bg(theme.inset)
+                .track_focus(menu.trigger_focus_handle())
+                .tab_index(0)
+                .focus_visible(|style| style.border_color(theme.accent))
+                .tooltip(Tooltip::text(attachment.name.clone()))
+        } else {
+            div()
+                .id(SharedString::from(format!(
+                    "message-{message_id}-attachment-{index}"
+                )))
+                .h(px(26.0))
+                .rounded(px(6.0))
+                .border_1()
+                .border_color(theme.border)
+                .bg(theme.inset)
+                .px(px(7.0))
+                .flex()
+                .items_center()
+                .gap(px(5.0))
+                .track_focus(menu.trigger_focus_handle())
+                .tab_index(0)
+                .focus_visible(|style| style.border_color(theme.accent))
+                .tooltip(Tooltip::text(format!("@{}", attachment.mention)))
+        };
         if attachment.is_image {
             let key_menu = menu.clone();
             if let Some(attachment_image) = attachment_image.as_ref() {
@@ -485,32 +511,22 @@ fn render_sent_message_attachments(
             }
         } else {
             let key_menu = menu.clone();
-            tile = tile.child(
-                div()
-                    .size_full()
-                    .px(px(7.0))
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(7.0))
-                    .child(icon(icon_path, 18.0, theme.text_tertiary))
-                    .child(
-                        div()
-                            .w_full()
-                            .truncate()
-                            .text_center()
-                            .text_size(sp(12.5))
-                            .text_color(theme.text_secondary)
-                            .child(attachment.name.clone()),
-                    ),
-            );
-            tile = tile.on_key_down(move |event: &KeyDownEvent, window, cx| {
-                if event.keystroke.key == "f10" && event.keystroke.modifiers.shift {
-                    key_menu.open_context_menu(window, cx);
-                    cx.stop_propagation();
-                }
-            });
+            tile = tile
+                .child(icon(icon_path, 14.0, theme.text_tertiary).flex_none())
+                .child(
+                    div()
+                        .max_w(px(220.0))
+                        .truncate()
+                        .text_size(sp(12.0))
+                        .text_color(theme.text)
+                        .child(display_name),
+                )
+                .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                    if event.keystroke.key == "f10" && event.keystroke.modifiers.shift {
+                        key_menu.open_context_menu(window, cx);
+                        cx.stop_propagation();
+                    }
+                });
         }
         let reveal_path = attachment.path.clone();
         row = row.child(context_menu(

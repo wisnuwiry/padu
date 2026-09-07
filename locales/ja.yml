@@ -1046,6 +1046,8 @@ files.preparing_editor: エディタを準備中…
 files.preparing_syntax: シンタックスハイライトを準備しています。
 files.copy_path: パスをコピー
 files.copied_path: "%{path} をクリップボードにコピーしました"
+files.add_to_chat: チャットに追加
+files.added_to_chat: "%{path} をチャットに追加しました"
 file_picker.open_project: プロジェクトを開く
 file_picker.attach: 添付
 file_picker.daemon_folders: デーモンのフォルダ

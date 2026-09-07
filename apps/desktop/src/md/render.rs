@@ -26,8 +26,8 @@ use gpui::{
     AnyElement, BorderStyle, Bounds, ClipboardItem, CursorStyle, DispatchPhase, Font, FontStyle,
     FontWeight, Hsla, InteractiveText, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, SharedString, StrikethroughStyle,
-    StyledText, TextLayout, TextRun, UnderlineStyle, Window, canvas, div, font, img, point,
-    prelude::*, px, quad, relative, size,
+    StyledText, TextLayout, TextRun, TransformationMatrix, UnderlineStyle, Window, canvas, div,
+    font, img, point, prelude::*, px, quad, relative, size,
 };
 use regex::Regex;
 
@@ -149,6 +149,8 @@ pub const MONO_FAMILY: &str = "JetBrains Mono";
 const CODE_WASH_RADIUS: f32 = 4.0;
 const CODE_WASH_PAD_X: f32 = 2.5;
 const CODE_WASH_INSET_Y: f32 = 1.5;
+const MENTION_CHIP_RADIUS: f32 = 7.0;
+const MENTION_CHIP_PAD_X: f32 = 6.0;
 
 /// Heading scale relative to body text, by level.
 fn heading_metrics(level: u8, metrics: &Metrics) -> (f32, f32, FontWeight) {
@@ -181,6 +183,8 @@ pub struct Palette {
     pub search_match: Hsla,
     pub active_search_match: Hsla,
     pub accent: Hsla,
+    pub mention_wash: Hsla,
+    pub mention_border: Hsla,
     pub added: Hsla,
     pub removed: Hsla,
     is_dark: bool,
@@ -218,6 +222,8 @@ impl Palette {
                 0.70
             }),
             accent: theme.accent,
+            mention_wash: theme.inset,
+            mention_border: theme.border,
             added: theme.success,
             removed: theme.danger,
             is_dark: theme.is_dark,
@@ -238,6 +244,7 @@ impl Palette {
             TokenClass::Type => hue(dark, 0x8FB8D9, 0x2F6690),
             TokenClass::Function => hue(dark, 0x8FB8D9, 0x2F6690),
             TokenClass::Meta => self.tertiary,
+            TokenClass::Mention => self.accent,
             TokenClass::Added => self.added,
             TokenClass::Removed => self.removed,
         }
@@ -258,6 +265,7 @@ pub struct FlatText {
     pub runs: Vec<TextRun>,
     pub links: Vec<(Range<usize>, String)>,
     pub code_ranges: Vec<Range<usize>>,
+    pub mention_ranges: Vec<Range<usize>>,
 }
 
 /// One literal find-in-page hit inside a shaped markdown text element.
@@ -291,6 +299,7 @@ pub fn flatten(
     let mut out: Vec<TextRun> = Vec::with_capacity(runs.len());
     let mut links: Vec<(Range<usize>, String)> = Vec::new();
     let mut code_ranges: Vec<Range<usize>> = Vec::new();
+    let mut mention_ranges: Vec<Range<usize>> = Vec::new();
 
     for run in runs {
         if run.text.is_empty() {
@@ -323,6 +332,41 @@ pub fn flatten(
                 _ => code_ranges.push(start..end),
             }
         }
+        if run.style.mention {
+            mention_ranges.push(start..end);
+            if run.text.starts_with('@') && run.text.len() > 1 {
+                out.push(TextRun {
+                    len: 1,
+                    font: run_font.clone(),
+                    color: gpui::transparent_black(),
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                });
+                let folder_suffix = run.text.ends_with('/');
+                let mut filename_font = run_font.clone();
+                filename_font.weight = FontWeight::MEDIUM;
+                out.push(TextRun {
+                    len: run.text.len() - 1 - usize::from(folder_suffix),
+                    font: filename_font,
+                    color: palette.text,
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                });
+                if folder_suffix {
+                    out.push(TextRun {
+                        len: 1,
+                        font: run_font,
+                        color: gpui::transparent_black(),
+                        background_color: None,
+                        underline: None,
+                        strikethrough: None,
+                    });
+                }
+                continue;
+            }
+        }
         if let Some(url) = &run.style.link {
             // A still-streaming link keeps link styling — so the URL settling
             // changes nothing visually — but must not become clickable.
@@ -337,7 +381,9 @@ pub fn flatten(
         out.push(TextRun {
             len: run.text.len(),
             font: run_font,
-            color: if run.style.code {
+            color: if run.style.mention {
+                palette.accent
+            } else if run.style.code {
                 palette.code_text
             } else {
                 base_color
@@ -362,6 +408,7 @@ pub fn flatten(
         runs: out,
         links,
         code_ranges,
+        mention_ranges,
     }
 }
 
@@ -392,6 +439,7 @@ pub fn flatten_plain(
         runs,
         links: Vec::new(),
         code_ranges: Vec::new(),
+        mention_ranges: Vec::new(),
     }
 }
 
@@ -657,6 +705,9 @@ fn text_element_with_selection(
     search: Option<SearchHighlights>,
     link_handler: Option<LinkHandler>,
     code_wash: Hsla,
+    mention_wash: Hsla,
+    mention_border: Hsla,
+    _mention_icon: Hsla,
     selection_wash: Hsla,
     search_match_wash: Hsla,
     active_search_match_wash: Hsla,
@@ -686,9 +737,10 @@ fn text_element_with_selection(
     let underlay = canvas(|_, _, _| (), {
         let text = flat.text.clone();
         let code_ranges = flat.code_ranges.clone();
+        let mention_ranges = flat.mention_ranges.clone();
         let layout = layout.clone();
         let key = key.clone();
-        move |_, _, window, _| {
+        move |_, _, window, cx| {
             for range in &code_ranges {
                 for rect in range_rects(&layout, range, CODE_WASH_PAD_X, CODE_WASH_INSET_Y) {
                     window.paint_quad(quad(
@@ -699,6 +751,45 @@ fn text_element_with_selection(
                         gpui::transparent_black(),
                         BorderStyle::default(),
                     ));
+                }
+            }
+            for range in &mention_ranges {
+                let rects = range_rects(&layout, range, MENTION_CHIP_PAD_X, CODE_WASH_INSET_Y);
+                for rect in &rects {
+                    window.paint_quad(quad(
+                        *rect,
+                        px(MENTION_CHIP_RADIUS),
+                        mention_wash,
+                        px(1.0),
+                        mention_border,
+                        BorderStyle::default(),
+                    ));
+                }
+                if let Some(first_rect) = rects.first() {
+                    let mention_str = &text[range.clone()];
+                    let is_folder = mention_str.ends_with('/');
+                    let file_name = mention_str.trim_start_matches('@').trim_end_matches('/');
+                    let icon_path = if is_folder {
+                        "icons/folder.svg"
+                    } else {
+                        crate::app::right_panel::file_icon_for_path(file_name)
+                    };
+                    let icon_size = 14.0;
+                    let icon_bounds = Bounds::new(
+                        point(
+                            first_rect.left() + px(2.0),
+                            first_rect.top() + (first_rect.size.height - px(icon_size)) / 2.0,
+                        ),
+                        size(px(icon_size), px(icon_size)),
+                    );
+                    let _ = window.paint_svg(
+                        icon_bounds,
+                        icon_path.into(),
+                        None,
+                        TransformationMatrix::unit(),
+                        crate::app::right_panel::file_icon_color(icon_path),
+                        cx,
+                    );
                 }
             }
             if let Some(search) = &search {
@@ -783,6 +874,9 @@ fn text_element(flat: &FlatText, key: TextKey, ctx: &Ctx) -> AnyElement {
         ctx.search.clone(),
         ctx.link_handler.clone(),
         ctx.palette.code_wash,
+        ctx.palette.mention_wash,
+        ctx.palette.mention_border,
+        ctx.palette.accent,
         ctx.palette.selection,
         ctx.palette.search_match,
         ctx.palette.active_search_match,
@@ -812,6 +906,9 @@ pub fn selectable_flat_text(
         None,
         None,
         code_wash,
+        gpui::transparent_black(),
+        gpui::transparent_black(),
+        gpui::transparent_black(),
         selection_wash,
         gpui::transparent_black(),
         gpui::transparent_black(),
@@ -851,7 +948,7 @@ pub fn frame_reset(selection: TranscriptSelection) -> impl IntoElement {
 /// window coordinates, from the laid-out text's own geometry. `pad_x` overhangs
 /// horizontally (inline code) and `inset_y` shrinks vertically; a selection
 /// wash passes zero for both so its boxes tile seamlessly across wrapped rows.
-fn range_rects(
+pub(crate) fn range_rects(
     layout: &TextLayout,
     range: &Range<usize>,
     pad_x: f32,
@@ -1531,6 +1628,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
             runs: code_runs(code, lang, &code_font, ctx.palette),
             links: Vec::new(),
             code_ranges: Vec::new(),
+            mention_ranges: Vec::new(),
         }
     });
     let label = language

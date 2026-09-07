@@ -2085,6 +2085,10 @@ files.copy_path:
   en: Copy path
 files.copied_path:
   en: "Copied %{path} to clipboard"
+files.add_to_chat:
+  en: Add to Chat
+files.added_to_chat:
+  en: "Added %{path} to chat"
 
 file_picker.open_project:
   en: Open Project

@@ -1398,6 +1398,7 @@ pub struct Padu {
     right_panel_expanded_paths: HashSet<PathBuf>,
     right_panel_show_hidden_files: bool,
     right_panel_file_operation_dialog: Option<right_panel::FileOperationDialog>,
+    right_panel_inline_file_operation: Option<right_panel::InlineFileOperation>,
     right_panel_files_selected_path: Option<String>,
     pub(crate) right_panel_files_cursor: Option<usize>,
     right_panel_file_tree_width: f32,
@@ -1642,7 +1643,7 @@ mod file_search;
 mod image_preview;
 mod onboarding;
 mod render;
-mod right_panel;
+pub(crate) mod right_panel;
 mod runtime;
 mod sessions;
 mod settings;
@@ -1664,6 +1665,7 @@ use components::*;
 pub use dialogs::init as init_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
 pub use onboarding::init as init_onboarding_keys;
+pub use right_panel::init_files_keys as init_right_panel_files_keys;
 pub use settings::init as init_settings_keys;
 pub use settings::init_skills_keys;
 pub use sidebar::init as init_sidebar_keys;
@@ -3124,6 +3126,7 @@ impl Padu {
                 right_panel_expanded_paths: HashSet::new(),
                 right_panel_show_hidden_files: false,
                 right_panel_file_operation_dialog: None,
+                right_panel_inline_file_operation: None,
                 right_panel_files_selected_path: None,
                 right_panel_files_cursor: None,
                 right_panel_file_tree_width: DEFAULT_FILE_TREE_WIDTH,

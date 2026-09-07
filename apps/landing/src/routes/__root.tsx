@@ -4,6 +4,7 @@ import { Outlet, createRootRoute, HeadContent, Scripts } from "@tanstack/react-r
 import type { ReleaseChannels, ReleaseInfo } from "~/latest-release";
 import { getLatestRelease } from "~/release";
 import { getStarCount } from "~/stars";
+import { useRealtimeStars } from "~/realtime-stars";
 
 interface StarsContext {
   stars: string;
@@ -63,9 +64,10 @@ export const Route = createRootRoute({
 
 function RootComponent() {
   const data = Route.useLoaderData();
+  const stars = useRealtimeStars(data.stars);
   return (
     <ReleaseCtx value={data.release}>
-      <StarsCtx value={data}>
+      <StarsCtx value={{ stars }}>
         <RootDocument>
           <Outlet />
         </RootDocument>

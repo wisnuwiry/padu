@@ -32,6 +32,8 @@ pub enum TokenClass {
     Function,
     /// `@decorator`, `#[attribute]`, preprocessor lines, `$variable`.
     Meta,
+    /// Inline `@mention` token.
+    Mention,
     /// Diff insertions and deletions.
     Added,
     Removed,

@@ -1980,7 +1980,11 @@ impl Padu {
         window.focus(&focus, cx);
     }
 
-    fn stage_attachment_paths(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) -> bool {
+    pub(crate) fn stage_attachment_paths(
+        &mut self,
+        paths: &[PathBuf],
+        cx: &mut Context<Self>,
+    ) -> bool {
         if paths.is_empty() {
             return false;
         }
@@ -2061,15 +2065,14 @@ impl Padu {
         }) {
             return false;
         }
-        let mut mention = path.display().to_string();
-        if is_dir && !mention.ends_with('/') {
-            mention.push('/');
-        }
+        let root = self.selected_workspace_path();
+        let mention = dropped_file_mention(root, &path, is_dir);
+        let trimmed_name = trim_to_filename(&name);
         self.composer_attachments.push(ComposerAttachment {
             path,
             client_preview_image,
             mention,
-            name: SharedString::from(name),
+            name: SharedString::from(trimmed_name),
             is_dir,
             is_image,
             blob_reference: Some(reference),
@@ -2372,7 +2375,8 @@ impl Padu {
             .pb(px(8.0))
             .flex()
             .flex_wrap()
-            .gap(px(8.0));
+            .items_center()
+            .gap(px(6.0));
         for (index, attachment) in self.composer_attachments.iter().enumerate() {
             let menu = self.menu_handle(format!("composer-attachment-{index}-menu"), cx);
             let icon_path = if attachment.is_dir {
@@ -2380,16 +2384,24 @@ impl Padu {
             } else {
                 super::right_panel::file_icon_for_path(&attachment.mention)
             };
-            let mut tile = div()
+            let raw_name = if attachment.name.is_empty() {
+                &attachment.mention
+            } else {
+                attachment.name.as_ref()
+            };
+            let display_name = trim_to_filename(raw_name);
+            let mut chip = div()
                 .id(SharedString::from(format!("composer-attachment-{index}")))
-                .relative()
-                .w(px(64.0))
-                .h(px(64.0))
-                .rounded(px(8.0))
-                .overflow_hidden()
+                .h(px(26.0))
+                .rounded(px(6.0))
                 .border_1()
                 .border_color(theme.border)
-                .bg(theme.inset)
+                .bg(theme.surface)
+                .pl(px(7.0))
+                .pr(px(5.0))
+                .flex()
+                .items_center()
+                .gap(px(5.0))
                 .track_focus(menu.trigger_focus_handle())
                 .tab_index(0)
                 .focus_visible(|style| style.border_color(theme.accent))
@@ -2413,13 +2425,16 @@ impl Padu {
             if attachment.is_image {
                 if let Some(attachment_image) = attachment_image.as_ref() {
                     let preview_image = attachment_image.clone();
-                    let preview_name = attachment.name.clone();
-                    tile = tile.child(
+                    let preview_name = SharedString::from(display_name.clone());
+                    chip = chip.child(
                         div()
                             .id(SharedString::from(format!(
                                 "composer-attachment-{index}-preview"
                             )))
-                            .size_full()
+                            .size(px(16.0))
+                            .rounded(px(3.0))
+                            .overflow_hidden()
+                            .flex_none()
                             .cursor_pointer()
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.open_image_preview(
@@ -2437,43 +2452,28 @@ impl Padu {
                             ),
                     );
                 } else {
-                    tile = tile.child(
-                        div()
-                            .size_full()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(icon("icons/file-types/image.svg", 16.0, theme.text_ghost)),
+                    chip = chip.child(
+                        icon("icons/file-types/image.svg", 14.0, theme.text_tertiary).flex_none(),
                     );
                 }
             } else {
-                tile = tile.child(
-                    div()
-                        .size_full()
-                        .px(px(5.0))
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .justify_center()
-                        .gap(px(5.0))
-                        .child(icon(icon_path, 16.0, theme.text_tertiary))
-                        .child(
-                            div().w_full().flex().justify_center().child(
-                                div()
-                                    .max_w_full()
-                                    .truncate()
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.text_tertiary)
-                                    .child(attachment.name.clone()),
-                            ),
-                        ),
-                );
+                chip = chip.child(icon(icon_path, 14.0, theme.text_tertiary).flex_none());
             }
+
+            chip = chip.child(
+                div()
+                    .max_w(px(200.0))
+                    .truncate()
+                    .text_size(sp(12.0))
+                    .text_color(theme.text)
+                    .child(display_name),
+            );
+
             let key_menu = menu.clone();
             let key_image = attachment_image.clone();
-            let key_name = attachment.name.clone();
+            let key_name = SharedString::from(attachment.name.to_string());
             let is_image = attachment.is_image;
-            tile = tile.on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+            chip = chip.on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 let key = event.keystroke.key.as_str();
                 if is_image
                     && matches!(key, "enter" | "space")
@@ -2486,25 +2486,20 @@ impl Padu {
                     cx.stop_propagation();
                 }
             }));
-            let tile = tile.child(
+
+            let chip = chip.child(
                 div()
                     .id(SharedString::from(format!(
                         "composer-attachment-remove-{index}"
                     )))
-                    .absolute()
-                    .top(px(3.0))
-                    .right(px(3.0))
-                    .w(px(16.0))
-                    .h(px(16.0))
-                    .tab_index(0)
-                    .rounded(px(5.0))
+                    .size(px(16.0))
+                    .rounded(px(4.0))
+                    .flex_none()
                     .flex()
                     .items_center()
                     .justify_center()
                     .cursor_pointer()
-                    .bg(theme.canvas.opacity(0.8))
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
-                    .hover(|element| element.bg(theme.canvas.opacity(0.95)))
+                    .hover(|element| element.bg(theme.overlay_strong))
                     .active(|element| element.opacity(0.8))
                     .child(icon("icons/x.svg", 9.0, theme.text_secondary))
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -2528,7 +2523,7 @@ impl Padu {
             );
             let reveal_path = attachment.path.clone();
             row = row.child(context_menu(
-                tile,
+                chip,
                 SharedString::from(format!("composer-attachment-{index}-context-menu")),
                 &menu,
                 move |_| image_preview::attachment_menu_items(reveal_path.clone(), can_reveal),
@@ -3725,7 +3720,19 @@ fn attachment_upload_from_path(
     ))
 }
 
-#[cfg(test)]
+pub(crate) fn trim_to_filename(path_str: &str) -> String {
+    let trimmed = path_str.trim_end_matches(['/', '\\']);
+    if let Some(name) = Path::new(trimmed).file_name().and_then(|n| n.to_str()) {
+        if path_str.ends_with('/') || path_str.ends_with('\\') {
+            format!("{name}/")
+        } else {
+            name.to_owned()
+        }
+    } else {
+        path_str.to_owned()
+    }
+}
+
 pub(super) fn dropped_file_mention(
     root: Option<&std::path::Path>,
     path: &std::path::Path,

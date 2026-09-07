@@ -371,7 +371,10 @@ impl Padu {
                 let composer_text = composer_complete::command_composer_text(&scored.item);
                 format!("{composer_text} ")
             }
-            AutocompleteRow::File(scored) => format!("@{} ", scored.item.path),
+            AutocompleteRow::File(scored) => {
+                let name = super::composer::trim_to_filename(&scored.item.path);
+                format!("@{name} ")
+            }
         };
         if matches!(row, AutocompleteRow::Command(_)) {
             let mut submission = self.composer.read(cx).content(cx).to_owned();

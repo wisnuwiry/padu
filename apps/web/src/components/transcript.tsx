@@ -1373,6 +1373,55 @@ function MessageContextMenu({
   )
 }
 
+function rehypeMentionChips() {
+  return () => (tree: any) => {
+    const regex = /(?:^|\s)@([a-zA-Z0-9_.\-\\/]+)/g
+    const visit = (node: any) => {
+      if (!node.children || node.tagName === 'code' || node.tagName === 'pre' || node.tagName === 'a') return
+      node.children = node.children.flatMap((child: any) => {
+        if (child.type === 'text') {
+          const value: string = child.value || ''
+          if (!value.includes('@')) return [child]
+          const result: any[] = []
+          let lastIndex = 0
+          let match: RegExpExecArray | null
+          regex.lastIndex = 0
+          while ((match = regex.exec(value)) !== null) {
+            const fullMatch = match[0]
+            const atOffset = fullMatch.indexOf('@')
+            const start = match.index + atOffset
+            const end = match.index + fullMatch.length
+            const trimmedEnd = value.slice(start, end).replace(/[,;!?:)\]}"']+$/, '').length + start
+            if (trimmedEnd <= start + 1) continue
+
+            if (start > lastIndex) {
+              result.push({ type: 'text', value: value.slice(lastIndex, start) })
+            }
+            result.push({
+              type: 'element',
+              tagName: 'span',
+              properties: {
+                className: ['mention-chip'],
+                'data-mention': value.slice(start, trimmedEnd).replace(/^@/, ''),
+              },
+              children: [{ type: 'text', value: value.slice(start, trimmedEnd) }],
+            })
+            lastIndex = trimmedEnd
+            regex.lastIndex = trimmedEnd
+          }
+          if (lastIndex < value.length) {
+            result.push({ type: 'text', value: value.slice(lastIndex) })
+          }
+          return result.length ? result : [child]
+        }
+        visit(child)
+        return [child]
+      })
+    }
+    visit(tree)
+  }
+}
+
 function Markdown({
   text,
   compact = false,
@@ -1392,7 +1441,7 @@ function Markdown({
     <div className={cn('markdown min-w-0', compact && '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0')}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={chunks.length ? [markdownVeilPlugin(chunks, now)] : []}
+        rehypePlugins={chunks.length ? [markdownVeilPlugin(chunks, now), rehypeMentionChips] : [rehypeMentionChips]}
         components={{
           a: ({ children, href, ...props }) => (
             <a
@@ -1415,6 +1464,24 @@ function Markdown({
               source={src}
             />
           ) : null,
+          // TODO(web): Make mention chips in rendered message bubbles use the
+          // same stable inline renderer as attachments; provider/markdown
+          // payload variations can still leave the chip unrendered.
+          span: ({ children, className, ...props }) => {
+            const mentionProps = props as { 'data-mention'?: string; dataMention?: string }
+            const mention = mentionProps['data-mention'] ?? mentionProps.dataMention
+            if (!mention || !className?.toString().includes('mention-chip')) {
+              return <span className={className} {...props}>{children}</span>
+            }
+            return (
+              <span className="mention-chip" {...props}>
+                {mention.endsWith('/')
+                  ? <PaduIcon className="size-3.5 shrink-0 text-[var(--text-secondary)]" name="folder" />
+                  : <FileTypeIcon className="size-3.5 shrink-0" path={mention} />}
+                <span className="truncate">{mention.replace(/\/$/, '')}</span>
+              </span>
+            )
+          },
         }}
       >
         {text}
@@ -1866,18 +1933,26 @@ function ChangedFilesCard({
   )
 }
 
+function trimToFilename(path: string): string {
+  const isDir = path.endsWith('/') || path.endsWith('\\')
+  const clean = path.replace(/[/\\]+$/, '')
+  const name = clean.split(/[/\\]/).pop() || clean
+  return isDir ? `${name}/` : name
+}
+
 function Attachment({ attachment }: { attachment: MessageAttachment }) {
   if (attachment.is_image) return <RemoteImage attachment={attachment} />
+  const displayName = trimToFilename(attachment.name || attachment.mention)
   return (
     <span
-      className="flex h-20 w-24 flex-col items-center justify-center gap-[7px] overflow-hidden rounded-[9px] border bg-[var(--inset)] px-[7px]"
-      title={attachment.name}
+      className="inline-flex h-[26px] max-w-[220px] items-center gap-1.5 rounded-md border border-border bg-[var(--inset)] px-2 text-[12px] text-foreground"
+      title={`@${attachment.mention}`}
     >
       {attachment.is_dir
-        ? <PaduIcon className="size-[18px] text-[var(--text-tertiary)]" name="folder" />
-        : <FileTypeIcon className="size-[18px]" path={attachment.mention || attachment.name} />}
-      <span className="w-full truncate text-center text-[9.5px] text-[var(--text-secondary)]">
-        {attachment.name}
+        ? <PaduIcon className="size-3.5 shrink-0 text-[var(--text-tertiary)]" name="folder" />
+        : <FileTypeIcon className="size-3.5 shrink-0" path={attachment.mention || attachment.name} />}
+      <span className="truncate font-mono text-[11.5px] text-foreground">
+        {displayName}
       </span>
     </span>
   )

@@ -12,6 +12,7 @@ mod model;
 mod render;
 mod tabs;
 
+pub use files::init_keys as init_files_keys;
 pub(crate) use links::*;
 pub(crate) use model::*;
 pub(crate) use tabs::*;
@@ -781,13 +782,15 @@ mod tests {
         assert!(entry.is_ignored);
         assert!(entry.is_dir);
 
-        let file_dialog = FileOperationDialogKind::CreateFile {
+        let inline_create = InlineFileOperationKind::CreateFile {
             parent: PathBuf::from("/project/src"),
+            depth: 1,
         };
         assert_eq!(
-            file_dialog,
-            FileOperationDialogKind::CreateFile {
-                parent: PathBuf::from("/project/src")
+            inline_create,
+            InlineFileOperationKind::CreateFile {
+                parent: PathBuf::from("/project/src"),
+                depth: 1,
             }
         );
     }

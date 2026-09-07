@@ -1,6 +1,6 @@
 use super::composer::{
     ComposerSubmitAction, composer_submit_action, dropped_file_mention, merged_submission,
-    next_picker_highlight, visible_branch_entries,
+    next_picker_highlight, trim_to_filename, visible_branch_entries,
 };
 use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
 use super::settings::visible_settings_pages;
@@ -272,6 +272,15 @@ fn dropped_files_mention_project_relative_paths() {
         dropped_file_mention(None, std::path::Path::new("/tmp/no project.png"), false),
         "/tmp/no project.png"
     );
+}
+
+#[test]
+fn trim_to_filename_extracts_basename() {
+    assert_eq!(trim_to_filename("src/app/right_panel/files.rs"), "files.rs");
+    assert_eq!(trim_to_filename("/Users/user/project/file.txt"), "file.txt");
+    assert_eq!(trim_to_filename("main.rs"), "main.rs");
+    assert_eq!(trim_to_filename("src/components/"), "components/");
+    assert_eq!(trim_to_filename("src/components"), "components");
 }
 
 #[test]

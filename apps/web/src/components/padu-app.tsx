@@ -160,6 +160,16 @@ export function PaduApp() {
     text: string
     signal: number
   } | null>(null)
+  const [composerAttachment, setComposerAttachment] = useState<{
+    sessionId: string
+    paths: string[]
+    signal: number
+  } | null>(null)
+  const [composerMention, setComposerMention] = useState<{
+    sessionId: string
+    mention: string
+    signal: number
+  } | null>(null)
   const [requestedPanel, setRequestedPanel] = useState<PanelSurface>('files')
   const [requestedFile, setRequestedFile] = useState<string | null>(null)
   const [requestedDiffSource, setRequestedDiffSource] = useState<ReviewDiffSource>('uncommitted')
@@ -1338,6 +1348,13 @@ export function PaduApp() {
                   projectId: activeProject.id,
                 })}
                 modelPickerSignal={modelPickerSignal}
+                attachmentSignal={composerAttachment?.sessionId === activeSession.id ? composerAttachment.signal : 0}
+                pendingAttachmentPaths={composerAttachment?.sessionId === activeSession.id ? composerAttachment.paths : undefined}
+                onAttachmentSignalHandled={() => setComposerAttachment((value) =>
+                  value?.sessionId === activeSession.id ? null : value)}
+                mentionSignal={composerMention?.sessionId === activeSession.id ? composerMention : undefined}
+                onMentionSignalHandled={() => setComposerMention((value) =>
+                  value?.sessionId === activeSession.id ? null : value)}
                 onAddProject={openProjectPicker}
                 onFocusSignalHandled={() => setFocusComposerSignal(0)}
                 onModelPickerSignalHandled={() => setModelPickerSignal(0)}
@@ -1416,6 +1433,13 @@ export function PaduApp() {
                   modelPickerSignal={modelPickerSignal}
                   prefillSignal={composerPrefill?.sessionId === current.id ? composerPrefill.signal : 0}
                   prefillText={composerPrefill?.sessionId === current.id ? composerPrefill.text : undefined}
+                  attachmentSignal={composerAttachment?.sessionId === current.id ? composerAttachment.signal : 0}
+                  pendingAttachmentPaths={composerAttachment?.sessionId === current.id ? composerAttachment.paths : undefined}
+                  onAttachmentSignalHandled={() => setComposerAttachment((value) =>
+                    value?.sessionId === current.id ? null : value)}
+                  mentionSignal={composerMention?.sessionId === current.id ? composerMention : undefined}
+                  onMentionSignalHandled={() => setComposerMention((value) =>
+                    value?.sessionId === current.id ? null : value)}
                   onAddProject={openProjectPicker}
                   onFocusSignalHandled={() => setFocusComposerSignal(0)}
                   onModelPickerSignalHandled={() => setModelPickerSignal(0)}
@@ -1529,6 +1553,16 @@ export function PaduApp() {
               }
             }}
             onPanelWidthChange={setRightPanelWidth}
+            onAddToChat={(name, isDir) => {
+              const mention = isDir ? `${name}/` : name
+              setComposerMention({
+                sessionId: panelSession.id,
+                mention,
+                signal: Date.now(),
+              })
+              setFocusComposerSignal((value) => value + 1)
+              toast.success(t('files.added_to_chat', { path: name }))
+            }}
           />
         )
       })}

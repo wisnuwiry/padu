@@ -1003,6 +1003,8 @@ files.preparing_editor: Menyiapkan editor…
 files.preparing_syntax: Menyiapkan penyorotan sintaksis.
 files.copy_path: Salin jalur
 files.copied_path: "%{path} disalin ke papan klip"
+files.add_to_chat: Tambahkan ke Obrolan
+files.added_to_chat: "%{path} ditambahkan ke obrolan"
 file_picker.open_project: Buka Proyek
 file_picker.attach: Lampirkan
 file_picker.daemon_folders: Folder daemon

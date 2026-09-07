@@ -124,6 +124,7 @@ export interface RightPanelProps {
   onShowConversationChange?: (show: boolean) => void
   onExpandableChange?: (expandable: boolean) => void
   onTabsReport?: (tabs: PanelTab[], activeId: string | null) => void
+  onAddToChat?: (name: string, isDir?: boolean) => void
 }
 
 interface PanelState {
@@ -153,6 +154,7 @@ export const RightPanel = forwardRef<RightPanelHandle, RightPanelProps>(function
   onShowConversationChange,
   onExpandableChange,
   onTabsReport,
+  onAddToChat,
 }, ref) {
   const { t } = useI18n()
   const [{ tabs, activeId }, setPanelState] = useState<PanelState>({
@@ -553,6 +555,7 @@ export const RightPanel = forwardRef<RightPanelHandle, RightPanelProps>(function
               tabId={tab.id}
               onDirtyChange={setTabDirty}
               onOpenFile={openFile}
+              onAddToChat={onAddToChat}
             />
           )}
           {tab.surface === 'changes' && (
@@ -959,6 +962,7 @@ function FilesPanel({
   setBuffers,
   onDirtyChange,
   onOpenFile,
+  onAddToChat,
 }: {
   active: boolean
   buffers: Record<string, FileBuffer>
@@ -970,6 +974,7 @@ function FilesPanel({
   setBuffers: Dispatch<SetStateAction<Record<string, FileBuffer>>>
   onDirtyChange: (tabId: string, dirty: boolean) => void
   onOpenFile: (tabId: string, path: string, treeWidth: number) => void
+  onAddToChat?: (name: string, isDir?: boolean) => void
 }) {
   const { t } = useI18n()
   const { client, config, phase } = useDaemon()
@@ -1310,49 +1315,87 @@ function FilesPanel({
           </button>
         </div>
       </div>
-      <div className="relative min-h-0 flex-1">
-        {tree.isPending ? (
-          <p className="p-3 text-[11px] text-[var(--text-tertiary)]">{t('files.loading')}</p>
-        ) : tree.error ? (
-          <p className="p-3 text-[11px] text-destructive">{errorMessage(tree.error)}</p>
-        ) : (
-          <Virtuoso
-            aria-label={t('files.workspace_files')}
-            className="size-full py-1"
-            computeItemKey={(_, entry) => entry.absolutePath}
-            data={tree.data ?? []}
-            fixedItemHeight={30}
-            increaseViewportBy={180}
-            itemContent={(index, entry) => (
-              <TreeRow
-                entry={entry}
-                expanded={entry.isDir && expanded.includes(entry.absolutePath)}
-                id={workingTreeRowId(entry.absolutePath)}
-                selected={selected === entry.relativePath}
-                tabIndex={treeTabStop === entry.absolutePath ? 0 : -1}
-                onActivate={activateTreeEntry}
-                onCreateFile={() => void createEntry(false, entry.relativePath)}
-                onCreateFolder={() => void createEntry(true, entry.relativePath)}
-                onCopyPath={() => {
-                  void navigator.clipboard.writeText(entry.absolutePath)
-                  toast.success(t('files.copied_path', { path: entry.name }))
-                }}
-                onCopyRelativePath={() => {
-                  void navigator.clipboard.writeText(entry.relativePath)
-                  toast.success(t('files.copied_path', { path: entry.name }))
-                }}
-                onDelete={() => void deleteEntry(entry)}
-                onFocus={() => setFocusedTreeEntry(entry.absolutePath)}
-                t={t}
-                onKeyDown={(event) => handleWorkingTreeKeyDown(event, entry, index)}
-                onRename={() => void renameEntry(entry)}
-              />
-            )}
-            ref={treeList}
-            role="tree"
-          />
-        )}
-      </div>
+      <ContextMenu.Root>
+        <ContextMenu.Trigger
+          className="relative min-h-0 flex-1 outline-none"
+          onContextMenu={(event) => {
+            if ((event.target as HTMLElement).closest('[role="treeitem"]')) {
+              event.preventDefault()
+            }
+          }}
+        >
+          {tree.isPending ? (
+            <p className="p-3 text-[11px] text-[var(--text-tertiary)]">{t('files.loading')}</p>
+          ) : tree.error ? (
+            <p className="p-3 text-[11px] text-destructive">{errorMessage(tree.error)}</p>
+          ) : (
+            <Virtuoso
+              aria-label={t('files.workspace_files')}
+              className="size-full py-1 outline-none"
+              computeItemKey={(_, entry) => entry.absolutePath}
+              data={tree.data ?? []}
+              fixedItemHeight={30}
+              increaseViewportBy={180}
+              itemContent={(index, entry) => (
+                <TreeRow
+                  entry={entry}
+                  expanded={entry.isDir && expanded.includes(entry.absolutePath)}
+                  id={workingTreeRowId(entry.absolutePath)}
+                  selected={selected === entry.relativePath}
+                  tabIndex={treeTabStop === entry.absolutePath ? 0 : -1}
+                  onActivate={activateTreeEntry}
+                  onAddToChat={onAddToChat}
+                  onCreateFile={() => {
+                    const parent = entry.isDir
+                      ? entry.relativePath
+                      : entry.relativePath.split('/').slice(0, -1).join('/')
+                    void createEntry(false, parent)
+                  }}
+                  onCreateFolder={() => {
+                    const parent = entry.isDir
+                      ? entry.relativePath
+                      : entry.relativePath.split('/').slice(0, -1).join('/')
+                    void createEntry(true, parent)
+                  }}
+                  onCopyPath={() => {
+                    void navigator.clipboard.writeText(entry.absolutePath)
+                    toast.success(t('files.copied_path', { path: entry.name }))
+                  }}
+                  onCopyRelativePath={() => {
+                    void navigator.clipboard.writeText(entry.relativePath)
+                    toast.success(t('files.copied_path', { path: entry.name }))
+                  }}
+                  onDelete={() => void deleteEntry(entry)}
+                  onFocus={() => setFocusedTreeEntry(entry.absolutePath)}
+                  t={t}
+                  onKeyDown={(event) => handleWorkingTreeKeyDown(event, entry, index)}
+                  onRename={() => void renameEntry(entry)}
+                />
+              )}
+              ref={treeList}
+              role="tree"
+            />
+          )}
+        </ContextMenu.Trigger>
+        <ContextMenu.Portal>
+          <ContextMenu.Positioner className="z-[100] outline-none">
+            <ContextMenu.Popup className="padu-menu-surface">
+              <ContextMenu.Item
+                className="padu-menu-item"
+                onClick={() => void createEntry(false, '')}
+              >
+                <PaduIcon className="size-3" name="file" /> {t('files.new_file')}
+              </ContextMenu.Item>
+              <ContextMenu.Item
+                className="padu-menu-item"
+                onClick={() => void createEntry(true, '')}
+              >
+                <PaduIcon className="size-3" name="folderNew" /> {t('files.new_folder')}
+              </ContextMenu.Item>
+            </ContextMenu.Popup>
+          </ContextMenu.Positioner>
+        </ContextMenu.Portal>
+      </ContextMenu.Root>
     </div>
   )
 
@@ -1474,6 +1517,7 @@ interface TreeRowProps {
   selected: boolean
   tabIndex: number
   onActivate: (entry: WorkingTreeEntry) => void
+  onAddToChat?: (name: string, isDir?: boolean) => void
   onCreateFile: () => void
   onCreateFolder: () => void
   onCopyPath: () => void
@@ -1492,6 +1536,7 @@ function TreeRow({
   selected,
   tabIndex,
   onActivate,
+  onAddToChat,
   onCreateFile,
   onCreateFolder,
   onCopyPath,
@@ -1517,6 +1562,9 @@ function TreeRow({
         style={{ paddingLeft: `${8 + entry.depth * 16}px`, width: 'calc(100% - 16px)' }}
         tabIndex={tabIndex}
         onClick={() => onActivate(entry)}
+        onContextMenu={(event) => {
+          event.stopPropagation()
+        }}
         onFocus={onFocus}
         onKeyDown={(event) => {
           if ((event.shiftKey && event.key === 'F10') || event.key === 'ContextMenu') {
@@ -1540,11 +1588,17 @@ function TreeRow({
       <ContextMenu.Portal>
         <ContextMenu.Positioner className="z-[100] outline-none">
           <ContextMenu.Popup className="padu-menu-surface">
-            {entry.isDir && <>
-              <ContextMenu.Item className="padu-menu-item" onClick={onCreateFile}><PaduIcon className="size-3" name="file" /> {t('files.new_file')}</ContextMenu.Item>
-              <ContextMenu.Item className="padu-menu-item" onClick={onCreateFolder}><PaduIcon className="size-3" name="folderNew" /> {t('files.new_folder')}</ContextMenu.Item>
-              <ContextMenu.Separator className="padu-menu-separator" />
-            </>}
+            {onAddToChat && (
+              <>
+                <ContextMenu.Item className="padu-menu-item" onClick={() => onAddToChat(entry.name, entry.isDir)}>
+                  <PaduIcon className="size-3" name="compose" /> {t('files.add_to_chat')}
+                </ContextMenu.Item>
+                <ContextMenu.Separator className="padu-menu-separator" />
+              </>
+            )}
+            <ContextMenu.Item className="padu-menu-item" onClick={onCreateFile}><PaduIcon className="size-3" name="file" /> {t('files.new_file')}</ContextMenu.Item>
+            <ContextMenu.Item className="padu-menu-item" onClick={onCreateFolder}><PaduIcon className="size-3" name="folderNew" /> {t('files.new_folder')}</ContextMenu.Item>
+            <ContextMenu.Separator className="padu-menu-separator" />
             <ContextMenu.Item className="padu-menu-item" onClick={onCopyPath}><PaduIcon className="size-3" name="copy" /> {t('files.copy_path')}</ContextMenu.Item>
             <ContextMenu.Item className="padu-menu-item" onClick={onCopyRelativePath}><PaduIcon className="size-3" name="copy" /> {t('files.copy_relative_path')}</ContextMenu.Item>
             <ContextMenu.Item className="padu-menu-item" onClick={onRename}><PaduIcon className="size-3" name="pencil" /> {t('common.rename')}</ContextMenu.Item>

@@ -24,6 +24,10 @@ static BARE_WEB_URL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?i)\bhttps?://[^\s<>"`\\]+"#).expect("bare web URL regex should compile")
 });
 
+static MENTION_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:\A|\s)@([a-zA-Z0-9_.\-\\/]+)").expect("mention regex should compile")
+});
+
 // ── Tree model ─────────────────────────────────────────────────────────────
 
 /// Inline styling threaded through nested emphasis and links.
@@ -32,6 +36,7 @@ pub struct InlineStyle {
     pub bold: bool,
     pub italic: bool,
     pub code: bool,
+    pub mention: bool,
     pub strikethrough: bool,
     /// Destination URL when inside a link.
     pub link: Option<String>,
@@ -613,7 +618,59 @@ fn merge_pieces(pieces: Vec<InlinePiece>) -> Vec<InlinePiece> {
             image => merged.push(image),
         }
     }
-    linkify_bare_urls(merged)
+    detect_inline_mentions(linkify_bare_urls(merged))
+}
+
+fn detect_inline_mentions(pieces: Vec<InlinePiece>) -> Vec<InlinePiece> {
+    let mut out = Vec::with_capacity(pieces.len());
+    for piece in pieces {
+        match piece {
+            InlinePiece::Run(run)
+                if !run.style.code && run.style.link.is_none() && !run.style.mention =>
+            {
+                push_mentioned_run(run, &mut out);
+            }
+            piece => out.push(piece),
+        }
+    }
+    out
+}
+
+fn push_mentioned_run(run: InlineRun, pieces: &mut Vec<InlinePiece>) {
+    let mut cursor = 0;
+    for candidate in MENTION_PATTERN.find_iter(&run.text) {
+        let match_str = candidate.as_str();
+        let at_offset = match_str.find('@').unwrap_or(0);
+        let at_start = candidate.start() + at_offset;
+        let candidate_end = candidate.end();
+        let mention_text = &run.text[at_start..candidate_end];
+        let trimmed_mention =
+            mention_text.trim_end_matches([',', ';', '!', '?', ':', ')', ']', '}', '"', '\'']);
+        if trimmed_mention.len() <= 1 {
+            continue;
+        }
+        let end = at_start + trimmed_mention.len();
+        if cursor < at_start {
+            pieces.push(InlinePiece::Run(InlineRun {
+                text: run.text[cursor..at_start].to_owned(),
+                style: run.style.clone(),
+            }));
+        }
+        let mut mention_style = run.style.clone();
+        mention_style.mention = true;
+        pieces.push(InlinePiece::Run(InlineRun {
+            text: run.text[at_start..end].to_owned(),
+            style: mention_style,
+        }));
+        cursor = end;
+    }
+
+    if cursor < run.text.len() {
+        pieces.push(InlinePiece::Run(InlineRun {
+            text: run.text[cursor..].to_owned(),
+            style: run.style,
+        }));
+    }
 }
 
 /// Linkify after Markdown has produced and merged its inline runs. Pulldown

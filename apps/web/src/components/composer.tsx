@@ -18,6 +18,7 @@ import {
   useState,
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
   type RefObject,
 } from 'react'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
@@ -128,6 +129,9 @@ export function Composer({
   initialComposerDraft,
   onComposerDraftChange,
   onComposerDraftSubmitted,
+  attachmentSignal,
+  pendingAttachmentPaths,
+  onAttachmentSignalHandled,
   onAddProject,
   onProjectless,
   onResume,
@@ -135,6 +139,8 @@ export function Composer({
   onModelPickerSignalHandled,
   onUsagePanelSignalHandled,
   onPrefillSignalHandled,
+  mentionSignal,
+  onMentionSignalHandled,
 }: {
   session: AgentSession
   project: Project
@@ -150,6 +156,11 @@ export function Composer({
   initialComposerDraft?: ComposerDraft
   onComposerDraftChange?: (draft: ComposerDraft) => void
   onComposerDraftSubmitted?: () => void
+  attachmentSignal?: number
+  pendingAttachmentPaths?: string[]
+  onAttachmentSignalHandled?: () => void
+  mentionSignal?: { signal: number; mention: string }
+  onMentionSignalHandled?: () => void
   onAddProject?: () => void
   onProjectless?: () => void
   onResume?: () => void
@@ -196,6 +207,7 @@ export function Composer({
   const [dismissedAutocomplete, setDismissedAutocomplete] = useState<string | null>(null)
   const [escapeStopArm, setEscapeStopArm] = useState<EscapeStopArm | null>(null)
   const composerInput = useRef<HTMLTextAreaElement>(null)
+  const backdropRef = useRef<HTMLDivElement>(null)
   const autocompleteList = useRef<VirtuosoHandle>(null)
   const pendingCursor = useRef<number | null>(null)
   const escapeStopTimer = useRef<number | null>(null)
@@ -322,6 +334,42 @@ export function Composer({
     composerInput.current?.focus()
     onPrefillSignalHandled?.()
   }, [onPrefillSignalHandled, prefillSignal, prefillText])
+
+  useEffect(() => {
+    if (!attachmentSignal || !pendingAttachmentPaths?.length) return
+    for (const path of pendingAttachmentPaths) {
+      void addDaemonFile(path).then((ok) => {
+
+      })
+    }
+    composerInput.current?.focus()
+    onAttachmentSignalHandled?.()
+  }, [attachmentSignal, onAttachmentSignalHandled, pendingAttachmentPaths, t])
+
+  useEffect(() => {
+    if (!mentionSignal?.signal) return
+    setPrompt((prev) => {
+      const pos = composerInput.current ? (composerInput.current.selectionStart ?? prev.length) : prev.length
+      const before = prev.slice(0, pos)
+      const after = prev.slice(pos)
+      const prefix = before.length && !/\s$/.test(before) ? ' ' : ''
+      const suffix = after.length && !/^\s/.test(after) ? ' ' : ''
+      const mentionText = `${prefix}@${mentionSignal.mention}${suffix}`
+      const next = before + mentionText + after
+      const existingSeparator = suffix ? 0 : (after.match(/^\s/u)?.[0].length ?? 0)
+      pendingCursor.current = before.length + mentionText.length + existingSeparator
+      return next
+    })
+    composerInput.current?.focus()
+    onMentionSignalHandled?.()
+  }, [mentionSignal, onMentionSignalHandled])
+
+  useEffect(() => {
+    if (composerInput.current && backdropRef.current) {
+      backdropRef.current.scrollTop = composerInput.current.scrollTop
+      backdropRef.current.scrollLeft = composerInput.current.scrollLeft
+    }
+  }, [prompt])
 
   useEffect(() => {
     setFilePickerOpen(false)
@@ -535,14 +583,24 @@ export function Composer({
 
   async function addDaemonFile(path: string): Promise<boolean> {
     if (!client) return false
-    if (attachments.some((attachment) => attachment.mention === path)) return true
+    if (attachments.some((attachment) => attachment.mention === path || attachment.path === path)) return true
     setUploading(true)
     try {
       const imported = await importDaemonPathAttachment(client, path)
       if (!mounted.current) return false
-      setAttachments((current) => current.some((attachment) => attachment.mention === imported.mention)
+      const normalizedCwd = cwd ? cwd.replace(/[/\\]+$/, '') : ''
+      let mention = imported.mention
+      if (normalizedCwd && imported.path.startsWith(normalizedCwd)) {
+        mention = imported.path.slice(normalizedCwd.length).replace(/^[/\\]+/, '')
+        if (imported.is_dir && !mention.endsWith('/')) mention += '/'
+      }
+      const adjusted: MessageAttachment = {
+        ...imported,
+        mention,
+      }
+      setAttachments((current) => current.some((attachment) => attachment.mention === adjusted.mention)
         ? current
-        : [...current, imported])
+        : [...current, adjusted])
       return true
     } catch (error) {
       toast.error(errorMessage(error))
@@ -587,6 +645,24 @@ export function Composer({
   }
 
   function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === 'Backspace' && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      const input = composerInput.current
+      const start = input?.selectionStart ?? prompt.length
+      const end = input?.selectionEnd ?? start
+      if (start === end) {
+        const before = prompt.slice(0, start)
+        const match = before.match(/(?:^|\s)(@[a-zA-Z0-9_.\-\\/]+) ?$/)
+        if (match) {
+          event.preventDefault()
+          const tokenStart = start - match[0].length + match[0].indexOf('@')
+          const removeStart = tokenStart - (tokenStart > 0 && /\s/.test(prompt[tokenStart - 1] ?? '') ? 1 : 0)
+          const next = prompt.slice(0, removeStart) + prompt.slice(start)
+          pendingCursor.current = removeStart
+          setPrompt(next)
+          return
+        }
+      }
+    }
     if (autocompleteVisible && event.key === 'Escape') {
       event.preventDefault()
       setDismissedAutocomplete(autocompleteKey)
@@ -741,6 +817,14 @@ export function Composer({
               ))}
             </div>
           )}
+          <div className="relative w-full">
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words border-0 px-1 pb-1 pt-0 font-sans text-[14px] leading-5 text-foreground select-none"
+              ref={backdropRef}
+            >
+              {renderPromptMentionsBackdrop(prompt)}
+            </div>
             <Textarea
               aria-controls={autocompleteVisible ? 'composer-autocomplete' : undefined}
               aria-expanded={autocompleteVisible}
@@ -749,7 +833,7 @@ export function Composer({
                 ? `composer-autocomplete-${autocompleteHighlight}`
                 : undefined}
               aria-autocomplete="list"
-              className="max-h-48 min-h-[46px] resize-none border-0 bg-transparent px-1 pb-1 pt-0 text-[14px] leading-5 shadow-none focus-visible:ring-0"
+              className="max-h-48 min-h-[46px] resize-none border-0 bg-transparent px-1 pb-1 pt-0 text-[14px] leading-5 text-transparent caret-foreground selection:bg-primary/20 selection:text-transparent shadow-none focus-visible:ring-0"
               placeholder={t(busy ? 'composer.queue_placeholder' : 'composer.prompt_placeholder')}
               ref={composerInput}
               role="combobox"
@@ -762,8 +846,15 @@ export function Composer({
               onClick={(event) => setCursor(event.currentTarget.selectionStart)}
               onFocus={() => setInputFocused(true)}
               onKeyDown={keyDown}
+              onScroll={(event) => {
+                if (backdropRef.current) {
+                  backdropRef.current.scrollTop = event.currentTarget.scrollTop
+                  backdropRef.current.scrollLeft = event.currentTarget.scrollLeft
+                }
+              }}
               onSelect={(event) => setCursor(event.currentTarget.selectionStart)}
             />
+          </div>
           <div
             className="mt-2 flex min-w-0 items-center gap-1 pb-px text-[11.5px] leading-[14px]"
             onMouseDown={preserveComposerFocusOnMouseDown}
@@ -1260,6 +1351,13 @@ function AutocompleteRowContents({ row }: { row: ComposerAutocompleteRow }) {
   )
 }
 
+function trimToFilename(path: string): string {
+  const isDir = path.endsWith('/') || path.endsWith('\\')
+  const clean = path.replace(/[/\\]+$/, '')
+  const name = clean.split(/[/\\]/).pop() || clean
+  return name
+}
+
 function ComposerAttachmentTile({
   attachment,
   onRemove,
@@ -1284,35 +1382,31 @@ function ComposerAttachmentTile({
     return () => { active = false }
   }, [attachment.blob_reference, attachment.is_image, attachment.name, attachment.path, client, config?.address, phase])
 
-  const contents = attachment.is_image && source ? (
-    <PreviewableImage
-      buttonClassName="size-full"
-      imageClassName="size-full object-cover"
-      name={attachment.name}
-      source={source}
-    />
-  ) : (
-    <div className="flex size-full flex-col items-center justify-center gap-[5px] px-[5px]">
-      {attachment.is_dir
-        ? <PaduIcon className="size-4 text-[var(--text-tertiary)]" name="folder" />
-        : <FileTypeIcon className="size-4" path={attachment.mention || attachment.name} />}
-      {!attachment.is_image && (
-        <span className="w-full truncate text-center text-[8.5px] text-[var(--text-tertiary)]">
-          {attachment.name}
-        </span>
-      )}
-    </div>
-  )
+  const displayName = trimToFilename(attachment.name || attachment.mention)
 
   return (
     <div
-      className="relative size-16 overflow-hidden rounded-lg border bg-[var(--inset)] outline-none focus-within:border-ring"
+      className="group inline-flex h-[28px] max-w-[220px] items-center gap-1.5 rounded-[8px] border border-border bg-[var(--inset)] pl-2.5 pr-1.5 text-[12px] text-foreground shadow-xs outline-none transition-colors hover:bg-accent/40 focus-within:border-ring"
       title={`@${attachment.mention}`}
     >
-      {contents}
+      {attachment.is_image && source ? (
+        <PreviewableImage
+          buttonClassName="size-4 shrink-0 overflow-hidden rounded-xs"
+          imageClassName="size-full object-cover"
+          name={attachment.name}
+          source={source}
+        />
+      ) : attachment.is_dir ? (
+        <PaduIcon className="size-3.5 shrink-0 text-[var(--text-tertiary)]" name="folder" />
+      ) : (
+        <FileTypeIcon className="size-3.5 shrink-0" path={attachment.mention || attachment.name} />
+      )}
+      <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-foreground">
+        {displayName}
+      </span>
       <button
-        aria-label={t('composer.remove_attachment', { name: attachment.name })}
-        className="absolute right-[3px] top-[3px] z-10 grid size-4 place-items-center rounded-[5px] bg-background/80 text-[var(--text-secondary)] outline-none hover:bg-background focus-visible:ring-1 focus-visible:ring-ring"
+        aria-label={t('composer.remove_attachment', { name: displayName })}
+        className="grid size-4 shrink-0 place-items-center rounded-xs text-[var(--text-tertiary)] outline-none hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
         type="button"
         onClick={onRemove}
         onMouseDown={(event) => event.preventDefault()}
@@ -2173,4 +2267,48 @@ function formatTokens(tokens: number) {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error)
+}
+
+function renderPromptMentionsBackdrop(text: string): ReactNode {
+  if (!text) return null
+  const regex = /(?:^|\s)@([a-zA-Z0-9_.\-\\/]+)/g
+  const parts: ReactNode[] = []
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(text)) !== null) {
+    const fullMatch = match[0]
+    const atOffset = fullMatch.indexOf('@')
+    const start = match.index + atOffset
+    const end = match.index + fullMatch.length
+    const trimmedEnd = text.slice(start, end).replace(/[,;!?:)\]}"']+$/, '').length + start
+    if (trimmedEnd <= start + 1) continue
+
+    if (start > lastIndex) {
+      parts.push(text.slice(lastIndex, start))
+    }
+    const mention = text.slice(start, trimmedEnd)
+    // TODO(web): Replace the overlay placeholder with a range-aware rich input;
+    // the chip's visual width can still diverge from the native textarea caret
+    // and overlap adjacent text in some cursor/wrap positions.
+    parts.push(
+      <span key={`${start}-${trimmedEnd}`} className="relative inline-block align-baseline">
+        <span className="invisible">{mention}</span>
+        <span className="absolute inset-y-0 left-0 inline-flex items-center gap-1 whitespace-nowrap rounded-[7px] border border-border bg-[var(--inset)] px-1.5 py-0.5 text-foreground">
+          {mention.endsWith('/')
+            ? <PaduIcon className="size-3.5 shrink-0 text-[var(--text-secondary)]" name="folder" />
+            : <FileTypeIcon className="size-3.5 shrink-0" path={mention.replace(/^@/, '')} />}
+          <span className="font-medium text-foreground">{mention.replace(/^@/, '').replace(/\/$/, '')}</span>
+        </span>
+      </span>,
+    )
+    lastIndex = trimmedEnd
+    regex.lastIndex = trimmedEnd
+  }
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex))
+  }
+  if (text.endsWith('\n')) {
+    parts.push('\u200b')
+  }
+  return parts
 }
