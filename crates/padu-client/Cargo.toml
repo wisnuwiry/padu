@@ -1,6 +1,6 @@
 [package]
 name = "padu-client"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "Rust client and daemon process supervisor for Padu"
 license = "GPL-3.0-only"

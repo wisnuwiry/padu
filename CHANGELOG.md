@@ -16,6 +16,16 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## 0.1.2 - 2026-09-07
+
+- **Right Panel Full-Size Mode**: Maximize the right panel to full-size view with dedicated keyboard shortcuts (`ctrl+tab` / `ctrl+shift+tab` tab navigation), unified headers, and balanced transcript layout sizing.
+- **File Tree Workspace Actions & Context Menus**: Added comprehensive file actions in the right panel working tree, including context menus for creating files/folders, danger confirmation delete dialogs, path copying, and `.gitignore` file filtering.
+- **Notifications Settings & Audio Alerts**: Added a dedicated Notifications tab in Settings with system notification permission inspection, customizable alert sound preview, and bell status indicator.
+- **About Settings Page & In-App Updater**: Added an About settings page displaying app build info, environment details, project links, and an in-app updater check state with progress indicator.
+- **Theme Preview Cards**: Revamped appearance settings with embedded SVG theme preview cards for instant visual theme selection.
+- **Daemon Origin Whitelist Management**: Added dynamic multi-origin whitelist configuration in settings for secure remote and local daemon connectivity.
+- **REPL & Process Watchdog Reliability**: Enhanced `padu_js_repl` with parent process watchdog monitoring to prevent orphan processes, and ensured clean teardown during computer-use sessions.
+
 ## 0.1.1 - 2026-09-04
 
 - **Indonesian Language Support**: Added complete Indonesian (Bahasa Indonesia) localization to the desktop client, navigation, and settings, with automatic system locale detection.

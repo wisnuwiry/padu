@@ -5093,7 +5093,7 @@ dependencies = [
 
 [[package]]
 name = "padu"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -5146,7 +5146,7 @@ dependencies = [
 
 [[package]]
 name = "padu-client"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
@@ -5165,7 +5165,7 @@ dependencies = [
 
 [[package]]
 name = "padu-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "agent-client-protocol",
  "alacritty_terminal",
@@ -5197,7 +5197,7 @@ dependencies = [
 
 [[package]]
 name = "padu-daemon"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
@@ -5212,7 +5212,7 @@ dependencies = [
 
 [[package]]
 name = "padu-protocol"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "base64 0.23.1",

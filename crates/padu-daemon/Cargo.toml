@@ -1,6 +1,6 @@
 [package]
 name = "padu-daemon"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "Headless Padu provider daemon"
 license = "GPL-3.0-only"

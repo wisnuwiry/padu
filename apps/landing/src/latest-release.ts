@@ -153,12 +153,12 @@ export function selectReleaseChannels(releases: GitHubRelease[]): ReleaseChannel
 
 const DEFAULT_FALLBACK_RELEASE: ReleaseChannels = {
   stable: {
-    version: "0.1.1",
-    macDmgAsset: "Padu-0.1.1.dmg",
-    linuxX64Tarball: "padu-0.1.1-x86_64-unknown-linux-gnu.tar.gz",
-    linuxArm64Tarball: "padu-0.1.1-aarch64-unknown-linux-gnu.tar.gz",
-    windowsX64Asset: "Padu-0.1.1-x86_64-Setup.exe",
-    windowsArm64Asset: "Padu-0.1.1-aarch64-Setup.exe",
+    version: "0.1.2",
+    macDmgAsset: "Padu-0.1.2.dmg",
+    linuxX64Tarball: "padu-0.1.2-x86_64-unknown-linux-gnu.tar.gz",
+    linuxArm64Tarball: "padu-0.1.2-aarch64-unknown-linux-gnu.tar.gz",
+    windowsX64Asset: "Padu-0.1.2-x86_64-Setup.exe",
+    windowsArm64Asset: "Padu-0.1.2-aarch64-Setup.exe",
   },
   beta: null,
 };
