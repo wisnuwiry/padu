@@ -350,7 +350,14 @@ impl Backend for PaduBackend {
                             merge_stale_session_metadata(existing, session);
                         } else {
                             preserve_daemon_checkpoints(existing, &mut session);
+                            let pinned_at = existing.pinned_at;
+                            let archived_at = existing.archived_at;
                             *existing = session;
+                            // Pin/archive metadata is mutated only through the
+                            // daemon-owned commands below. A stale full-session
+                            // save must never undo a concurrent metadata change.
+                            existing.pinned_at = pinned_at;
+                            existing.archived_at = archived_at;
                         }
                     } else {
                         state.sessions.push(session);
@@ -379,6 +386,76 @@ impl Backend for PaduBackend {
                     })
                     .collect();
                 Ok(ResponsePayload::TaskStateSaved { sessions })
+            }
+            Command::SetSessionPinned { pinned } => {
+                let mut state = self.task_state.lock();
+                let index = state
+                    .sessions
+                    .iter()
+                    .position(|session| session.id == session_id)
+                    .ok_or_else(|| anyhow!("session not found: {session_id}"))?;
+                let (changed, projection) = {
+                    let session = &mut state.sessions[index];
+                    if pinned && session.archived_at.is_some() {
+                        bail!("cannot pin an archived session");
+                    }
+                    let next = if pinned {
+                        session
+                            .pinned_at
+                            .or_else(|| Some(crate::model::unix_time()))
+                    } else {
+                        None
+                    };
+                    let changed = session.pinned_at != next;
+                    if changed {
+                        session.pinned_at = next;
+                    }
+                    (changed, session.list_projection())
+                };
+                if changed {
+                    state.mark_session_dirty(session_id);
+                    self.task_store.save(&mut state)?;
+                }
+                Ok(ResponsePayload::SessionMetadataUpdated {
+                    session: projection,
+                })
+            }
+            Command::SetSessionArchived { archived } => {
+                let mut state = self.task_state.lock();
+                let index = state
+                    .sessions
+                    .iter()
+                    .position(|session| session.id == session_id)
+                    .ok_or_else(|| anyhow!("session not found: {session_id}"))?;
+                let (changed, projection) = {
+                    let session = &mut state.sessions[index];
+                    if archived && session.is_busy() {
+                        bail!("cannot archive a busy session");
+                    }
+                    let next = if archived {
+                        session
+                            .archived_at
+                            .or_else(|| Some(crate::model::unix_time()))
+                    } else {
+                        None
+                    };
+                    let changed =
+                        session.archived_at != next || (archived && session.pinned_at.is_some());
+                    if changed {
+                        session.archived_at = next;
+                        if archived {
+                            session.pinned_at = None;
+                        }
+                    }
+                    (changed, session.list_projection())
+                };
+                if changed {
+                    state.mark_session_dirty(session_id);
+                    self.task_store.save(&mut state)?;
+                }
+                Ok(ResponsePayload::SessionMetadataUpdated {
+                    session: projection,
+                })
             }
             Command::RemoveSession => {
                 {
@@ -835,6 +912,8 @@ fn merge_stale_session_metadata(existing: &mut AgentSession, incoming: AgentSess
         existing.updated_at = incoming.updated_at;
         existing.last_reply_at = incoming.last_reply_at.or(existing.last_reply_at);
     }
+    // Pin/archive metadata is daemon-authoritative and is intentionally not
+    // copied from a stale client projection.
     for queued in incoming.queued_messages {
         if !existing
             .queued_messages
@@ -1704,6 +1783,8 @@ fn handle_driver_command(
         | Command::LoadTaskState
         | Command::SaveTaskState { .. }
         | Command::RemoveSession
+        | Command::SetSessionPinned { .. }
+        | Command::SetSessionArchived { .. }
         | Command::HydrateSession { .. }
         | Command::SearchSessionMessages { .. }
         | Command::ListProviderSessions { .. }
@@ -2025,6 +2106,22 @@ mod tests {
         assert_eq!(existing.title, "Renamed elsewhere");
         assert_eq!(existing.messages.len(), 1);
         assert_eq!(existing.runtime_event_cursor.unwrap().sequence, 10);
+    }
+
+    #[test]
+    fn stale_full_session_save_cannot_clear_daemon_metadata() {
+        let mut existing = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        existing.pinned_at = Some(100);
+        existing.archived_at = None;
+
+        let mut incoming = existing.clone();
+        incoming.pinned_at = None;
+        incoming.archived_at = Some(200);
+        incoming.updated_at = existing.updated_at + 1;
+        merge_stale_session_metadata(&mut existing, incoming);
+
+        assert_eq!(existing.pinned_at, Some(100));
+        assert_eq!(existing.archived_at, None);
     }
 
     #[test]
