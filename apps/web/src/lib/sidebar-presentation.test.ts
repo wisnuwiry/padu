@@ -99,6 +99,16 @@ describe('desktop sidebar presentation', () => {
     expect(oldest.map((s) => s.id)).toEqual(['s1', 's2', 's3'])
   })
 
+  test('puts pinned sessions first and omits archived sessions', () => {
+    const pinned = session({ id: 'pinned', created_at: 100, last_reply_at: 100, pinned_at: 1, messages: [{ id: 'm' } as never] })
+    const normal = session({ id: 'normal', created_at: 300, last_reply_at: 300, messages: [{ id: 'm' } as never] })
+    const archived = session({ id: 'archived', created_at: 400, last_reply_at: 400, archived_at: 1, messages: [{ id: 'm' } as never] })
+
+    expect(sortSidebarSessions([normal, pinned], 'newest').map((item) => item.id)).toEqual(['pinned', 'normal'])
+    const groups = groupSessions([], [normal, pinned, archived], new Date(2026, 7, 15, 12), 'Unknown', 'No project', 'updated')
+    expect(groups.flatMap((group) => group.sessions.map((item) => item.session.id))).toEqual(['pinned', 'normal'])
+  })
+
   test('groups sessions by project and applies 7-day recent cutoff with pagination', () => {
     const now = new Date(2026, 7, 15, 12)
     const nowSeconds = Math.floor(now.getTime() / 1000)

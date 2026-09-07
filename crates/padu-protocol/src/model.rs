@@ -946,6 +946,12 @@ pub struct AgentSession {
     /// then refreshed when the turn settles, whatever its outcome.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_reply_at: Option<u64>,
+    /// When the session was pinned, according to the daemon clock.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_at: Option<u64>,
+    /// When the session was archived, according to the daemon clock.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived_at: Option<u64>,
     #[serde(default)]
     pub provider_cursor: Option<ProviderResumeCursor>,
     /// Slash commands the provider reported for this session's live process,
@@ -1016,6 +1022,8 @@ impl AgentSession {
             created_at: now,
             updated_at: now,
             last_reply_at: None,
+            pinned_at: None,
+            archived_at: None,
             detail_loaded: true,
             provider_cursor: None,
             available_commands: Vec::new(),
@@ -1054,6 +1062,8 @@ impl AgentSession {
             created_at: self.created_at,
             updated_at: self.updated_at,
             last_reply_at: self.last_reply_at,
+            pinned_at: self.pinned_at,
+            archived_at: self.archived_at,
             provider_cursor: None,
             available_commands: Vec::new(),
             thread_goal: None,
@@ -4517,6 +4527,25 @@ mod tests {
         let checkpoint = session.turns[0].checkpoint.as_ref().unwrap();
         assert_eq!((checkpoint.additions, checkpoint.deletions), (10, 7));
         assert!(checkpoint.totals_are_current());
+    }
+
+    #[test]
+    fn session_metadata_defaults_and_survives_projection() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        assert_eq!(session.pinned_at, None);
+        assert_eq!(session.archived_at, None);
+        session.pinned_at = Some(10);
+        session.archived_at = Some(20);
+        let projection = session.list_projection();
+        assert_eq!(projection.pinned_at, Some(10));
+        assert_eq!(projection.archived_at, Some(20));
+
+        let mut value = serde_json::to_value(session).unwrap();
+        value.as_object_mut().unwrap().remove("pinned_at");
+        value.as_object_mut().unwrap().remove("archived_at");
+        let restored: AgentSession = serde_json::from_value(value).unwrap();
+        assert_eq!(restored.pinned_at, None);
+        assert_eq!(restored.archived_at, None);
     }
 
     #[test]

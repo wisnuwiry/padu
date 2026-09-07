@@ -48,7 +48,15 @@ updated_at: number,
  * Activity time of the newest turn. Set as soon as the user submits it,
  * then refreshed when the turn settles, whatever its outcome.
  */
-last_reply_at?: number | null, provider_cursor: ProviderResumeCursor | null,
+last_reply_at?: number | null,
+/**
+ * When the session was pinned, according to the daemon clock.
+ */
+pinned_at?: number | null,
+/**
+ * When the session was archived, according to the daemon clock.
+ */
+archived_at?: number | null, provider_cursor: ProviderResumeCursor | null,
 /**
  * Slash commands the provider reported for this session's live process,
  * kept so a resumed session still completes them before its next

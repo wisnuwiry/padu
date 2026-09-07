@@ -307,7 +307,7 @@ impl Padu {
             .state
             .sessions
             .iter()
-            .filter(|session| session.has_started())
+            .filter(|session| session.has_started() && session.archived_at.is_none())
             .map(|session| session.id)
             .collect::<Vec<_>>();
         let ordered = ordered_task_ids(
@@ -412,11 +412,9 @@ impl Padu {
         let mut focus_after = previous_focus;
         if may_commit
             && let Some(selected) = selected
-            && self
-                .state
-                .sessions
-                .iter()
-                .any(|session| session.id == selected && session.has_started())
+            && self.state.sessions.iter().any(|session| {
+                session.id == selected && session.has_started() && session.archived_at.is_none()
+            })
         {
             let was_in_settings = self.settings_page.is_some();
             self.settings_page = None;

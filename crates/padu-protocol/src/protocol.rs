@@ -173,6 +173,12 @@ pub enum Command {
     /// merge-only so a stale client snapshot cannot delete tasks another
     /// client just created.
     RemoveSession,
+    SetSessionPinned {
+        pinned: bool,
+    },
+    SetSessionArchived {
+        archived: bool,
+    },
     HydrateSession {
         session_id: Uuid,
     },
@@ -412,6 +418,9 @@ pub enum ResponsePayload {
     TaskStateSaved {
         sessions: Vec<AgentSession>,
     },
+    SessionMetadataUpdated {
+        session: AgentSession,
+    },
     Session {
         session: Option<AgentSession>,
     },
@@ -517,6 +526,24 @@ mod tests {
             panic!("unexpected command variant");
         };
         assert_eq!(data, vec![0, 1, 2, 255]);
+    }
+
+    #[test]
+    fn session_metadata_commands_use_stable_wire_fields() {
+        let pin = serde_json::to_value(Command::SetSessionPinned { pinned: true }).unwrap();
+        assert_eq!(pin["type"], "setSessionPinned");
+        assert_eq!(pin["pinned"], true);
+
+        let archive =
+            serde_json::to_value(Command::SetSessionArchived { archived: false }).unwrap();
+        assert_eq!(archive["type"], "setSessionArchived");
+        assert_eq!(archive["archived"], false);
+
+        let response = serde_json::to_value(ResponsePayload::SessionMetadataUpdated {
+            session: AgentSession::new(Uuid::new_v4(), ProviderKind::Codex),
+        })
+        .unwrap();
+        assert_eq!(response["type"], "sessionMetadataUpdated");
     }
 
     #[test]

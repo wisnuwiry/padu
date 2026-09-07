@@ -279,7 +279,7 @@ host.add_host: Tambah Host...
 host.edit_host: Edit Host
 host.remove_host: Hapus Host
 host.delete_confirm_title: Hapus Profil Host
-host.delete_confirm_message: "Apakah Anda yakin ingin menghapus \"%{name}\"? Tindakan ini tidak dapat dibatalkan."
+host.delete_confirm_message: 'Apakah Anda yakin ingin menghapus "%{name}"? Tindakan ini tidak dapat dibatalkan.'
 host.name: Nama
 host.name_placeholder: mis. Server Dev
 host.address: Alamat
@@ -290,7 +290,7 @@ host.save_and_connect: Simpan & Hubungkan
 host.save: Simpan
 host.settings: Pengaturan Host...
 host.connection_failed: "Koneksi gagal: %{error}"
-host.confirm_remove: "Hapus host \"%{name}\"?"
+host.confirm_remove: 'Hapus host "%{name}"?'
 host.connecting: Menghubungkan...
 host.remote_hosts: Host Jarak Jauh
 host.remote_hosts_description: Hubungkan ke instans daemon Padu yang berjalan di server jarak jauh atau workstation.
@@ -1285,3 +1285,20 @@ onboarding.slide3_item2_title: Scratchpad Cepat
 onboarding.slide3_item2_desc: Mulai seketika tanpa proyek untuk pertanyaan singkat, skrip, dan pembuatan purwarupa.
 onboarding.slide3_item3_title: Ganti Model Kapan Saja
 onboarding.slide3_item3_desc: Pilih model, sesuaikan upaya penalaran, dan ganti penyedia kapan saja dengan Cmd/Ctrl + /.
+settings.archived: Diarsipkan
+settings.archived_keywords: diarsipkan arsip tersembunyi percakapan tugas pulihkan
+settings.archived_empty: Tidak ada percakapan yang diarsipkan
+settings.archived_description: Percakapan yang diarsipkan disimpan di sini sampai dipulihkan atau dihapus.
+settings.archived_search: Cari percakapan yang diarsipkan
+settings.archived_no_matches: Tidak ada percakapan yang diarsipkan yang cocok dengan pencarian
+settings.archived_project: Proyek
+settings.archived_project_path: Jalur
+settings.restore: Pulihkan
+sidebar.pin: Sematkan
+sidebar.pinned: Disematkan
+sidebar.unpin: Lepas sematan
+sidebar.archive: Arsipkan
+session.pin: Sematkan
+session.unpin: Lepas sematan
+session.archive: Arsipkan
+errors.update_task: "Tidak dapat memperbarui tugas: %{error}"

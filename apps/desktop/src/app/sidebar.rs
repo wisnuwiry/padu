@@ -66,6 +66,7 @@ impl SessionDateGroup {
 /// between Project and Updated grouping.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) enum SidebarGroup {
+    Pinned,
     Updated(SessionDateGroup),
     Project(Uuid),
     Projectless,
@@ -74,6 +75,7 @@ pub(super) enum SidebarGroup {
 impl SidebarGroup {
     fn element_key(self) -> SharedString {
         match self {
+            Self::Pinned => "pinned".into(),
             Self::Updated(group) => format!("updated-{}", group.index()).into(),
             Self::Project(project_id) => format!("project-{project_id}").into(),
             Self::Projectless => "projectless".into(),
@@ -82,6 +84,7 @@ impl SidebarGroup {
 
     fn mix_fingerprint(self, fingerprint: u64) -> u64 {
         match self {
+            Self::Pinned => mix(fingerprint, 0x001),
             Self::Updated(group) => mix(fingerprint, group.index() as u64 + 1),
             Self::Project(project_id) => mix_uuid(mix(fingerprint, 0x100), project_id),
             Self::Projectless => mix(fingerprint, 0x200),
@@ -168,7 +171,11 @@ fn append_sidebar_group_rows(
             rows.push(SidebarRow::ShowMore(group));
         }
     }
-    rows.push(SidebarRow::GroupSpacer);
+    if group == SidebarGroup::Pinned {
+        rows.push(SidebarRow::PinnedSeparator);
+    } else {
+        rows.push(SidebarRow::GroupSpacer);
+    }
 }
 
 fn updater_button_available_content(
@@ -217,6 +224,7 @@ const SIDEBAR_GROUP_HEADER_HEIGHT: f32 = 28.0;
 const SIDEBAR_GROUP_HEADER_BOTTOM_GAP: f32 = 2.0;
 const SIDEBAR_SHOW_MORE_ROW_HEIGHT: f32 = 30.0;
 const SIDEBAR_GROUP_SPACER_HEIGHT: f32 = 10.0;
+const SIDEBAR_PINNED_SEPARATOR_HEIGHT: f32 = 9.0;
 const SIDEBAR_GROUP_CHILD_PADDING: f32 = 25.0;
 const SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS: u64 = 3 * 24 * 60 * 60;
 const SIDEBAR_PROJECT_REVEAL_BATCH: usize = 30;
@@ -345,6 +353,8 @@ pub(super) enum SidebarRow {
     ShowMore(SidebarGroup),
     /// Spacing between date groups.
     GroupSpacer,
+    /// Visual divider between pinned and regular groups.
+    PinnedSeparator,
 }
 
 fn sidebar_session_row_index(rows: &[SidebarRow], session_id: Uuid) -> Option<usize> {
@@ -365,6 +375,7 @@ fn sidebar_row_height(row: SidebarRow, grouping: SidebarGrouping) -> Pixels {
         }
         SidebarRow::ShowMore(_) => SIDEBAR_SHOW_MORE_ROW_HEIGHT,
         SidebarRow::GroupSpacer => SIDEBAR_GROUP_SPACER_HEIGHT,
+        SidebarRow::PinnedSeparator => SIDEBAR_PINNED_SEPARATOR_HEIGHT,
     })
 }
 
@@ -1450,7 +1461,7 @@ impl Padu {
     /// [`Self::sidebar_rows`] reads: started sessions with their project and
     /// recency, the presentation preferences, the collapsed-group set, and
     /// today's date and the moving project-recency boundary.
-    fn sidebar_rows_cached(&self, today: NaiveDate, now: u64) -> Rc<Vec<SidebarRow>> {
+    pub(super) fn sidebar_rows_cached(&self, today: NaiveDate, now: u64) -> Rc<Vec<SidebarRow>> {
         let mut fingerprint = mix(0x51de_ba5e_5eed_c0de, today.num_days_from_ce() as u64);
         fingerprint = mix(
             fingerprint,
@@ -1473,6 +1484,8 @@ impl Padu {
             fingerprint = mix_uuid(fingerprint, session.id);
             fingerprint = mix_uuid(fingerprint, session.project_id);
             fingerprint = mix(fingerprint, sidebar_session_timestamp(session));
+            fingerprint = mix(fingerprint, u64::from(session.pinned_at.is_some()));
+            fingerprint = mix(fingerprint, u64::from(session.archived_at.is_some()));
             if self.state.sidebar_grouping == SidebarGrouping::Project {
                 fingerprint = mix(
                     fingerprint,
@@ -1524,15 +1537,31 @@ impl Padu {
             .state
             .sessions
             .iter()
-            .filter(|session| session.has_started())
+            .filter(|session| session.has_started() && session.archived_at.is_none())
             .collect::<Vec<_>>();
         sort_sidebar_sessions(&mut sorted_sessions, self.state.sidebar_ordering);
 
         let mut rows = vec![SidebarRow::Search];
+        let pinned_sessions = sorted_sessions
+            .iter()
+            .filter(|session| session.pinned_at.is_some())
+            .map(|session| session.id)
+            .collect::<Vec<_>>();
+        append_sidebar_group_rows(
+            &mut rows,
+            SidebarGroup::Pinned,
+            &pinned_sessions,
+            self.sidebar_collapsed_groups
+                .contains(&SidebarGroup::Pinned),
+            false,
+        );
         match self.state.sidebar_grouping {
             SidebarGrouping::Updated => {
                 let mut grouped_sessions: [Vec<Uuid>; 6] = std::array::from_fn(|_| Vec::new());
-                for session in sorted_sessions {
+                for session in sorted_sessions
+                    .iter()
+                    .filter(|session| session.pinned_at.is_none())
+                {
                     grouped_sessions
                         [session_date_group(sidebar_session_timestamp(session), today).index()]
                     .push(session.id);
@@ -1554,7 +1583,12 @@ impl Padu {
             }
             SidebarGrouping::Project => {
                 let recent_cutoff = now.saturating_sub(SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS);
-                let session_timestamps = sorted_sessions
+                let unpinned_sessions = sorted_sessions
+                    .iter()
+                    .copied()
+                    .filter(|session| session.pinned_at.is_none())
+                    .collect::<Vec<_>>();
+                let session_timestamps = unpinned_sessions
                     .iter()
                     .map(|session| (session.id, sidebar_session_timestamp(session)))
                     .collect::<HashMap<_, _>>();
@@ -1569,7 +1603,7 @@ impl Padu {
                     .map(|project| project.id)
                     .collect::<HashSet<_>>();
                 for (group, sessions) in
-                    project_sidebar_groups(&sorted_sessions, &projectless_project_ids)
+                    project_sidebar_groups(&unpinned_sessions, &projectless_project_ids)
                 {
                     let revealed_older_sessions = self
                         .sidebar_project_reveal_counts
@@ -1659,9 +1693,13 @@ impl Padu {
         };
         match *row {
             SidebarRow::Search => self.render_sidebar_search(cx).into_any_element(),
-            SidebarRow::Header(group) => self
-                .render_sidebar_group_header(group, index == 1, cx)
-                .into_any_element(),
+            SidebarRow::Header(group) => {
+                let first_regular_group = rows.iter().position(|row| {
+                    matches!(row, SidebarRow::Header(group) if *group != SidebarGroup::Pinned)
+                });
+                self.render_sidebar_group_header(group, Some(index) == first_regular_group, cx)
+                    .into_any_element()
+            }
             SidebarRow::Session(session_id) => self
                 .render_sidebar_session_item(session_id, cx)
                 .into_any_element(),
@@ -1671,6 +1709,14 @@ impl Padu {
             SidebarRow::GroupSpacer => div()
                 .w_full()
                 .h(px(SIDEBAR_GROUP_SPACER_HEIGHT))
+                .into_any_element(),
+            SidebarRow::PinnedSeparator => div()
+                .w_full()
+                .h(px(SIDEBAR_PINNED_SEPARATOR_HEIGHT))
+                .px(px(6.0))
+                .flex()
+                .items_center()
+                .child(div().w_full().h(px(1.0)).bg(Theme::current(cx).border))
                 .into_any_element(),
         }
     }
@@ -1699,7 +1745,8 @@ impl Padu {
             "icons/folder-open.svg"
         };
         let label = match group {
-            SidebarGroup::Updated(group) => group.label(),
+            SidebarGroup::Pinned => tr!("sidebar.pinned"),
+            SidebarGroup::Updated(date_group) => date_group.label(),
             SidebarGroup::Project(project_id) => self
                 .state
                 .projects
@@ -1744,6 +1791,9 @@ impl Padu {
                     .gap(px(5.0))
                     .when(show_folder_icon, |element| {
                         element.child(icon(folder_icon, 14.0, theme.text_secondary))
+                    })
+                    .when(group == SidebarGroup::Pinned, |element| {
+                        element.child(icon("icons/pin.svg", 14.0, theme.text_secondary))
                     })
                     .child(
                         div()
@@ -1885,7 +1935,7 @@ impl Padu {
                 .state
                 .sessions
                 .iter()
-                .filter(|session| session.has_started())
+                .filter(|session| session.has_started() && session.archived_at.is_none())
                 .collect::<Vec<_>>();
             sort_sidebar_sessions(&mut sorted_sessions, self.state.sidebar_ordering);
             sessions = sorted_sessions.iter().map(|s| s.id).collect();
@@ -1912,25 +1962,29 @@ impl Padu {
                 }
             };
         if let Some(target_session) = self.state.sessions.iter().find(|s| s.id == next_session) {
-            let group = match self.state.sidebar_grouping {
-                SidebarGrouping::Updated => SidebarGroup::Updated(session_date_group(
-                    sidebar_session_timestamp(target_session),
-                    Local::now().date_naive(),
-                )),
-                SidebarGrouping::Project => {
-                    let projectless_root = crate::projectless::workspace_root();
-                    let is_projectless = self
-                        .state
-                        .projects
-                        .iter()
-                        .find(|p| p.id == target_session.project_id)
-                        .is_some_and(|p| {
-                            sidebar_project_is_projectless(p, projectless_root.as_deref())
-                        });
-                    if is_projectless {
-                        SidebarGroup::Projectless
-                    } else {
-                        SidebarGroup::Project(target_session.project_id)
+            let group = if target_session.pinned_at.is_some() {
+                SidebarGroup::Pinned
+            } else {
+                match self.state.sidebar_grouping {
+                    SidebarGrouping::Updated => SidebarGroup::Updated(session_date_group(
+                        sidebar_session_timestamp(target_session),
+                        Local::now().date_naive(),
+                    )),
+                    SidebarGrouping::Project => {
+                        let projectless_root = crate::projectless::workspace_root();
+                        let is_projectless = self
+                            .state
+                            .projects
+                            .iter()
+                            .find(|p| p.id == target_session.project_id)
+                            .is_some_and(|p| {
+                                sidebar_project_is_projectless(p, projectless_root.as_deref())
+                            });
+                        if is_projectless {
+                            SidebarGroup::Projectless
+                        } else {
+                            SidebarGroup::Project(target_session.project_id)
+                        }
                     }
                 }
             };
@@ -2177,6 +2231,7 @@ impl Padu {
         };
 
         let time_label = session_time_label(session, unix_time()).map(SharedString::from);
+
         let dot = div()
             .w(px(14.0))
             .h(px(14.0))
@@ -2401,6 +2456,8 @@ impl Padu {
                 }))
                 .into_any_element()
         } else {
+            let is_pinned = session.pinned_at.is_some();
+            let is_busy = session.is_busy();
             context_menu(
                 div().w_full().child(row),
                 SharedString::from(format!("session-menu-{session_id}")),
@@ -2408,7 +2465,32 @@ impl Padu {
                 move |_| {
                     let rename_padu = padu.clone();
                     let remove_padu = padu.clone();
+                    let pin_padu = padu.clone();
+                    let archive_padu = padu.clone();
                     vec![
+                        MenuItem::new(
+                            if is_pinned {
+                                tr!("session.unpin")
+                            } else {
+                                tr!("session.pin")
+                            },
+                            move |_, cx| {
+                                let _ = pin_padu.update(cx, |padu, cx| {
+                                    padu.set_session_pinned(session_id, !is_pinned, cx);
+                                });
+                            },
+                        )
+                        .icon("icons/pin.svg"),
+                        MenuItem::new(tr!("session.archive"), move |_, cx| {
+                            if !is_busy {
+                                let _ = archive_padu.update(cx, |padu, cx| {
+                                    padu.set_session_archived(session_id, true, cx);
+                                });
+                            }
+                        })
+                        .icon("icons/folder.svg")
+                        .disabled(is_busy),
+                        MenuItem::Separator,
                         MenuItem::new(tr!("common.rename"), move |window, cx| {
                             let _ = rename_padu.update(cx, |padu, cx| {
                                 padu.begin_session_rename(session_id, window, cx);
@@ -2871,6 +2953,18 @@ mod tests {
         assert_eq!(
             collapsed,
             vec![SidebarRow::Header(group), SidebarRow::GroupSpacer,]
+        );
+
+        let mut pinned = Vec::new();
+        append_sidebar_group_rows(&mut pinned, SidebarGroup::Pinned, &sessions, false, false);
+        assert_eq!(
+            pinned,
+            vec![
+                SidebarRow::Header(SidebarGroup::Pinned),
+                SidebarRow::Session(sessions[0]),
+                SidebarRow::Session(sessions[1]),
+                SidebarRow::PinnedSeparator,
+            ]
         );
     }
 

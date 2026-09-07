@@ -295,7 +295,7 @@ host.save_and_connect: 保存して接続
 host.save: 保存
 host.settings: ホスト設定…
 host.connection_failed: "接続に失敗しました：%{error}"
-host.confirm_remove: "ホスト \"%{name}\" を削除しますか？"
+host.confirm_remove: 'ホスト "%{name}" を削除しますか？'
 host.connecting: 接続中…
 host.remote_hosts: リモートホスト
 host.remote_hosts_description: リモートサーバーやワークステーションで実行されている Padu デーモンインスタンスに接続します。
@@ -1342,3 +1342,20 @@ onboarding.slide3_item2_title: クイックスクラッチパッド
 onboarding.slide3_item2_desc: プロジェクトを開かずに即座に開始し、素早い質問やスクリプト作成に活用。
 onboarding.slide3_item3_title: モデルの自在な切り替え
 onboarding.slide3_item3_desc: Cmd/Ctrl + / でいつでもモデルやプロバイダーを切り替え、推論強度を調整。
+settings.archived: アーカイブ済み
+settings.archived_keywords: アーカイブ 非表示 会話 タスク 復元
+settings.archived_empty: アーカイブ済みの会話はありません
+settings.archived_description: アーカイブ済みの会話は、復元または削除するまでここに保持されます。
+settings.archived_search: アーカイブ済みの会話を検索
+settings.archived_no_matches: 検索に一致するアーカイブ済みの会話はありません
+settings.archived_project: プロジェクト
+settings.archived_project_path: パス
+settings.restore: 復元
+sidebar.pin: ピン留め
+sidebar.pinned: ピン留め済み
+sidebar.unpin: ピン留めを外す
+sidebar.archive: アーカイブ
+session.pin: ピン留め
+session.unpin: ピン留めを外す
+session.archive: アーカイブ
+errors.update_task: "タスクを更新できませんでした：%{error}"

@@ -42,11 +42,20 @@ export const sessions = sqliteTable(
     updatedAt: integer("updated_at").notNull(),
     /** Completion of the most recent assistant turn, unix seconds. */
     lastReplyAt: integer("last_reply_at"),
+    /** When the session was pinned, unix seconds. */
+    pinnedAt: integer("pinned_at"),
+    /** When the session was archived, unix seconds. */
+    archivedAt: integer("archived_at"),
   },
   (table) => [
     index("sessions_by_project").on(table.projectId, table.updatedAt),
     index("sessions_by_updated_at").on(table.updatedAt),
     index("sessions_by_last_reply_at").on(table.lastReplyAt),
+    index("sessions_by_archive_pin").on(table.archivedAt, table.pinnedAt),
+    index("sessions_by_archive_updated_at").on(
+      table.archivedAt,
+      table.updatedAt,
+    ),
   ],
 );
 

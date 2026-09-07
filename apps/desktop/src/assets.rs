@@ -170,6 +170,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "minimize",
     "package",
     "panel-left",
+    "pin",
     "panel-right",
     "pencil",
     "plus",

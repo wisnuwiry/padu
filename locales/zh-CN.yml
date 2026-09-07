@@ -291,7 +291,7 @@ host.save_and_connect: 保存并连接
 host.save: 保存
 host.settings: 主机设置…
 host.connection_failed: "连接失败：%{error}"
-host.confirm_remove: "确定删除主机 \"%{name}\"？"
+host.confirm_remove: '确定删除主机 "%{name}"？'
 host.connecting: 正在连接…
 host.remote_hosts: 远程主机
 host.remote_hosts_description: 连接到在远程服务器或工作站上运行的 Padu 守护进程实例。
@@ -1290,5 +1290,20 @@ onboarding.slide3_item2_title: 快速草稿模式
 onboarding.slide3_item2_desc: 无需项目即可立即开始，适合快速提问、编写脚本与灵感原型。
 onboarding.slide3_item3_title: 随心切换模型
 onboarding.slide3_item3_desc: 随时通过 Cmd/Ctrl + / 选择提供商与模型，并调节思考力度。
-
-
+settings.archived: 已归档
+settings.archived_keywords: 归档 隐藏 对话 任务 恢复
+settings.archived_empty: 没有已归档的对话
+settings.archived_description: 已归档的对话会保留在这里，直到恢复或删除。
+settings.archived_search: 搜索已归档的对话
+settings.archived_no_matches: 没有符合搜索条件的已归档对话
+settings.archived_project: 项目
+settings.archived_project_path: 路径
+settings.restore: 恢复
+sidebar.pin: 置顶
+sidebar.pinned: 已置顶
+sidebar.unpin: 取消置顶
+sidebar.archive: 归档
+session.pin: 置顶
+session.unpin: 取消置顶
+session.archive: 归档
+errors.update_task: "无法更新任务：%{error}"

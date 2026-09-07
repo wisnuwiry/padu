@@ -43,6 +43,8 @@ interface SidebarProps {
   onSelectSession: (sessionId: string) => void
   onRenameSession: (sessionId: string, title: string) => Promise<void>
   onRemoveSession: (sessionId: string) => Promise<void>
+  onSetSessionPinned: (sessionId: string, pinned: boolean) => Promise<void>
+  onSetSessionArchived: (sessionId: string, archived: boolean) => Promise<void>
   onSearch: () => void
   onSettings: () => void
   onUsage?: () => void
@@ -72,6 +74,8 @@ export function Sidebar({
   onSelectSession,
   onRenameSession,
   onRemoveSession,
+  onSetSessionPinned,
+  onSetSessionArchived,
   onSearch,
   onSettings,
   onUsage,
@@ -266,6 +270,13 @@ export function Sidebar({
                 )
               }
               if (row.kind === 'spacer') return <div className="h-2.5" />
+              if (row.kind === 'separator') {
+                return (
+                  <div className="flex h-[9px] items-center px-2.5">
+                    <div className="h-px w-full bg-sidebar-border" />
+                  </div>
+                )
+              }
               if (row.kind === 'showMore') {
                 return (
                   <div className="relative px-2.5 pb-1">
@@ -299,6 +310,8 @@ export function Sidebar({
                 const isProjectGroup = row.group.kind === 'project' || row.group.kind === 'projectless'
                 const label = row.group.kind === 'updated' && row.group.dateGroup
                   ? t(GROUP_TRANSLATION_KEYS[row.group.dateGroup])
+                  : row.group.kind === 'pinned'
+                  ? t('sidebar.pinned')
                   : row.group.label
                 return (
                   <div className="relative px-2.5">
@@ -345,6 +358,12 @@ export function Sidebar({
                           <PaduIcon
                             className="size-3.5 shrink-0 text-[var(--text-secondary)]"
                             name={row.collapsed ? 'folder' : 'folderOpen'}
+                          />
+                        )}
+                        {row.group.kind === 'pinned' && (
+                          <PaduIcon
+                            className="size-3.5 shrink-0 text-[var(--text-secondary)]"
+                            name="pin"
                           />
                         )}
                         <span className="truncate">{label}</span>
@@ -432,6 +451,8 @@ export function Sidebar({
                       setSessionToDelete({ id: sessionId, title: session?.title })
                     }}
                     onRename={onRenameSession}
+                    onSetPinned={onSetSessionPinned}
+                    onSetArchived={onSetSessionArchived}
                     onSelect={(sessionId) => {
                       onSelectSession(sessionId)
                       onMobileOpenChange(false)
@@ -575,6 +596,8 @@ function SessionRow({
   onSelect,
   onRename,
   onRemove,
+  onSetPinned,
+  onSetArchived,
   t,
 }: {
   item: SessionItem
@@ -584,6 +607,8 @@ function SessionRow({
   onSelect: (sessionId: string) => void
   onRename: (sessionId: string, title: string) => Promise<void>
   onRemove: (sessionId: string) => void | Promise<void>
+  onSetPinned: (sessionId: string, pinned: boolean) => Promise<void>
+  onSetArchived: (sessionId: string, archived: boolean) => Promise<void>
   t: Translator
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -813,6 +838,27 @@ function SessionRow({
               }}
             >
               <PaduIcon className="size-3" name="pencil" /> {t('common.rename')}
+            </ContextMenu.Item>
+            <ContextMenu.Item
+              className="padu-menu-item"
+              onClick={() => {
+                restoreMenuFocus.current = true
+                setMenuOpen(false)
+                void onSetPinned(item.session.id, !Boolean(item.session.pinned_at)).catch(() => {})
+              }}
+            >
+              <PaduIcon className="size-3" name="pin" /> {t(item.session.pinned_at ? 'session.unpin' : 'session.pin')}
+            </ContextMenu.Item>
+            <ContextMenu.Item
+              className="padu-menu-item"
+              disabled={item.session.status === 'connecting' || item.session.status === 'working' || item.session.status === 'waiting'}
+              onClick={() => {
+                restoreMenuFocus.current = true
+                setMenuOpen(false)
+                void onSetArchived(item.session.id, true).catch(() => {})
+              }}
+            >
+              <PaduIcon className="size-3" name="package" /> {t('session.archive')}
             </ContextMenu.Item>
             <ContextMenu.Separator className="padu-menu-separator" />
             <ContextMenu.Item

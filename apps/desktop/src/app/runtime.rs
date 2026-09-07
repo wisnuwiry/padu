@@ -131,6 +131,8 @@ pub(super) fn merge_remote_session_catalog(
             local.model = remote.model;
             local.created_at = remote.created_at;
             local.last_reply_at = remote.last_reply_at;
+            local.pinned_at = remote.pinned_at;
+            local.archived_at = remote.archived_at;
             if !has_local_runtime(local.id) {
                 local.status = remote.status;
                 local.updated_at = remote.updated_at;

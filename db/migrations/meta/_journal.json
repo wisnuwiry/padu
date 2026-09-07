@@ -22,6 +22,13 @@
       "when": 1786435875650,
       "tag": "0002_cute_miracleman",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1788776705511,
+      "tag": "0003_chubby_starhawk",
+      "breakpoints": true
     }
   ]
 }

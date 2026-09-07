@@ -49,6 +49,7 @@ export const PADU_ICONS = {
   paperclip: 'i-padu-paperclip',
   panelLeft: 'i-padu-panel-left',
   panelRight: 'i-padu-panel-right',
+  pin: 'i-padu-pin',
   pencil: 'i-padu-pencil',
   plus: 'i-padu-plus',
   queue: 'i-padu-queue',

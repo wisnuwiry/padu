@@ -67,6 +67,8 @@ import {
   selectableProjects,
   sameProviderSession,
   sessionCwd,
+  setSessionArchived,
+  setSessionPinned,
   type TaskState,
 } from '@/lib/daemon-api'
 import {
@@ -475,8 +477,10 @@ export function PaduApp() {
     const rememberedSession = remembered?.kind === 'session'
       ? taskState.data.sessions.find((session) => session.id === remembered.sessionId)
       : undefined
-    const newest = rememberedSession ?? [...taskState.data.sessions]
-      .filter((session) => session.last_reply_at || session.turns.length || session.messages.length)
+    const newest = rememberedSession && !rememberedSession.archived_at
+      ? rememberedSession
+      : [...taskState.data.sessions]
+      .filter((session) => !session.archived_at && (session.last_reply_at || session.turns.length || session.messages.length))
       .sort((a, b) => (b.last_reply_at ?? b.created_at) - (a.last_reply_at ?? a.created_at))[0]
     if (newest) void navigate({ search: { session: newest.id }, replace: true })
     else startNewTask(taskState.data.projects[0])
@@ -827,7 +831,10 @@ export function PaduApp() {
 
   function selectAdjacentSession(delta: number) {
     if (!taskState.data) return
-    const started = sortSidebarSessions(taskState.data.sessions.filter(sessionHasStarted), 'newest')
+    const started = sortSidebarSessions(
+      taskState.data.sessions.filter((session) => !session.archived_at && sessionHasStarted(session)),
+      'newest',
+    )
     if (!started.length) return
     const currentId = search.session
     const currentIndex = currentId ? started.findIndex((s) => s.id === currentId) : -1
@@ -958,6 +965,49 @@ export function PaduApp() {
         }))
       }
       toast.error(t('errors.rename_task', { error: errorMessage(error) }))
+      throw error
+    }
+  }
+
+  async function updateSessionFlag(
+    sessionId: string,
+    flag: 'pinned_at' | 'archived_at',
+    enabled: boolean,
+  ) {
+    if (!client || !config) throw new Error(t('errors.daemon_disconnected'))
+    const stateKey = daemonKeys.taskState(config.address)
+    const sessionKey = daemonKeys.session(config.address, sessionId)
+    const previousState = queryClient.getQueryData<TaskState>(stateKey)
+    const previousSession = queryClient.getQueryData<AgentSession>(sessionKey)
+    const timestamp = enabled ? Math.floor(Date.now() / 1_000) : null
+    const update = <T extends { id: string } & Partial<Record<'pinned_at' | 'archived_at', number | null>>>(value: T) => ({
+      ...value,
+      [flag]: timestamp,
+      ...(flag === 'archived_at' && enabled ? { pinned_at: null } : {}),
+    }) as T
+    queryClient.setQueryData<TaskState>(stateKey, (currentState) => currentState && ({
+      ...currentState,
+      sessions: currentState.sessions.map((session) => session.id === sessionId ? update(session) : session),
+    }))
+    queryClient.setQueryData<AgentSession>(sessionKey, (session) => session ? update(session) : session)
+    try {
+      const updated = flag === 'pinned_at'
+        ? await setSessionPinned(client, sessionId, enabled)
+        : await setSessionArchived(client, sessionId, enabled)
+      queryClient.setQueryData<TaskState>(stateKey, (currentState) => currentState && ({
+        ...currentState,
+        sessions: currentState.sessions.map((session) => session.id === sessionId
+          ? { ...session, pinned_at: updated.pinned_at, archived_at: updated.archived_at }
+          : session),
+      }))
+      queryClient.setQueryData<AgentSession>(sessionKey, (session) => session
+        ? { ...session, pinned_at: updated.pinned_at, archived_at: updated.archived_at }
+        : session)
+      if (flag === 'archived_at' && enabled && search.session === sessionId) startNewTask(null)
+    } catch (error) {
+      if (previousState) queryClient.setQueryData(stateKey, previousState)
+      if (previousSession) queryClient.setQueryData(sessionKey, previousSession)
+      toast.error(t('errors.update_task', { error: errorMessage(error) }))
       throw error
     }
   }
@@ -1212,6 +1262,8 @@ export function PaduApp() {
           onNewTask={(project) => startNewTask(project)}
           onRemoveSession={removeSessionById}
           onRenameSession={renameSession}
+          onSetSessionArchived={(sessionId, archived) => updateSessionFlag(sessionId, 'archived_at', archived)}
+          onSetSessionPinned={(sessionId, pinned) => updateSessionFlag(sessionId, 'pinned_at', pinned)}
           onSearch={() => openCommandPalette('commands')}
           onSelectSession={selectSession}
           onSettings={() => openSettings('general')}

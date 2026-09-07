@@ -971,6 +971,12 @@ impl Padu {
                 "settings preferences usage tokens cost history",
             ),
             (
+                SettingsPage::Archived,
+                "settings.archived",
+                "icons/package.svg",
+                "settings preferences archived archive hidden conversations restore",
+            ),
+            (
                 SettingsPage::Daemon,
                 "settings.daemon",
                 "icons/server.svg",
@@ -1024,7 +1030,7 @@ impl Padu {
         self.state
             .sessions
             .iter()
-            .filter(|session| session.has_started())
+            .filter(|session| session.has_started() && session.archived_at.is_none())
             .enumerate()
             .map(|(order, session)| {
                 let (project, project_path) = projects

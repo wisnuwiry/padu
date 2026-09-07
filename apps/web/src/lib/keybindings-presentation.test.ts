@@ -16,6 +16,7 @@ describe('keybindings settings parity', () => {
       'notifications',
       'providers',
       'skills',
+      'archived',
       'usage',
       'daemon',
       'about',

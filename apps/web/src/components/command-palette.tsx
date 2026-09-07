@@ -675,7 +675,7 @@ function buildItems({
   const matchBySession = new Map(matches.map((match) => [match.session_id, match]))
   const projectById = new Map(taskState.projects.map((project) => [project.id, project]))
   const tasks = taskState.sessions
-    .filter(sessionHasStarted)
+    .filter((session) => !session.archived_at && sessionHasStarted(session))
     .map((session, order) => {
       const project = projectById.get(session.project_id)
       const projectName = project
