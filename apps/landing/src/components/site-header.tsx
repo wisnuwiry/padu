@@ -5,9 +5,11 @@ import { Menu, X } from "lucide-react";
 import "~/styles.css";
 import { GitHubIcon } from "~/components/brand-icons";
 import { useStars } from "~/routes/__root";
+import { useRealtimeStars } from "~/realtime-stars";
 
 export function SiteHeader() {
-  const { stars } = useStars();
+  const context = useStars();
+  const stars = useRealtimeStars(context.stars);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
 
