@@ -1980,7 +1980,11 @@ impl Padu {
         window.focus(&focus, cx);
     }
 
-    fn stage_attachment_paths(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) -> bool {
+    pub(crate) fn stage_attachment_paths(
+        &mut self,
+        paths: &[PathBuf],
+        cx: &mut Context<Self>,
+    ) -> bool {
         if paths.is_empty() {
             return false;
         }

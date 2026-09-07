@@ -1,16 +1,24 @@
 use super::*;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum FileOperationDialogKind {
-    CreateFile { parent: PathBuf },
-    CreateDirectory { parent: PathBuf },
+pub(crate) enum InlineFileOperationKind {
     Rename { source: PathBuf },
+    CreateFile { parent: PathBuf, depth: usize },
+    CreateDirectory { parent: PathBuf, depth: usize },
+}
+
+pub(crate) struct InlineFileOperation {
+    pub(crate) kind: InlineFileOperationKind,
+    pub(crate) input: Entity<TextInput>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum FileOperationDialogKind {
     Delete { target: PathBuf },
 }
 
 pub(crate) struct FileOperationDialog {
     pub(crate) kind: FileOperationDialogKind,
-    pub(crate) input: Entity<TextInput>,
     pub(crate) focus: FocusHandle,
     pub(crate) previous_focus: Option<FocusHandle>,
 }
