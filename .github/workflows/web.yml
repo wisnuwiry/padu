@@ -64,7 +64,7 @@ jobs:
             ${{ runner.os }}-bun-
 
       - name: Run sccache-action
-        uses: mozilla/sccache-action@v0.0.9
+        uses: mozilla/sccache-action@v0.0.11
 
       - name: Cache Cargo registry and git
         uses: actions/cache@v6
