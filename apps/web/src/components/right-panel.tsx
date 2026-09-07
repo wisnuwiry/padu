@@ -124,7 +124,7 @@ export interface RightPanelProps {
   onShowConversationChange?: (show: boolean) => void
   onExpandableChange?: (expandable: boolean) => void
   onTabsReport?: (tabs: PanelTab[], activeId: string | null) => void
-  onAddToChat?: (path: string) => void
+  onAddToChat?: (name: string, isDir?: boolean) => void
 }
 
 interface PanelState {
@@ -974,7 +974,7 @@ function FilesPanel({
   setBuffers: Dispatch<SetStateAction<Record<string, FileBuffer>>>
   onDirtyChange: (tabId: string, dirty: boolean) => void
   onOpenFile: (tabId: string, path: string, treeWidth: number) => void
-  onAddToChat?: (path: string) => void
+  onAddToChat?: (name: string, isDir?: boolean) => void
 }) {
   const { t } = useI18n()
   const { client, config, phase } = useDaemon()
@@ -1517,7 +1517,7 @@ interface TreeRowProps {
   selected: boolean
   tabIndex: number
   onActivate: (entry: WorkingTreeEntry) => void
-  onAddToChat?: (path: string) => void
+  onAddToChat?: (name: string, isDir?: boolean) => void
   onCreateFile: () => void
   onCreateFolder: () => void
   onCopyPath: () => void
@@ -1590,7 +1590,7 @@ function TreeRow({
           <ContextMenu.Popup className="padu-menu-surface">
             {onAddToChat && (
               <>
-                <ContextMenu.Item className="padu-menu-item" onClick={() => onAddToChat(entry.absolutePath)}>
+                <ContextMenu.Item className="padu-menu-item" onClick={() => onAddToChat(entry.name, entry.isDir)}>
                   <PaduIcon className="size-3" name="compose" /> {t('files.add_to_chat')}
                 </ContextMenu.Item>
                 <ContextMenu.Separator className="padu-menu-separator" />

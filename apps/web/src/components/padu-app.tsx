@@ -165,6 +165,11 @@ export function PaduApp() {
     paths: string[]
     signal: number
   } | null>(null)
+  const [composerMention, setComposerMention] = useState<{
+    sessionId: string
+    mention: string
+    signal: number
+  } | null>(null)
   const [requestedPanel, setRequestedPanel] = useState<PanelSurface>('files')
   const [requestedFile, setRequestedFile] = useState<string | null>(null)
   const [requestedDiffSource, setRequestedDiffSource] = useState<ReviewDiffSource>('uncommitted')
@@ -1347,6 +1352,9 @@ export function PaduApp() {
                 pendingAttachmentPaths={composerAttachment?.sessionId === activeSession.id ? composerAttachment.paths : undefined}
                 onAttachmentSignalHandled={() => setComposerAttachment((value) =>
                   value?.sessionId === activeSession.id ? null : value)}
+                mentionSignal={composerMention?.sessionId === activeSession.id ? composerMention : undefined}
+                onMentionSignalHandled={() => setComposerMention((value) =>
+                  value?.sessionId === activeSession.id ? null : value)}
                 onAddProject={openProjectPicker}
                 onFocusSignalHandled={() => setFocusComposerSignal(0)}
                 onModelPickerSignalHandled={() => setModelPickerSignal(0)}
@@ -1428,6 +1436,9 @@ export function PaduApp() {
                   attachmentSignal={composerAttachment?.sessionId === current.id ? composerAttachment.signal : 0}
                   pendingAttachmentPaths={composerAttachment?.sessionId === current.id ? composerAttachment.paths : undefined}
                   onAttachmentSignalHandled={() => setComposerAttachment((value) =>
+                    value?.sessionId === current.id ? null : value)}
+                  mentionSignal={composerMention?.sessionId === current.id ? composerMention : undefined}
+                  onMentionSignalHandled={() => setComposerMention((value) =>
                     value?.sessionId === current.id ? null : value)}
                   onAddProject={openProjectPicker}
                   onFocusSignalHandled={() => setFocusComposerSignal(0)}
@@ -1542,12 +1553,15 @@ export function PaduApp() {
               }
             }}
             onPanelWidthChange={setRightPanelWidth}
-            onAddToChat={(path) => {
-              setComposerAttachment({
+            onAddToChat={(name, isDir) => {
+              const mention = isDir ? `${name}/` : name
+              setComposerMention({
                 sessionId: panelSession.id,
+                mention,
                 signal: Date.now(),
-                paths: [path],
               })
+              setFocusComposerSignal((value) => value + 1)
+              toast.success(t('files.added_to_chat', { path: name }))
             }}
           />
         )

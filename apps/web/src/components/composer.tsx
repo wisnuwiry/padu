@@ -18,6 +18,7 @@ import {
   useState,
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
   type RefObject,
 } from 'react'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
@@ -138,6 +139,8 @@ export function Composer({
   onModelPickerSignalHandled,
   onUsagePanelSignalHandled,
   onPrefillSignalHandled,
+  mentionSignal,
+  onMentionSignalHandled,
 }: {
   session: AgentSession
   project: Project
@@ -156,6 +159,8 @@ export function Composer({
   attachmentSignal?: number
   pendingAttachmentPaths?: string[]
   onAttachmentSignalHandled?: () => void
+  mentionSignal?: { signal: number; mention: string }
+  onMentionSignalHandled?: () => void
   onAddProject?: () => void
   onProjectless?: () => void
   onResume?: () => void
@@ -202,6 +207,7 @@ export function Composer({
   const [dismissedAutocomplete, setDismissedAutocomplete] = useState<string | null>(null)
   const [escapeStopArm, setEscapeStopArm] = useState<EscapeStopArm | null>(null)
   const composerInput = useRef<HTMLTextAreaElement>(null)
+  const backdropRef = useRef<HTMLDivElement>(null)
   const autocompleteList = useRef<VirtuosoHandle>(null)
   const pendingCursor = useRef<number | null>(null)
   const escapeStopTimer = useRef<number | null>(null)
@@ -342,6 +348,26 @@ export function Composer({
     composerInput.current?.focus()
     onAttachmentSignalHandled?.()
   }, [attachmentSignal, onAttachmentSignalHandled, pendingAttachmentPaths, t])
+
+  useEffect(() => {
+    if (!mentionSignal?.signal) return
+    const mentionText = `@${mentionSignal.mention} `
+    setPrompt((prev) => {
+      const pos = composerInput.current ? (composerInput.current.selectionStart ?? prev.length) : prev.length
+      const next = prev.slice(0, pos) + mentionText + prev.slice(pos)
+      pendingCursor.current = pos + mentionText.length
+      return next
+    })
+    composerInput.current?.focus()
+    onMentionSignalHandled?.()
+  }, [mentionSignal, onMentionSignalHandled])
+
+  useEffect(() => {
+    if (composerInput.current && backdropRef.current) {
+      backdropRef.current.scrollTop = composerInput.current.scrollTop
+      backdropRef.current.scrollLeft = composerInput.current.scrollLeft
+    }
+  }, [prompt])
 
   useEffect(() => {
     setFilePickerOpen(false)
@@ -771,6 +797,14 @@ export function Composer({
               ))}
             </div>
           )}
+          <div className="relative w-full">
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words border-0 px-1 pb-1 pt-0 font-sans text-[14px] leading-5 text-transparent select-none"
+              ref={backdropRef}
+            >
+              {renderPromptMentionsBackdrop(prompt)}
+            </div>
             <Textarea
               aria-controls={autocompleteVisible ? 'composer-autocomplete' : undefined}
               aria-expanded={autocompleteVisible}
@@ -792,8 +826,15 @@ export function Composer({
               onClick={(event) => setCursor(event.currentTarget.selectionStart)}
               onFocus={() => setInputFocused(true)}
               onKeyDown={keyDown}
+              onScroll={(event) => {
+                if (backdropRef.current) {
+                  backdropRef.current.scrollTop = event.currentTarget.scrollTop
+                  backdropRef.current.scrollLeft = event.currentTarget.scrollLeft
+                }
+              }}
               onSelect={(event) => setCursor(event.currentTarget.selectionStart)}
             />
+          </div>
           <div
             className="mt-2 flex min-w-0 items-center gap-1 pb-px text-[11.5px] leading-[14px]"
             onMouseDown={preserveComposerFocusOnMouseDown}
@@ -2206,4 +2247,42 @@ function formatTokens(tokens: number) {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error)
+}
+
+function renderPromptMentionsBackdrop(text: string): ReactNode {
+  if (!text) return null
+  const regex = /(?:^|\s)@([a-zA-Z0-9_.\-\\/]+)/g
+  const parts: ReactNode[] = []
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(text)) !== null) {
+    const fullMatch = match[0]
+    const atOffset = fullMatch.indexOf('@')
+    const start = match.index + atOffset
+    const end = match.index + fullMatch.length
+    const trimmedEnd = text.slice(start, end).replace(/[,;!?:)\]}"']+$/, '').length + start
+    if (trimmedEnd <= start + 1) continue
+
+    if (start > lastIndex) {
+      parts.push(text.slice(lastIndex, start))
+    }
+    const mention = text.slice(start, trimmedEnd)
+    parts.push(
+      <span
+        key={`${start}-${trimmedEnd}`}
+        className="rounded bg-ring/20 ring-1 ring-ring/35"
+      >
+        {mention}
+      </span>,
+    )
+    lastIndex = trimmedEnd
+    regex.lastIndex = trimmedEnd
+  }
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex))
+  }
+  if (text.endsWith('\n')) {
+    parts.push('\u200b')
+  }
+  return parts
 }

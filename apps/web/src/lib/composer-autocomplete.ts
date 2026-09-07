@@ -160,6 +160,13 @@ export function composerAutocompleteRows(
     .map(({ row }) => row)
 }
 
+export function trimToFilename(path: string): string {
+  const isDir = path.endsWith('/') || path.endsWith('\\')
+  const clean = path.replace(/[/\\]+$/, '')
+  const name = clean.split(/[/\\]/).pop() || clean
+  return isDir ? `${name}/` : name
+}
+
 export function replaceComposerTrigger(
   text: string,
   trigger: ComposerTrigger,
@@ -167,7 +174,7 @@ export function replaceComposerTrigger(
 ): { text: string; cursor: number } {
   const insert = row.kind === 'command'
     ? `/${row.command.name} `
-    : `@${row.file.path} `
+    : `@${trimToFilename(row.file.path)} `
   const next = `${text.slice(0, trigger.start)}${insert}${text.slice(trigger.end)}`
   return { text: next, cursor: trigger.start + insert.length }
 }
