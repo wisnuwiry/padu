@@ -1,4 +1,18 @@
+use gpui::{KeyBinding, actions};
+
 use super::*;
+
+actions!(padu_inline_file, [CancelInlineFile, SubmitInlineFile]);
+
+pub(crate) const INLINE_FILE_PARENT_CONTEXT: &str = "InlineFileField";
+pub(crate) const INLINE_FILE_FIELD_CONTEXT: &str = "InlineFileField > TextInput";
+
+pub fn init_keys(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new("escape", CancelInlineFile, Some(INLINE_FILE_FIELD_CONTEXT)),
+        KeyBinding::new("enter", SubmitInlineFile, Some(INLINE_FILE_FIELD_CONTEXT)),
+    ]);
+}
 
 impl Padu {
     pub(crate) fn render_right_panel_files(
@@ -232,6 +246,7 @@ impl Padu {
                     // Add to Chat (for files and folders)
                     let chat_path = menu_path.clone();
                     let chat_relative = menu_relative.clone();
+                    let chat_is_dir = is_dir;
                     items.push(
                         MenuItem::new(tr!("files.add_to_chat"), move |window, cx| {
                             let _ = chat_weak.update(cx, |this, cx| {
@@ -240,7 +255,12 @@ impl Padu {
                                     .and_then(|n| n.to_str())
                                     .unwrap_or(&chat_relative)
                                     .to_owned();
-                                if this.stage_attachment_paths(&[chat_path.clone()], cx) {
+                                if this.stage_workspace_mention(
+                                    chat_path.clone(),
+                                    chat_relative.clone(),
+                                    chat_is_dir,
+                                    cx,
+                                ) {
                                     let focus = this.composer.read(cx).focus();
                                     window.focus(&focus, cx);
                                     this.show_success_toast(tr!(
@@ -1471,6 +1491,16 @@ impl Padu {
         let theme = Theme::current(cx);
         div()
             .id("right-panel-inline-create-row")
+            .key_context(INLINE_FILE_PARENT_CONTEXT)
+            .on_action(cx.listener(|this, _: &SubmitInlineFile, window, cx| {
+                this.submit_inline_file_operation(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &CancelInlineFile, window, cx| {
+                this.cancel_inline_file_operation(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &crate::input::Clear, window, cx| {
+                this.cancel_inline_file_operation(window, cx);
+            }))
             .h(px(30.0))
             .min_h(px(30.0))
             .flex_none()
@@ -1562,6 +1592,16 @@ impl Padu {
     ) -> AnyElement {
         let theme = Theme::current(cx);
         div()
+            .key_context(INLINE_FILE_PARENT_CONTEXT)
+            .on_action(cx.listener(|this, _: &SubmitInlineFile, window, cx| {
+                this.submit_inline_file_operation(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &CancelInlineFile, window, cx| {
+                this.cancel_inline_file_operation(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &crate::input::Clear, window, cx| {
+                this.cancel_inline_file_operation(window, cx);
+            }))
             .flex_1()
             .min_w_0()
             .flex()
@@ -1647,6 +1687,12 @@ impl Padu {
                 tr!("files.name_placeholder")
             })
         });
+        cx.subscribe(&input, |this: &mut Self, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Submit(_)) {
+                this.commit_inline_file_operation(cx);
+            }
+        })
+        .detach();
         let focus = input.read(cx).focus();
         let kind = if is_dir {
             InlineFileOperationKind::CreateDirectory { parent, depth }
@@ -1688,6 +1734,12 @@ impl Padu {
                 input.select_all_text(cx);
             }
         });
+        cx.subscribe(&input, |this: &mut Self, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Submit(_)) {
+                this.commit_inline_file_operation(cx);
+            }
+        })
+        .detach();
         let focus = input.read(cx).focus();
         self.right_panel_inline_file_operation = Some(InlineFileOperation {
             kind: InlineFileOperationKind::Rename { source },
@@ -1714,29 +1766,34 @@ impl Padu {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.commit_inline_file_operation(cx) {
+            let focus = self.transcript_control_focus("right-panel-working-tree", cx);
+            window.focus(&focus, cx);
+        }
+    }
+
+    pub(crate) fn commit_inline_file_operation(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(op) = self.right_panel_inline_file_operation.take() else {
-            return;
+            return false;
         };
         let name = op.input.read(cx).content().trim().to_owned();
         if name.is_empty() {
-            let focus = self.transcript_control_focus("right-panel-working-tree", cx);
-            window.focus(&focus, cx);
             cx.notify();
-            return;
+            return true;
         }
         if Path::new(&name).components().count() != 1 || name.contains('/') || name.contains('\\') {
             self.show_toast(tr!("files.invalid_name"));
             self.right_panel_inline_file_operation = Some(op);
             cx.notify();
-            return;
+            return false;
         }
         let Some(root) = self.selected_workspace_path().map(Path::to_path_buf) else {
-            return;
+            return true;
         };
         let (operation, is_create_file, created_rel) = match op.kind {
             InlineFileOperationKind::CreateFile { parent, .. } => {
                 let Ok(parent_rel) = parent.strip_prefix(&root) else {
-                    return;
+                    return true;
                 };
                 let relative_path = parent_rel.join(&name);
                 let rel_str = relative_path.to_string_lossy().into_owned();
@@ -1751,7 +1808,7 @@ impl Padu {
             }
             InlineFileOperationKind::CreateDirectory { parent, .. } => {
                 let Ok(parent_rel) = parent.strip_prefix(&root) else {
-                    return;
+                    return true;
                 };
                 (
                     padu_client::WorkspaceOperation::CreateDirectory {
@@ -1765,16 +1822,14 @@ impl Padu {
             InlineFileOperationKind::Rename { source } => {
                 let current_name = source.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 if current_name == name {
-                    let focus = self.transcript_control_focus("right-panel-working-tree", cx);
-                    window.focus(&focus, cx);
                     cx.notify();
-                    return;
+                    return true;
                 }
                 let Ok(source_relative) = source.strip_prefix(&root) else {
-                    return;
+                    return true;
                 };
                 let Some(parent) = source_relative.parent() else {
-                    return;
+                    return true;
                 };
                 let new_relative = parent.join(&name);
                 if let Some(selected) = self.right_panel_files_selected_path.as_ref() {
@@ -1816,9 +1871,8 @@ impl Padu {
             });
         })
         .detach();
-        let focus = self.transcript_control_focus("right-panel-working-tree", cx);
-        window.focus(&focus, cx);
         cx.notify();
+        true
     }
 
     pub(crate) fn begin_file_operation_dialog(

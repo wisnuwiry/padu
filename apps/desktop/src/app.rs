@@ -1671,6 +1671,7 @@ pub use goal_dialog::init as init_goal_dialog_keys;
 pub use host_dialog::init as init_host_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
 pub use onboarding::init as init_onboarding_keys;
+pub use right_panel::init_files_keys as init_right_panel_files_keys;
 pub use settings::init as init_settings_keys;
 pub use settings::init_skills_keys;
 pub use sidebar::init as init_sidebar_keys;
