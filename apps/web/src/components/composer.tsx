@@ -555,14 +555,24 @@ export function Composer({
 
   async function addDaemonFile(path: string): Promise<boolean> {
     if (!client) return false
-    if (attachments.some((attachment) => attachment.mention === path)) return true
+    if (attachments.some((attachment) => attachment.mention === path || attachment.path === path)) return true
     setUploading(true)
     try {
       const imported = await importDaemonPathAttachment(client, path)
       if (!mounted.current) return false
-      setAttachments((current) => current.some((attachment) => attachment.mention === imported.mention)
+      const normalizedCwd = cwd ? cwd.replace(/[/\\]+$/, '') : ''
+      let mention = imported.mention
+      if (normalizedCwd && imported.path.startsWith(normalizedCwd)) {
+        mention = imported.path.slice(normalizedCwd.length).replace(/^[/\\]+/, '')
+        if (imported.is_dir && !mention.endsWith('/')) mention += '/'
+      }
+      const adjusted: MessageAttachment = {
+        ...imported,
+        mention,
+      }
+      setAttachments((current) => current.some((attachment) => attachment.mention === adjusted.mention)
         ? current
-        : [...current, imported])
+        : [...current, adjusted])
       return true
     } catch (error) {
       toast.error(errorMessage(error))
@@ -1280,6 +1290,13 @@ function AutocompleteRowContents({ row }: { row: ComposerAutocompleteRow }) {
   )
 }
 
+function trimToFilename(path: string): string {
+  const isDir = path.endsWith('/') || path.endsWith('\\')
+  const clean = path.replace(/[/\\]+$/, '')
+  const name = clean.split(/[/\\]/).pop() || clean
+  return isDir ? `${name}/` : name
+}
+
 function ComposerAttachmentTile({
   attachment,
   onRemove,
@@ -1304,35 +1321,31 @@ function ComposerAttachmentTile({
     return () => { active = false }
   }, [attachment.blob_reference, attachment.is_image, attachment.name, attachment.path, client, config?.address, phase])
 
-  const contents = attachment.is_image && source ? (
-    <PreviewableImage
-      buttonClassName="size-full"
-      imageClassName="size-full object-cover"
-      name={attachment.name}
-      source={source}
-    />
-  ) : (
-    <div className="flex size-full flex-col items-center justify-center gap-[5px] px-[5px]">
-      {attachment.is_dir
-        ? <PaduIcon className="size-4 text-[var(--text-tertiary)]" name="folder" />
-        : <FileTypeIcon className="size-4" path={attachment.mention || attachment.name} />}
-      {!attachment.is_image && (
-        <span className="w-full truncate text-center text-[8.5px] text-[var(--text-tertiary)]">
-          {attachment.name}
-        </span>
-      )}
-    </div>
-  )
+  const displayName = trimToFilename(attachment.name || attachment.mention)
 
   return (
     <div
-      className="relative size-16 overflow-hidden rounded-lg border bg-[var(--inset)] outline-none focus-within:border-ring"
+      className="group inline-flex h-[26px] max-w-[220px] items-center gap-1.5 rounded-md border border-border bg-card pl-2 pr-1 text-[12px] text-foreground shadow-xs outline-none transition-colors hover:bg-accent/40 focus-within:border-ring"
       title={`@${attachment.mention}`}
     >
-      {contents}
+      {attachment.is_image && source ? (
+        <PreviewableImage
+          buttonClassName="size-4 shrink-0 overflow-hidden rounded-xs"
+          imageClassName="size-full object-cover"
+          name={attachment.name}
+          source={source}
+        />
+      ) : attachment.is_dir ? (
+        <PaduIcon className="size-3.5 shrink-0 text-[var(--text-tertiary)]" name="folder" />
+      ) : (
+        <FileTypeIcon className="size-3.5 shrink-0" path={attachment.mention || attachment.name} />
+      )}
+      <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-foreground">
+        {displayName}
+      </span>
       <button
-        aria-label={t('composer.remove_attachment', { name: attachment.name })}
-        className="absolute right-[3px] top-[3px] z-10 grid size-4 place-items-center rounded-[5px] bg-background/80 text-[var(--text-secondary)] outline-none hover:bg-background focus-visible:ring-1 focus-visible:ring-ring"
+        aria-label={t('composer.remove_attachment', { name: displayName })}
+        className="grid size-4 shrink-0 place-items-center rounded-xs text-[var(--text-tertiary)] outline-none hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
         type="button"
         onClick={onRemove}
         onMouseDown={(event) => event.preventDefault()}

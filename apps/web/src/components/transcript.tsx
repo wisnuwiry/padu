@@ -1866,18 +1866,26 @@ function ChangedFilesCard({
   )
 }
 
+function trimToFilename(path: string): string {
+  const isDir = path.endsWith('/') || path.endsWith('\\')
+  const clean = path.replace(/[/\\]+$/, '')
+  const name = clean.split(/[/\\]/).pop() || clean
+  return isDir ? `${name}/` : name
+}
+
 function Attachment({ attachment }: { attachment: MessageAttachment }) {
   if (attachment.is_image) return <RemoteImage attachment={attachment} />
+  const displayName = trimToFilename(attachment.name || attachment.mention)
   return (
     <span
-      className="flex h-20 w-24 flex-col items-center justify-center gap-[7px] overflow-hidden rounded-[9px] border bg-[var(--inset)] px-[7px]"
-      title={attachment.name}
+      className="inline-flex h-[26px] max-w-[220px] items-center gap-1.5 rounded-md border border-border bg-[var(--inset)] px-2 text-[12px] text-foreground"
+      title={`@${attachment.mention}`}
     >
       {attachment.is_dir
-        ? <PaduIcon className="size-[18px] text-[var(--text-tertiary)]" name="folder" />
-        : <FileTypeIcon className="size-[18px]" path={attachment.mention || attachment.name} />}
-      <span className="w-full truncate text-center text-[9.5px] text-[var(--text-secondary)]">
-        {attachment.name}
+        ? <PaduIcon className="size-3.5 shrink-0 text-[var(--text-tertiary)]" name="folder" />
+        : <FileTypeIcon className="size-3.5 shrink-0" path={attachment.mention || attachment.name} />}
+      <span className="truncate font-mono text-[11.5px] text-foreground">
+        {displayName}
       </span>
     </span>
   )
