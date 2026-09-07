@@ -1448,7 +1448,10 @@ mod tests {
         let _watchdog = start_parent_watchdog_with(999_999, Duration::from_millis(20), move || {
             parent_died_signal.store(true, Ordering::Release);
         });
-        thread::sleep(Duration::from_millis(80));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !parent_died.load(Ordering::Acquire) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
         assert!(parent_died.load(Ordering::Acquire));
     }
 }
