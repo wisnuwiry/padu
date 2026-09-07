@@ -11,7 +11,8 @@ use gpui::{KeyBinding, actions};
 use crate::model::{GoalOperation, MessageRole, ThreadGoal, ThreadGoalStatus};
 use crate::usage::format_tokens;
 
-use super::*;
+use crate::app::*;
+use crate::ui::dialog::dialog_backdrop;
 
 actions!(padu_goal_dialog, [ConfirmGoalDialog, DismissGoalDialog]);
 
@@ -33,7 +34,7 @@ pub fn init(cx: &mut App) {
 /// A deferred open. The objective editor needs a `Window` to exist, which
 /// command paths (composer submissions) do not carry, so opening stages a
 /// request that the next frame materializes.
-pub(super) struct GoalDialogRequest {
+pub(crate) struct GoalDialogRequest {
     pub session_id: Uuid,
     /// Objective text to start the editor with; `None` prefills the current
     /// goal's objective.
@@ -43,7 +44,7 @@ pub(super) struct GoalDialogRequest {
     pub replace: bool,
 }
 
-pub(super) struct GoalDialogState {
+pub(crate) struct GoalDialogState {
     session_id: Uuid,
     replace: bool,
     objective: Entity<TextInput>,
@@ -54,7 +55,7 @@ pub(super) struct GoalDialogState {
 
 impl Padu {
     /// Stage the goal dialog for `session_id`; the next frame builds it.
-    pub(super) fn request_goal_dialog(
+    pub(crate) fn request_goal_dialog(
         &mut self,
         session_id: Uuid,
         prefill: Option<String>,
@@ -125,7 +126,7 @@ impl Padu {
     /// there before the first message. Padu starts providers lazily, so the
     /// goal path starts the runtime itself and the queued operations drain
     /// the moment it installs.
-    pub(super) fn dispatch_goal_operation(
+    pub(crate) fn dispatch_goal_operation(
         &mut self,
         session_id: Uuid,
         operation: GoalOperation,
@@ -234,7 +235,7 @@ impl Padu {
     /// returning the session to rest. Confirmed turns and submissions are
     /// never touched: only a running provider turn without a user message
     /// and without a provider start report qualifies.
-    pub(super) fn unwind_unconfirmed_pursuit_turn(&mut self, session_id: Uuid) {
+    pub(crate) fn unwind_unconfirmed_pursuit_turn(&mut self, session_id: Uuid) {
         let Some(session) = self
             .state
             .session_mut(session_id)
@@ -254,7 +255,7 @@ impl Padu {
     /// Flush operations accepted before the runtime existed. Called after
     /// any runtime install so the goal lands on the thread that was started
     /// for it — whether the goal path or a racing submission started it.
-    pub(super) fn drain_pending_goal_operations(&mut self, session_id: Uuid) {
+    pub(crate) fn drain_pending_goal_operations(&mut self, session_id: Uuid) {
         let Some(operations) = self.pending_goal_operations.remove(&session_id) else {
             return;
         };
@@ -331,7 +332,7 @@ impl Padu {
         self.close_goal_dialog(window, cx);
     }
 
-    pub(super) fn render_goal_dialog(
+    pub(crate) fn render_goal_dialog(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -505,27 +506,13 @@ impl Padu {
             .child(div().mx(px(8.0)).h(px(1.0)).bg(theme.border))
             .child(actions_column);
 
-        let scrim = if theme.is_dark {
-            gpui::hsla(0.0, 0.0, 0.0, 0.34)
-        } else {
-            gpui::hsla(0.0, 0.0, 0.0, 0.16)
-        };
-        let layer = div()
-            .id("goal-dialog-layer")
-            .absolute()
-            .inset_0()
-            .occlude()
-            .bg(scrim)
-            .p(px(24.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|padu, _, window, cx| padu.close_goal_dialog(window, cx)),
-            )
-            .child(card);
-        Some(gpui::deferred(layer).with_priority(4).into_any_element())
+        Some(dialog_backdrop(
+            "goal-dialog-layer",
+            &theme,
+            cx,
+            |padu, window, cx| padu.close_goal_dialog(window, cx),
+            card,
+        ))
     }
 }
 
@@ -603,7 +590,7 @@ fn render_goal_action_row(
 }
 
 /// The status vocabulary Codex's own UI uses, translated.
-pub(super) fn goal_status_label(status: ThreadGoalStatus) -> String {
+pub(crate) fn goal_status_label(status: ThreadGoalStatus) -> String {
     match status {
         ThreadGoalStatus::Active => tr!("goal.status_active"),
         ThreadGoalStatus::Paused => tr!("goal.status_paused"),
@@ -615,7 +602,7 @@ pub(super) fn goal_status_label(status: ThreadGoalStatus) -> String {
 }
 
 /// Status tint, always paired with the label text — never color alone.
-pub(super) fn goal_status_color(status: ThreadGoalStatus, theme: &Theme) -> gpui::Hsla {
+pub(crate) fn goal_status_color(status: ThreadGoalStatus, theme: &Theme) -> gpui::Hsla {
     match status {
         ThreadGoalStatus::Active => theme.accent,
         ThreadGoalStatus::Paused => theme.text_secondary,
@@ -630,7 +617,7 @@ pub(super) fn goal_status_color(status: ThreadGoalStatus, theme: &Theme) -> gpui
 /// budget when one bounds the goal, elapsed pursuit time otherwise, the
 /// Codex CLI's own treatment. `live_elapsed_seconds` extends an active
 /// goal's recorded time with the current turn's wall clock.
-pub(super) fn goal_chip_label(goal: &ThreadGoal, live_elapsed_seconds: i64) -> String {
+pub(crate) fn goal_chip_label(goal: &ThreadGoal, live_elapsed_seconds: i64) -> String {
     let phrase = match goal.status {
         ThreadGoalStatus::Active => tr!("goal.chip_active"),
         ThreadGoalStatus::Paused => tr!("goal.chip_paused"),
@@ -665,7 +652,7 @@ pub(super) fn goal_chip_label(goal: &ThreadGoal, live_elapsed_seconds: i64) -> S
 
 /// One line of accounting for the dialog header: elapsed pursuit time and
 /// token consumption, whichever the goal has recorded.
-pub(super) fn goal_usage_summary(goal: &ThreadGoal) -> Option<String> {
+pub(crate) fn goal_usage_summary(goal: &ThreadGoal) -> Option<String> {
     let mut parts = Vec::new();
     if goal.time_used_seconds > 0 {
         parts.push(format_goal_elapsed(goal.time_used_seconds));

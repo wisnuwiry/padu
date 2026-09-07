@@ -5,7 +5,8 @@
 
 use gpui::{KeyBinding, actions};
 
-use super::*;
+use crate::app::*;
+use crate::ui::dialog::dialog_backdrop;
 
 actions!(
     padu_commit_dialog,
@@ -40,7 +41,7 @@ enum CommitPending {
     Git(CommitAction),
 }
 
-pub(super) struct CommitOperationState {
+pub(crate) struct CommitOperationState {
     id: Uuid,
     workspace: PathBuf,
     pending: CommitPending,
@@ -63,7 +64,7 @@ fn commit_pending_status_label(pending: CommitPending) -> String {
     }
 }
 
-pub(super) struct CommitDialogState {
+pub(crate) struct CommitDialogState {
     id: Uuid,
     workspace: PathBuf,
     invocation: Option<crate::git_commit::AgentInvocation>,
@@ -101,13 +102,13 @@ impl CommitDialogState {
 }
 
 impl Padu {
-    pub(super) fn commit_operation_status_label(&self) -> Option<String> {
+    pub(crate) fn commit_operation_status_label(&self) -> Option<String> {
         self.commit_operation
             .as_ref()
             .map(CommitOperationState::status_label)
     }
 
-    pub(super) fn open_commit_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn open_commit_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.commit_operation.is_some() {
             return;
         }
@@ -513,7 +514,7 @@ impl Padu {
         .detach();
     }
 
-    pub(super) fn render_commit_dialog(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(crate) fn render_commit_dialog(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dialog = self.commit_dialog.as_ref()?;
         let theme = Theme::current(cx);
         let branch = dialog.snapshot.branch.clone();
@@ -751,27 +752,13 @@ impl Padu {
                     .child(push),
             );
 
-        let scrim = if theme.is_dark {
-            gpui::hsla(0.0, 0.0, 0.0, 0.34)
-        } else {
-            gpui::hsla(0.0, 0.0, 0.0, 0.16)
-        };
-        let layer = div()
-            .id("commit-dialog-layer")
-            .absolute()
-            .inset_0()
-            .occlude()
-            .bg(scrim)
-            .p(px(24.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|padu, _, window, cx| padu.close_commit_dialog(window, cx)),
-            )
-            .child(card);
-        Some(gpui::deferred(layer).with_priority(4).into_any_element())
+        Some(dialog_backdrop(
+            "commit-dialog-layer",
+            &theme,
+            cx,
+            |padu, window, cx| padu.close_commit_dialog(window, cx),
+            card,
+        ))
     }
 }
 
