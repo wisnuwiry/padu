@@ -19,10 +19,13 @@ import { ProviderIcon, PROVIDERS, PaduIcon, type PaduIconName } from '@/componen
 import {
   useDaemonSettings,
   useProviderProbes,
+  useTaskState,
 } from '@/hooks/use-daemon-data'
 import { useCopyFeedback } from '@/hooks/use-copy-feedback'
 import {
   daemonKeys,
+  displayTitle,
+  setSessionArchived,
   updateDaemonSettings,
 } from '@/lib/daemon-api'
 import { useDaemon } from '@/lib/daemon-context'
@@ -45,6 +48,7 @@ export type SettingsPageId =
   | 'notifications'
   | 'providers'
   | 'skills'
+  | 'archived'
   | 'usage'
   | 'daemon'
   | 'about'
@@ -63,6 +67,7 @@ export const SETTINGS_PAGES: Array<{
   { id: 'notifications', label: 'Notifications', labelKey: 'settings.notifications', icon: 'bell', keywords: 'notifications sound alerts audio banner permission prompt notify test chime task complete', keywordsKey: 'settings.notifications_keywords' },
   { id: 'providers', label: 'Providers', labelKey: 'settings.providers', icon: 'bot', keywords: 'providers agents models cli version install detect claude codex cursor opencode amp grok pi omp oh my pi kimi', keywordsKey: 'settings.providers_keywords' },
   { id: 'skills', label: 'Skills', labelKey: 'settings.skills', icon: 'package', keywords: 'skills library agent disable enable delete shared', keywordsKey: 'settings.skills_keywords' },
+  { id: 'archived', label: 'Archived', labelKey: 'settings.archived', icon: 'package', keywords: 'archived archive hidden conversations tasks restore', keywordsKey: 'settings.archived_keywords' },
   { id: 'usage', label: 'Usage', labelKey: 'settings.usage', icon: 'chartColumn', keywords: 'usage tokens cost spend cache daily monthly project model history', keywordsKey: 'settings.usage_keywords' },
   { id: 'daemon', label: 'Hosts & Daemon', labelKey: 'settings.daemon', icon: 'server', keywords: 'hosts host remote server devbox cloud daemon web network connection url token websocket ssh lan', keywordsKey: 'settings.daemon_keywords' },
   { id: 'about', label: 'About', labelKey: 'settings.about', icon: 'info', keywords: 'about info version update host connected github sponsor repo contribute', keywordsKey: 'settings.about_keywords' },
@@ -169,12 +174,51 @@ export function SettingsView({
             {page === 'keybindings' && <KeybindingsSettings />}
             {page === 'notifications' && <NotificationsSettings />}
             {page === 'providers' && <ProvidersSettings />}
+            {page === 'archived' && <ArchivedSettings />}
             {page === 'usage' && <UsageSettings projects={projects} />}
             {page === 'daemon' && <DaemonSettings />}
             {page === 'about' && <AboutSettings onPageChange={onPageChange} />}
           </div>
         )}
       </main>
+    </div>
+  )
+}
+
+function ArchivedSettings() {
+  const { t } = useI18n()
+  const { client, config } = useDaemon()
+  const queryClient = useQueryClient()
+  const taskState = useTaskState()
+  const archived = (taskState.data?.sessions.filter((session) => Boolean(session.archived_at)) ?? [])
+    .slice()
+    .sort((left, right) => (right.archived_at ?? 0) - (left.archived_at ?? 0))
+
+  async function restore(sessionId: string) {
+    if (!client || !config) return
+    await setSessionArchived(client, sessionId, false)
+    queryClient.setQueryData(daemonKeys.taskState(config.address), (current: typeof taskState.data) => current && ({
+      ...current,
+      sessions: current.sessions.map((session) => session.id === sessionId
+        ? { ...session, archived_at: null }
+        : session),
+    }))
+  }
+
+  return (
+    <div className="mt-[15px] overflow-hidden rounded-[13px] bg-[var(--raised)]">
+      {archived.length === 0 ? (
+        <p className="px-5 py-5 text-[13px] text-[var(--text-tertiary)]">{t('settings.archived_empty')}</p>
+      ) : archived.map((session, index) => (
+        <div className={cn('flex min-h-[58px] items-center gap-3 px-5 py-3', index > 0 && 'border-t')} key={session.id}>
+          <PaduIcon className="size-4 shrink-0 text-[var(--text-tertiary)]" name="package" />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[13px] font-medium">{displayTitle(session)}</div>
+            <div className="truncate text-[11.5px] text-[var(--text-tertiary)]">{session.id}</div>
+          </div>
+          <Button size="sm" variant="outline" onClick={() => void restore(session.id)}>{t('settings.restore')}</Button>
+        </div>
+      ))}
     </div>
   )
 }

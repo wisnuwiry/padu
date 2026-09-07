@@ -14,7 +14,7 @@ export interface SessionItem {
 
 export interface SessionGroup {
   id: string
-  kind: 'updated' | 'project' | 'projectless'
+  kind: 'pinned' | 'updated' | 'project' | 'projectless'
   dateGroup?: DateGroup
   projectId?: string
   project?: Project
@@ -29,6 +29,7 @@ export type SidebarListRow =
   | { kind: 'session'; key: string; item: SessionItem }
   | { kind: 'showMore'; key: string; groupId: string }
   | { kind: 'spacer'; key: string }
+  | { kind: 'separator'; key: string }
 
 export const GROUP_LABELS: Record<DateGroup, string> = {
   today: 'Today',
@@ -67,7 +68,7 @@ export function sidebarRows(
       key: `group:${group.id}`,
       group,
       collapsed: isCollapsed,
-      first: index === 0,
+      first: group.kind !== 'pinned' && visibleGroups.slice(0, index).every((candidate) => candidate.kind === 'pinned'),
     })
     if (!isCollapsed) {
       rows.push(...group.sessions.map((item) => ({
@@ -83,7 +84,10 @@ export function sidebarRows(
         })
       }
     }
-    if (groups.length) rows.push({ kind: 'spacer', key: `spacer:${group.id}` })
+    if (groups.length) {
+      rows.push({ kind: 'spacer', key: `spacer:${group.id}` })
+      if (group.kind === 'pinned') rows.push({ kind: 'separator', key: 'separator:pinned' })
+    }
   })
   return rows
 }
@@ -93,6 +97,8 @@ export function sortSidebarSessions(
   ordering: SidebarOrdering = 'newest',
 ): AgentSession[] {
   return [...sessions].sort((left, right) => {
+    const pinnedOrder = Number(Boolean(right.pinned_at)) - Number(Boolean(left.pinned_at))
+    if (pinnedOrder) return pinnedOrder
     const leftTime = sessionTimestamp(left)
     const rightTime = sessionTimestamp(right)
     return ordering === 'oldest' ? leftTime - rightTime : rightTime - leftTime
@@ -114,11 +120,22 @@ export function groupSessions(
     project.id,
     projectDisplayName(project, projectlessName),
   ]))
-  const started = sortSidebarSessions(sessions.filter(sessionHasStarted), ordering)
+  const started = sortSidebarSessions(
+    sessions.filter((session) => !session.archived_at && sessionHasStarted(session)),
+    ordering,
+  )
+
+  const pinned = started
+    .filter((session) => session.pinned_at)
+    .map((session) => ({
+        session,
+        projectName: projectNames.get(session.project_id) ?? unknownProject,
+        timestamp: sessionTimestamp(session),
+      }))
 
   if (grouping === 'updated') {
     const grouped = new Map<DateGroup, SessionItem[]>()
-    for (const session of started) {
+    for (const session of started.filter((session) => !session.pinned_at)) {
       const id = dateGroup(sessionTimestamp(session), now)
       const items = grouped.get(id) ?? []
       items.push({
@@ -129,15 +146,20 @@ export function groupSessions(
       grouped.set(id, items)
     }
     const order = ordering === 'oldest' ? GROUP_ORDER_OLDEST : GROUP_ORDER_NEWEST
-    return order
+    return [
+      ...(pinned.length > 0
+        ? [{ id: 'pinned', kind: 'pinned' as const, label: 'Pinned', sessions: pinned }]
+        : []),
+      ...order
       .filter((id) => grouped.has(id))
       .map((id) => ({
         id: `updated:${id}`,
-        kind: 'updated',
+        kind: 'updated' as const,
         dateGroup: id,
         label: GROUP_LABELS[id],
         sessions: grouped.get(id)!,
-      }))
+      })),
+    ]
   }
 
   // grouping === 'project'
@@ -148,7 +170,7 @@ export function groupSessions(
   const projectIndexMap = new Map<string, number>()
   const projectlessSessions: SessionItem[] = []
 
-  for (const session of started) {
+  for (const session of started.filter((session) => !session.pinned_at)) {
     const project = projectMap.get(session.project_id)
     const isProjectless = !project || isProjectlessProject(project)
     const item: SessionItem = {
@@ -188,7 +210,7 @@ export function groupSessions(
   }
 
   // Apply recent cutoff and pagination for each project group
-  return projectGroups.map((group) => {
+  const visibleProjectGroups = projectGroups.map((group) => {
     const allSessions = group.sessions
     const revealedOlder = revealedOlderCounts[group.id] ?? 0
 
@@ -196,7 +218,7 @@ export function groupSessions(
     let olderSeen = 0
 
     for (const item of allSessions) {
-      const recent = item.timestamp >= recentCutoff
+      const recent = item.session.pinned_at != null || item.timestamp >= recentCutoff
       if (recent || olderSeen < revealedOlder) {
         visible.push(item)
       }
@@ -213,6 +235,12 @@ export function groupSessions(
       hasMore,
     }
   })
+  return [
+    ...(pinned.length > 0
+      ? [{ id: 'pinned', kind: 'pinned' as const, label: 'Pinned', sessions: pinned }]
+      : []),
+    ...visibleProjectGroups,
+  ]
 }
 
 export function sessionHasStarted(session: AgentSession): boolean {

@@ -24,6 +24,8 @@ import {
   removeSession,
   sameProviderSession,
   selectableProjects,
+  setSessionArchived,
+  setSessionPinned,
   writeWorkspaceTextFile,
   type DaemonDirectory,
 } from './daemon-api'
@@ -44,6 +46,26 @@ describe('applyComposerDraftChanges', () => {
 
     await expect(applyComposerDraftChanges(client, changes)).resolves.toBeUndefined()
     expect(command).toEqual({ type: 'applyComposerDraftChanges', changes })
+  })
+})
+
+describe('session flags', () => {
+  test('sends pin and archive commands with the session scope', async () => {
+    const commands: unknown[] = []
+    const client = {
+      request: async (command: unknown, sessionId?: string) => {
+        commands.push({ command, sessionId })
+        return { type: 'sessionMetadataUpdated', session: {} }
+      },
+    } as unknown as PaduClient
+
+    await setSessionPinned(client, 'session-1', true)
+    await setSessionArchived(client, 'session-1', false)
+
+    expect(commands).toEqual([
+      { command: { type: 'setSessionPinned', pinned: true }, sessionId: 'session-1' },
+      { command: { type: 'setSessionArchived', archived: false }, sessionId: 'session-1' },
+    ])
   })
 })
 
