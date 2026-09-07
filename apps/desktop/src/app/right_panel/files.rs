@@ -264,10 +264,6 @@ impl Padu {
                                 });
                                 let focus = this.composer.read(cx).focus();
                                 window.focus(&focus, cx);
-                                this.show_success_toast(tr!(
-                                    "files.added_to_chat",
-                                    path = file_name
-                                ));
                             });
                         })
                         .icon("icons/compose.svg"),

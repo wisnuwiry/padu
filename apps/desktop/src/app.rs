@@ -1646,7 +1646,7 @@ mod host_dialog;
 mod image_preview;
 mod onboarding;
 mod render;
-mod right_panel;
+pub(crate) mod right_panel;
 mod runtime;
 mod sessions;
 mod settings;

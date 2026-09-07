@@ -1400,7 +1400,10 @@ function rehypeMentionChips() {
             result.push({
               type: 'element',
               tagName: 'span',
-              properties: { className: ['mention-chip'] },
+              properties: {
+                className: ['mention-chip'],
+                'data-mention': value.slice(start, trimmedEnd).replace(/^@/, ''),
+              },
               children: [{ type: 'text', value: value.slice(start, trimmedEnd) }],
             })
             lastIndex = trimmedEnd
@@ -1461,6 +1464,24 @@ function Markdown({
               source={src}
             />
           ) : null,
+          // TODO(web): Make mention chips in rendered message bubbles use the
+          // same stable inline renderer as attachments; provider/markdown
+          // payload variations can still leave the chip unrendered.
+          span: ({ children, className, ...props }) => {
+            const mentionProps = props as { 'data-mention'?: string; dataMention?: string }
+            const mention = mentionProps['data-mention'] ?? mentionProps.dataMention
+            if (!mention || !className?.toString().includes('mention-chip')) {
+              return <span className={className} {...props}>{children}</span>
+            }
+            return (
+              <span className="mention-chip" {...props}>
+                {mention.endsWith('/')
+                  ? <PaduIcon className="size-3.5 shrink-0 text-[var(--text-secondary)]" name="folder" />
+                  : <FileTypeIcon className="size-3.5 shrink-0" path={mention} />}
+                <span className="truncate">{mention.replace(/\/$/, '')}</span>
+              </span>
+            )
+          },
         }}
       >
         {text}

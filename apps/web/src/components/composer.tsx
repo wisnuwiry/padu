@@ -339,10 +339,7 @@ export function Composer({
     if (!attachmentSignal || !pendingAttachmentPaths?.length) return
     for (const path of pendingAttachmentPaths) {
       void addDaemonFile(path).then((ok) => {
-        if (ok) {
-          const name = path.split('/').pop() || path
-          toast.success(t('files.added_to_chat', { path: name }))
-        }
+
       })
     }
     composerInput.current?.focus()
@@ -351,11 +348,16 @@ export function Composer({
 
   useEffect(() => {
     if (!mentionSignal?.signal) return
-    const mentionText = `@${mentionSignal.mention} `
     setPrompt((prev) => {
       const pos = composerInput.current ? (composerInput.current.selectionStart ?? prev.length) : prev.length
-      const next = prev.slice(0, pos) + mentionText + prev.slice(pos)
-      pendingCursor.current = pos + mentionText.length
+      const before = prev.slice(0, pos)
+      const after = prev.slice(pos)
+      const prefix = before.length && !/\s$/.test(before) ? ' ' : ''
+      const suffix = after.length && !/^\s/.test(after) ? ' ' : ''
+      const mentionText = `${prefix}@${mentionSignal.mention}${suffix}`
+      const next = before + mentionText + after
+      const existingSeparator = suffix ? 0 : (after.match(/^\s/u)?.[0].length ?? 0)
+      pendingCursor.current = before.length + mentionText.length + existingSeparator
       return next
     })
     composerInput.current?.focus()
@@ -643,6 +645,24 @@ export function Composer({
   }
 
   function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === 'Backspace' && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      const input = composerInput.current
+      const start = input?.selectionStart ?? prompt.length
+      const end = input?.selectionEnd ?? start
+      if (start === end) {
+        const before = prompt.slice(0, start)
+        const match = before.match(/(?:^|\s)(@[a-zA-Z0-9_.\-\\/]+) ?$/)
+        if (match) {
+          event.preventDefault()
+          const tokenStart = start - match[0].length + match[0].indexOf('@')
+          const removeStart = tokenStart - (tokenStart > 0 && /\s/.test(prompt[tokenStart - 1] ?? '') ? 1 : 0)
+          const next = prompt.slice(0, removeStart) + prompt.slice(start)
+          pendingCursor.current = removeStart
+          setPrompt(next)
+          return
+        }
+      }
+    }
     if (autocompleteVisible && event.key === 'Escape') {
       event.preventDefault()
       setDismissedAutocomplete(autocompleteKey)
@@ -800,7 +820,7 @@ export function Composer({
           <div className="relative w-full">
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words border-0 px-1 pb-1 pt-0 font-sans text-[14px] leading-5 text-transparent select-none"
+              className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words border-0 px-1 pb-1 pt-0 font-sans text-[14px] leading-5 text-foreground select-none"
               ref={backdropRef}
             >
               {renderPromptMentionsBackdrop(prompt)}
@@ -813,7 +833,7 @@ export function Composer({
                 ? `composer-autocomplete-${autocompleteHighlight}`
                 : undefined}
               aria-autocomplete="list"
-              className="max-h-48 min-h-[46px] resize-none border-0 bg-transparent px-1 pb-1 pt-0 text-[14px] leading-5 shadow-none focus-visible:ring-0"
+              className="max-h-48 min-h-[46px] resize-none border-0 bg-transparent px-1 pb-1 pt-0 text-[14px] leading-5 text-transparent caret-foreground selection:bg-primary/20 selection:text-transparent shadow-none focus-visible:ring-0"
               placeholder={t(busy ? 'composer.queue_placeholder' : 'composer.prompt_placeholder')}
               ref={composerInput}
               role="combobox"
@@ -1335,7 +1355,7 @@ function trimToFilename(path: string): string {
   const isDir = path.endsWith('/') || path.endsWith('\\')
   const clean = path.replace(/[/\\]+$/, '')
   const name = clean.split(/[/\\]/).pop() || clean
-  return isDir ? `${name}/` : name
+  return name
 }
 
 function ComposerAttachmentTile({
@@ -1366,7 +1386,7 @@ function ComposerAttachmentTile({
 
   return (
     <div
-      className="group inline-flex h-[26px] max-w-[220px] items-center gap-1.5 rounded-md border border-border bg-card pl-2 pr-1 text-[12px] text-foreground shadow-xs outline-none transition-colors hover:bg-accent/40 focus-within:border-ring"
+      className="group inline-flex h-[28px] max-w-[220px] items-center gap-1.5 rounded-[8px] border border-border bg-[var(--inset)] pl-2.5 pr-1.5 text-[12px] text-foreground shadow-xs outline-none transition-colors hover:bg-accent/40 focus-within:border-ring"
       title={`@${attachment.mention}`}
     >
       {attachment.is_image && source ? (
@@ -2267,12 +2287,18 @@ function renderPromptMentionsBackdrop(text: string): ReactNode {
       parts.push(text.slice(lastIndex, start))
     }
     const mention = text.slice(start, trimmedEnd)
+    // TODO(web): Replace the overlay placeholder with a range-aware rich input;
+    // the chip's visual width can still diverge from the native textarea caret
+    // and overlap adjacent text in some cursor/wrap positions.
     parts.push(
-      <span
-        key={`${start}-${trimmedEnd}`}
-        className="rounded bg-ring/20 ring-1 ring-ring/35"
-      >
-        {mention}
+      <span key={`${start}-${trimmedEnd}`} className="relative inline-block align-baseline">
+        <span className="invisible">{mention}</span>
+        <span className="absolute inset-y-0 left-0 inline-flex items-center gap-1 whitespace-nowrap rounded-[7px] border border-border bg-[var(--inset)] px-1.5 py-0.5 text-foreground">
+          {mention.endsWith('/')
+            ? <PaduIcon className="size-3.5 shrink-0 text-[var(--text-secondary)]" name="folder" />
+            : <FileTypeIcon className="size-3.5 shrink-0" path={mention.replace(/^@/, '')} />}
+          <span className="font-medium text-foreground">{mention.replace(/^@/, '').replace(/\/$/, '')}</span>
+        </span>
       </span>,
     )
     lastIndex = trimmedEnd

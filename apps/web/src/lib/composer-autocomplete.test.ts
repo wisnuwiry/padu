@@ -35,12 +35,12 @@ describe('composer autocomplete', () => {
     expect(detectComposerTrigger('email@example.com', 17)).toBeNull()
   })
 
-  test('replaces only the active token and leaves the caret after a trailing space', () => {
+  test('replaces only the active token and keeps one separator before following text', () => {
     const trigger = detectComposerTrigger('read @app then', 9)!
     expect(replaceComposerTrigger('read @app then', trigger, {
       kind: 'file',
       file: { path: 'src/app.ts', is_dir: false },
-    })).toEqual({ text: 'read @app.ts  then', cursor: 13 })
+    })).toEqual({ text: 'read @app.ts then', cursor: 13 })
   })
 
   test('merges live provider commands without losing discovered templates', () => {
