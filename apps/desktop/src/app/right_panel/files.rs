@@ -244,7 +244,6 @@ impl Padu {
                     let mut items = Vec::new();
 
                     // Add to Chat (for files and folders)
-                    let chat_path = menu_path.clone();
                     let chat_relative = menu_relative.clone();
                     let chat_is_dir = is_dir;
                     items.push(
@@ -255,19 +254,20 @@ impl Padu {
                                     .and_then(|n| n.to_str())
                                     .unwrap_or(&chat_relative)
                                     .to_owned();
-                                if this.stage_workspace_mention(
-                                    chat_path.clone(),
-                                    chat_relative.clone(),
-                                    chat_is_dir,
-                                    cx,
-                                ) {
-                                    let focus = this.composer.read(cx).focus();
-                                    window.focus(&focus, cx);
-                                    this.show_success_toast(tr!(
-                                        "files.added_to_chat",
-                                        path = file_name
-                                    ));
-                                }
+                                let mention_name = if chat_is_dir {
+                                    format!("{file_name}/")
+                                } else {
+                                    file_name.clone()
+                                };
+                                this.composer.update(cx, |composer, cx| {
+                                    composer.insert_mention(&mention_name, cx);
+                                });
+                                let focus = this.composer.read(cx).focus();
+                                window.focus(&focus, cx);
+                                this.show_success_toast(tr!(
+                                    "files.added_to_chat",
+                                    path = file_name
+                                ));
                             });
                         })
                         .icon("icons/compose.svg"),

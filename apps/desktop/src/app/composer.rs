@@ -2080,49 +2080,6 @@ impl Padu {
         true
     }
 
-    pub(crate) fn stage_workspace_mention(
-        &mut self,
-        path: PathBuf,
-        relative_path: String,
-        is_dir: bool,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let mut mention = relative_path.trim_start_matches('/').to_string();
-        if is_dir && !mention.ends_with('/') {
-            mention.push('/');
-        }
-        if self
-            .composer_attachments
-            .iter()
-            .any(|a| a.path == path || a.mention == mention)
-        {
-            return false;
-        }
-        let filename = trim_to_filename(&mention);
-        let is_image = !is_dir && is_image_attachment_path(&path);
-        let preview_image = is_image
-            .then(|| {
-                image_preview::image_format_for_name(&filename).and_then(|format| {
-                    std::fs::read(&path)
-                        .ok()
-                        .map(|bytes| Arc::new(gpui::Image::from_bytes(format, bytes)))
-                })
-            })
-            .flatten();
-        self.composer_attachments.push(ComposerAttachment {
-            path,
-            client_preview_image: preview_image,
-            mention,
-            name: SharedString::from(filename),
-            is_dir,
-            is_image,
-            blob_reference: None,
-        });
-        self.schedule_composer_draft_save(cx);
-        cx.notify();
-        true
-    }
-
     /// Stage the clipboard's primary image/file representation. On-disk paths
     /// reuse drop handling immediately; raw image bytes are copied into Padu's
     /// durable blob store on the background executor before their chip appears.

@@ -181,6 +181,8 @@ pub struct Palette {
     pub search_match: Hsla,
     pub active_search_match: Hsla,
     pub accent: Hsla,
+    pub mention_wash: Hsla,
+    pub mention_border: Hsla,
     pub added: Hsla,
     pub removed: Hsla,
     is_dark: bool,
@@ -218,6 +220,8 @@ impl Palette {
                 0.70
             }),
             accent: theme.accent,
+            mention_wash: theme.accent.opacity(0.16),
+            mention_border: theme.accent.opacity(0.35),
             added: theme.success,
             removed: theme.danger,
             is_dark: theme.is_dark,
@@ -238,6 +242,7 @@ impl Palette {
             TokenClass::Type => hue(dark, 0x8FB8D9, 0x2F6690),
             TokenClass::Function => hue(dark, 0x8FB8D9, 0x2F6690),
             TokenClass::Meta => self.tertiary,
+            TokenClass::Mention => self.accent,
             TokenClass::Added => self.added,
             TokenClass::Removed => self.removed,
         }
@@ -258,6 +263,7 @@ pub struct FlatText {
     pub runs: Vec<TextRun>,
     pub links: Vec<(Range<usize>, String)>,
     pub code_ranges: Vec<Range<usize>>,
+    pub mention_ranges: Vec<Range<usize>>,
 }
 
 /// One literal find-in-page hit inside a shaped markdown text element.
@@ -291,6 +297,7 @@ pub fn flatten(
     let mut out: Vec<TextRun> = Vec::with_capacity(runs.len());
     let mut links: Vec<(Range<usize>, String)> = Vec::new();
     let mut code_ranges: Vec<Range<usize>> = Vec::new();
+    let mut mention_ranges: Vec<Range<usize>> = Vec::new();
 
     for run in runs {
         if run.text.is_empty() {
@@ -323,6 +330,9 @@ pub fn flatten(
                 _ => code_ranges.push(start..end),
             }
         }
+        if run.style.mention {
+            mention_ranges.push(start..end);
+        }
         if let Some(url) = &run.style.link {
             // A still-streaming link keeps link styling — so the URL settling
             // changes nothing visually — but must not become clickable.
@@ -337,7 +347,9 @@ pub fn flatten(
         out.push(TextRun {
             len: run.text.len(),
             font: run_font,
-            color: if run.style.code {
+            color: if run.style.mention {
+                palette.accent
+            } else if run.style.code {
                 palette.code_text
             } else {
                 base_color
@@ -362,6 +374,7 @@ pub fn flatten(
         runs: out,
         links,
         code_ranges,
+        mention_ranges,
     }
 }
 
@@ -392,6 +405,7 @@ pub fn flatten_plain(
         runs,
         links: Vec::new(),
         code_ranges: Vec::new(),
+        mention_ranges: Vec::new(),
     }
 }
 
@@ -657,6 +671,8 @@ fn text_element_with_selection(
     search: Option<SearchHighlights>,
     link_handler: Option<LinkHandler>,
     code_wash: Hsla,
+    mention_wash: Hsla,
+    mention_border: Hsla,
     selection_wash: Hsla,
     search_match_wash: Hsla,
     active_search_match_wash: Hsla,
@@ -686,6 +702,7 @@ fn text_element_with_selection(
     let underlay = canvas(|_, _, _| (), {
         let text = flat.text.clone();
         let code_ranges = flat.code_ranges.clone();
+        let mention_ranges = flat.mention_ranges.clone();
         let layout = layout.clone();
         let key = key.clone();
         move |_, _, window, _| {
@@ -697,6 +714,18 @@ fn text_element_with_selection(
                         code_wash,
                         px(0.0),
                         gpui::transparent_black(),
+                        BorderStyle::default(),
+                    ));
+                }
+            }
+            for range in &mention_ranges {
+                for rect in range_rects(&layout, range, CODE_WASH_PAD_X, CODE_WASH_INSET_Y) {
+                    window.paint_quad(quad(
+                        rect,
+                        px(CODE_WASH_RADIUS),
+                        mention_wash,
+                        px(1.0),
+                        mention_border,
                         BorderStyle::default(),
                     ));
                 }
@@ -783,6 +812,8 @@ fn text_element(flat: &FlatText, key: TextKey, ctx: &Ctx) -> AnyElement {
         ctx.search.clone(),
         ctx.link_handler.clone(),
         ctx.palette.code_wash,
+        ctx.palette.mention_wash,
+        ctx.palette.mention_border,
         ctx.palette.selection,
         ctx.palette.search_match,
         ctx.palette.active_search_match,
@@ -812,6 +843,8 @@ pub fn selectable_flat_text(
         None,
         None,
         code_wash,
+        gpui::transparent_black(),
+        gpui::transparent_black(),
         selection_wash,
         gpui::transparent_black(),
         gpui::transparent_black(),
@@ -1531,6 +1564,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
             runs: code_runs(code, lang, &code_font, ctx.palette),
             links: Vec::new(),
             code_ranges: Vec::new(),
+            mention_ranges: Vec::new(),
         }
     });
     let label = language

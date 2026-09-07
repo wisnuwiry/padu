@@ -564,6 +564,8 @@ pub struct TextInput {
     focus_click_select_all: bool,
     /// Language for paint-only syntax colouring, in code mode.
     language: Option<Lang>,
+    /// Whether to highlight file and folder mentions as inline chips.
+    highlight_mentions: bool,
     /// Cached token spans over `content`, as absolute byte ranges. Recomputed
     /// only when the content changes, so painting a large file is free.
     highlight: Vec<(Range<usize>, TokenClass)>,
@@ -656,6 +658,7 @@ impl TextInput {
             select_all_on_focus_click: false,
             focus_click_select_all: false,
             language: None,
+            highlight_mentions: false,
             highlight: Vec::new(),
             search_matches: Vec::new(),
             active_search_match: None,
@@ -833,26 +836,83 @@ impl TextInput {
         self.read_only = read_only;
     }
 
+    pub fn highlight_mentions(mut self) -> Self {
+        self.highlight_mentions = true;
+        self.refresh_highlight();
+        self
+    }
+
     /// Re-tokenize after a content change. Cheap for a composer (no language),
-    /// one linear pass for a code editor.
+    /// one linear pass for a code editor or mention-highlighted field.
     fn refresh_highlight(&mut self) {
-        let Some(language) = self.language else {
-            return;
-        };
-        self.highlight.clear();
-        let mut line_start = 0;
-        for (line, tokens) in self
-            .content
-            .split('\n')
-            .zip(highlight::tokenize(language, &self.content))
-        {
-            self.highlight.extend(tokens.into_iter().map(|token| {
-                (
-                    line_start + token.range.start..line_start + token.range.end,
-                    token.class,
-                )
-            }));
-            line_start += line.len() + 1;
+        if let Some(language) = self.language {
+            self.highlight.clear();
+            let mut line_start = 0;
+            for (line, tokens) in self
+                .content
+                .split('\n')
+                .zip(highlight::tokenize(language, &self.content))
+            {
+                self.highlight.extend(tokens.into_iter().map(|token| {
+                    (
+                        line_start + token.range.start..line_start + token.range.end,
+                        token.class,
+                    )
+                }));
+                line_start += line.len() + 1;
+            }
+        } else if self.highlight_mentions {
+            self.highlight.clear();
+            let content = &self.content;
+            let mut cursor = 0;
+            while cursor < content.len() {
+                if let Some(at_rel) = content[cursor..].find('@') {
+                    let at_pos = cursor + at_rel;
+                    let preceded_by_boundary = at_pos == 0
+                        || content[..at_pos]
+                            .chars()
+                            .last()
+                            .is_some_and(char::is_whitespace);
+                    if preceded_by_boundary {
+                        let after_at = at_pos + 1;
+                        let token_end = content[after_at..]
+                            .char_indices()
+                            .take_while(|(_, ch)| {
+                                !ch.is_whitespace()
+                                    && !matches!(
+                                        *ch,
+                                        ',' | ';'
+                                            | '!'
+                                            | '?'
+                                            | '('
+                                            | ')'
+                                            | '['
+                                            | ']'
+                                            | '{'
+                                            | '}'
+                                            | '<'
+                                            | '>'
+                                            | '"'
+                                            | '\''
+                                    )
+                            })
+                            .last()
+                            .map(|(i, ch)| after_at + i + ch.len_utf8())
+                            .unwrap_or(after_at);
+                        if token_end > after_at {
+                            self.highlight
+                                .push((at_pos..token_end, TokenClass::Mention));
+                            cursor = token_end;
+                            continue;
+                        }
+                    }
+                    cursor = at_pos + 1;
+                } else {
+                    break;
+                }
+            }
+        } else {
+            self.highlight.clear();
         }
     }
 
@@ -2070,6 +2130,7 @@ fn input_text_runs(
     highlight: &[(Range<usize>, TokenClass)],
     token_color: impl Fn(TokenClass) -> Hsla,
     search: SearchPaint,
+    mention_color: Hsla,
 ) -> Vec<TextRun> {
     let mut boundaries = vec![0, display_len];
     for range in [selected_range, marked_range].into_iter().flatten() {
@@ -2105,6 +2166,10 @@ fn input_text_runs(
             let start = boundary[0];
             let end = boundary[1];
             let token_index = highlight.partition_point(|(range, _)| range.end <= start);
+            let is_mention = highlight
+                .get(token_index)
+                .filter(|(range, _)| range.start <= start && range.end >= end)
+                .is_some_and(|(_, class)| *class == TokenClass::Mention);
             let color = highlight
                 .get(token_index)
                 .filter(|(range, _)| range.start <= start && range.end >= end)
@@ -2118,6 +2183,8 @@ fn input_text_runs(
                 Some(selection_color)
             } else if covering_match(start, end) {
                 Some(search.match_color)
+            } else if is_mention {
+                Some(mention_color)
             } else {
                 None
             };
@@ -2212,8 +2279,12 @@ impl Element for InputElement {
             } else {
                 &input.highlight
             },
-            |class| palette.token(class),
+            |class| match class {
+                TokenClass::Mention => theme.accent,
+                _ => palette.token(class),
+            },
             search,
+            theme.accent.opacity(0.18),
         );
         let mut text = StyledText::new(display_text).with_runs(runs);
         let (layout_id, text_layout_state) = text.request_layout(id, inspector_id, window, cx);
@@ -2551,6 +2622,7 @@ impl ComposerInput {
                 .submit_on_enter()
                 .auto_height()
                 .media_paste()
+                .highlight_mentions()
                 .placeholder(tr!("input.do_anything"))
         });
         let focus_handle = input.read(cx).focus();
@@ -2623,6 +2695,23 @@ impl ComposerInput {
     pub fn replace_range(&mut self, range: Range<usize>, text: &str, cx: &mut Context<Self>) {
         self.input
             .update(cx, |input, cx| input.replace_range(range, text, cx));
+    }
+
+    /// Splice a `@mention` at the caret offset, inserting surrounding whitespace
+    /// when needed, and advance the caret past it.
+    pub fn insert_mention(&mut self, mention: &str, cx: &mut Context<Self>) {
+        self.input.update(cx, |input, cx| {
+            let cursor = input.cursor();
+            let content = input.content();
+            let mut text = String::new();
+            if cursor > 0 && !content[..cursor].ends_with(char::is_whitespace) {
+                text.push(' ');
+            }
+            text.push('@');
+            text.push_str(mention);
+            text.push(' ');
+            input.replace_range(cursor..cursor, &text, cx);
+        });
     }
 
     pub fn preserve_visual_focus_for_context_menu(
@@ -3307,6 +3396,7 @@ mod tests {
                 _ => plain,
             },
             SearchPaint::none(),
+            hsla(0.0, 0.0, 0.0, 0.0),
         );
 
         assert_eq!(
@@ -3347,6 +3437,7 @@ mod tests {
             &[],
             |_| hsla(0.0, 0.0, 1.0, 1.0),
             SearchPaint::none(),
+            hsla(0.0, 0.0, 0.0, 0.0),
         );
 
         assert_eq!(
@@ -3402,6 +3493,7 @@ mod tests {
                 match_color,
                 active_color,
             },
+            hsla(0.0, 0.0, 0.0, 0.0),
         );
 
         assert_eq!(runs.iter().map(|run| run.len).sum::<usize>(), 20);
