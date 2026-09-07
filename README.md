@@ -18,6 +18,7 @@
 </p>
 
 <p align="center">
+  <a href="https://padu.dev/download">Download</a>&nbsp;·
   <a href="#overview">Overview</a>&nbsp;·
   <a href="#supported-agents">Agents</a>&nbsp;·
   <a href="#highlights">Highlights</a>&nbsp;·
@@ -44,43 +45,42 @@ it keeps projects, sessions, and transcripts entirely on your machine.
   <img alt="Padu app preview" src="apps/landing/public/preview-light.webp" width="100%">
 </picture>
 
-## Install
+## Download
 
-Padu is available for **Linux**, **macOS**, and **Windows**.
+The recommended way to download and install Padu on **macOS**, **Windows**, and **Linux** is via:
 
-### Linux
+👉 **[https://padu.dev/download](https://padu.dev/download)**
+
+| Platform | Download / Install | Notes |
+| :--- | :--- | :--- |
+| **macOS** | [Download `.dmg`](https://padu.dev/download) | Apple Silicon & Intel, Developer ID signed and Apple-notarized |
+| **Windows** | [Download `.exe` Setup](https://padu.dev/download) | x64 & ARM64 installers, per-user install |
+| **Linux** | [Download `.tar.gz`](https://padu.dev/download) | x86_64 & ARM64 tarballs, Wayland & X11 support |
+
+You can also find all release assets and checksums on [GitHub Releases](https://github.com/wisnuwiry/padu/releases/latest).
+
+---
+
+### Command Line Install
+
+#### Linux
+
+Install directly into `~/.local/padu.app` without root or package managers:
 
 ```sh
 curl -fsSL https://padu.dev/install.sh | sh
 ```
 
-Installs to `~/.local/padu.app` — no root, no package manager.
+#### Windows
 
-### macOS
+Install per-user via PowerShell:
 
-```sh
-# Download the latest DMG from GitHub Releases:
-# https://github.com/wisnuwiry/padu/releases/latest
-#
-# Or via terminal:
-curl -LO https://github.com/wisnuwiry/padu/releases/latest/download/Padu-0.1.1.dmg
-open Padu-0.1.1.dmg
+```powershell
+# Open download page in browser:
+Start-Process https://padu.dev/download
 ```
 
-### Windows
-
-```sh
-# Download the latest installer from GitHub Releases:
-# https://github.com/wisnuwiry/padu/releases/latest
-#
-# Or via PowerShell:
-irm https://github.com/wisnuwiry/padu/releases/latest/download/Padu-0.1.1-x86_64-Setup.exe -OutFile $env:TEMP\Padu-Setup.exe
-Start-Process $env:TEMP\Padu-Setup.exe
-```
-
-> ℹ️ The installer is **per-user** (\`%LOCALAPPDATA%\Programs\Padu\`) — no
-> admin rights needed. SmartScreen may show a warning; click **Run anyway**
-> to proceed.
+> ℹ️ The Windows installer installs to `%LOCALAPPDATA%\Programs\Padu` without requiring administrator privileges. If Microsoft Defender SmartScreen prompts, click **More info** → **Run anyway**.
 
 ## Supported agents
 
