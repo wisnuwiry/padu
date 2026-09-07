@@ -270,7 +270,13 @@ export function Sidebar({
                 )
               }
               if (row.kind === 'spacer') return <div className="h-2.5" />
-              if (row.kind === 'separator') return <div className="mx-3 h-2.5 border-b border-sidebar-border" />
+              if (row.kind === 'separator') {
+                return (
+                  <div className="flex h-[9px] items-center px-2.5">
+                    <div className="h-px w-full bg-sidebar-border" />
+                  </div>
+                )
+              }
               if (row.kind === 'showMore') {
                 return (
                   <div className="relative px-2.5 pb-1">
@@ -352,6 +358,12 @@ export function Sidebar({
                           <PaduIcon
                             className="size-3.5 shrink-0 text-[var(--text-secondary)]"
                             name={row.collapsed ? 'folder' : 'folderOpen'}
+                          />
+                        )}
+                        {row.group.kind === 'pinned' && (
+                          <PaduIcon
+                            className="size-3.5 shrink-0 text-[var(--text-secondary)]"
+                            name="pin"
                           />
                         )}
                         <span className="truncate">{label}</span>
@@ -727,7 +739,6 @@ function SessionRow({
                   )}
                 />
               </span>
-              {item.session.pinned_at && <PaduIcon className="size-3 shrink-0 text-[var(--warning)]" name="pin" />}
               <span
                 className={cn(
                   'min-w-0 flex-1 truncate text-[13px] leading-tight text-[var(--text-secondary)] group-hover:text-foreground',
@@ -796,7 +807,6 @@ function SessionRow({
                   )}
                 />
               </span>
-              {item.session.pinned_at && <PaduIcon className="size-3 shrink-0 text-[var(--warning)]" name="pin" />}
               <span
                 className={cn(
                   'min-w-0 flex-1 truncate text-[13.5px] text-foreground',

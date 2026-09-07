@@ -85,8 +85,11 @@ export function sidebarRows(
       }
     }
     if (groups.length) {
-      rows.push({ kind: 'spacer', key: `spacer:${group.id}` })
-      if (group.kind === 'pinned') rows.push({ kind: 'separator', key: 'separator:pinned' })
+      if (group.kind === 'pinned') {
+        rows.push({ kind: 'separator', key: 'separator:pinned' })
+      } else {
+        rows.push({ kind: 'spacer', key: `spacer:${group.id}` })
+      }
     }
   })
   return rows
