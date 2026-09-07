@@ -1,4 +1,7 @@
 use super::*;
+use crate::ui::dialog::{
+    ConfirmVariant, dialog_backdrop, dialog_cancel_button, dialog_card, dialog_confirm_button,
+};
 
 impl Padu {
     pub(crate) fn render_right_panel_files(
@@ -273,13 +276,7 @@ impl Padu {
                     items.push(
                         MenuItem::new(tr!("files.delete"), move |window, cx| {
                             let _ = delete_weak.update(cx, |this, cx| {
-                                this.begin_file_operation_dialog(
-                                    FileOperationDialogKind::Delete {
-                                        target: target.clone(),
-                                    },
-                                    window,
-                                    cx,
-                                );
+                                this.confirm_delete_path(target.clone(), window, cx);
                             });
                         })
                         .icon("icons/trash.svg")
@@ -519,13 +516,7 @@ impl Padu {
             }
             "delete" | "backspace" => {
                 let entry = &entries[current];
-                self.begin_file_operation_dialog(
-                    FileOperationDialogKind::Delete {
-                        target: entry.absolute_path.clone(),
-                    },
-                    window,
-                    cx,
-                );
+                self.confirm_delete_path(entry.absolute_path.clone(), window, cx);
                 cx.stop_propagation();
             }
             _ => {}
@@ -1280,11 +1271,7 @@ impl Padu {
             input.update(cx, |input, cx| input.set_content(initial, cx));
         }
         let focus = cx.focus_handle();
-        let focus_target = if matches!(kind, FileOperationDialogKind::Delete { .. }) {
-            focus.clone()
-        } else {
-            input.read(cx).focus()
-        };
+        let focus_target = input.read(cx).focus();
         let previous_focus = window.focused(cx);
         self.right_panel_file_operation_dialog = Some(FileOperationDialog {
             kind,
@@ -1318,19 +1305,13 @@ impl Padu {
         let Some(dialog) = self.right_panel_file_operation_dialog.take() else {
             return;
         };
-        let is_delete = matches!(dialog.kind, FileOperationDialogKind::Delete { .. });
-        let name = if is_delete {
-            String::new()
-        } else {
-            let name = dialog.input.read(cx).content().trim().to_owned();
-            if name.is_empty() || Path::new(&name).components().count() != 1 {
-                self.show_toast(tr!("files.invalid_name"));
-                self.right_panel_file_operation_dialog = Some(dialog);
-                cx.notify();
-                return;
-            }
-            name
-        };
+        let name = dialog.input.read(cx).content().trim().to_owned();
+        if name.is_empty() || Path::new(&name).components().count() != 1 {
+            self.show_toast(tr!("files.invalid_name"));
+            self.right_panel_file_operation_dialog = Some(dialog);
+            cx.notify();
+            return;
+        }
         let Some(root) = self.selected_workspace_path().map(Path::to_path_buf) else {
             return;
         };
@@ -1373,19 +1354,6 @@ impl Padu {
                     to: new_relative,
                 }
             }
-            FileOperationDialogKind::Delete { target } => {
-                let Ok(relative_path) = target.strip_prefix(&root) else {
-                    return;
-                };
-                let rel_str = relative_path.to_string_lossy().into_owned();
-                if self.right_panel_files_selected_path.as_deref() == Some(&rel_str) {
-                    self.right_panel_files_selected_path = None;
-                }
-                padu_client::WorkspaceOperation::DeletePath {
-                    root: root.clone(),
-                    relative_path: relative_path.to_path_buf(),
-                }
-            }
         };
         let workspace = padu_client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |padu, cx| {
@@ -1411,6 +1379,40 @@ impl Padu {
         cx.notify();
     }
 
+    pub(crate) fn execute_delete_path(&mut self, target: PathBuf, cx: &mut Context<Self>) {
+        let Some(root) = self.selected_workspace_path().map(Path::to_path_buf) else {
+            return;
+        };
+        let Ok(relative_path) = target.strip_prefix(&root) else {
+            return;
+        };
+        let rel_str = relative_path.to_string_lossy().into_owned();
+        if self.right_panel_files_selected_path.as_deref() == Some(&rel_str) {
+            self.right_panel_files_selected_path = None;
+        }
+        let operation = padu_client::WorkspaceOperation::DeletePath {
+            root,
+            relative_path: relative_path.to_path_buf(),
+        };
+        let workspace = padu_client::WorkspaceClient::new(self.daemon.client());
+        cx.spawn(async move |padu, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { workspace.request(operation) })
+                .await;
+            let _ = padu.update(cx, |padu, cx| {
+                match result {
+                    Ok(padu_client::WorkspaceResult::Ack) => {
+                        padu.refresh_right_panel_working_tree(cx);
+                    }
+                    Ok(_) | Err(_) => padu.show_toast(tr!("files.operation_failed")),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     pub(crate) fn render_file_operation_dialog(
         &mut self,
         _window: &mut Window,
@@ -1418,131 +1420,57 @@ impl Padu {
     ) -> Option<AnyElement> {
         let dialog = self.right_panel_file_operation_dialog.as_ref()?;
         let theme = Theme::current(cx);
-        let is_delete = matches!(dialog.kind, FileOperationDialogKind::Delete { .. });
         let title = match dialog.kind {
             FileOperationDialogKind::CreateFile { .. } => tr!("files.new_file"),
             FileOperationDialogKind::CreateDirectory { .. } => tr!("files.new_folder"),
             FileOperationDialogKind::Rename { .. } => tr!("common.rename"),
-            FileOperationDialogKind::Delete { .. } => tr!("files.delete"),
         };
         let confirm_label = match dialog.kind {
             FileOperationDialogKind::Rename { .. } => tr!("common.rename"),
-            FileOperationDialogKind::Delete { .. } => tr!("files.delete"),
             _ => tr!("files.confirm"),
         };
-        let cancel = div()
-            .id("file-operation-cancel")
-            .tab_index(0)
-            .h(px(30.0))
-            .px(px(12.0))
-            .gap(px(6.0))
-            .rounded(px(7.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .cursor_pointer()
-            .text_size(sp(12.5))
-            .text_color(theme.text_secondary)
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
-            .hover(|e| e.bg(theme.overlay))
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(tr!("common.cancel"))
-            .child(kbd_badge("Esc", &theme))
-            .on_click(
-                cx.listener(|this, _, window, cx| this.close_file_operation_dialog(window, cx)),
-            );
-        let (confirm_bg, confirm_text, badge_border) = if is_delete {
-            (theme.danger, gpui::white(), gpui::hsla(0.0, 0.0, 1.0, 0.25))
-        } else {
-            (
-                theme.inverse,
-                theme.on_inverse,
-                gpui::hsla(0.0, 0.0, 1.0, 0.2),
-            )
-        };
-        let mut confirm = div()
-            .id("file-operation-confirm")
-            .tab_index(0)
-            .h(px(30.0))
-            .px(px(14.0))
-            .gap(px(6.0))
-            .rounded(px(7.0))
-            .bg(confirm_bg)
-            .cursor_pointer()
-            .text_size(sp(12.5))
-            .font_weight(FontWeight::MEDIUM)
-            .text_color(confirm_text)
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
-            .hover(|e| e.opacity(0.9))
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(confirm_label)
-            .child(kbd_badge_icon(
-                "icons/corner-down-left.svg",
-                confirm_bg,
-                confirm_text,
-                badge_border,
-            ))
-            .on_click(
-                cx.listener(|this, _, window, cx| this.submit_file_operation_dialog(window, cx)),
-            );
-        if is_delete {
-            confirm = confirm.track_focus(&dialog.focus);
-        }
-        let body = if is_delete {
-            let target_name = match &dialog.kind {
-                FileOperationDialogKind::Delete { target } => target
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or_default()
-                    .to_owned(),
-                _ => String::new(),
-            };
-            div()
-                .text_size(sp(13.5))
-                .line_height(sp(20.0))
-                .text_color(theme.text_secondary)
-                .child(tr!("files.delete_confirm", name = target_name))
-        } else {
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(6.0))
-                .child(
-                    div()
-                        .text_size(sp(12.5))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text_secondary)
-                        .child(tr!("files.name_placeholder")),
-                )
-                .child(
-                    div()
-                        .h(px(32.0))
-                        .px(px(10.0))
-                        .rounded(px(7.0))
-                        .border_1()
-                        .border_color(theme.border)
-                        .bg(theme.surface)
-                        .flex()
-                        .items_center()
-                        .child(dialog.input.clone()),
-                )
-        };
-        let card = div()
-            .id("file-operation-dialog")
-            .w(px(420.0))
-            .p(px(20.0))
-            .gap(px(16.0))
+        let cancel = dialog_cancel_button(
+            "file-operation-cancel",
+            tr!("common.cancel"),
+            &dialog.focus,
+            &theme,
+            cx,
+            |this, window, cx| this.close_file_operation_dialog(window, cx),
+        );
+        let confirm_focus = cx.focus_handle();
+        let confirm = dialog_confirm_button(
+            "file-operation-confirm",
+            confirm_label,
+            &confirm_focus,
+            ConfirmVariant::Default,
+            &theme,
+            cx,
+            |this, window, cx| this.submit_file_operation_dialog(window, cx),
+        );
+        let body = div()
             .flex()
             .flex_col()
-            .rounded(px(14.0))
-            .bg(theme.raised)
-            .border_1()
-            .border_color(theme.border_strong)
-            .shadow_lg()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .gap(px(6.0))
+            .child(
+                div()
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_secondary)
+                    .child(tr!("files.name_placeholder")),
+            )
+            .child(
+                div()
+                    .h(px(32.0))
+                    .px(px(10.0))
+                    .rounded(px(7.0))
+                    .border_1()
+                    .border_color(theme.border)
+                    .bg(theme.surface)
+                    .flex()
+                    .items_center()
+                    .child(dialog.input.clone()),
+            );
+        let card = dialog_card("file-operation-dialog", &theme, px(420.0))
             .child(
                 div()
                     .flex()
@@ -1550,19 +1478,10 @@ impl Padu {
                     .justify_between()
                     .child(
                         div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .when(is_delete, |header| {
-                                header.child(icon("icons/trash.svg", 15.0, theme.danger))
-                            })
-                            .child(
-                                div()
-                                    .text_size(sp(15.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(theme.text)
-                                    .child(title),
-                            ),
+                            .text_size(sp(15.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme.text)
+                            .child(title),
                     )
                     .child(
                         div()
@@ -1605,30 +1524,14 @@ impl Padu {
                     _ => {}
                 }
             }));
-        let scrim = if theme.is_dark {
-            gpui::hsla(0.0, 0.0, 0.0, 0.45)
-        } else {
-            gpui::hsla(0.0, 0.0, 0.0, 0.25)
-        };
-        Some(
-            div()
-                .id("file-operation-layer")
-                .absolute()
-                .inset_0()
-                .occlude()
-                .bg(scrim)
-                .flex()
-                .items_center()
-                .justify_center()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _, window, cx| {
-                        this.close_file_operation_dialog(window, cx);
-                    }),
-                )
-                .child(card)
-                .into_any_element(),
-        )
+
+        Some(dialog_backdrop(
+            "file-operation-layer",
+            &theme,
+            cx,
+            |this, window, cx| this.close_file_operation_dialog(window, cx),
+            card,
+        ))
     }
 
     pub(crate) fn toggle_right_panel_hidden_files(&mut self, cx: &mut Context<Self>) {
