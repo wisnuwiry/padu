@@ -158,7 +158,7 @@ windows = { version = "0.61", features = [
     "Win32_System_Com",
     "Win32_UI_WindowsAndMessaging",
 ] }
-windows-core = "0.62"
+windows-core = "0.100"
 # GPUI does not read the Windows animation preference, so Padu asks
 # `SystemParametersInfoW` itself. Same major version as the one already in the
 # graph through GPUI.
