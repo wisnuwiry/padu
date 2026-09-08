@@ -814,7 +814,7 @@ mod tests {
                 ProviderKind::Agy => {
                     assert!(has_pair(&args, "--prompt", prompt));
                     assert!(has_pair(&args, "--output-format", "text"));
-                    assert!(has_pair(&args, "--model", "model-low"));
+                    assert!(has_pair(&args, "--model", "model"));
                 }
                 ProviderKind::Kimi => {
                     assert!(has_pair(&args, "--prompt", prompt));
