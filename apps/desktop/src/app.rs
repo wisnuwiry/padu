@@ -68,11 +68,11 @@ use crate::ui::{
 use crate::{
     CancelTaskSwitch, CancelTurn, CloseFind, CloseWindow, ConfirmTaskSwitch, CopySelection,
     FindNext, FindPrevious, FocusComposer, NavigateBack, NavigateForward, NewProject, NewSession,
-    NextRightPanelTab, OpenBrowser, OpenFiles, OpenFind, OpenFindReplace, OpenResumePicker,
-    OpenReview, OpenSettings, OpenTerminal, PrevRightPanelTab, ReplaceAllMatches, SaveFile,
-    SelectFirstTask, SelectLastTask, SelectNextSession, SelectPreviousSession, SwitchTaskBackward,
-    SwitchTaskForward, ToggleCommandPalette, ToggleFindCaseSensitive, ToggleFindRegex,
-    ToggleFindWholeWord, ToggleFpsCounter, ToggleModelPicker, ToggleRightPanel,
+    NextRightPanelTab, OpenBrowser, OpenFilePicker, OpenFiles, OpenFind, OpenFindReplace,
+    OpenResumePicker, OpenReview, OpenSettings, OpenTerminal, PrevRightPanelTab, ReplaceAllMatches,
+    SaveFile, SelectFirstTask, SelectLastTask, SelectNextSession, SelectPreviousSession,
+    SwitchTaskBackward, SwitchTaskForward, ToggleCommandPalette, ToggleFindCaseSensitive,
+    ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter, ToggleModelPicker, ToggleRightPanel,
     ToggleRightPanelFullscreen, ToggleSidebar, ToggleUsagePanel,
 };
 
@@ -1397,7 +1397,7 @@ pub struct Padu {
     right_panel_pending_terminal_focus: Option<Uuid>,
     right_panel_expanded_paths: HashSet<PathBuf>,
     right_panel_show_hidden_files: bool,
-    right_panel_file_operation_dialog: Option<right_panel::FileOperationDialog>,
+
     right_panel_inline_file_operation: Option<right_panel::InlineFileOperation>,
     right_panel_files_selected_path: Option<String>,
     pub(crate) right_panel_files_cursor: Option<usize>,
@@ -3125,7 +3125,7 @@ impl Padu {
                 right_panel_pending_terminal_focus: None,
                 right_panel_expanded_paths: HashSet::new(),
                 right_panel_show_hidden_files: false,
-                right_panel_file_operation_dialog: None,
+
                 right_panel_inline_file_operation: None,
                 right_panel_files_selected_path: None,
                 right_panel_files_cursor: None,

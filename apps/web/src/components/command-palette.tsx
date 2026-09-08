@@ -1,7 +1,7 @@
-import type { AgentSession, ProviderKind, ProviderSessionSummary, SessionMessageMatch } from '@padu/client'
+import type { AgentSession, FileEntry, ProviderKind, ProviderSessionSummary, SessionMessageMatch } from '@padu/client'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { ProviderIcon, PROVIDERS, providerMeta, PaduIcon, type PaduIconName } from '@/components/padu-icon'
+import { FileTypeIcon, ProviderIcon, PROVIDERS, providerMeta, PaduIcon, type PaduIconName } from '@/components/padu-icon'
 import { Kbd } from '@/components/ui/kbd'
 import type { SettingsPageId } from '@/components/settings-view'
 import { SETTINGS_PAGES } from '@/components/settings-view'
@@ -23,7 +23,7 @@ import { formatTimeAgo, sessionHasStarted } from '@/lib/sidebar-presentation'
 import { cn } from '@/lib/utils'
 
 type PaletteSection = 'suggested' | 'tasks' | 'sessions' | 'providers' | 'commands' | 'settings'
-export type CommandPaletteView = 'commands' | 'resume' | 'resumeProviders'
+export type CommandPaletteView = 'commands' | 'resume' | 'resumeProviders' | 'findFile'
 type Translator = (key: string, params?: Record<string, string | number>) => string
 
 interface PaletteItem {
@@ -57,6 +57,7 @@ export interface CommandPaletteActions {
   selectPreviousTask?: () => void
   selectNextTask?: () => void
   resumeProviderSession: (summary: ProviderSessionSummary) => Promise<void>
+  openFile: (path: string) => void
 }
 
 export function CommandPalette({
@@ -70,6 +71,8 @@ export function CommandPalette({
   canChooseModel,
   canToggleUsage,
   currentProvider,
+  files = [],
+  filesLoading = false,
   initialView = 'commands',
   actions,
   onOpenChange,
@@ -84,6 +87,8 @@ export function CommandPalette({
   canChooseModel: boolean
   canToggleUsage: boolean
   currentProvider: ProviderKind
+  files?: FileEntry[]
+  filesLoading?: boolean
   initialView?: CommandPaletteView
   actions: CommandPaletteActions
   onOpenChange: (open: boolean) => void
@@ -212,6 +217,14 @@ export function CommandPalette({
     }
   }, [client, open, resumeProvider, view])
 
+  function openFileView() {
+    setView('findFile')
+    setQuery('')
+    setPreviousItems([])
+    setSelected(0)
+    requestAnimationFrame(() => input.current?.focus())
+  }
+
   function openResumeView() {
     setResumeProvider(currentProvider)
     setView('resume')
@@ -280,6 +293,8 @@ export function CommandPalette({
           select: selectResumeProvider,
           t,
         })
+    : view === 'findFile'
+    ? buildFileItems({ files, query, openFile: actions.openFile })
     : buildItems({
         taskState,
         query,
@@ -294,6 +309,7 @@ export function CommandPalette({
         macShortcuts,
         actions,
         openResume: openResumeView,
+        openFileView,
         t,
       })
   const items = view === 'commands' && shouldKeepPreviousPaletteItems(
@@ -303,7 +319,9 @@ export function CommandPalette({
   ) ? previousItems : nextItems
   const resultsPending = view === 'resume'
     ? providerSessionsPending
-    : view === 'commands' && searchPending
+    : view === 'findFile' && filesLoading
+      ? true
+      : view === 'commands' && searchPending
 
   useEffect(() => setSelected((current) => Math.min(current, Math.max(0, items.length - 1))), [items.length])
   if (!open) return null
@@ -336,8 +354,15 @@ export function CommandPalette({
       requestAnimationFrame(() => input.current?.focus())
       return
     }
-    if (view === 'resume') {
+    if (view === 'findFile') {
       setView('commands')
+      setQuery('')
+      setSelected(0)
+      requestAnimationFrame(() => input.current?.focus())
+      return
+    }
+    if (view === 'resume') {
+      setView('commands');
       setQuery('')
       setProviderSessions([])
       setProviderSessionsPending(false)
@@ -362,6 +387,10 @@ export function CommandPalette({
       <div className="flex max-h-[min(440px,calc(100dvh-108px))] w-full max-w-[640px] flex-col overflow-hidden rounded-[12px] bg-[var(--raised)] shadow-[0_24px_80px_rgba(0,0,0,0.26)]">
         <div className="flex h-[52px] shrink-0 items-center gap-2.5 border-b px-4">
           <PaduIcon className="size-3.5 shrink-0 text-[var(--text-tertiary)]" name="search" />
+          {view === 'findFile' && <>
+            <span className="text-[12.5px] text-[var(--text-secondary)]">{t('command_palette.find_file')}</span>
+            <PaduIcon className="size-3 text-[var(--text-ghost)]" name="chevronRight" />
+          </>}
           <input
             aria-activedescendant={items[selected] ? `palette-${items[selected]!.id}` : undefined}
             aria-controls="command-palette-results"
@@ -369,14 +398,18 @@ export function CommandPalette({
               ? 'command_palette.resume_placeholder'
               : view === 'resumeProviders'
                 ? 'command_palette.resume_provider_placeholder'
-                : 'command_palette.placeholder')}
+                : view === 'findFile'
+                  ? 'command_palette.find_file_placeholder'
+                  : 'command_palette.placeholder')}
             autoComplete="off"
             className="h-full min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-[var(--text-ghost)]"
             placeholder={t(view === 'resume'
               ? 'command_palette.resume_placeholder'
               : view === 'resumeProviders'
                 ? 'command_palette.resume_provider_placeholder'
-                : 'command_palette.placeholder')}
+                : view === 'findFile'
+                  ? 'command_palette.find_file_placeholder'
+                  : 'command_palette.placeholder')}
             ref={input}
             role="combobox"
             value={query}
@@ -453,24 +486,26 @@ export function CommandPalette({
                 <PaduIcon
                   className={cn(
                     'mx-auto size-4 text-[var(--text-ghost)]',
-                    view === 'resume' && resultsPending && 'animate-spin motion-reduce:animate-none',
+                    resultsPending && 'animate-spin motion-reduce:animate-none',
                   )}
-                  name={view === 'resume' && resultsPending
+                  name={resultsPending
                     ? 'loaderCircle'
                     : view === 'resume' && providerSessionError ? 'alert' : 'search'}
                 />
                 <div className="mt-2.5 text-[12.5px] font-medium text-[var(--text-secondary)]">
-                  {view === 'resume' && resultsPending
-                    ? t('command_palette.loading_sessions')
+                  {resultsPending
+                    ? view === 'findFile' ? t('command_palette.loading_files') : t('command_palette.loading_sessions')
                     : view === 'resume' && providerSessionError
                       ? t('command_palette.could_not_load_sessions')
                       : t(view === 'resume'
                           ? 'command_palette.no_resume_sessions'
                           : view === 'resumeProviders'
                             ? 'command_palette.no_matching_providers'
-                            : 'command_palette.no_results')}
+                            : view === 'findFile'
+                              ? 'command_palette.no_files'
+                              : 'command_palette.no_results')}
                 </div>
-                {!(view === 'resume' && resultsPending) && (
+                {!resultsPending && (
                   <div className="mt-1 text-[12px] text-[var(--text-tertiary)]">
                     {view === 'resume' && providerSessionError
                       ? providerSessionError
@@ -478,7 +513,9 @@ export function CommandPalette({
                         ? null
                         : t(view === 'resume'
                             ? 'command_palette.no_resume_sessions_hint'
-                            : 'command_palette.no_results_hint')}
+                            : view === 'findFile'
+                              ? 'command_palette.no_files_hint'
+                              : 'command_palette.no_results_hint')}
                   </div>
                 )}
               </div>
@@ -530,6 +567,7 @@ function PaletteRows({
 }) {
   let section: PaletteSection | null = null
   return items.map((item, index) => {
+    const fileResult = item.id.startsWith('file-')
     const header = section !== item.section
     section = item.section
     return (
@@ -543,7 +581,7 @@ function PaletteRows({
           aria-selected={index === selected}
           className={cn(
             'flex w-full items-center gap-2 rounded-[8px] border border-transparent px-2.5 text-left outline-none hover:bg-accent',
-            item.content ? 'h-[54px]' : 'h-10',
+            item.content ? 'h-[54px]' : fileResult ? 'h-12' : 'h-10',
             index === selected && 'border-input bg-accent',
           )}
           id={`palette-${item.id}`}
@@ -552,17 +590,19 @@ function PaletteRows({
           onClick={() => onExecute(index)}
           onMouseEnter={() => onSelected(index)}
         >
-          <span className="grid size-[18px] shrink-0 place-items-center text-[var(--text-secondary)]">
+          <span className="grid size-[20px] shrink-0 place-items-center text-[var(--text-secondary)]">
             {item.pending
               ? <PaduIcon className="size-3.5 animate-spin motion-reduce:animate-none" name="loaderCircle" />
               : item.provider
               ? <ProviderIcon className="size-3.5" provider={item.provider} />
+              : fileResult
+              ? <FileTypeIcon className="size-4" path={item.keywords} />
               : item.icon && <PaduIcon className="size-3.5" name={item.icon} />}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="flex min-w-0 items-baseline gap-[7px]">
-              <span className={cn('truncate text-[13px] text-[var(--text-secondary)]', index === selected && 'font-medium text-foreground')}>{item.label}</span>
-              {item.detail && <span className="truncate text-[12px] text-[var(--text-tertiary)]">{item.detail}</span>}
+            <span className={cn('flex min-w-0', fileResult ? 'flex-col gap-[2px]' : 'items-baseline gap-[7px]')}>
+              <span className={cn('truncate text-[13px] text-[var(--text-secondary)]', fileResult ? 'leading-[15px]' : undefined, index === selected && 'font-medium text-foreground')}>{item.label}</span>
+              {item.detail && <span className={cn('truncate text-[var(--text-tertiary)]', fileResult ? 'text-[11px] leading-[11px]' : 'text-[12px]')}>{item.detail}</span>}
             </span>
             {item.content && (
               <span className="mt-0.5 block truncate text-[12px] text-[var(--text-tertiary)]">
@@ -604,6 +644,7 @@ function buildItems({
   macShortcuts,
   actions,
   openResume,
+  openFileView,
   t,
 }: {
   taskState: TaskState
@@ -619,6 +660,7 @@ function buildItems({
   macShortcuts: boolean
   actions: CommandPaletteActions
   openResume: () => void
+  openFileView: () => void
   t: Translator
 }): PaletteItem[] {
   const searching = Boolean(query.trim())
@@ -631,6 +673,10 @@ function buildItems({
       closeOnRun: false,
     },
     command('open-project', commandSection, t('command_palette.open_project'), 'folder', shortcut('⌘O', 'Ctrl+O'), `open add folder project workspace repository repo ${t('command_palette.open_project')}`, actions.openProject),
+    {
+      ...command('find-file', commandSection, t('command_palette.find_file'), 'search', shortcut('⌘P', 'Ctrl+P'), `find search file path workspace project ${t('command_palette.find_file')}`, openFileView),
+      closeOnRun: false,
+    },
   ]
   if (canChooseModel) commands.push(command('choose-model', commandSection, t('command_palette.choose_model'), 'bot', shortcut('⌘/', 'Ctrl+/'), `choose change select model provider agent ${t('command_palette.choose_model')}`, actions.chooseModel))
   if (searching) {
@@ -733,6 +779,41 @@ function buildItems({
     ...tasks,
     ...matchingCommands,
   ]
+}
+
+function buildFileItems({
+  files,
+  query,
+  openFile,
+}: {
+  files: FileEntry[]
+  query: string
+  openFile: (path: string) => void
+}): PaletteItem[] {
+  const normalized = query.trim().toLowerCase()
+  return files
+    .filter((file) => !file.is_dir)
+    .map((file, order) => {
+      const path = file.path
+      const filename = path.split('/').pop() ?? path
+      const directory = path.slice(0, Math.max(0, path.length - filename.length)).replace(/\/$/, '')
+      const score = normalized ? fuzzyScore(normalized, path) : 0
+      return {
+        id: `file-${path}`,
+        section: 'commands' as const,
+        label: filename,
+        detail: directory || undefined,
+        icon: 'file' as const,
+        keywords: path,
+        run: () => openFile(path),
+        order,
+        score: score ?? -1,
+      }
+    })
+    .filter((item) => item.score >= 0)
+    .sort((left, right) => right.score - left.score || left.order - right.order)
+    .slice(0, 50)
+    .map(({ order: _, score: __, ...item }) => item)
 }
 
 function buildResumeProviderItems({

@@ -13,17 +13,6 @@ pub(crate) struct InlineFileOperation {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum FileOperationDialogKind {
-    Delete { target: PathBuf },
-}
-
-pub(crate) struct FileOperationDialog {
-    pub(crate) kind: FileOperationDialogKind,
-    pub(crate) focus: FocusHandle,
-    pub(crate) previous_focus: Option<FocusHandle>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct WorkingTreeEntry {
     pub(crate) relative_path: String,
     pub(crate) absolute_path: PathBuf,

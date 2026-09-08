@@ -39,6 +39,7 @@ const SECTION_HEADER_HEIGHT: f32 = 26.0;
 const PROVIDER_SECTION_TOP_MARGIN: f32 = 6.0;
 const RESULT_ROW_HEIGHT: f32 = 40.0;
 const CONTENT_RESULT_ROW_HEIGHT: f32 = 54.0;
+const FILE_RESULT_ROW_HEIGHT: f32 = 48.0;
 const EMPTY_RESULTS_HEIGHT: f32 = 160.0;
 const RESULTS_BOTTOM_PADDING: f32 = 6.0;
 const MAX_CARD_HEIGHT: f32 = 440.0;
@@ -101,6 +102,7 @@ impl PaletteSection {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PaletteIcon {
     Asset(&'static str),
+    File(&'static str),
     Provider(ProviderKind),
 }
 
@@ -166,6 +168,8 @@ enum PaletteAction {
     OpenBrowser,
     OpenTerminal,
     OpenFiles,
+    FindFile,
+    OpenFile(String),
     OpenReview,
     OpenSettings(SettingsPage),
     OpenOnboarding,
@@ -180,6 +184,7 @@ enum CommandPaletteView {
     Commands,
     Resume,
     ResumeProviders,
+    FindFile,
 }
 
 #[derive(Clone, Debug)]
@@ -310,7 +315,9 @@ fn palette_content_match_text(
 }
 
 fn command_palette_row_height(item: &CommandPaletteItem) -> f32 {
-    if item.content_match.is_some() {
+    if matches!(item.action, PaletteAction::OpenFile(_)) {
+        FILE_RESULT_ROW_HEIGHT
+    } else if item.content_match.is_some() {
         CONTENT_RESULT_ROW_HEIGHT
     } else {
         RESULT_ROW_HEIGHT
@@ -425,6 +432,19 @@ impl Padu {
             self.open_command_palette(window, cx);
         }
         self.open_command_palette_resume_view(None, cx);
+    }
+
+    pub(super) fn open_file_picker_action(
+        &mut self,
+        _: &OpenFilePicker,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.command_palette.open {
+            self.open_command_palette(window, cx);
+        }
+        self.refresh_composer_sources(cx);
+        self.open_command_palette_file_view(cx);
     }
 
     pub(super) fn toggle_command_palette_action(
@@ -549,6 +569,26 @@ impl Padu {
         cx.notify();
     }
 
+    fn open_command_palette_file_view(&mut self, cx: &mut Context<Self>) {
+        self.command_palette.view = CommandPaletteView::FindFile;
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("command_palette.find_file_placeholder"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+    }
+
+    fn leave_command_palette_file_view(&mut self, cx: &mut Context<Self>) {
+        self.command_palette.view = CommandPaletteView::Commands;
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("command_palette.placeholder"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+    }
+
     fn leave_command_palette_resume_provider_view(&mut self, cx: &mut Context<Self>) {
         self.command_palette.view = CommandPaletteView::Resume;
         self.command_palette.search.update(cx, |input, cx| {
@@ -566,6 +606,7 @@ impl Padu {
             CommandPaletteView::ResumeProviders => {
                 self.leave_command_palette_resume_provider_view(cx)
             }
+            CommandPaletteView::FindFile => self.leave_command_palette_file_view(cx),
         }
     }
 
@@ -576,6 +617,7 @@ impl Padu {
             CommandPaletteView::ResumeProviders => {
                 tr!("command_palette.resume_provider_placeholder")
             }
+            CommandPaletteView::FindFile => tr!("command_palette.find_file_placeholder"),
         };
         self.command_palette
             .search
@@ -592,7 +634,9 @@ impl Padu {
         }
         if matches!(
             self.command_palette.view,
-            CommandPaletteView::Resume | CommandPaletteView::ResumeProviders
+            CommandPaletteView::Resume
+                | CommandPaletteView::ResumeProviders
+                | CommandPaletteView::FindFile
         ) {
             self.refresh_command_palette_results(query, false, cx);
             cx.notify();
@@ -919,6 +963,15 @@ impl Padu {
                     Some(crate::platform::primary_shortcut("⇧⌘E", "Ctrl+Shift+E")),
                     PaletteAction::OpenFiles,
                     "files explorer tree workspace open right panel",
+                    next(),
+                ),
+                CommandPaletteItem::command(
+                    PaletteSection::Commands,
+                    tr!("command_palette.find_file"),
+                    "icons/search.svg",
+                    Some(crate::platform::primary_shortcut("⌘P", "Ctrl+P")),
+                    PaletteAction::FindFile,
+                    "find search file path workspace project source",
                     next(),
                 ),
                 CommandPaletteItem::command(
@@ -1278,6 +1331,39 @@ impl Padu {
             .scroll_to_item(self.command_palette_scroll_index(self.command_palette.selected));
     }
 
+    fn command_palette_file_candidates(&mut self, query: &str) -> Vec<CommandPaletteItem> {
+        crate::composer_complete::filter_files(
+            &self.mention_file_index,
+            query.trim(),
+            &mut self.command_palette.matcher,
+        )
+        .into_iter()
+        .filter(|file| !file.item.is_dir)
+        .enumerate()
+        .map(|(order, file)| {
+            let path = file.item.path;
+            let label = path.rsplit('/').next().unwrap_or(&path).to_owned();
+            let detail = path
+                .strip_suffix(&label)
+                .map(|value| value.trim_end_matches('/'))
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned);
+            CommandPaletteItem {
+                section: PaletteSection::Commands,
+                label,
+                detail,
+                icon: PaletteIcon::File(crate::app::right_panel::file_icon_for_path(&path)),
+                shortcut: None,
+                action: PaletteAction::OpenFile(path.clone()),
+                content_match: None,
+                search_text: path,
+                order,
+                recency: 0,
+            }
+        })
+        .collect()
+    }
+
     fn refresh_command_palette_results(
         &mut self,
         query: &str,
@@ -1291,6 +1377,28 @@ impl Padu {
             }
             CommandPaletteView::ResumeProviders => {
                 self.refresh_command_palette_resume_provider_results(query, preserve_selection);
+                return;
+            }
+            CommandPaletteView::FindFile => {
+                let selected_action = preserve_selection.then(|| {
+                    self.command_palette
+                        .results
+                        .get(self.command_palette.selected)
+                        .map(|item| item.action.clone())
+                });
+                self.command_palette.results = self.command_palette_file_candidates(query);
+                self.command_palette.selected = selected_action
+                    .flatten()
+                    .and_then(|action| {
+                        self.command_palette
+                            .results
+                            .iter()
+                            .position(|item| item.action == action)
+                    })
+                    .unwrap_or(0);
+                self.command_palette
+                    .scroll
+                    .scroll_to_item(self.command_palette.selected);
                 return;
             }
             CommandPaletteView::Commands => {}
@@ -1709,6 +1817,10 @@ impl Padu {
                 self.load_command_palette_provider_session(summary, window, cx);
                 return;
             }
+            PaletteAction::FindFile => {
+                self.open_command_palette_file_view(cx);
+                return;
+            }
             _ => {}
         }
 
@@ -1741,6 +1853,7 @@ impl Padu {
             PaletteAction::OpenBrowser => self.open_browser_action(&OpenBrowser, window, cx),
             PaletteAction::OpenTerminal => self.open_terminal_action(&OpenTerminal, window, cx),
             PaletteAction::OpenFiles => self.open_files_action(&OpenFiles, window, cx),
+            PaletteAction::OpenFile(path) => self.open_right_panel_file(path, cx),
             PaletteAction::OpenReview => self.open_review_action(&OpenReview, window, cx),
             PaletteAction::OpenSettings(page) => {
                 self.open_settings_action(&OpenSettings, window, cx);
@@ -1790,7 +1903,8 @@ impl Padu {
             PaletteAction::Resume
             | PaletteAction::ChooseResumeProvider
             | PaletteAction::SelectResumeProvider(_)
-            | PaletteAction::ResumeProviderSession(_) => {
+            | PaletteAction::ResumeProviderSession(_)
+            | PaletteAction::FindFile => {
                 unreachable!("resume actions are handled before closing the palette")
             }
         }
@@ -1816,6 +1930,7 @@ impl Padu {
             .min(self.command_palette.results.len().saturating_sub(1));
         let search_query = self.command_palette.search.read(cx).content().to_owned();
         let resume_view = self.command_palette.view == CommandPaletteView::Resume;
+        let file_view = self.command_palette.view == CommandPaletteView::FindFile;
         let resume_session_count = self
             .command_palette
             .results
@@ -1826,6 +1941,7 @@ impl Padu {
             CommandPaletteView::Resume => self.command_palette.provider_sessions_pending,
             CommandPaletteView::Commands => self.command_palette.message_search_pending,
             CommandPaletteView::ResumeProviders => false,
+            CommandPaletteView::FindFile => self.mention_file_index_loading,
         };
         let show_empty_state = should_show_command_palette_empty_state(
             if resume_view {
@@ -1835,9 +1951,12 @@ impl Padu {
             },
             results_pending,
         );
-        let show_loading_state = resume_view
+        let show_loading_state = (resume_view
             && resume_session_count == 0
-            && self.command_palette.provider_sessions_pending;
+            && self.command_palette.provider_sessions_pending)
+            || (file_view
+                && self.command_palette.results.is_empty()
+                && self.mention_file_index_loading);
         let show_placeholder_state = show_empty_state || show_loading_state;
         let results_height =
             command_palette_results_height(&self.command_palette.results, show_placeholder_state)
@@ -1860,7 +1979,11 @@ impl Padu {
             let (icon_path, title, hint, spinning) = if show_loading_state {
                 (
                     "icons/loader-circle.svg",
-                    tr!("command_palette.loading_sessions"),
+                    if file_view {
+                        tr!("command_palette.loading_files")
+                    } else {
+                        tr!("command_palette.loading_sessions")
+                    },
                     None,
                     true,
                 )
@@ -1876,6 +1999,13 @@ impl Padu {
                     "icons/search.svg",
                     tr!("command_palette.no_resume_sessions"),
                     Some(tr!("command_palette.no_resume_sessions_hint")),
+                    false,
+                )
+            } else if file_view {
+                (
+                    "icons/search.svg",
+                    tr!("command_palette.no_files"),
+                    Some(tr!("command_palette.no_files_hint")),
                     false,
                 )
             } else {
@@ -1998,11 +2128,15 @@ impl Padu {
 
                 let highlighted = index == selected;
                 let icon_color = match item.icon {
-                    PaletteIcon::Asset(_) => theme.text_secondary,
+                    PaletteIcon::Asset(_) | PaletteIcon::File(_) => theme.text_secondary,
                     PaletteIcon::Provider(provider) => provider_color(&theme, provider),
                 };
+                let file_icon_path = match item.icon {
+                    PaletteIcon::File(path) => Some(path),
+                    _ => None,
+                };
                 let icon_path = match item.icon {
-                    PaletteIcon::Asset(path) => path,
+                    PaletteIcon::Asset(path) | PaletteIcon::File(path) => path,
                     PaletteIcon::Provider(provider) => provider_icon(provider),
                 };
                 let importing = match &item.action {
@@ -2018,6 +2152,7 @@ impl Padu {
                 } else {
                     item.detail.clone()
                 };
+                let file_result = matches!(&item.action, PaletteAction::OpenFile(_));
                 let content_match = item.content_match.clone();
                 let shortcut = item.shortcut;
                 results = results.child(
@@ -2054,13 +2189,15 @@ impl Padu {
                         }))
                         .child(
                             div()
-                                .size(px(18.0))
+                                .size(px(if file_result { 20.0 } else { 18.0 }))
                                 .flex_none()
                                 .flex()
                                 .items_center()
                                 .justify_center()
                                 .child(if importing {
                                     motion::spin(icon("icons/loader-circle.svg", 14.0, icon_color))
+                                } else if let Some(path) = file_icon_path {
+                                    file_icon(path, 16.0).into_any_element()
                                 } else {
                                     icon(icon_path, 14.0, icon_color).into_any_element()
                                 }),
@@ -2072,10 +2209,49 @@ impl Padu {
                                 .flex()
                                 .flex_col()
                                 .justify_center()
-                                .gap(px(2.0))
-                                .child(
+                                .when(!file_result, |column| column.gap(px(2.0)))
+                                .child(if file_result {
                                     div()
                                         .min_w_0()
+                                        .flex_1()
+                                        .flex()
+                                        .flex_col()
+                                        .justify_center()
+                                        .gap(px(2.0))
+                                        .child(
+                                            div()
+                                                .min_w_0()
+                                                .truncate()
+                                                .text_size(sp(13.0))
+                                                .line_height(sp(15.0))
+                                                .font_weight(if highlighted {
+                                                    FontWeight::MEDIUM
+                                                } else {
+                                                    FontWeight::NORMAL
+                                                })
+                                                .text_color(if highlighted {
+                                                    theme.text
+                                                } else {
+                                                    theme.text_secondary
+                                                })
+                                                .child(item.label.clone()),
+                                        )
+                                        .when_some(detail, |row, detail| {
+                                            row.child(
+                                                div()
+                                                    .min_w_0()
+                                                    .truncate()
+                                                    .text_size(sp(11.0))
+                                                    .line_height(sp(11.0))
+                                                    .text_color(theme.text_tertiary)
+                                                    .child(detail),
+                                            )
+                                        })
+                                        .into_any_element()
+                                } else {
+                                    div()
+                                        .min_w_0()
+                                        .flex_1()
                                         .flex()
                                         .items_baseline()
                                         .gap(px(7.0))
@@ -2105,8 +2281,9 @@ impl Padu {
                                                     .text_color(theme.text_tertiary)
                                                     .child(detail),
                                             )
-                                        }),
-                                )
+                                        })
+                                        .into_any_element()
+                                })
                                 .when_some(content_match, |column, matched| {
                                     column.child(
                                         div()
@@ -2201,6 +2378,17 @@ impl Padu {
                     .text_size(sp(14.0))
                     .text_color(theme.text)
                     .child(icon("icons/search.svg", 14.0, theme.text_tertiary))
+                    .when(file_view, |header| {
+                        header.child(
+                            div()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_secondary)
+                                .child(tr!("command_palette.find_file")),
+                        )
+                    })
+                    .when(file_view, |header| {
+                        header.child(icon("icons/chevron-right.svg", 11.0, theme.text_ghost))
+                    })
                     .child(
                         div()
                             .min_w_0()
