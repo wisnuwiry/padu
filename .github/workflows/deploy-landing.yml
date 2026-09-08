@@ -8,6 +8,7 @@ on:
       - "public-docs/**"
       - "bun.lock"
       - "package.json"
+      - "CHANGELOG.md"
       - ".github/workflows/deploy-landing.yml"
   workflow_dispatch:
 
