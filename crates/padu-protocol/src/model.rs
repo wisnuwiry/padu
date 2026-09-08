@@ -10,6 +10,7 @@ use uuid::Uuid;
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum ProviderKind {
+    Agy,
     Amp,
     Claude,
     #[default]
@@ -25,7 +26,8 @@ pub enum ProviderKind {
 }
 
 impl ProviderKind {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
+        Self::Agy,
         Self::Amp,
         Self::Claude,
         Self::Codex,
@@ -41,6 +43,7 @@ impl ProviderKind {
 
     pub fn id(self) -> &'static str {
         match self {
+            Self::Agy => "agy",
             Self::Amp => "amp",
             Self::Claude => "claude",
             Self::Codex => "codex",
@@ -57,6 +60,7 @@ impl ProviderKind {
 
     pub fn display_name(self) -> &'static str {
         match self {
+            Self::Agy => "Antigravity",
             Self::Amp => "Amp",
             Self::Claude => "Claude Code",
             Self::Codex => "Codex CLI",
@@ -73,6 +77,7 @@ impl ProviderKind {
 
     pub fn short_name(self) -> &'static str {
         match self {
+            Self::Agy => "Agy",
             Self::Amp => "Amp",
             Self::Claude => "Claude",
             Self::Codex => "Codex",
@@ -89,6 +94,7 @@ impl ProviderKind {
 
     pub fn command(self) -> &'static str {
         match self {
+            Self::Agy => "agy_acp_server.par",
             Self::Amp => "amp",
             Self::Claude => "claude",
             Self::Codex => "codex",
@@ -143,7 +149,8 @@ impl ProviderKind {
     pub fn supports_model_discovery(self) -> bool {
         matches!(
             self,
-            Self::Claude
+            Self::Agy
+                | Self::Claude
                 | Self::Codex
                 | Self::Cursor
                 | Self::DeepSeek
@@ -164,6 +171,9 @@ impl ProviderKind {
     tag = "provider"
 )]
 pub enum ProviderResumeCursor {
+    Agy {
+        session_id: String,
+    },
     Amp {
         thread_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -212,6 +222,7 @@ pub enum ProviderResumeCursor {
 impl ProviderResumeCursor {
     pub fn from_session_id(provider: ProviderKind, id: String) -> Self {
         match provider {
+            ProviderKind::Agy => Self::Agy { session_id: id },
             ProviderKind::Amp => Self::Amp {
                 thread_id: id,
                 fork_context: None,
@@ -243,6 +254,7 @@ impl ProviderResumeCursor {
 
     pub fn provider(&self) -> ProviderKind {
         match self {
+            Self::Agy { .. } => ProviderKind::Agy,
             Self::Amp { .. } => ProviderKind::Amp,
             Self::Claude { .. } => ProviderKind::Claude,
             Self::Codex { .. } => ProviderKind::Codex,
@@ -259,6 +271,7 @@ impl ProviderResumeCursor {
 
     pub fn native_id(&self) -> &str {
         match self {
+            Self::Agy { session_id } => session_id,
             Self::Amp { thread_id, .. } => thread_id,
             Self::Claude { session_id, .. }
             | Self::Cursor { session_id, .. }
@@ -3984,6 +3997,10 @@ mod tests {
 
     #[test]
     fn provider_ids_are_stable() {
+        assert_eq!(ProviderKind::Agy.id(), "agy");
+        assert_eq!(ProviderKind::Agy.command(), "agy_acp_server.par");
+        assert_eq!(ProviderKind::Agy.display_name(), "Antigravity");
+        assert_eq!(ProviderKind::Agy.short_name(), "Agy");
         assert_eq!(ProviderKind::Amp.id(), "amp");
         assert_eq!(ProviderKind::Claude.id(), "claude");
         assert_eq!(ProviderKind::Codex.command(), "codex");
@@ -4010,7 +4027,7 @@ mod tests {
             assert!(provider.supports_conversation_fork());
             assert!(provider.supports_conversation_rollback());
         }
-        for provider in [ProviderKind::Fx, ProviderKind::Kimi] {
+        for provider in [ProviderKind::Agy, ProviderKind::Fx, ProviderKind::Kimi] {
             assert!(!provider.supports_conversation_fork());
             assert!(!provider.supports_conversation_rollback());
         }
@@ -4018,6 +4035,7 @@ mod tests {
 
     #[test]
     fn only_dynamic_provider_catalogs_are_discovered() {
+        assert!(ProviderKind::Agy.supports_model_discovery());
         assert!(!ProviderKind::Amp.supports_model_discovery());
         assert!(ProviderKind::Claude.supports_model_discovery());
         assert!(ProviderKind::Codex.supports_model_discovery());
@@ -4264,6 +4282,15 @@ mod tests {
         assert_eq!(value["provider"], "cursor");
         assert_eq!(value["sessionId"], "");
         assert_eq!(value["forkContext"], "[]");
+
+        let cursor = ProviderResumeCursor::Agy {
+            session_id: "agy-sess-42".into(),
+        };
+        let value = serde_json::to_value(&cursor).unwrap();
+        assert_eq!(value["provider"], "agy");
+        assert_eq!(value["sessionId"], "agy-sess-42");
+        assert_eq!(cursor.provider(), ProviderKind::Agy);
+        assert_eq!(cursor.native_id(), "agy-sess-42");
     }
 
     #[test]

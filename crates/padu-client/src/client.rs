@@ -34,6 +34,8 @@ struct ClientInner {
     sessions: Mutex<HashMap<(Uuid, Uuid), Sender<SequencedEvent>>>,
     pending_events: Mutex<HashMap<(Uuid, Uuid), VecDeque<SequencedEvent>>>,
     task_state_subscribers: Mutex<Vec<Sender<u64>>>,
+    provider_install_subscribers:
+        Mutex<Vec<Sender<(padu_protocol::model::ProviderKind, String, u8)>>>,
     last_sequences: Mutex<HashMap<(Uuid, Uuid), LastSequence>>,
     disconnected: AtomicBool,
 }
@@ -110,6 +112,7 @@ impl DaemonClient {
             sessions: Mutex::new(HashMap::new()),
             pending_events: Mutex::new(HashMap::new()),
             task_state_subscribers: Mutex::new(Vec::new()),
+            provider_install_subscribers: Mutex::new(Vec::new()),
             last_sequences: Mutex::new(last_sequences),
             disconnected: AtomicBool::new(false),
         });
@@ -160,11 +163,32 @@ impl DaemonClient {
         receiver
     }
 
+    pub fn subscribe_provider_install_progress(
+        &self,
+    ) -> Receiver<(padu_protocol::model::ProviderKind, String, u8)> {
+        let (events, receiver) = unbounded();
+        self.inner.provider_install_subscribers.lock().push(events);
+        receiver
+    }
+
     pub fn request(
         &self,
         session_id: Uuid,
         runtime_id: Uuid,
         command: Command,
+    ) -> anyhow::Result<ResponsePayload> {
+        self.request_with_timeout(session_id, runtime_id, command, REQUEST_TIMEOUT)
+    }
+
+    /// Send a request with a caller-selected response timeout. Long-running
+    /// maintenance operations such as provider installation should use this
+    /// instead of extending the timeout for normal interactive commands.
+    pub fn request_with_timeout(
+        &self,
+        session_id: Uuid,
+        runtime_id: Uuid,
+        command: Command,
+        timeout: Duration,
     ) -> anyhow::Result<ResponsePayload> {
         if self.inner.disconnected.load(Ordering::Acquire) {
             bail!("Padu daemon is disconnected");
@@ -187,7 +211,7 @@ impl DaemonClient {
             self.inner.pending.lock().remove(&request_id);
             bail!("Padu daemon connection is closed");
         }
-        match response_rx.recv_timeout(REQUEST_TIMEOUT) {
+        match response_rx.recv_timeout(timeout) {
             Ok(Ok(payload)) => Ok(payload),
             Ok(Err(error)) => Err(anyhow!(error.message)),
             Err(error) => {
@@ -329,6 +353,18 @@ fn run_client(
                             .task_state_subscribers
                             .lock()
                             .retain(|subscriber| subscriber.send(revision).is_ok());
+                    }
+                    ServerMessage::ProviderInstallProgress {
+                        provider,
+                        phase,
+                        percent,
+                    } => {
+                        inner
+                            .provider_install_subscribers
+                            .lock()
+                            .retain(|subscriber| {
+                                subscriber.send((provider, phase.clone(), percent)).is_ok()
+                            });
                     }
                     ServerMessage::ShuttingDown => break,
                     ServerMessage::Hello { .. } | ServerMessage::Rejected { .. } => {}

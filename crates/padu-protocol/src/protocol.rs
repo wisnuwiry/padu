@@ -19,7 +19,7 @@ use crate::usage::PlanUsage;
 use crate::usage_history::{UsageHistory, UsageWindow};
 use crate::workspace::{WorkspaceOperation, WorkspaceResult};
 
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 pub const MAX_WIRE_MESSAGE_BYTES: usize = 48 * 1024 * 1024;
 pub const DAEMON_TOKEN_ENV: &str = "PADU_DAEMON_TOKEN";
 pub const DAEMON_ADDRESS_ENV: &str = "PADU_DAEMON_ADDRESS";
@@ -135,6 +135,11 @@ pub enum Command {
     UpdateSettings {
         settings: DaemonSettings,
     },
+    InstallAgyAcp,
+    AuthenticateAgy,
+    LogoutAgy,
+    ReinstallAgyAcp,
+    RemoveAgyAcp,
     ProbeProvider {
         provider: ProviderKind,
         binary_override: Option<String>,
@@ -355,6 +360,13 @@ pub enum ServerMessage {
     TaskStateChanged {
         revision: u64,
     },
+    /// Live progress for a daemon-side provider installation. This is not
+    /// replayed because it only describes the current download operation.
+    ProviderInstallProgress {
+        provider: ProviderKind,
+        phase: String,
+        percent: u8,
+    },
     ShuttingDown,
 }
 
@@ -392,6 +404,10 @@ pub enum ResponsePayload {
     },
     Settings {
         settings: DaemonSettings,
+    },
+    ProviderInstalled {
+        provider: ProviderKind,
+        path: PathBuf,
     },
     ProviderProbe {
         probe: ProviderProbe,
@@ -553,7 +569,7 @@ mod tests {
 
         assert_eq!(json["type"], "forkSessionFromResponse");
         assert_eq!(json["turnCount"], 7);
-        assert_eq!(PROTOCOL_VERSION, 6);
+        assert_eq!(PROTOCOL_VERSION, 7);
     }
 
     #[test]
@@ -562,7 +578,7 @@ mod tests {
 
         assert_eq!(json["type"], "rewindSessionToMessage");
         assert_eq!(json["turnCount"], 4);
-        assert_eq!(PROTOCOL_VERSION, 6);
+        assert_eq!(PROTOCOL_VERSION, 7);
     }
 
     #[test]
@@ -641,5 +657,49 @@ mod tests {
             project_id.to_string()
         );
         assert_eq!(json["changes"][0]["draft"]["text"], "unfinished");
+    }
+
+    #[test]
+    fn agy_wire_commands_and_messages_are_stable() {
+        assert_eq!(
+            serde_json::to_value(Command::InstallAgyAcp).unwrap()["type"],
+            "installAgyAcp"
+        );
+        assert_eq!(
+            serde_json::to_value(Command::AuthenticateAgy).unwrap()["type"],
+            "authenticateAgy"
+        );
+        assert_eq!(
+            serde_json::to_value(Command::LogoutAgy).unwrap()["type"],
+            "logoutAgy"
+        );
+        assert_eq!(
+            serde_json::to_value(Command::ReinstallAgyAcp).unwrap()["type"],
+            "reinstallAgyAcp"
+        );
+        assert_eq!(
+            serde_json::to_value(Command::RemoveAgyAcp).unwrap()["type"],
+            "removeAgyAcp"
+        );
+
+        let progress = ServerMessage::ProviderInstallProgress {
+            provider: ProviderKind::Agy,
+            phase: "Downloading".into(),
+            percent: 42,
+        };
+        let progress_json = serde_json::to_value(progress).unwrap();
+        assert_eq!(progress_json["type"], "providerInstallProgress");
+        assert_eq!(progress_json["provider"], "agy");
+        assert_eq!(progress_json["phase"], "Downloading");
+        assert_eq!(progress_json["percent"], 42);
+
+        let installed = ResponsePayload::ProviderInstalled {
+            provider: ProviderKind::Agy,
+            path: PathBuf::from("/path/to/agy_acp_server.par"),
+        };
+        let installed_json = serde_json::to_value(installed).unwrap();
+        assert_eq!(installed_json["type"], "providerInstalled");
+        assert_eq!(installed_json["provider"], "agy");
+        assert_eq!(installed_json["path"], "/path/to/agy_acp_server.par");
     }
 }
