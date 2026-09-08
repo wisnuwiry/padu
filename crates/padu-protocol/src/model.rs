@@ -4000,7 +4000,7 @@ mod tests {
         assert_eq!(ProviderKind::Agy.id(), "agy");
         assert_eq!(ProviderKind::Agy.command(), "agy_acp_server.par");
         assert_eq!(ProviderKind::Agy.display_name(), "Antigravity");
-        assert_eq!(ProviderKind::Agy.short_name(), "Agy");
+        assert_eq!(ProviderKind::Agy.short_name(), "Antigravity");
         assert_eq!(ProviderKind::Amp.id(), "amp");
         assert_eq!(ProviderKind::Claude.id(), "claude");
         assert_eq!(ProviderKind::Codex.command(), "codex");
