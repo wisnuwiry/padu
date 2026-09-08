@@ -12,7 +12,8 @@ mod pi;
 mod support;
 mod title_refresh;
 
-pub(crate) use acp::catalog_agent;
+pub use acp::{agy_auth_status, authenticate_agy, logout_agy};
+pub(crate) use acp::{catalog_agent, discover_agy_models};
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -221,9 +222,11 @@ pub fn start_local(
         // Cursor, Fx, Grok, and Kimi Code all serve a long-lived ACP session,
         // which is the only way their Supervised mode can actually ask the user
         // rather than silently forcing or denying.
-        ProviderKind::Cursor | ProviderKind::Fx | ProviderKind::Grok | ProviderKind::Kimi => {
-            Arc::new(acp::AcpDriver::start(provider, options, events)?)
-        }
+        ProviderKind::Agy
+        | ProviderKind::Cursor
+        | ProviderKind::Fx
+        | ProviderKind::Grok
+        | ProviderKind::Kimi => Arc::new(acp::AcpDriver::start(provider, options, events)?),
         ProviderKind::DeepSeek => Arc::new(deepseek::DeepSeekDriver::start(options, events)?),
         // OpenCode's own server is its real API, and it is what exposes
         // interactive permission requests.

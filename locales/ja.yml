@@ -391,6 +391,27 @@ providers.binary_path_description: Padu が %{provider} の起動に使用する
 providers.checked_just_now: たった今確認済み
 providers.checked_minutes_ago: "%{count} 分前に確認済み"
 providers.checked_hours_ago: "%{count} 時間前に確認済み"
+providers.agy_install_acp: ACP サーバーをインストール
+providers.agy_downloading: ダウンロード中… %{percent}%
+providers.agy_working: 処理中…
+providers.agy_sign_in: Google でログイン
+providers.agy_sign_out: ログアウト
+providers.agy_reinstall: 再インストール
+providers.agy_remove_download: ダウンロードを削除
+providers.agy_installed_at: Antigravity ACP サーバーを %{path} にインストールしました
+providers.agy_install_failed: "Antigravity ACP サーバーをインストールできませんでした: %{error}"
+providers.agy_signed_in: Google アカウントで Antigravity にログインしました
+providers.agy_sign_in_failed: "Antigravity にログインできませんでした: %{error}"
+providers.agy_signed_out: Antigravity からログアウトしました
+providers.agy_sign_out_failed: "Antigravity からログアウトできませんでした: %{error}"
+providers.agy_removed: ダウンロードした Antigravity ACP サーバーを削除しました
+providers.agy_remove_failed: "Antigravity ACP サーバーを削除できませんでした: %{error}"
+providers.agy_reinstall_title: Antigravity ACP サーバーを再インストール
+providers.agy_reinstall_confirm: ダウンロードした ACP サーバーは検証済みの新しいコピーに置き換えられます。
+providers.agy_sign_out_title: Antigravity からログアウト
+providers.agy_sign_out_confirm: Antigravity の Google OAuth セッションがログアウトされます。
+providers.agy_remove_title: Antigravity ACP サーバーを削除
+providers.agy_remove_confirm: ダウンロードした ACP サーバーと設定されたパスが削除されます。
 
 computer_use.allow_apps: Padu にアプリの操作を許可
 computer_use.availability: コンピュータ操作は Codex、OpenCode、Grok、Pi で利用できます

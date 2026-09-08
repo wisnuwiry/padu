@@ -382,6 +382,27 @@ providers.binary_path_description: Eksekusi yang dijalankan Padu untuk %{provide
 providers.checked_just_now: Baru saja diperiksa
 providers.checked_minutes_ago: Diperiksa %{count}m yang lalu
 providers.checked_hours_ago: Diperiksa %{count}j yang lalu
+providers.agy_install_acp: Pasang server ACP
+providers.agy_downloading: Mengunduh… %{percent}%
+providers.agy_working: Memproses…
+providers.agy_sign_in: Masuk dengan Google
+providers.agy_sign_out: Keluar
+providers.agy_reinstall: Pasang ulang
+providers.agy_remove_download: Hapus unduhan
+providers.agy_installed_at: Server Antigravity ACP terpasang di %{path}
+providers.agy_install_failed: "Gagal memasang server Antigravity ACP: %{error}"
+providers.agy_signed_in: Masuk ke Antigravity dengan Google
+providers.agy_sign_in_failed: "Gagal masuk ke Antigravity: %{error}"
+providers.agy_signed_out: Keluar dari Antigravity
+providers.agy_sign_out_failed: "Gagal keluar dari Antigravity: %{error}"
+providers.agy_removed: Server Antigravity ACP yang diunduh telah dihapus
+providers.agy_remove_failed: "Gagal menghapus server Antigravity ACP: %{error}"
+providers.agy_reinstall_title: Pasang ulang server Antigravity ACP
+providers.agy_reinstall_confirm: Server ACP yang diunduh akan diganti dengan salinan terverifikasi yang baru.
+providers.agy_sign_out_title: Keluar dari Antigravity
+providers.agy_sign_out_confirm: Sesi Google OAuth Antigravity Anda akan dikeluarkan.
+providers.agy_remove_title: Hapus server Antigravity ACP
+providers.agy_remove_confirm: Server ACP yang diunduh dan jalur konfigurasinya akan dihapus.
 computer_use.allow_apps: Izinkan Padu menggunakan aplikasi
 computer_use.availability: Penggunaan Komputer tersedia dengan Codex, OpenCode, Grok, dan Pi
 computer_use.macos_access: Akses macOS

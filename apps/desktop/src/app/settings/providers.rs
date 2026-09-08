@@ -259,6 +259,197 @@ impl Padu {
             .into_any_element()
     }
 
+    pub(crate) fn install_agy_acp(&mut self, cx: &mut Context<Self>) {
+        if self.agy_installing {
+            return;
+        }
+
+        self.agy_installing = true;
+        self.agy_install_percent = 0;
+        cx.notify();
+
+        let daemon = self.daemon.client();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    daemon.request_with_timeout(
+                        uuid::Uuid::nil(),
+                        uuid::Uuid::nil(),
+                        padu_client::Command::InstallAgyAcp,
+                        std::time::Duration::from_secs(10 * 60),
+                    )
+                })
+                .await;
+
+            let _ = this.update(cx, |this, cx| {
+                this.agy_installing = false;
+                match result {
+                    Ok(padu_client::ResponsePayload::ProviderInstalled { path, .. }) => {
+                        let display_path = path.display().to_string();
+                        this.state
+                            .provider_binary_overrides
+                            .insert(ProviderKind::Agy, display_path.clone());
+                        this.save();
+
+                        // The initial provider scan may still be in flight. Update the
+                        // visible probe immediately instead of leaving the row stale
+                        // until that scan happens to finish.
+                        let probe = ProviderProbe {
+                            provider: ProviderKind::Agy,
+                            installed: true,
+                            path: Some(path),
+                            models: crate::model_catalog::fallback_models(ProviderKind::Agy),
+                            agent_presets: crate::model_catalog::fallback_agent_presets(
+                                ProviderKind::Agy,
+                            ),
+                        };
+                        if let Some(existing) = this
+                            .probes
+                            .iter_mut()
+                            .find(|existing| existing.provider == ProviderKind::Agy)
+                        {
+                            *existing = probe;
+                        } else {
+                            this.probes.push(probe);
+                        }
+                        this.show_success_toast(tr!(
+                            "providers.agy_installed_at",
+                            path = display_path
+                        ));
+                        this.refresh_provider_detection(Some(ProviderKind::Agy));
+                    }
+                    Ok(response) => {
+                        this.show_toast(format!(
+                            "Antigravity ACP installation returned an unexpected response: {response:?}"
+                        ));
+                    }
+                    Err(error) => {
+                        this.show_toast(tr!(
+                            "providers.agy_install_failed",
+                            error = error
+                        ));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn authenticate_agy(&mut self, cx: &mut Context<Self>) {
+        if self.agy_installing {
+            return;
+        }
+        self.agy_installing = true;
+        cx.notify();
+        let daemon = self.daemon.client();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    daemon.request_with_timeout(
+                        uuid::Uuid::nil(),
+                        uuid::Uuid::nil(),
+                        padu_client::Command::AuthenticateAgy,
+                        std::time::Duration::from_secs(10 * 60),
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.agy_installing = false;
+                match result {
+                    Ok(padu_client::ResponsePayload::Ack) => {
+                        this.agy_authenticated = true;
+                        this.show_success_toast(tr!("providers.agy_signed_in"));
+                    }
+                    Ok(response) => this.show_toast(format!(
+                        "Antigravity sign-in returned an unexpected response: {response:?}"
+                    )),
+                    Err(error) => {
+                        this.show_toast(tr!("providers.agy_sign_in_failed", error = error))
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    pub(crate) fn logout_agy(&mut self, cx: &mut Context<Self>) {
+        if self.agy_installing {
+            return;
+        }
+        self.agy_installing = true;
+        cx.notify();
+        let daemon = self.daemon.client();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    daemon.request(
+                        uuid::Uuid::nil(),
+                        uuid::Uuid::nil(),
+                        padu_client::Command::LogoutAgy,
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.agy_installing = false;
+                if let Ok(padu_client::ResponsePayload::Ack) = result {
+                    this.agy_authenticated = false;
+                    this.show_success_toast(tr!("providers.agy_signed_out"));
+                } else if let Err(error) = result {
+                    this.show_toast(tr!("providers.agy_sign_out_failed", error = error));
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    pub(crate) fn remove_agy_download(&mut self, cx: &mut Context<Self>) {
+        if self.agy_installing {
+            return;
+        }
+        self.agy_installing = true;
+        cx.notify();
+        let daemon = self.daemon.client();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    daemon.request(
+                        uuid::Uuid::nil(),
+                        uuid::Uuid::nil(),
+                        padu_client::Command::RemoveAgyAcp,
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.agy_installing = false;
+                match result {
+                    Ok(padu_client::ResponsePayload::Ack) => {
+                        this.state
+                            .provider_binary_overrides
+                            .remove(&ProviderKind::Agy);
+                        this.save();
+                        this.refresh_provider_detection(Some(ProviderKind::Agy));
+                        this.show_success_toast(tr!("providers.agy_removed"));
+                    }
+                    Ok(response) => this.show_toast(format!(
+                        "Antigravity removal returned an unexpected response: {response:?}"
+                    )),
+                    Err(error) => {
+                        this.show_toast(tr!("providers.agy_remove_failed", error = error))
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// The expanded row's settings body: the binary override for this
     /// provider, with the detection result as its caption.
     fn render_provider_expanded_settings(
@@ -336,6 +527,68 @@ impl Padu {
                     .flex()
                     .items_center()
                     .gap(px(8.0))
+                    .when(
+                        kind == ProviderKind::Agy && override_value.is_none(),
+                        |element| {
+                            let installing = self.agy_installing;
+                            element.child(
+                                div()
+                                    .id("install-agy-acp")
+                                    .tab_index(0)
+                                    .focus_visible(|style| style.border_color(theme.accent))
+                                    .h(px(29.0))
+                                    .px(px(10.0))
+                                    .rounded(px(7.0))
+                                    .border_1()
+                                    .border_color(theme.border_strong)
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(6.0))
+                                    .cursor(if installing {
+                                        gpui::CursorStyle::Arrow
+                                    } else {
+                                        gpui::CursorStyle::PointingHand
+                                    })
+                                    .opacity(if installing { 0.65 } else { 1.0 })
+                                    .text_size(sp(12.5))
+                                    .text_color(theme.text_secondary)
+                                    .hover(|element| element.bg(theme.overlay))
+                                    .when(installing, |element| {
+                                        element.child(crate::ui::motion::spin(icon(
+                                            "icons/loader-circle.svg",
+                                            12.0,
+                                            theme.text_secondary,
+                                        )))
+                                    })
+                                    .child(if installing {
+                                        SharedString::from(tr!(
+                                            "providers.agy_downloading",
+                                            percent = self.agy_install_percent
+                                        ))
+                                    } else {
+                                        SharedString::from(tr!("providers.agy_install_acp"))
+                                    })
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        if !installing {
+                                            this.install_agy_acp(cx);
+                                        }
+                                    }))
+                                    .on_key_down(cx.listener(
+                                        move |this, event: &KeyDownEvent, _, cx| {
+                                            if !installing
+                                                && matches!(
+                                                    event.keystroke.key.as_str(),
+                                                    "enter" | "space"
+                                                )
+                                            {
+                                                this.install_agy_acp(cx);
+                                                cx.stop_propagation();
+                                            }
+                                        },
+                                    )),
+                            )
+                        },
+                    )
                     .child(
                         TextField::new(
                             SharedString::from(format!("provider-path-field-{}", kind.id())),
@@ -345,6 +598,156 @@ impl Padu {
                         .max_w(px(430.0)),
                     )
                     .when(override_value.is_some(), |element| element.child(reset)),
+            )
+            .when(
+                kind == ProviderKind::Agy && override_value.is_some(),
+                |element| {
+                    let installing = self.agy_installing;
+                    element.child(
+                        div()
+                            .mt(px(6.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .child(
+                                div()
+                                    .id("agy-sign-in")
+                                    .tab_index(0)
+                                    .focus_visible(|style| style.border_color(theme.accent))
+                                    .h(px(29.0))
+                                    .px(px(9.0))
+                                    .rounded(px(7.0))
+                                    .border_1()
+                                    .border_color(theme.border_strong)
+                                    .flex()
+                                    .items_center()
+                                    .cursor(if installing {
+                                        gpui::CursorStyle::Arrow
+                                    } else {
+                                        gpui::CursorStyle::PointingHand
+                                    })
+                                    .opacity(if installing { 0.65 } else { 1.0 })
+                                    .text_size(sp(12.5))
+                                    .text_color(theme.text_secondary)
+                                    .hover(|element| element.bg(theme.overlay))
+                                    .child(if installing {
+                                        tr!("providers.agy_working")
+                                    } else if self.agy_authenticated {
+                                        tr!("providers.agy_sign_out")
+                                    } else {
+                                        tr!("providers.agy_sign_in")
+                                    })
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        if !this.agy_installing {
+                                            if this.agy_authenticated {
+                                                this.confirm_sign_out_agy(window, cx);
+                                            } else {
+                                                this.authenticate_agy(cx);
+                                            }
+                                        }
+                                    }))
+                                    .on_key_down(cx.listener(
+                                        move |this, event: &KeyDownEvent, window, cx| {
+                                            if !this.agy_installing
+                                                && matches!(
+                                                    event.keystroke.key.as_str(),
+                                                    "enter" | "space"
+                                                )
+                                            {
+                                                if this.agy_authenticated {
+                                                    this.confirm_sign_out_agy(window, cx);
+                                                } else {
+                                                    this.authenticate_agy(cx);
+                                                }
+                                                cx.stop_propagation();
+                                            }
+                                        },
+                                    )),
+                            )
+                            .child(
+                                div()
+                                    .id("agy-reinstall")
+                                    .tab_index(0)
+                                    .focus_visible(|style| style.border_color(theme.accent))
+                                    .h(px(29.0))
+                                    .px(px(9.0))
+                                    .rounded(px(7.0))
+                                    .border_1()
+                                    .border_color(theme.border_strong)
+                                    .flex()
+                                    .items_center()
+                                    .cursor(if installing {
+                                        gpui::CursorStyle::Arrow
+                                    } else {
+                                        gpui::CursorStyle::PointingHand
+                                    })
+                                    .opacity(if installing { 0.65 } else { 1.0 })
+                                    .text_size(sp(12.5))
+                                    .text_color(theme.text_secondary)
+                                    .hover(|element| element.bg(theme.overlay))
+                                    .child(tr!("providers.agy_reinstall"))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        if !this.agy_installing {
+                                            this.confirm_reinstall_agy(window, cx);
+                                        }
+                                    }))
+                                    .on_key_down(cx.listener(
+                                        move |this, event: &KeyDownEvent, window, cx| {
+                                            if !this.agy_installing
+                                                && matches!(
+                                                    event.keystroke.key.as_str(),
+                                                    "enter" | "space"
+                                                )
+                                            {
+                                                this.confirm_reinstall_agy(window, cx);
+                                                cx.stop_propagation();
+                                            }
+                                        },
+                                    )),
+                            )
+                            .child(
+                                div()
+                                    .id("agy-remove-download")
+                                    .tab_index(0)
+                                    .focus_visible(|style| style.border_color(theme.accent))
+                                    .h(px(29.0))
+                                    .px(px(9.0))
+                                    .rounded(px(7.0))
+                                    .border_1()
+                                    .border_color(theme.border_strong)
+                                    .flex()
+                                    .items_center()
+                                    .cursor(if installing {
+                                        gpui::CursorStyle::Arrow
+                                    } else {
+                                        gpui::CursorStyle::PointingHand
+                                    })
+                                    .opacity(if installing { 0.65 } else { 1.0 })
+                                    .text_size(sp(12.5))
+                                    .text_color(theme.warning)
+                                    .hover(|element| element.bg(theme.overlay))
+                                    .child(tr!("providers.agy_remove_download"))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        if !this.agy_installing {
+                                            this.confirm_remove_agy(window, cx);
+                                        }
+                                    }))
+                                    .on_key_down(cx.listener(
+                                        move |this, event: &KeyDownEvent, window, cx| {
+                                            if !this.agy_installing
+                                                && matches!(
+                                                    event.keystroke.key.as_str(),
+                                                    "enter" | "space"
+                                                )
+                                            {
+                                                this.confirm_remove_agy(window, cx);
+                                                cx.stop_propagation();
+                                            }
+                                        },
+                                    )),
+                            ),
+                    )
+                },
             )
             .child(
                 div()

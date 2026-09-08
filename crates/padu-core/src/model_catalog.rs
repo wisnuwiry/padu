@@ -15,6 +15,18 @@ const PI_RPC_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
     match provider {
+        ProviderKind::Agy => vec![
+            ProviderModel::new("gemini-3.8-flash", "Gemini 3.8 Flash")
+                .reasoning(reasoning_options(["low", "medium", "high"]), "medium")
+                .default(),
+            ProviderModel::new("gemini-3.7-flash", "Gemini 3.7 Flash")
+                .reasoning(reasoning_options(["low", "medium", "high"]), "medium"),
+            ProviderModel::new("gemini-3.6-flash", "Gemini 3.6 Flash")
+                .reasoning(reasoning_options(["low", "medium", "high"]), "medium"),
+            ProviderModel::new("gemini-3.1-pro", "Gemini 3.1 Pro")
+                .reasoning(reasoning_options(["low"]), "low"),
+            ProviderModel::new("gemini-pro-agent", "Gemini Pro Agent"),
+        ],
         ProviderKind::Amp => [
             ProviderModel::new("low", tr!("model_option.low")),
             ProviderModel::new("medium", tr!("model_option.medium")).default(),
@@ -116,6 +128,7 @@ pub fn discover_catalog(
     binary: &Path,
 ) -> (Vec<ProviderModel>, Vec<ProviderAgentPreset>) {
     let (discovered, discovered_presets) = match provider {
+        ProviderKind::Agy => (crate::driver::discover_agy_models(binary), None),
         // Amp exposes stable agent modes rather than a model inventory. Keep
         // the picker aligned with the modes advertised by the current CLI.
         ProviderKind::Amp => (Vec::new(), None),
@@ -1050,7 +1063,7 @@ fn parse_codex_model_response(response: &Value) -> Vec<ProviderModel> {
         .collect()
 }
 
-fn reasoning_effort_label(effort: &str) -> String {
+pub(crate) fn reasoning_effort_label(effort: &str) -> String {
     match effort {
         "none" => tr!("model_option.none"),
         "minimal" => tr!("model_option.minimal"),
@@ -1171,7 +1184,7 @@ fn normalize_codex_name(name: &str) -> String {
         .collect()
 }
 
-fn display_name_from_slug(slug: &str) -> String {
+pub(crate) fn display_name_from_slug(slug: &str) -> String {
     let words = slug
         .split(['-', '_'])
         .filter(|part| !part.is_empty())

@@ -83,6 +83,8 @@ COMMANDS:
     list                         List all known providers and detection status
     probe <PROVIDER>             Inspect binary path and detected CLI version
     models <PROVIDER>            Discover and display models, tiers, and presets
+    auth <PROVIDER>              Trigger provider authentication handshake
+    logout <PROVIDER>            Trigger provider sign-out
     connect <PROVIDER>           Test connection handshake and return session cursor
     turn <PROVIDER> "<PROMPT>"   Test full chat turn with live token/thought streaming
     switch-model <PROVIDER> <M>  Test dynamic in-place model switching via apply_options
@@ -376,6 +378,72 @@ fn run_connect(
     );
     println!();
     Ok(())
+}
+
+fn run_auth(provider: ProviderKind, json: bool) -> anyhow::Result<()> {
+    let probe = provider_probe(provider, None);
+    let binary = probe.path.ok_or_else(|| {
+        anyhow!(
+            "Provider '{}' binary not found on system",
+            provider.command()
+        )
+    })?;
+    let cwd = std::env::current_dir()?;
+
+    match provider {
+        ProviderKind::Agy => {
+            padu_core::driver::authenticate_agy(&binary, &cwd)?;
+            if json {
+                println!(
+                    "{}",
+                    json!({ "authenticated": true, "provider": provider.id() })
+                );
+            } else {
+                println!(
+                    "\n✓ Authenticated with {} successfully!\n",
+                    provider.display_name()
+                );
+            }
+            Ok(())
+        }
+        _ => Err(anyhow!(
+            "Provider '{}' does not support standalone authentication",
+            provider.id()
+        )),
+    }
+}
+
+fn run_logout(provider: ProviderKind, json: bool) -> anyhow::Result<()> {
+    let probe = provider_probe(provider, None);
+    let binary = probe.path.ok_or_else(|| {
+        anyhow!(
+            "Provider '{}' binary not found on system",
+            provider.command()
+        )
+    })?;
+    let cwd = std::env::current_dir()?;
+
+    match provider {
+        ProviderKind::Agy => {
+            padu_core::driver::logout_agy(&binary, &cwd)?;
+            if json {
+                println!(
+                    "{}",
+                    json!({ "logged_out": true, "provider": provider.id() })
+                );
+            } else {
+                println!(
+                    "\n✓ Logged out from {} successfully!\n",
+                    provider.display_name()
+                );
+            }
+            Ok(())
+        }
+        _ => Err(anyhow!(
+            "Provider '{}' does not support standalone logout",
+            provider.id()
+        )),
+    }
 }
 
 fn run_turn(
@@ -840,6 +908,22 @@ fn main() -> anyhow::Result<()> {
                     .ok_or_else(|| anyhow!("models requires a provider name"))?,
             )?;
             run_models(provider, args.json)
+        }
+        "auth" => {
+            let provider = parse_provider(
+                args.provider_raw
+                    .as_deref()
+                    .ok_or_else(|| anyhow!("auth requires a provider name"))?,
+            )?;
+            run_auth(provider, args.json)
+        }
+        "logout" => {
+            let provider = parse_provider(
+                args.provider_raw
+                    .as_deref()
+                    .ok_or_else(|| anyhow!("logout requires a provider name"))?,
+            )?;
+            run_logout(provider, args.json)
         }
         "connect" => {
             let provider = parse_provider(

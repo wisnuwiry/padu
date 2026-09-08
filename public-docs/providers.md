@@ -22,7 +22,7 @@ A **provider** defines the communication contract between Padu and an external a
 
 ## Integration Tiers
 
-1. **Native Direct Drivers:** Built-in optimized drivers in `crates/padu-core` for top agents (Claude Code, Codex, OpenCode, Pi Agent, Amp, DeepSeek, Cursor CLI, Fx, Grok Build, Kimi Code).
+1. **Native Direct Drivers:** Built-in optimized drivers in `crates/padu-core` for top agents (Claude Code, Codex, OpenCode, Antigravity, Pi Agent, Amp, DeepSeek, Cursor CLI, Fx, Grok Build, Kimi Code).
 2. **Agent Client Protocol (ACP):** Universal support for any agent implementing the open [Agent Client Protocol (ACP)](https://agentclientprotocol.com) over standard I/O streams (`stdio`).
 3. **Daemon Overrides:** Configure binary paths or disable providers via `~/.padu/settings.json` or the Settings UI.
 
@@ -31,4 +31,5 @@ A **provider** defines the communication contract between Padu and an external a
 - [Supported providers](/docs/supported-providers) — Explore all natively supported agent CLIs.
 - [Claude Code guide](/docs/claude-code) — Setup and usage for Anthropic's Claude Code CLI.
 - [OpenAI Codex guide](/docs/codex) — Setup and usage for OpenAI's Codex CLI.
+- [Antigravity guide](/docs/antigravity) — Setup and usage for Google Antigravity.
 - [Configuration & Settings](/docs/configuration) — Configure daemon settings and binary overrides.

@@ -32,5 +32,6 @@ These providers are integrated via the open [Agent Client Protocol (ACP)](https:
 - **Fx** — Fast terminal coding assistant with live streaming and diffs.
 - **[Grok Build](https://docs.x.ai/build/overview)** — xAI's agentic coding CLI.
 - **[Kimi Code](https://github.com/MoonshotAI/kimi-code)** — Moonshot AI's long-context assistant.
+- **[Antigravity](/docs/antigravity)** — Google DeepMind's autonomous coding agent with native ACP integration, one-click installer, and dedicated reasoning effort controls.
 
 View the full interactive catalog on [padu.dev/agents](/agents).

@@ -30,6 +30,9 @@ pub(crate) enum ConfirmAction {
     DeleteSession { session_id: Uuid },
     DeletePath { path: PathBuf },
     DeleteHost { profile_id: String },
+    ReinstallAgy,
+    RemoveAgy,
+    SignOutAgy,
 }
 
 pub(crate) struct ConfirmDialogState {
@@ -109,6 +112,68 @@ impl Padu {
         cx.notify();
     }
 
+    pub(crate) fn confirm_reinstall_agy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_agy_confirmation(
+            tr!("providers.agy_reinstall_title"),
+            tr!("providers.agy_reinstall_confirm"),
+            tr!("providers.agy_reinstall"),
+            ConfirmAction::ReinstallAgy,
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn confirm_sign_out_agy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_agy_confirmation(
+            tr!("providers.agy_sign_out_title"),
+            tr!("providers.agy_sign_out_confirm"),
+            tr!("providers.agy_sign_out"),
+            ConfirmAction::SignOutAgy,
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn confirm_remove_agy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_agy_confirmation(
+            tr!("providers.agy_remove_title"),
+            tr!("providers.agy_remove_confirm"),
+            tr!("providers.agy_remove_download"),
+            ConfirmAction::RemoveAgy,
+            window,
+            cx,
+        );
+    }
+
+    fn open_agy_confirmation(
+        &mut self,
+        title: impl Into<SharedString>,
+        message: impl Into<SharedString>,
+        confirm_label: impl Into<SharedString>,
+        action: ConfirmAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let previous_focus = window.focused(cx);
+        let cancel_focus = cx.focus_handle();
+        let confirm_focus = cx.focus_handle();
+        let focus_target = confirm_focus.clone();
+        window.on_next_frame(move |window, cx| window.focus(&focus_target, cx));
+        self.confirm_dialog = Some(ConfirmDialogState {
+            title: title.into(),
+            message: message.into(),
+            confirm_label: confirm_label.into(),
+            cancel_label: tr!("common.cancel").into(),
+            variant: ConfirmVariant::Danger,
+            icon_name: Some("icons/trash.svg"),
+            action,
+            cancel_focus,
+            confirm_focus,
+            previous_focus,
+        });
+        cx.notify();
+    }
+
     pub(crate) fn confirm_delete_host(
         &mut self,
         profile_id: String,
@@ -173,6 +238,15 @@ impl Padu {
             }
             ConfirmAction::DeletePath { path } => {
                 self.execute_delete_path(path, cx);
+            }
+            ConfirmAction::ReinstallAgy => {
+                self.install_agy_acp(cx);
+            }
+            ConfirmAction::RemoveAgy => {
+                self.remove_agy_download(cx);
+            }
+            ConfirmAction::SignOutAgy => {
+                self.logout_agy(cx);
             }
             ConfirmAction::DeleteHost { profile_id } => {
                 let was_active = self.state.active_host_id.as_deref() == Some(&profile_id);

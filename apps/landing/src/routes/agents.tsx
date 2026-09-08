@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { AgentIcon } from "~/components/agent-icons";
 import { CursorFieldProvider } from "~/components/butterfly";
 import { SiteShell } from "~/components/site-shell";
 import { AGENT_PAGES } from "~/data/agent-pages";
@@ -9,7 +10,7 @@ export const Route = createFileRoute("/agents")({
   head: () =>
     pageMeta(
       "Supported agents – Every coding agent Padu runs",
-      "Run Claude Code, Codex, OpenCode, Pi, Oh My Pi, Cursor, DeepSeek, and more coding agents from your phone or desktop. Self-hosted, your code stays on your machine.",
+      "Run Claude Code, Codex, OpenCode, Antigravity, Pi, Oh My Pi, Cursor, DeepSeek, and more coding agents from your phone or desktop. Self-hosted, your code stays on your machine.",
       "/agents",
     ),
   component: AgentsPage,
@@ -49,14 +50,19 @@ function AgentsPage() {
               >
                 <div>
                   <div className="flex items-center justify-between">
-                    <h3 className="font-medium text-white group-hover:text-purple-300 transition-colors">
-                      {agent.name}
-                    </h3>
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-white/80 group-hover:text-white group-hover:border-purple-500/30 transition-colors">
+                        <AgentIcon slug={agent.slug} className="w-4.5 h-4.5" />
+                      </div>
+                      <h3 className="font-medium text-white group-hover:text-purple-300 transition-colors">
+                        {agent.name}
+                      </h3>
+                    </div>
                     <span className="text-[10px] font-mono uppercase tracking-wider text-purple-400/80 bg-purple-400/10 px-2 py-0.5 rounded">
                       Native
                     </span>
                   </div>
-                  <p className="mt-2 text-sm text-white/60 leading-relaxed">{agent.subtitle}</p>
+                  <p className="mt-3 text-sm text-white/60 leading-relaxed">{agent.subtitle}</p>
                 </div>
               </Link>
             ))}
@@ -80,14 +86,19 @@ function AgentsPage() {
               >
                 <div>
                   <div className="flex items-center justify-between">
-                    <h3 className="font-medium text-white group-hover:text-sky-300 transition-colors">
-                      {agent.name}
-                    </h3>
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-white/[0.06] border border-white/10 flex items-center justify-center text-white/80 group-hover:text-white group-hover:border-sky-500/30 transition-colors">
+                        <AgentIcon slug={agent.slug} className="w-4.5 h-4.5" />
+                      </div>
+                      <h3 className="font-medium text-white group-hover:text-sky-300 transition-colors">
+                        {agent.name}
+                      </h3>
+                    </div>
                     <span className="text-[10px] font-mono uppercase tracking-wider text-sky-400/80 bg-sky-400/10 px-2 py-0.5 rounded">
                       ACP
                     </span>
                   </div>
-                  <p className="mt-2 text-sm text-white/60 leading-relaxed">{agent.subtitle}</p>
+                  <p className="mt-3 text-sm text-white/60 leading-relaxed">{agent.subtitle}</p>
                 </div>
               </Link>
             ))}

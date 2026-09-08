@@ -1122,6 +1122,13 @@ pub struct Padu {
     /// Providers the running re-detection has not answered for yet; empty
     /// means no re-detection is in flight.
     provider_detection_remaining: usize,
+    /// Whether the Agy ACP server installation request is in flight.
+    agy_installing: bool,
+    /// Whether the current Agy ACP credential is authenticated.
+    agy_authenticated: bool,
+    /// Latest daemon-reported Agy download percentage.
+    agy_install_percent: u8,
+    agy_install_progress_events: Receiver<(ProviderKind, String, u8)>,
     /// When provider detection last completed, for the page's "Checked" label.
     provider_detection_checked_at: Option<Instant>,
     /// The provider row expanded on the Providers page, if any. The binary
@@ -1921,6 +1928,7 @@ impl Padu {
     }
 
     fn apply_new_daemon(&mut self, daemon: padu_client::DaemonSupervisor, cx: &mut Context<Self>) {
+        self.agy_install_progress_events = daemon.client().subscribe_provider_install_progress();
         self.daemon = daemon.clone();
         self.store = StateStore::remote(daemon.clone());
         self.composer_draft_store = ComposerDraftStore::remote(daemon.clone());
@@ -2372,6 +2380,7 @@ impl Padu {
         let (provider_probe_tx, provider_probe_events) = unbounded();
         let (provider_version_tx, provider_version_events) = unbounded();
         let (provider_detection_tx, provider_detection_events) = unbounded();
+        let agy_install_progress_events = daemon.client().subscribe_provider_install_progress();
         let (computer_permission_tx, computer_permission_events) = unbounded();
         let (plan_usage_tx, plan_usage_events) = unbounded();
         let (event_wake_tx, event_wake_events) = smol::channel::bounded(1);
@@ -2472,6 +2481,7 @@ impl Padu {
             .and_then(|state| state.0.as_ref())
             .map(|updater| (updater.status(), Some(updater.events())))
             .unwrap_or_default();
+        let auth_daemon = daemon.clone();
         let entity = cx.new(|cx| {
             let settings_focus = cx.focus_handle();
             let onboarding_add_project_focus = cx.focus_handle();
@@ -2990,6 +3000,10 @@ impl Padu {
                 provider_detection_tx,
                 provider_detection_events,
                 provider_detection_remaining: 0,
+                agy_installing: false,
+                agy_authenticated: false,
+                agy_install_percent: 0,
+                agy_install_progress_events,
                 provider_detection_checked_at: None,
                 expanded_provider_settings: None,
                 provider_path_input,
@@ -3261,6 +3275,29 @@ impl Padu {
         // that there is an entity to notify and deliberately not before the
         // first frame.
         entity.update(cx, |this, cx| {
+            let auth_daemon = auth_daemon.clone();
+            cx.spawn(async move |this, cx| {
+                let authenticated = cx
+                    .background_executor()
+                    .spawn(async move {
+                        match auth_daemon.client().request(
+                            Uuid::nil(),
+                            Uuid::nil(),
+                            padu_client::Command::CheckAgyAuth,
+                        ) {
+                            Ok(padu_client::ResponsePayload::AgyAuthStatus { authenticated }) => {
+                                authenticated
+                            }
+                            _ => false,
+                        }
+                    })
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    this.agy_authenticated = authenticated;
+                    cx.notify();
+                });
+            })
+            .detach();
             this.restart_task_state_sync();
             for session_id in startup_live_session_ids {
                 this.start_runtime_attachment(session_id, cx);

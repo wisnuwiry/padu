@@ -87,11 +87,11 @@ import {
 import { useRelease } from "~/routes/__root";
 import { HeroMockup } from "~/components/hero-mockup";
 import {
+  AntigravityIcon,
   ClaudeCodeIcon,
   CodexIcon,
   CursorIcon,
   OpenCodeIcon,
-  PiIcon,
 } from "~/components/agent-icons";
 import { ClaudeIcon } from "~/components/mockup";
 import { FAQItem } from "~/components/faq-item";
@@ -605,7 +605,7 @@ function MultiProviderSection() {
     { name: "Claude Code", icon: <ClaudeIcon size={24} />, slug: "claude-code" },
     { name: "OpenAI Codex", icon: <CodexIcon className="w-6 h-6" />, slug: "codex" },
     { name: "OpenCode", icon: <OpenCodeIcon className="w-6 h-6" />, slug: "opencode" },
-    { name: "Pi Agent", icon: <PiIcon className="w-6 h-6" />, slug: "pi" },
+    { name: "Antigravity", icon: <AntigravityIcon className="w-6 h-6" />, slug: "antigravity" },
     { name: "Cursor CLI", icon: <CursorIcon className="w-6 h-6" />, slug: "cursor" },
   ];
 
@@ -686,11 +686,11 @@ function GetStarted() {
           <span>OpenCode</span>
         </a>
         <a
-          href="/pi"
+          href="/antigravity"
           className="flex items-center gap-1.5 hover:text-white transition-colors"
         >
-          <PiIcon className="h-4 w-4" />
-          <span>Pi</span>
+          <AntigravityIcon className="h-4 w-4" />
+          <span>Antigravity</span>
         </a>
         <a
           href="/cursor"

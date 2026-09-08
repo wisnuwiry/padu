@@ -70,6 +70,9 @@ export class PaduClient {
   private subscriptions = new Map<string, Set<EventListener>>();
   private pendingEvents = new Map<string, SequencedEvent[]>();
   private taskStateListeners = new Set<(revision: number) => void>();
+  private providerInstallProgressListeners = new Set<
+    (progress: { provider: string; phase: string; percent: number }) => void
+  >();
   private connectionStateListeners = new Set<ConnectionStateListener>();
   private sequences = new Map<string, LastSequence>();
   private connectionGeneration = 0;
@@ -211,6 +214,15 @@ export class PaduClient {
     sessionId = NIL_UUID,
     runtimeId = NIL_UUID,
   ): Promise<ResponsePayload> {
+    return this.requestWithTimeout(command, this.requestTimeoutMs, sessionId, runtimeId);
+  }
+
+  requestWithTimeout(
+    command: Command,
+    timeoutMs: number,
+    sessionId = NIL_UUID,
+    runtimeId = NIL_UUID,
+  ): Promise<ResponsePayload> {
     let socket: WebSocketLike;
     try {
       socket = this.requireSocket();
@@ -230,7 +242,7 @@ export class PaduClient {
       const timeout = setTimeout(() => {
         this.pending.delete(requestId);
         reject(new Error("timed out waiting for Padu daemon"));
-      }, this.requestTimeoutMs);
+      }, timeoutMs);
       this.pending.set(requestId, { resolve, reject, timeout });
       try {
         socket.send(JSON.stringify(message));
@@ -282,6 +294,13 @@ export class PaduClient {
   subscribeTaskState(listener: (revision: number) => void): () => void {
     this.taskStateListeners.add(listener);
     return () => this.taskStateListeners.delete(listener);
+  }
+
+  subscribeProviderInstallProgress(
+    listener: (progress: { provider: string; phase: string; percent: number }) => void,
+  ): () => void {
+    this.providerInstallProgressListeners.add(listener);
+    return () => this.providerInstallProgressListeners.delete(listener);
   }
 
   /** Observes connection changes, including remote socket closure. */
@@ -360,6 +379,16 @@ export class PaduClient {
     }
     if (message.type === "taskStateChanged") {
       for (const listener of this.taskStateListeners) listener(message.revision);
+      return;
+    }
+    if (message.type === "providerInstallProgress") {
+      for (const listener of this.providerInstallProgressListeners) {
+        listener({
+          provider: message.provider,
+          phase: message.phase,
+          percent: message.percent,
+        });
+      }
       return;
     }
     if (message.type === "shuttingDown") {

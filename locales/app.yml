@@ -792,6 +792,48 @@ providers.checked_minutes_ago:
   en: Checked %{count}m ago
 providers.checked_hours_ago:
   en: Checked %{count}h ago
+providers.agy_install_acp:
+  en: Install ACP server
+providers.agy_downloading:
+  en: Downloading… %{percent}%
+providers.agy_working:
+  en: Working…
+providers.agy_sign_in:
+  en: Sign in with Google
+providers.agy_sign_out:
+  en: Sign out
+providers.agy_reinstall:
+  en: Reinstall
+providers.agy_remove_download:
+  en: Remove download
+providers.agy_installed_at:
+  en: Antigravity ACP server installed at %{path}
+providers.agy_install_failed:
+  en: "Could not install Antigravity ACP server: %{error}"
+providers.agy_signed_in:
+  en: Signed in to Antigravity with Google
+providers.agy_sign_in_failed:
+  en: "Could not sign in to Antigravity: %{error}"
+providers.agy_signed_out:
+  en: Signed out of Antigravity
+providers.agy_sign_out_failed:
+  en: "Could not sign out of Antigravity: %{error}"
+providers.agy_removed:
+  en: Removed downloaded Antigravity ACP server
+providers.agy_remove_failed:
+  en: "Could not remove Antigravity ACP server: %{error}"
+providers.agy_reinstall_title:
+  en: Reinstall Antigravity ACP server
+providers.agy_reinstall_confirm:
+  en: The downloaded ACP server will be replaced with a fresh verified copy.
+providers.agy_sign_out_title:
+  en: Sign out of Antigravity
+providers.agy_sign_out_confirm:
+  en: Your Antigravity Google OAuth session will be signed out.
+providers.agy_remove_title:
+  en: Remove Antigravity ACP server
+providers.agy_remove_confirm:
+  en: The downloaded ACP server and its configured path will be removed.
 
 computer_use.allow_apps:
   en: Let Padu use apps

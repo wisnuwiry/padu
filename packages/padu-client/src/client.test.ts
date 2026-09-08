@@ -288,6 +288,51 @@ describe("PaduClient", () => {
       command: { type: "writeTerminal", data: "bHM=" },
     });
   });
+
+  test("notifies subscribers of provider install progress", async () => {
+    const { client, sockets } = fixture();
+    const socket = await connect(client, sockets);
+
+    const progressUpdates: Array<{ provider: string; phase: string; percent: number }> = [];
+    const unsubscribe = client.subscribeProviderInstallProgress((event) => {
+      progressUpdates.push(event);
+    });
+
+    socket.receive({
+      type: "providerInstallProgress",
+      provider: "agy",
+      phase: "Downloading",
+      percent: 45,
+    });
+    socket.receive({
+      type: "providerInstallProgress",
+      provider: "agy",
+      phase: "Verifying",
+      percent: 90,
+    });
+
+    expect(progressUpdates).toEqual([
+      { provider: "agy", phase: "Downloading", percent: 45 },
+      { provider: "agy", phase: "Verifying", percent: 90 },
+    ]);
+
+    unsubscribe();
+    socket.receive({
+      type: "providerInstallProgress",
+      provider: "agy",
+      phase: "Complete",
+      percent: 100,
+    });
+    expect(progressUpdates).toHaveLength(2);
+  });
+
+  test("requestWithTimeout rejects when timeout expires", async () => {
+    const { client, sockets } = fixture();
+    await connect(client, sockets);
+
+    const request = client.requestWithTimeout({ type: "installAgyAcp" }, 10);
+    await expect(request).rejects.toThrow("timed out waiting for Padu daemon");
+  });
 });
 
 test("daemonUrl pins the versioned endpoint", () => {

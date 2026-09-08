@@ -4,6 +4,18 @@ use crate::model::{ProviderAgentPreset, ProviderKind, ProviderModel, ProviderMod
 
 pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
     match provider {
+        ProviderKind::Agy => vec![
+            ProviderModel::new("gemini-3.8-flash", "Gemini 3.8 Flash")
+                .reasoning(reasoning_options(["low", "medium", "high"]), "medium")
+                .default(),
+            ProviderModel::new("gemini-3.7-flash", "Gemini 3.7 Flash")
+                .reasoning(reasoning_options(["low", "medium", "high"]), "medium"),
+            ProviderModel::new("gemini-3.6-flash", "Gemini 3.6 Flash")
+                .reasoning(reasoning_options(["low", "medium", "high"]), "medium"),
+            ProviderModel::new("gemini-3.1-pro", "Gemini 3.1 Pro")
+                .reasoning(reasoning_options(["low"]), "low"),
+            ProviderModel::new("gemini-pro-agent", "Gemini Pro Agent"),
+        ],
         ProviderKind::Amp => [
             ProviderModel::new("low", tr!("model_option.low")),
             ProviderModel::new("medium", tr!("model_option.medium")).default(),
@@ -85,7 +97,7 @@ pub fn fallback_agent_presets(provider: ProviderKind) -> Vec<ProviderAgentPreset
     ]
 }
 
-fn reasoning_effort_label(effort: &str) -> String {
+pub fn reasoning_effort_label(effort: &str) -> String {
     match effort {
         "none" => tr!("model_option.none"),
         "minimal" => tr!("model_option.minimal"),
@@ -100,7 +112,7 @@ fn reasoning_effort_label(effort: &str) -> String {
     }
 }
 
-fn reasoning_options<const N: usize>(efforts: [&str; N]) -> Vec<ProviderModelOption> {
+pub fn reasoning_options<const N: usize>(efforts: [&str; N]) -> Vec<ProviderModelOption> {
     efforts
         .into_iter()
         .map(|effort| ProviderModelOption::new(effort, reasoning_effort_label(effort)))

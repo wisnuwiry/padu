@@ -40,7 +40,7 @@ Padu manages external agent CLIs; it does not bundle AI models itself. Before la
 - **[OpenAI Codex](/docs/codex):** `codex` (OpenAI CLI)
 - **[OpenCode](https://opencode.ai/):** `opencode`
 - **[Pi Agent](https://pi.dev):** `pi`
-- **Other ACP Agents:** Cursor CLI, Gemini CLI, GitHub Copilot, Amp, Grok Build, Kimi Code, etc.
+- **Other ACP Agents:** Antigravity (`agy`), Cursor CLI, Amp, Grok Build, Kimi Code, etc.
 
 See [Supported providers](/docs/supported-providers) for the full list of supported agents.
 
