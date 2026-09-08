@@ -1057,6 +1057,12 @@ diff.preparing_review: Menyiapkan peninjauan…
 diff.loading_description: Mengambil snapshot Git yang konsisten untuk peninjauan
 diff.unavailable: Perubahan tidak tersedia
 diff.refresh: Segarkan perubahan
+diff.expand_all_files: Perluas semua file
+diff.collapse_all_files: Ciutkan semua file
+diff.layout_tree: Tata letak pohon
+diff.layout_flat: Tata letak datar
+diff.show_files: Tampilkan file yang berubah
+diff.hide_files: Sembunyikan file yang berubah
 diff.refresh_failed: "Tidak dapat menyegarkan perubahan: %{error}"
 diff.truncated: Diff besar · menampilkan 50.000 baris pertama
 diff.unmodified_lines: "%{count} baris yang tidak diubah"
