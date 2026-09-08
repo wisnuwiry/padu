@@ -383,6 +383,27 @@ providers.binary_path_description: Padu 用于启动 %{provider} 的可执行文
 providers.checked_just_now: 刚刚检查过
 providers.checked_minutes_ago: "%{count} 分钟前检查过"
 providers.checked_hours_ago: "%{count} 小时前检查过"
+providers.agy_install_acp: 安装 ACP 服务
+providers.agy_downloading: 下载中… %{percent}%
+providers.agy_working: 处理中…
+providers.agy_sign_in: 使用 Google 登录
+providers.agy_sign_out: 退出登录
+providers.agy_reinstall: 重新安装
+providers.agy_remove_download: 删除下载
+providers.agy_installed_at: Antigravity ACP 服务已安装至 %{path}
+providers.agy_install_failed: "无法安装 Antigravity ACP 服务: %{error}"
+providers.agy_signed_in: 已使用 Google 登录 Antigravity
+providers.agy_sign_in_failed: "无法登录 Antigravity: %{error}"
+providers.agy_signed_out: 已退出 Antigravity
+providers.agy_sign_out_failed: "无法退出 Antigravity: %{error}"
+providers.agy_removed: 已删除下载的 Antigravity ACP 服务
+providers.agy_remove_failed: "无法删除 Antigravity ACP 服务: %{error}"
+providers.agy_reinstall_title: 重新安装 Antigravity ACP 服务
+providers.agy_reinstall_confirm: 下载的 ACP 服务将被替换为全新的已验证副本。
+providers.agy_sign_out_title: 退出 Antigravity
+providers.agy_sign_out_confirm: 您的 Antigravity Google OAuth 会话将被退出。
+providers.agy_remove_title: 删除 Antigravity ACP 服务
+providers.agy_remove_confirm: 已下载的 ACP 服务及其配置路径将被移除。
 computer_use.allow_apps: 允许 Padu 操作其他应用
 computer_use.availability: Codex、OpenCode、Grok 和 Pi 支持电脑操作功能
 computer_use.macos_access: macOS 权限
