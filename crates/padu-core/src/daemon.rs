@@ -200,6 +200,58 @@ impl Backend for PaduBackend {
                 self.settings.replace(settings)?;
                 Ok(ResponsePayload::Ack)
             }
+            Command::InstallAgyAcp | Command::ReinstallAgyAcp => {
+                let progress_events = events.clone();
+                let path = crate::agy_install::install(|percent, phase| {
+                    progress_events.send_provider_install_progress(
+                        ProviderKind::Agy,
+                        phase,
+                        percent,
+                    );
+                })?;
+                let mut settings = self.settings.get();
+                settings
+                    .provider_binary_overrides
+                    .insert(ProviderKind::Agy, path.display().to_string());
+                self.settings.replace(settings)?;
+                Ok(ResponsePayload::ProviderInstalled {
+                    provider: ProviderKind::Agy,
+                    path,
+                })
+            }
+            Command::LogoutAgy => {
+                let settings = self.settings.get();
+                let binary_override = settings
+                    .provider_binary_overrides
+                    .get(&ProviderKind::Agy)
+                    .map(String::as_str);
+                let path = crate::model::provider_probe(ProviderKind::Agy, binary_override)
+                    .path
+                    .ok_or_else(|| anyhow!("Antigravity ACP server is not installed"))?;
+                crate::driver::logout_agy(&path, &self.default_cwd)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::AuthenticateAgy => {
+                let settings = self.settings.get();
+                let binary_override = settings
+                    .provider_binary_overrides
+                    .get(&ProviderKind::Agy)
+                    .map(String::as_str);
+                let path = crate::model::provider_probe(ProviderKind::Agy, binary_override)
+                    .path
+                    .ok_or_else(|| anyhow!("Antigravity ACP server is not installed"))?;
+                crate::driver::authenticate_agy(&path, &self.default_cwd)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::RemoveAgyAcp => {
+                crate::agy_install::remove()?;
+                let mut settings = self.settings.get();
+                settings
+                    .provider_binary_overrides
+                    .remove(&ProviderKind::Agy);
+                self.settings.replace(settings)?;
+                Ok(ResponsePayload::Ack)
+            }
             Command::ProbeProvider {
                 provider,
                 binary_override,
@@ -541,7 +593,10 @@ impl Backend for PaduBackend {
                     ProviderKind::Codex => {
                         crate::codex_session::list_provider_sessions(&binary, limit)?
                     }
-                    ProviderKind::Cursor | ProviderKind::Fx | ProviderKind::OpenCode => {
+                    ProviderKind::Agy
+                    | ProviderKind::Cursor
+                    | ProviderKind::Fx
+                    | ProviderKind::OpenCode => {
                         crate::acp_session::list_provider_sessions(provider, &binary, &[], limit)?
                     }
                     ProviderKind::DeepSeek => {
@@ -602,7 +657,8 @@ impl Backend for PaduBackend {
                             VISIBLE_TURN_LIMIT,
                         )?
                     }
-                    ProviderResumeCursor::Cursor { session_id, .. }
+                    ProviderResumeCursor::Agy { session_id }
+                    | ProviderResumeCursor::Cursor { session_id, .. }
                     | ProviderResumeCursor::Fx { session_id }
                     | ProviderResumeCursor::OpenCode { session_id }
                     | ProviderResumeCursor::Grok { session_id }
@@ -1269,7 +1325,7 @@ impl PaduBackend {
             }
             // Unreachable through the UI, which hides branching for providers
             // that answer `supports_conversation_fork` with false.
-            ProviderKind::Fx | ProviderKind::Kimi => {
+            ProviderKind::Agy | ProviderKind::Fx | ProviderKind::Kimi => {
                 bail!(
                     "{} cannot branch a conversation at a turn",
                     source.provider.display_name()
@@ -1472,7 +1528,7 @@ impl PaduBackend {
             )),
             // Unreachable through the UI, which hides rewinding for providers
             // that answer `supports_conversation_rollback` with false.
-            ProviderKind::Fx | ProviderKind::Kimi => {
+            ProviderKind::Agy | ProviderKind::Fx | ProviderKind::Kimi => {
                 bail!(
                     "{} cannot rewind a conversation to a turn",
                     source.provider.display_name()
@@ -1773,6 +1829,11 @@ fn handle_driver_command(
         | Command::Start { .. }
         | Command::GetSettings
         | Command::UpdateSettings { .. }
+        | Command::InstallAgyAcp
+        | Command::AuthenticateAgy
+        | Command::LogoutAgy
+        | Command::ReinstallAgyAcp
+        | Command::RemoveAgyAcp
         | Command::ProbeProvider { .. }
         | Command::FetchPlanUsage { .. }
         | Command::ProbeComputerPermissions { .. }

@@ -13,13 +13,13 @@ use std::time::Duration;
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
-    CancelNotification, ClientCapabilities, ContentBlock, Implementation, InitializeRequest,
-    InitializeResponse, LoadSessionRequest, NewSessionRequest, PermissionOptionKind, PromptRequest,
-    PromptResponse, RequestId, RequestPermissionOutcome, RequestPermissionRequest,
-    RequestPermissionResponse, ResumeSessionRequest, SelectedPermissionOutcome, SessionConfigKind,
-    SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOptions, SessionId,
-    SessionModeId, SessionModeState, SessionNotification, SetSessionConfigOptionRequest,
-    SetSessionModeRequest, StopReason, TextContent,
+    AuthenticateRequest, CancelNotification, ClientCapabilities, ContentBlock, Implementation,
+    InitializeRequest, InitializeResponse, LoadSessionRequest, LogoutRequest, NewSessionRequest,
+    PermissionOptionKind, PromptRequest, PromptResponse, RequestId, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, ResumeSessionRequest,
+    SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
+    SessionConfigSelectOptions, SessionId, SessionModeId, SessionModeState, SessionNotification,
+    SetSessionConfigOptionRequest, SetSessionModeRequest, StopReason, TextContent,
 };
 use agent_client_protocol::{
     AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo, Handled, LineDirection, Responder,
@@ -34,8 +34,9 @@ use crate::driver::{
     DriverControl, DriverEventSender, DriverEventSink, DriverStartOptions, SessionOptions,
 };
 use crate::model::{
-    ActivityKind, DriverEvent, InteractionMode, PermissionOption, ProviderKind,
-    ProviderResumeCursor, RuntimeMode, UserInputAnswer, UserInputOption, UserInputQuestion,
+    ActivityKind, DriverEvent, InteractionMode, PermissionOption, ProviderKind, ProviderModel,
+    ProviderModelOption, ProviderResumeCursor, RuntimeMode, UserInputAnswer, UserInputOption,
+    UserInputQuestion,
 };
 
 enum CommandMessage {
@@ -70,6 +71,34 @@ struct AcpLaunch {
 
 fn launch_for(provider: ProviderKind, reasoning_effort: Option<&str>) -> anyhow::Result<AcpLaunch> {
     match provider {
+        ProviderKind::Agy => {
+            let mut env = Vec::new();
+            if std::env::var_os("ANTIGRAVITY_HARNESS_PATH").is_none() {
+                let harness_name = if cfg!(target_os = "windows") {
+                    "localharness_external.exe"
+                } else {
+                    "localharness_external"
+                };
+                if let Some(harness) = crate::command_env::find_executable(harness_name)
+                    .or_else(|| crate::command_env::find_executable("localharness"))
+                {
+                    env.push((
+                        "ANTIGRAVITY_HARNESS_PATH".into(),
+                        harness.to_string_lossy().into_owned(),
+                    ));
+                }
+            }
+            Ok(AcpLaunch {
+                // The official registry distribution requires an empty UID flag on
+                // Linux; macOS and Windows accept the server with no arguments.
+                args: if cfg!(target_os = "linux") {
+                    vec!["--uid=".into()]
+                } else {
+                    Vec::new()
+                },
+                env,
+            })
+        }
         ProviderKind::Cursor => Ok(AcpLaunch {
             args: vec!["acp".into()],
             env: Vec::new(),
@@ -498,6 +527,9 @@ async fn run_sdk_connection(
                 )
                 .block_task()
                 .await?;
+            if provider == ProviderKind::Agy {
+                authenticate_agy_connection(&connection, &initialize).await?
+            }
             let (session_id, modes, config_options) = establish_session(
                 &connection,
                 &initialize,
@@ -637,7 +669,7 @@ async fn run_sdk_connection(
                     }
                     CommandMessage::Options(options) => {
                         if options.model != current_model
-                            || (provider == ProviderKind::Grok
+                            || ((provider == ProviderKind::Grok || provider == ProviderKind::Agy)
                                 && options.reasoning_effort != current_effort)
                         {
                             current_model = options.model;
@@ -662,6 +694,269 @@ async fn run_sdk_connection(
             Ok(())
         })
         .await
+}
+
+pub(crate) fn discover_agy_models(binary: &Path) -> Vec<ProviderModel> {
+    let Ok(cwd) = std::env::current_dir() else {
+        return Vec::new();
+    };
+    let Ok(agent) = sdk_agent(
+        binary,
+        &cwd,
+        launch_for(ProviderKind::Agy, None).unwrap_or(AcpLaunch {
+            args: Vec::new(),
+            env: Vec::new(),
+        }),
+        None,
+        Arc::new(Mutex::new(Vec::new())),
+    ) else {
+        return Vec::new();
+    };
+    let request = Client.builder().name("padu").connect_with(
+        agent,
+        async move |connection: ConnectionTo<Agent>| {
+            let initialize = connection
+                .send_request(
+                    InitializeRequest::new(ProtocolVersion::V1)
+                        .client_capabilities(ClientCapabilities::new().terminal(false))
+                        .client_info(Implementation::new("padu", env!("CARGO_PKG_VERSION"))),
+                )
+                .block_task()
+                .await?;
+            let _ = authenticate_agy_connection(&connection, &initialize).await;
+            let response = connection
+                .send_request(NewSessionRequest::new(&cwd))
+                .block_task()
+                .await?;
+            if response.config_options.is_none() {
+                return Ok(Vec::new());
+            }
+            let raw_ids = response
+                .config_options
+                .unwrap_or_default()
+                .iter()
+                .find(|option| option.category == Some(SessionConfigOptionCategory::Model))
+                .map(session_config_select_values)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|id| id.to_owned())
+                .collect::<Vec<_>>();
+            Ok(group_agy_models(&raw_ids))
+        },
+    );
+    let result = smol::block_on(smol::future::race(
+        async move { request.await.map_err(anyhow::Error::new) },
+        async move {
+            smol::Timer::after(Duration::from_secs(10)).await;
+            Err(anyhow!("Antigravity model discovery timed out"))
+        },
+    ));
+    result.unwrap_or_default()
+}
+
+pub(crate) fn split_agy_model_effort(raw_id: &str) -> (&str, Option<&str>) {
+    if let Some((base, suffix)) = raw_id.rsplit_once('-') {
+        if matches!(
+            suffix,
+            "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
+        ) {
+            return (base, Some(suffix));
+        }
+    }
+    (raw_id, None)
+}
+
+pub(crate) fn group_agy_models(raw_ids: &[String]) -> Vec<ProviderModel> {
+    let mut groups: Vec<(&str, Vec<&str>)> = Vec::new();
+    for raw in raw_ids {
+        let (base, effort) = split_agy_model_effort(raw);
+        if let Some((_, efforts)) = groups.iter_mut().find(|(b, _)| *b == base) {
+            if let Some(effort) = effort {
+                if !efforts.contains(&effort) {
+                    efforts.push(effort);
+                }
+            }
+        } else {
+            groups.push((base, effort.map_or_else(Vec::new, |e| vec![e])));
+        }
+    }
+
+    const EFFORT_ORDER: [&str; 7] = ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+
+    groups
+        .into_iter()
+        .enumerate()
+        .map(|(index, (base, mut efforts))| {
+            efforts.sort_by_key(|e| {
+                EFFORT_ORDER
+                    .iter()
+                    .position(|known| known == e)
+                    .unwrap_or(usize::MAX)
+            });
+
+            let name = crate::model_catalog::display_name_from_slug(base);
+            let mut model = ProviderModel::new(base, name);
+            if index == 0 {
+                model = model.default();
+            }
+
+            if !efforts.is_empty() {
+                let default_effort = if efforts.contains(&"medium") {
+                    "medium"
+                } else if efforts.contains(&"low") {
+                    "low"
+                } else {
+                    efforts[0]
+                };
+
+                let options = efforts
+                    .into_iter()
+                    .map(|effort| {
+                        ProviderModelOption::new(
+                            effort,
+                            crate::model_catalog::reasoning_effort_label(effort),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+
+                model = model.reasoning(options, default_effort);
+            }
+
+            model
+        })
+        .collect()
+}
+
+pub(crate) fn resolve_agy_model_id(
+    model: &str,
+    reasoning_effort: Option<&str>,
+    config_options: Option<&[SessionConfigOption]>,
+) -> String {
+    let available_values = config_options
+        .and_then(|options| find_config_option(options, SessionConfigOptionCategory::Model))
+        .map(session_config_select_values)
+        .unwrap_or_default();
+
+    // 1. If model is already an exact available value (e.g. gemini-3.8-flash-high or gemini-pro-agent):
+    if available_values.contains(&model) {
+        return model.to_owned();
+    }
+
+    // 2. If an effort is explicitly specified:
+    if let Some(effort) = reasoning_effort.filter(|e| !e.is_empty()) {
+        let candidate = format!("{model}-{effort}");
+        if available_values.is_empty() || available_values.contains(&candidate.as_str()) {
+            return candidate;
+        }
+    }
+
+    // 3. If no effort or effort didn't match, check available effort suffixes in preferred order:
+    if !available_values.is_empty() {
+        for preferred in ["medium", "low", "high", "xhigh", "minimal", "max", "ultra"] {
+            let candidate = format!("{model}-{preferred}");
+            if available_values.contains(&candidate.as_str()) {
+                return candidate;
+            }
+        }
+        let prefix = format!("{model}-");
+        if let Some(matched) = available_values.iter().find(|val| val.starts_with(&prefix)) {
+            return (*matched).to_owned();
+        }
+    }
+
+    // 4. Default fallback:
+    if let Some(effort) = reasoning_effort.filter(|e| !e.is_empty()) {
+        format!("{model}-{effort}")
+    } else {
+        model.to_owned()
+    }
+}
+
+pub fn logout_agy(binary: &Path, cwd: &Path) -> anyhow::Result<()> {
+    let agent = sdk_agent(
+        binary,
+        cwd,
+        launch_for(ProviderKind::Agy, None)?,
+        None,
+        Arc::new(Mutex::new(Vec::new())),
+    )?;
+    let request = Client.builder().name("padu").connect_with(
+        agent,
+        async move |connection: ConnectionTo<Agent>| {
+            let _initialize = connection
+                .send_request(
+                    InitializeRequest::new(ProtocolVersion::V1)
+                        .client_capabilities(ClientCapabilities::new().terminal(false))
+                        .client_info(Implementation::new("padu", env!("CARGO_PKG_VERSION"))),
+                )
+                .block_task()
+                .await?;
+            connection
+                .send_request(LogoutRequest::new())
+                .block_task()
+                .await?;
+            Ok(())
+        },
+    );
+    smol::block_on(smol::future::race(
+        async move { request.await.map_err(anyhow::Error::new) },
+        async move {
+            smol::Timer::after(Duration::from_secs(10)).await;
+            Err(anyhow!("Antigravity sign-out timed out"))
+        },
+    ))
+    .map_err(|error| anyhow!("Antigravity sign-out failed: {error}"))
+}
+
+pub fn authenticate_agy(binary: &Path, cwd: &Path) -> anyhow::Result<()> {
+    let agent = sdk_agent(
+        binary,
+        cwd,
+        launch_for(ProviderKind::Agy, None)?,
+        None,
+        Arc::new(Mutex::new(Vec::new())),
+    )?;
+    let request = Client.builder().name("padu").connect_with(
+        agent,
+        async move |connection: ConnectionTo<Agent>| {
+            let initialize = connection
+                .send_request(
+                    InitializeRequest::new(ProtocolVersion::V1)
+                        .client_capabilities(ClientCapabilities::new().terminal(false))
+                        .client_info(Implementation::new("padu", env!("CARGO_PKG_VERSION"))),
+                )
+                .block_task()
+                .await?;
+            authenticate_agy_connection(&connection, &initialize).await
+        },
+    );
+    smol::block_on(smol::future::race(
+        async move { request.await.map_err(anyhow::Error::new) },
+        async move {
+            smol::Timer::after(Duration::from_secs(30)).await;
+            Err(anyhow!("Antigravity sign-in timed out"))
+        },
+    ))
+    .map_err(|error| anyhow!("Antigravity sign-in failed: {error}"))
+}
+
+async fn authenticate_agy_connection(
+    connection: &ConnectionTo<Agent>,
+    initialize: &InitializeResponse,
+) -> agent_client_protocol::Result<()> {
+    let Some(method) = initialize
+        .auth_methods
+        .iter()
+        .find(|method| method.id().0.as_ref() == "oauth-personal")
+        .or_else(|| initialize.auth_methods.first())
+    else {
+        return Ok(());
+    };
+    connection
+        .send_request(AuthenticateRequest::new(method.id().clone()))
+        .block_task()
+        .await?;
+    Ok(())
 }
 
 async fn establish_session(
@@ -1009,6 +1304,13 @@ async fn apply_model(
     let Some(model) = model else {
         return;
     };
+    let resolved_model_storage;
+    let model = if provider == ProviderKind::Agy {
+        resolved_model_storage = resolve_agy_model_id(model, reasoning_effort, config_options);
+        resolved_model_storage.as_str()
+    } else {
+        model
+    };
     let cursor_model_option = (provider == ProviderKind::Cursor)
         .then_some(config_options)
         .flatten()
@@ -1129,6 +1431,7 @@ async fn apply_model(
         return;
     }
     if provider != ProviderKind::Grok
+        && provider != ProviderKind::Agy
         && let Some(effort) = reasoning_effort
     {
         // Reasoning effort is an optional config extension and is deliberately
@@ -1962,6 +2265,19 @@ mod tests {
     }
 
     #[test]
+    fn launch_for_agy_sets_appropriate_arguments() {
+        let launch = launch_for(ProviderKind::Agy, None).expect("agy launch should succeed");
+        #[cfg(target_os = "linux")]
+        assert_eq!(launch.args, vec!["--uid="]);
+        #[cfg(not(target_os = "linux"))]
+        assert!(launch.args.is_empty());
+        for (key, val) in &launch.env {
+            assert_eq!(key, "ANTIGRAVITY_HARNESS_PATH");
+            assert!(!val.is_empty());
+        }
+    }
+
+    #[test]
     fn cursor_question_response_uses_native_scalar_and_array_answers() {
         let params = json!({
             "toolCallId": "ask-1",
@@ -2651,5 +2967,112 @@ mod tests {
                 "the turn failed without naming a reason"
             ),
         }
+    }
+
+    #[test]
+    fn split_and_group_agy_models() {
+        let raw = vec![
+            "gemini-3.8-flash-high".to_string(),
+            "gemini-3.8-flash-medium".to_string(),
+            "gemini-3.8-flash-low".to_string(),
+            "gemini-3.7-flash-high".to_string(),
+            "gemini-3.7-flash-medium".to_string(),
+            "gemini-3.7-flash-low".to_string(),
+            "gemini-pro-agent".to_string(),
+            "gemini-3.1-pro-low".to_string(),
+        ];
+        let models = group_agy_models(&raw);
+        assert_eq!(models.len(), 4);
+
+        assert_eq!(models[0].id, "gemini-3.8-flash");
+        assert_eq!(models[0].name, "Gemini 3.8 Flash");
+        assert!(models[0].is_default);
+        assert_eq!(
+            models[0].default_reasoning_effort.as_deref(),
+            Some("medium")
+        );
+        assert_eq!(
+            models[0]
+                .reasoning_efforts
+                .iter()
+                .map(|o| o.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["low", "medium", "high"]
+        );
+
+        assert_eq!(models[1].id, "gemini-3.7-flash");
+        assert_eq!(models[1].name, "Gemini 3.7 Flash");
+        assert!(!models[1].is_default);
+        assert_eq!(
+            models[1].default_reasoning_effort.as_deref(),
+            Some("medium")
+        );
+        assert_eq!(
+            models[1]
+                .reasoning_efforts
+                .iter()
+                .map(|o| o.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["low", "medium", "high"]
+        );
+
+        assert_eq!(models[2].id, "gemini-pro-agent");
+        assert_eq!(models[2].name, "Gemini Pro Agent");
+        assert!(models[2].reasoning_efforts.is_empty());
+        assert_eq!(models[2].default_reasoning_effort, None);
+
+        assert_eq!(models[3].id, "gemini-3.1-pro");
+        assert_eq!(models[3].name, "Gemini 3.1 Pro");
+        assert_eq!(models[3].default_reasoning_effort.as_deref(), Some("low"));
+        assert_eq!(
+            models[3]
+                .reasoning_efforts
+                .iter()
+                .map(|o| o.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["low"]
+        );
+    }
+
+    #[test]
+    fn resolve_agy_model_id_resolves_effort_and_fallbacks() {
+        let option = select_config_option(
+            "model",
+            SessionConfigOptionCategory::Model,
+            "gemini-3.8-flash-medium",
+            &[
+                "gemini-3.8-flash-high",
+                "gemini-3.8-flash-medium",
+                "gemini-3.8-flash-low",
+                "gemini-pro-agent",
+                "gemini-3.1-pro-low",
+            ],
+        );
+        let options = vec![option];
+
+        assert_eq!(
+            resolve_agy_model_id("gemini-3.8-flash", Some("high"), Some(&options)),
+            "gemini-3.8-flash-high"
+        );
+        assert_eq!(
+            resolve_agy_model_id("gemini-3.8-flash", Some("low"), Some(&options)),
+            "gemini-3.8-flash-low"
+        );
+        assert_eq!(
+            resolve_agy_model_id("gemini-3.8-flash", None, Some(&options)),
+            "gemini-3.8-flash-medium"
+        );
+        assert_eq!(
+            resolve_agy_model_id("gemini-3.1-pro", None, Some(&options)),
+            "gemini-3.1-pro-low"
+        );
+        assert_eq!(
+            resolve_agy_model_id("gemini-pro-agent", None, Some(&options)),
+            "gemini-pro-agent"
+        );
+        assert_eq!(
+            resolve_agy_model_id("gemini-3.8-flash-high", None, Some(&options)),
+            "gemini-3.8-flash-high"
+        );
     }
 }

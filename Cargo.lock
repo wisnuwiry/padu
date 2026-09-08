@@ -5186,6 +5186,7 @@ dependencies = [
  "serde",
  "serde-saphyr 1.2.0",
  "serde_json",
+ "sha2 0.10.9",
  "smol",
  "subtle",
  "toml 1.1.4+spec-1.1.0",

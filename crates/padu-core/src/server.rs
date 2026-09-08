@@ -78,6 +78,16 @@ impl EventSink {
             .emit(self.session_id, self.runtime_id, event, false);
         Ok(())
     }
+
+    pub fn send_provider_install_progress(
+        &self,
+        provider: crate::model::ProviderKind,
+        phase: impl Into<String>,
+        percent: u8,
+    ) {
+        self.hub
+            .broadcast_provider_install_progress(provider, phase.into(), percent);
+    }
 }
 
 #[derive(Default)]
@@ -306,6 +316,23 @@ impl Hub {
         if changed {
             Self::broadcast_task_state_changed(&mut state, source_subscriber_id);
         }
+    }
+
+    fn broadcast_provider_install_progress(
+        &self,
+        provider: crate::model::ProviderKind,
+        phase: String,
+        percent: u8,
+    ) {
+        let message = ServerMessage::ProviderInstallProgress {
+            provider,
+            phase,
+            percent,
+        };
+        self.state
+            .lock()
+            .subscribers
+            .retain(|_, subscriber| subscriber.send(message.clone()).is_ok());
     }
 
     fn broadcast_task_state_changed(state: &mut HubState, source_subscriber_id: u64) {

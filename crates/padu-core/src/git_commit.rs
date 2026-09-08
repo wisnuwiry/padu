@@ -332,6 +332,18 @@ fn agent_arguments(
         // Kimi carries the prompt as `--prompt`'s value rather than a trailing
         // positional, so it returns early. It has no tool or session switches
         // to turn off; the commit prompt is what forbids tool use.
+        ProviderKind::Agy => {
+            push(&mut args, "--prompt");
+            push(&mut args, prompt);
+            push(&mut args, "--output-format");
+            push(&mut args, "text");
+            if let Some(model) = model {
+                let resolved = crate::driver::resolve_agy_model_id(model, reasoning_effort, None);
+                push(&mut args, "--model");
+                push(&mut args, &resolved);
+            }
+            return args;
+        }
         ProviderKind::Kimi => {
             push(&mut args, "--prompt");
             push(&mut args, prompt);
@@ -797,6 +809,11 @@ mod tests {
                     assert!(has(&args, "--no-tools"));
                     assert!(has(&args, "--no-rules"));
                     assert!(has_pair(&args, "--thinking", "low"));
+                }
+                ProviderKind::Agy => {
+                    assert!(has_pair(&args, "--prompt", prompt));
+                    assert!(has_pair(&args, "--output-format", "text"));
+                    assert!(has_pair(&args, "--model", "model-low"));
                 }
                 ProviderKind::Kimi => {
                     assert!(has_pair(&args, "--prompt", prompt));

@@ -503,6 +503,7 @@ fn user_tool_directories(home: &Path) -> Vec<PathBuf> {
         home.join(".cargo/bin"),
         home.join(".local/share/mise/shims"),
         home.join(".volta/bin"),
+        home.join(".padu/providers/antigravity/1.1.1"),
     ]
 }
 
@@ -516,6 +517,7 @@ fn user_tool_directories(home: &Path) -> Vec<PathBuf> {
         home.join("scoop/shims"),
         home.join("AppData/Local/Microsoft/WindowsApps"),
         home.join(".local/bin"),
+        home.join(".padu/providers/antigravity/1.1.1"),
     ];
     // Volta, pnpm, and the user-scoped Node installer default to LocalAppData
     // (the same list T3 Code probes); it can be redirected away from home.
