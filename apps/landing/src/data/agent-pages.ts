@@ -146,6 +146,18 @@ export const AGENT_PAGES = [
     metaDescription:
       "Open source app for Oh My Pi coding agent. Launch sessions on your machine, monitor progress, ship from anywhere. Self-hosted.",
   },
+  {
+    slug: "antigravity",
+    name: "Antigravity",
+    category: "acp",
+    badge: "ACP",
+    title: "Open source desktop app for Google Antigravity",
+    subtitle:
+      "Run Google Antigravity on your machine with native ACP integration, reasoning effort controls, and local checkpoint history.",
+    metaTitle: "Antigravity Desktop & Web App, Open Source",
+    metaDescription:
+      "Open source app for Google Antigravity. Launch tasks on your machine, monitor output, review diffs, and merge from anywhere. Self-hosted.",
+  },
 ] as const satisfies readonly AgentPage[];
 
 export const AGENT_PAGE_SLUGS: readonly string[] = AGENT_PAGES.map((p) => p.slug);

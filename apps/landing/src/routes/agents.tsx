@@ -9,7 +9,7 @@ export const Route = createFileRoute("/agents")({
   head: () =>
     pageMeta(
       "Supported agents – Every coding agent Padu runs",
-      "Run Claude Code, Codex, OpenCode, Pi, Oh My Pi, Cursor, DeepSeek, and more coding agents from your phone or desktop. Self-hosted, your code stays on your machine.",
+      "Run Claude Code, Codex, OpenCode, Antigravity, Pi, Oh My Pi, Cursor, DeepSeek, and more coding agents from your phone or desktop. Self-hosted, your code stays on your machine.",
       "/agents",
     ),
   component: AgentsPage,

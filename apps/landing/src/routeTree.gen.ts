@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from "./routes/__root";
 import { Route as IndexRouteImport } from "./routes/index";
 import { Route as AgentsRouteImport } from "./routes/agents";
 import { Route as AmpRouteImport } from "./routes/amp";
+import { Route as AntigravityRouteImport } from "./routes/antigravity";
 import { Route as ChangelogRouteImport } from "./routes/changelog";
 import { Route as ClaudeCodeRouteImport } from "./routes/claude-code";
 import { Route as CodexRouteImport } from "./routes/codex";
@@ -43,6 +44,11 @@ const AgentsRoute = AgentsRouteImport.update({
 const AmpRoute = AmpRouteImport.update({
   id: "/amp",
   path: "/amp",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const AntigravityRoute = AntigravityRouteImport.update({
+  id: "/antigravity",
+  path: "/antigravity",
   getParentRoute: () => rootRouteImport,
 } as any);
 const ChangelogRoute = ChangelogRouteImport.update({
@@ -135,6 +141,7 @@ export interface FileRoutesByFullPath {
   "/": typeof IndexRoute;
   "/agents": typeof AgentsRoute;
   "/amp": typeof AmpRoute;
+  "/antigravity": typeof AntigravityRoute;
   "/changelog": typeof ChangelogRoute;
   "/claude-code": typeof ClaudeCodeRoute;
   "/codex": typeof CodexRoute;
@@ -157,6 +164,7 @@ export interface FileRoutesByTo {
   "/": typeof IndexRoute;
   "/agents": typeof AgentsRoute;
   "/amp": typeof AmpRoute;
+  "/antigravity": typeof AntigravityRoute;
   "/changelog": typeof ChangelogRoute;
   "/claude-code": typeof ClaudeCodeRoute;
   "/codex": typeof CodexRoute;
@@ -179,6 +187,7 @@ export interface FileRoutesById {
   "/": typeof IndexRoute;
   "/agents": typeof AgentsRoute;
   "/amp": typeof AmpRoute;
+  "/antigravity": typeof AntigravityRoute;
   "/changelog": typeof ChangelogRoute;
   "/claude-code": typeof ClaudeCodeRoute;
   "/codex": typeof CodexRoute;
@@ -203,6 +212,7 @@ export interface FileRouteTypes {
     | "/"
     | "/agents"
     | "/amp"
+    | "/antigravity"
     | "/changelog"
     | "/claude-code"
     | "/codex"
@@ -225,6 +235,7 @@ export interface FileRouteTypes {
     | "/"
     | "/agents"
     | "/amp"
+    | "/antigravity"
     | "/changelog"
     | "/claude-code"
     | "/codex"
@@ -246,6 +257,7 @@ export interface FileRouteTypes {
     | "/"
     | "/agents"
     | "/amp"
+    | "/antigravity"
     | "/changelog"
     | "/claude-code"
     | "/codex"
@@ -269,6 +281,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
   AgentsRoute: typeof AgentsRoute;
   AmpRoute: typeof AmpRoute;
+  AntigravityRoute: typeof AntigravityRoute;
   ChangelogRoute: typeof ChangelogRoute;
   ClaudeCodeRoute: typeof ClaudeCodeRoute;
   CodexRoute: typeof CodexRoute;
@@ -307,6 +320,13 @@ declare module "@tanstack/react-router" {
       path: "/amp";
       fullPath: "/amp";
       preLoaderRoute: typeof AmpRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/antigravity": {
+      id: "/antigravity";
+      path: "/antigravity";
+      fullPath: "/antigravity";
+      preLoaderRoute: typeof AntigravityRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/changelog": {
@@ -447,6 +467,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentsRoute: AgentsRoute,
   AmpRoute: AmpRoute,
+  AntigravityRoute: AntigravityRoute,
   ChangelogRoute: ChangelogRoute,
   ClaudeCodeRoute: ClaudeCodeRoute,
   CodexRoute: CodexRoute,
