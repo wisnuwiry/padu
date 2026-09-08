@@ -21,22 +21,24 @@ impl Padu {
                     .min_w_0()
                     .flex()
                     .child(self.render_right_panel_unified_diff(snapshot.clone(), cx))
-                    .child(
-                        div()
-                            .w(px(tree_width))
-                            .min_w(px(FILE_TREE_MIN_WIDTH))
-                            .h_full()
-                            .flex_none()
-                            .relative()
-                            .border_l_1()
-                            .border_color(theme.border_strong)
-                            .child(self.render_right_panel_diff_tree(window, cx))
-                            .child(self.render_panel_resize_handle(
-                                "right-panel-diff-tree-resize-handle",
-                                PanelResizeTarget::FileTree,
-                                cx,
-                            )),
-                    )
+                    .when(self.right_panel_diff_files_visible, |content| {
+                        content.child(
+                            div()
+                                .w(px(tree_width))
+                                .min_w(px(FILE_TREE_MIN_WIDTH))
+                                .h_full()
+                                .flex_none()
+                                .relative()
+                                .border_l_1()
+                                .border_color(theme.border_strong)
+                                .child(self.render_right_panel_diff_tree(window, cx))
+                                .child(self.render_panel_resize_handle(
+                                    "right-panel-diff-tree-resize-handle",
+                                    PanelResizeTarget::FileTree,
+                                    cx,
+                                )),
+                        )
+                    })
                     .into_any_element()
             }
             None if self.right_panel_diff_loading => self
@@ -169,6 +171,129 @@ impl Padu {
         } else {
             icon("icons/rotate-cw.svg", 12.0, theme.text_tertiary).into_any_element()
         };
+        let expand_all = self
+            .right_panel_diff_snapshot
+            .as_ref()
+            .is_some_and(|snapshot| {
+                !snapshot.files.is_empty()
+                    && self.right_panel_diff_file_layout == DiffFileLayout::Tree
+                    && !review_diff_directory_paths(&snapshot.files)
+                        .is_subset(&self.right_panel_diff_expanded_paths)
+            });
+        let expand_icon = if expand_all {
+            "icons/chevron-down.svg"
+        } else {
+            "icons/chevron-up.svg"
+        };
+        let expand_tooltip = if expand_all {
+            tr!("diff.expand_all_files")
+        } else {
+            tr!("diff.collapse_all_files")
+        };
+        let expand_focus = self.transcript_control_focus("right-panel-diff-expand-all", cx);
+        let expand_control = div()
+            .id("right-panel-diff-expand-all")
+            .track_focus(&expand_focus)
+            .tab_index(0)
+            .size(px(28.0))
+            .rounded(px(7.0))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .when(!expand_all, |control| control.bg(theme.overlay))
+            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .hover(|style| style.bg(theme.overlay))
+            .child(icon(expand_icon, 13.0, theme.text_tertiary))
+            .tooltip(move |window, cx| Tooltip::new(expand_tooltip.clone()).build(window, cx))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.toggle_right_panel_diff_directories(cx);
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.toggle_right_panel_diff_directories(cx);
+                    cx.stop_propagation();
+                }
+            }));
+        let layout_handle = self.menu_handle("right-panel-diff-layout", cx);
+        let current_layout = self.right_panel_diff_file_layout;
+        let layout = dropdown_menu(
+            MenuChip::new("right-panel-diff-layout")
+                .label(match self.right_panel_diff_file_layout {
+                    DiffFileLayout::Tree => tr!("diff.layout_tree"),
+                    DiffFileLayout::Flat => tr!("diff.layout_flat"),
+                })
+                .height(px(28.0))
+                .background(theme.surface)
+                .selected(layout_handle.is_open()),
+            "right-panel-diff-layout-menu",
+            &layout_handle,
+            MenuAlign::BelowRight,
+            {
+                let weak = cx.entity().downgrade();
+                move |_| {
+                    [
+                        (DiffFileLayout::Tree, tr!("diff.layout_tree")),
+                        (DiffFileLayout::Flat, tr!("diff.layout_flat")),
+                    ]
+                    .into_iter()
+                    .map(|(choice, label)| {
+                        let weak = weak.clone();
+                        MenuItem::new(label, move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.set_right_panel_diff_file_layout(choice, cx)
+                            });
+                        })
+                        .selected(choice == current_layout)
+                    })
+                    .collect()
+                }
+            },
+        );
+        let files_focus = self.transcript_control_focus("right-panel-diff-files-visible", cx);
+        let files_visible = self.right_panel_diff_files_visible;
+        let files_control = div()
+            .id("right-panel-diff-files-visible")
+            .track_focus(&files_focus)
+            .tab_index(0)
+            .size(px(28.0))
+            .rounded(px(7.0))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .when(!files_visible, |control| control.bg(theme.overlay))
+            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .hover(|style| style.bg(theme.overlay))
+            .child(icon(
+                if files_visible {
+                    "icons/eye-off.svg"
+                } else {
+                    "icons/eye.svg"
+                },
+                13.0,
+                theme.text_tertiary,
+            ))
+            .tooltip(move |window, cx| {
+                Tooltip::new(if files_visible {
+                    tr!("diff.hide_files")
+                } else {
+                    tr!("diff.show_files")
+                })
+                .build(window, cx)
+            })
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.toggle_right_panel_diff_files(cx);
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.toggle_right_panel_diff_files(cx);
+                    cx.stop_propagation();
+                }
+            }));
+
         let refresh = div()
             .id("right-panel-diff-refresh")
             .track_focus(&refresh_focus)
@@ -225,6 +350,10 @@ impl Padu {
                 )
             })
             .child(div().flex_1())
+            .when(self.right_panel_diff_files_visible, |toolbar| {
+                toolbar.child(expand_control).child(layout)
+            })
+            .child(files_control)
             .child(refresh)
             .into_any_element()
     }
@@ -633,7 +762,15 @@ impl Padu {
                             self.right_panel_diff_filter.clone(),
                         )
                         .icon("icons/search.svg", 13.0)
-                        .w_full(),
+                        .w_full()
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _, window, cx| {
+                                let focus = this.right_panel_diff_filter.read(cx).focus();
+                                window.focus(&focus, cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
                     ),
             )
             .child(
@@ -760,7 +897,11 @@ impl Padu {
                     return div().h(px(30.0)).into_any_element();
                 };
                 let path = file.path.clone();
-                let name = path.rsplit('/').next().unwrap_or(&path).to_owned();
+                let name = if self.right_panel_diff_file_layout == DiffFileLayout::Flat {
+                    path.clone()
+                } else {
+                    path.rsplit('/').next().unwrap_or(&path).to_owned()
+                };
                 let selected = self.right_panel_diff_selected_file == Some(file_index);
                 let (status, status_color) = match file.status {
                     crate::review_diff::FileStatus::Added => ("A", theme.success),
@@ -782,7 +923,13 @@ impl Padu {
                             .h(px(26.0))
                             .flex_1()
                             .min_w_0()
-                            .pl(px(23.0 + depth as f32 * 14.0))
+                            .pl(px(
+                                if self.right_panel_diff_file_layout == DiffFileLayout::Flat {
+                                    7.0
+                                } else {
+                                    23.0 + depth as f32 * 14.0
+                                },
+                            ))
                             .pr(px(7.0))
                             .rounded(px(5.0))
                             .flex()
@@ -1028,11 +1175,14 @@ impl Padu {
             .right_panel_diff_snapshot
             .as_ref()
             .map_or_else(Vec::new, |snapshot| {
-                review_diff_tree_rows(
-                    &snapshot.files,
-                    &self.right_panel_diff_expanded_paths,
-                    &filter,
-                )
+                match self.right_panel_diff_file_layout {
+                    DiffFileLayout::Tree => review_diff_tree_rows(
+                        &snapshot.files,
+                        &self.right_panel_diff_expanded_paths,
+                        &filter,
+                    ),
+                    DiffFileLayout::Flat => review_diff_flat_rows(&snapshot.files, &filter),
+                }
             });
         let cursor = previous_cursor_row
             .as_ref()
@@ -1070,6 +1220,40 @@ impl Padu {
         self.right_panel_diff_tree_cursor = cursor;
         self.right_panel_diff_tree_list_state
             .reset_with_uniform_height(row_count, px(30.0));
+    }
+
+    pub(crate) fn set_right_panel_diff_file_layout(
+        &mut self,
+        layout: DiffFileLayout,
+        cx: &mut Context<Self>,
+    ) {
+        if self.right_panel_diff_file_layout != layout {
+            self.right_panel_diff_file_layout = layout;
+            self.sync_right_panel_diff_tree_rows(cx);
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn toggle_right_panel_diff_files(&mut self, cx: &mut Context<Self>) {
+        self.right_panel_diff_files_visible = !self.right_panel_diff_files_visible;
+        cx.notify();
+    }
+
+    pub(crate) fn toggle_right_panel_diff_directories(&mut self, cx: &mut Context<Self>) {
+        let Some(snapshot) = self.right_panel_diff_snapshot.as_ref() else {
+            return;
+        };
+        if self.right_panel_diff_file_layout != DiffFileLayout::Tree {
+            return;
+        }
+        let directories = review_diff_directory_paths(&snapshot.files);
+        if directories.is_subset(&self.right_panel_diff_expanded_paths) {
+            self.right_panel_diff_expanded_paths.clear();
+        } else {
+            self.right_panel_diff_expanded_paths = directories;
+        }
+        self.sync_right_panel_diff_tree_rows(cx);
+        cx.notify();
     }
 
     pub(crate) fn toggle_right_panel_diff_directory(

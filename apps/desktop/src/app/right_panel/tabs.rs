@@ -370,6 +370,8 @@ impl Padu {
             diff_snapshot: self.right_panel_diff_snapshot.take(),
             diff_selected_file: self.right_panel_diff_selected_file.take(),
             diff_expanded_paths: std::mem::take(&mut self.right_panel_diff_expanded_paths),
+            diff_file_layout: self.right_panel_diff_file_layout,
+            diff_files_visible: self.right_panel_diff_files_visible,
         }
     }
 
@@ -393,6 +395,8 @@ impl Padu {
         self.right_panel_diff_error = None;
         self.right_panel_diff_selected_file = state.diff_selected_file;
         self.right_panel_diff_expanded_paths = state.diff_expanded_paths;
+        self.right_panel_diff_file_layout = state.diff_file_layout;
+        self.right_panel_diff_files_visible = state.diff_files_visible;
         self.right_panel_diff_tree_cursor = None;
         self.right_panel_diff_tree_rows.borrow_mut().clear();
         self.right_panel_diff_tree_list_state.reset(0);
