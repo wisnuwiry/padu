@@ -1118,6 +1118,13 @@ pub struct Padu {
     /// Providers the running re-detection has not answered for yet; empty
     /// means no re-detection is in flight.
     provider_detection_remaining: usize,
+    /// Whether the Agy ACP server installation request is in flight.
+    agy_installing: bool,
+    /// Whether the current Agy ACP credential is authenticated.
+    agy_authenticated: bool,
+    /// Latest daemon-reported Agy download percentage.
+    agy_install_percent: u8,
+    agy_install_progress_events: Receiver<(ProviderKind, String, u8)>,
     /// When provider detection last completed, for the page's "Checked" label.
     provider_detection_checked_at: Option<Instant>,
     /// The provider row expanded on the Providers page, if any. The binary
@@ -2366,6 +2373,7 @@ impl Padu {
         let (provider_probe_tx, provider_probe_events) = unbounded();
         let (provider_version_tx, provider_version_events) = unbounded();
         let (provider_detection_tx, provider_detection_events) = unbounded();
+        let agy_install_progress_events = daemon.client().subscribe_provider_install_progress();
         let (computer_permission_tx, computer_permission_events) = unbounded();
         let (plan_usage_tx, plan_usage_events) = unbounded();
         let (event_wake_tx, event_wake_events) = smol::channel::bounded(1);
@@ -2984,6 +2992,10 @@ impl Padu {
                 provider_detection_tx,
                 provider_detection_events,
                 provider_detection_remaining: 0,
+                agy_installing: false,
+                agy_authenticated: false,
+                agy_install_percent: 0,
+                agy_install_progress_events,
                 provider_detection_checked_at: None,
                 expanded_provider_settings: None,
                 provider_path_input,

@@ -558,7 +558,7 @@ fn perform_provider_rewind(
         }
         // Unreachable through the UI, which hides rewinding for providers that
         // answer `supports_conversation_rollback` with false.
-        ProviderKind::Fx | ProviderKind::Kimi => Err(anyhow::anyhow!(tr!(
+        ProviderKind::Agy | ProviderKind::Fx | ProviderKind::Kimi => Err(anyhow::anyhow!(tr!(
             "errors.provider_turn_branching_unsupported",
             provider = provider.display_name()
         ))),
@@ -849,7 +849,7 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
             }
             // Unreachable through the UI, which hides branching for providers
             // that answer `supports_conversation_fork` with false.
-            ProviderKind::Fx | ProviderKind::Kimi => anyhow::bail!(tr!(
+            ProviderKind::Agy | ProviderKind::Fx | ProviderKind::Kimi => anyhow::bail!(tr!(
                 "errors.provider_turn_branching_unsupported",
                 provider = provider.display_name()
             )),
@@ -1492,6 +1492,17 @@ impl Padu {
         for provider in providers {
             self.provider_model_discoveries.remove(&provider);
         }
+    }
+
+    pub(super) fn drain_agy_install_progress_events(&mut self) -> bool {
+        let mut changed = false;
+        while let Ok((provider, _phase, percent)) = self.agy_install_progress_events.try_recv() {
+            if provider == ProviderKind::Agy {
+                self.agy_install_percent = percent;
+                changed = true;
+            }
+        }
+        changed
     }
 
     pub(super) fn drain_provider_detection_events(&mut self) -> bool {
@@ -3494,6 +3505,7 @@ impl Padu {
             | self.drain_provider_probe_events()
             | self.drain_provider_version_events()
             | self.drain_provider_detection_events()
+            | self.drain_agy_install_progress_events()
             | self.drain_computer_permission_events()
             | self.drain_plan_usage_events()
             | self.drain_task_state_sync_events(cx)
