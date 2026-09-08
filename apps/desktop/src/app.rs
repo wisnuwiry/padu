@@ -68,11 +68,11 @@ use crate::ui::{
 use crate::{
     CancelTaskSwitch, CancelTurn, CloseFind, CloseWindow, ConfirmTaskSwitch, CopySelection,
     FindNext, FindPrevious, FocusComposer, NavigateBack, NavigateForward, NewProject, NewSession,
-    NextRightPanelTab, OpenBrowser, OpenFiles, OpenFind, OpenFindReplace, OpenResumePicker,
-    OpenReview, OpenSettings, OpenTerminal, PrevRightPanelTab, ReplaceAllMatches, SaveFile,
-    SelectFirstTask, SelectLastTask, SelectNextSession, SelectPreviousSession, SwitchTaskBackward,
-    SwitchTaskForward, ToggleCommandPalette, ToggleFindCaseSensitive, ToggleFindRegex,
-    ToggleFindWholeWord, ToggleFpsCounter, ToggleModelPicker, ToggleRightPanel,
+    NextRightPanelTab, OpenBrowser, OpenFilePicker, OpenFiles, OpenFind, OpenFindReplace,
+    OpenResumePicker, OpenReview, OpenSettings, OpenTerminal, PrevRightPanelTab, ReplaceAllMatches,
+    SaveFile, SelectFirstTask, SelectLastTask, SelectNextSession, SelectPreviousSession,
+    SwitchTaskBackward, SwitchTaskForward, ToggleCommandPalette, ToggleFindCaseSensitive,
+    ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter, ToggleModelPicker, ToggleRightPanel,
     ToggleRightPanelFullscreen, ToggleSidebar, ToggleUsagePanel,
 };
 

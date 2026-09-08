@@ -46,6 +46,7 @@ import { Transcript } from '@/components/transcript'
 import { PaduIcon } from '@/components/padu-icon'
 import {
   useComposerDrafts,
+  useComposerFiles,
   useSession,
   useSessionTurnRefs,
   useTaskState,
@@ -210,6 +211,7 @@ export function PaduApp() {
   const currentCwd = current && currentProject
     ? sessionCwd(current, currentProject)
     : undefined
+  const composerFiles = useComposerFiles(currentCwd)
   const sessionTurnRefs = useSessionTurnRefs(currentCwd, current?.id)
   const selectedReady = current?.id === search.session
   const activeSession = current ?? draft
@@ -508,6 +510,12 @@ export function PaduApp() {
     const keyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey)) return
       const key = event.key.toLowerCase()
+      if (key === 'p') {
+        event.preventDefault()
+        setPaletteInitialView('findFile')
+        setPaletteOpen(true)
+        return
+      }
       if (key === 'k') {
         event.preventDefault()
         if (paletteOpen) setPaletteOpen(false)
@@ -1204,6 +1212,7 @@ export function PaduApp() {
   const paletteActions: CommandPaletteActions = {
     newTask: () => startNewTask(),
     openProject: openProjectPicker,
+    openFile: (path) => openPanel('files', 'uncommitted', path),
     chooseModel: () => {
       setModelPickerSignal((value) => value + 1)
     },
@@ -1241,6 +1250,8 @@ export function PaduApp() {
       canChooseModel={Boolean(activeSession && !['connecting', 'working', 'waiting'].includes(activeSession.status))}
       canToggleUsage={Boolean(activeSession)}
       currentProvider={activeSession?.provider ?? 'codex'}
+      files={composerFiles.data ?? []}
+      filesLoading={composerFiles.isLoading}
       initialView={paletteInitialView}
       open={paletteOpen}
       rightPanelVisible={rightPanelVisible}

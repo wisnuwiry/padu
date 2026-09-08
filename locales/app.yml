@@ -144,6 +144,16 @@ command_palette.open_terminal:
   en: Open terminal
 command_palette.open_files:
   en: Open files
+command_palette.find_file:
+  en: Find File
+command_palette.find_file_placeholder:
+  en: Search files…
+command_palette.loading_files:
+  en: Loading files…
+command_palette.no_files:
+  en: No matching files
+command_palette.no_files_hint:
+  en: Try a different file name or path.
 command_palette.open_review:
   en: Open review
 command_palette.previous_session:
