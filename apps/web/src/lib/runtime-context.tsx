@@ -1435,6 +1435,7 @@ function syntheticEvent(
 function providerName(provider: AgentSession['provider']) {
   return (
     {
+      agy: 'Antigravity',
       amp: 'Amp',
       claude: 'Claude Code',
       codex: 'Codex',

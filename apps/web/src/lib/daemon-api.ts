@@ -158,6 +158,26 @@ export async function loadProviderSessionHistory(
   return response.history
 }
 
+export async function installAgyAcp(client: PaduClient): Promise<string> {
+  const response = expectResponse(
+    await client.requestWithTimeout({ type: 'installAgyAcp' }, 10 * 60 * 1000),
+    'providerInstalled',
+  )
+  return response.path
+}
+
+export async function authenticateAgy(client: PaduClient): Promise<void> {
+  expectResponse(await client.requestWithTimeout({ type: 'authenticateAgy' }, 10 * 60 * 1000), 'ack')
+}
+
+export async function logoutAgy(client: PaduClient): Promise<void> {
+  expectResponse(await client.request({ type: 'logoutAgy' }), 'ack')
+}
+
+export async function removeAgyAcp(client: PaduClient): Promise<void> {
+  expectResponse(await client.request({ type: 'removeAgyAcp' }), 'ack')
+}
+
 export async function loadDaemonSettings(
   client: PaduClient,
 ): Promise<DaemonSettings> {

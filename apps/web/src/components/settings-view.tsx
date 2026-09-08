@@ -23,8 +23,12 @@ import {
 } from '@/hooks/use-daemon-data'
 import { useCopyFeedback } from '@/hooks/use-copy-feedback'
 import {
+  authenticateAgy,
   daemonKeys,
   displayTitle,
+  installAgyAcp,
+  logoutAgy,
+  removeAgyAcp,
   setSessionArchived,
   updateDaemonSettings,
 } from '@/lib/daemon-api'
@@ -339,6 +343,15 @@ function ProvidersSettings() {
   const probes = useProviderProbes()
   const [expanded, setExpanded] = useState<ProviderKind | null>(null)
   const [paths, setPaths] = useState<Partial<Record<ProviderKind, string>>>({})
+  const [installingAgy, setInstallingAgy] = useState(false)
+  const [agyInstallPercent, setAgyInstallPercent] = useState(0)
+  const [agyAuthenticated, setAgyAuthenticated] = useState(false)
+  useEffect(() => {
+    if (!client) return
+    return client.subscribeProviderInstallProgress((progress) => {
+      if (progress.provider === 'agy') setAgyInstallPercent(progress.percent)
+    })
+  }, [client])
   const checkedAt = Math.max(
     0,
     ...Object.values(probes.states).map((state) => state.dataUpdatedAt),
@@ -469,7 +482,114 @@ function ProvidersSettings() {
                   <p className="text-[10.5px] leading-[15px] text-[var(--text-tertiary)]">
                     {t('providers.binary_path_description', { provider: provider.shortName })}
                   </p>
-                  <div className="mt-[3px] flex items-center gap-2">
+                  <div className="mt-[3px] flex flex-wrap items-center gap-2">
+                    {provider.id === 'agy' && !installed && (
+                      <button
+                        className="flex h-[29px] shrink-0 items-center gap-1.5 rounded-[7px] border border-input px-2.5 text-[10.5px] text-[var(--text-secondary)] outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
+                        disabled={installingAgy}
+                        type="button"
+                        onClick={async () => {
+                          if (!client || !config) return
+                          setInstallingAgy(true)
+                          setAgyInstallPercent(0)
+                          try {
+                            await installAgyAcp(client)
+                            await queryClient.invalidateQueries({ queryKey: daemonKeys.settings(config.address) })
+                            await queryClient.invalidateQueries({ queryKey: daemonKeys.providers(config.address) })
+                          } catch (error) {
+                            // The button already communicates the active download;
+                            // keep failures as a neutral notification rather than an
+                            // error alert that looks like an interactive prompt.
+                            toast(errorMessage(error))
+                          } finally {
+                            setInstallingAgy(false)
+                          }
+                        }}
+                      >
+                        {installingAgy && (
+                          <PaduIcon className="size-3 motion-safe:animate-spin motion-reduce:animate-none" name="loaderCircle" />
+                        )}
+                        {installingAgy
+                          ? t('providers.agy_downloading', { percent: agyInstallPercent })
+                          : t('providers.agy_install_acp')}
+                      </button>
+                    )}
+                    {provider.id === 'agy' && installed && (
+                      <div className="order-2 flex w-full items-center gap-1.5">
+                        <button
+                          className="h-[29px] rounded-[7px] border border-input px-2.5 text-[10.5px] text-[var(--text-secondary)] outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
+                          disabled={installingAgy}
+                          type="button"
+                          onClick={async () => {
+                            if (!client || !config) return
+                            if (agyAuthenticated && !window.confirm(t('providers.agy_sign_out_confirm'))) return
+                            setInstallingAgy(true)
+                            try {
+                              if (agyAuthenticated) {
+                                await logoutAgy(client)
+                                setAgyAuthenticated(false)
+                                toast.success(t('providers.agy_signed_out'))
+                              } else {
+                                await authenticateAgy(client)
+                                setAgyAuthenticated(true)
+                                toast.success(t('providers.agy_signed_in'))
+                              }
+                            } catch (error) {
+                              toast(errorMessage(error))
+                            } finally {
+                              setInstallingAgy(false)
+                            }
+                          }}
+                        >
+                          {agyAuthenticated ? t('providers.agy_sign_out') : t('providers.agy_sign_in')}
+                        </button>
+                        <button
+                          className="h-[29px] rounded-[7px] border border-input px-2.5 text-[10.5px] text-[var(--text-secondary)] outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
+                          disabled={installingAgy}
+                          type="button"
+                          onClick={async () => {
+                            if (!client || !config) return
+                            setInstallingAgy(true)
+                            setAgyInstallPercent(0)
+                            try {
+                              await installAgyAcp(client)
+                              await queryClient.invalidateQueries({ queryKey: daemonKeys.settings(config.address) })
+                              await queryClient.invalidateQueries({ queryKey: daemonKeys.providers(config.address) })
+                            } catch (error) {
+                              toast(errorMessage(error))
+                            } finally {
+                              setInstallingAgy(false)
+                            }
+                          }}
+                        >
+                          {installingAgy
+                            ? t('providers.agy_downloading', { percent: agyInstallPercent })
+                            : t('providers.agy_reinstall')}
+                        </button>
+                        <button
+                          className="h-[29px] rounded-[7px] border border-input px-2.5 text-[10.5px] text-destructive outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
+                          disabled={installingAgy}
+                          type="button"
+                          onClick={async () => {
+                            if (!client || !config || !window.confirm(t('providers.agy_remove_confirm'))) return
+                            setInstallingAgy(true)
+                            try {
+                              await removeAgyAcp(client)
+                              setAgyAuthenticated(false)
+                              toast.success(t('providers.agy_removed'))
+                              await queryClient.invalidateQueries({ queryKey: daemonKeys.settings(config.address) })
+                              await queryClient.invalidateQueries({ queryKey: daemonKeys.providers(config.address) })
+                            } catch (error) {
+                              toast(errorMessage(error))
+                            } finally {
+                              setInstallingAgy(false)
+                            }
+                          }}
+                        >
+                          {t('providers.agy_remove_download')}
+                        </button>
+                      </div>
+                    )}
                     <Input
                       autoFocus
                       className="h-[29px] max-w-[430px] flex-1 bg-[var(--inset)] font-mono text-[11px]"
