@@ -1,0 +1,73 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: "en-US"
+reviews:
+  profile: "chill"
+  high_level_summary: true
+  review_status: true
+  review_details: true
+  collapse_walkthrough: false
+  auto_review:
+    enabled: true
+    drafts: false
+    incremental_review: true
+    auto_pause_after_reviewed_commits: 5
+  path_filters:
+    - "!**/node_modules/**"
+    - "!**/target/**"
+    - "!**/dist/**"
+    - "!**/.wrangler/**"
+    - "!**/.expo/**"
+    - "!packages/padu-client/src/generated/**"
+  path_instructions:
+    - path: "apps/desktop/**/*.rs"
+      instructions: |
+        Review this GPUI desktop code with a strong focus on performance and UI-thread safety:
+        - Flag filesystem, subprocess, network, synchronous IPC, or blocking-lock work reachable from render(), row builders, measurement, or other frame paths.
+        - Check that long collections remain virtualized with list() and that per-frame work is proportional to visible content.
+        - For streaming paths, verify stream commits stay at or below approximately 8.3 Hz and pulse-clock ticks at or below 30 Hz; avoid unnecessary refreshes and animation-frame requests.
+        - Check keyboard operability, visible focus treatment, conventional key handling, and reduce-motion behavior for interactive controls.
+        - Prefer existing GPUI patterns in this repository and avoid speculative performance claims.
+    - path: "apps/web/**/*.{ts,tsx}"
+      instructions: |
+        Review the browser client for parity with apps/desktop where the behavior is shared:
+        - Check that user-visible workflows, state representation, and transcript/tool-event ordering remain consistent with the native client.
+        - Check keyboard accessibility, visible focus, semantic controls, and that state is not communicated by color alone.
+        - Check React rendering and streaming paths for unnecessary rerenders, unbounded work, and broken virtualization.
+        - Do not require native-only behavior to be duplicated in the browser.
+    - path: "apps/mobile/**/*.{ts,tsx}"
+      instructions: |
+        Review shared client behavior for consistency with the desktop and web clients while respecting React Native platform constraints. Pay particular attention to state transitions, protocol event ordering, loading/error states, keyboard or assistive interaction, and avoiding unnecessary rerenders.
+    - path: "crates/padu-protocol/**/*.rs"
+      instructions: |
+        Treat changes here as wire-protocol changes:
+        - Check backward compatibility, optionality, serialization names, enum evolution, and error handling.
+        - Verify that generated TypeScript bindings and shared reducers remain synchronized.
+        - Flag changes that appear to require bun run protocol:generate and bun run protocol:check but do not update the generated client or corresponding web behavior.
+    - path: "packages/padu-client/**/*.{ts,tsx}"
+      instructions: |
+        Check reducers and protocol consumers for exhaustive event handling, provider-native ordering, duplicate or dropped events, stale state, and safe handling of unknown or newly added events. Confirm tests cover changed state transitions.
+    - path: ".github/workflows/**/*.{yml,yaml}"
+      instructions: |
+        Review GitHub Actions for least-privilege permissions, correct path filters, concurrency and cancellation behavior, pinned or stable action usage, cross-platform coverage, lockfile-safe dependency installation, and commands that match package.json and CONTRIBUTING.md.
+    - path: "**/*.{md,mdx}"
+      instructions: |
+        Check documentation for accuracy against the repository's current commands and behavior. Preserve the repository's required PR checks, performance guidance, accessibility requirements, and desktop/web parity expectations.
+  tools:
+    clippy:
+      enabled: true
+    actionlint:
+      enabled: true
+    biome:
+      enabled: true
+    eslint:
+      enabled: true
+chat:
+  auto_reply: true
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "AGENTS.md"
+      - "**/AGENTS.md"
+      - "CLAUDE.md"
+      - "**/CLAUDE.md"
