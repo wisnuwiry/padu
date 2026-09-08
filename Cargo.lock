@@ -1958,7 +1958,7 @@ dependencies = [
  "cc",
  "memchr",
  "rustc_version",
- "toml 1.1.4+spec-1.1.0",
+ "toml 1.1.5+spec-1.1.0",
  "vswhom",
  "winreg",
 ]
@@ -3516,7 +3516,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.61.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -5189,7 +5189,7 @@ dependencies = [
  "sha2 0.10.9",
  "smol",
  "subtle",
- "toml 1.1.4+spec-1.1.0",
+ "toml 1.1.5+spec-1.1.0",
  "trash",
  "tungstenite",
  "url",
@@ -7856,9 +7856,9 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "1.1.4+spec-1.1.0"
+version = "1.1.5+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3aace63f4bbcdfc2c965b059de67119c89c4017a70d633be6c104910f67056f5"
+checksum = "12c0ba9680044b4ce98d391a62094047eada0d64860b80166c39f4a6b5640785"
 dependencies = [
  "indexmap 2.14.1",
  "serde_core",
@@ -8061,9 +8061,9 @@ dependencies = [
 
 [[package]]
 name = "trash"
-version = "5.2.6"
+version = "5.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7602e0c7d66ec2d92a8c917219fbc7894039efa2063b9064260110828a356f46"
+checksum = "08676401d031c4a43b7022d90e1748ef4624fabb68ac2abf0cb5812f8c02d78e"
 dependencies = [
  "chrono",
  "libc",
