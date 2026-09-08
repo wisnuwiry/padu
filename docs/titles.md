@@ -51,7 +51,7 @@ What differs is how the title reaches that event:
 
 1. **Pushed on the provider's own stream.** The agent sends a title event and
    the driver forwards it. Nothing to poll, nothing to schedule. OpenCode, Pi,
-   Oh My Pi, Kimi Code, DeepSeek, and Codex's native paths work this way.
+   Oh My Pi, Antigravity, Kimi Code, DeepSeek, and Codex's native paths work this way.
 2. **Polled from a native store.** The agent writes the title to disk (or to a
    store reachable by CLI) but never puts it on the wire. The driver polls with
    [`NativeTitleRefresh`](../crates/padu-core/src/driver/title_refresh.rs) on a
@@ -83,6 +83,7 @@ title near when the provider writes it, and long enough to survive a slow start.
 | Pi | Pi | NDJSON stream | connect, `session_info_changed` | [pi.rs:472](../crates/padu-core/src/driver/pi.rs#L472), [pi.rs:1214](../crates/padu-core/src/driver/pi.rs#L1214) |
 | Oh My Pi | Oh My Pi | NDJSON stream | connect, `session_info_update` | [pi.rs:472](../crates/padu-core/src/driver/pi.rs#L472), [pi.rs:1214](../crates/padu-core/src/driver/pi.rs#L1214) |
 | DeepSeek | Harness | stream + projections | `session/title`, projection replay | [deepseek.rs:782](../crates/padu-core/src/driver/deepseek.rs#L782), [deepseek.rs:1139](../crates/padu-core/src/driver/deepseek.rs#L1139) |
+| Antigravity | Antigravity | ACP stream | `session_info_update` | [acp.rs:1305](../crates/padu-core/src/driver/acp.rs#L1305) |
 | Kimi Code | Kimi (placeholder) | ACP stream | `session_info_update` | [acp.rs:1305](../crates/padu-core/src/driver/acp.rs#L1305) |
 | Cursor CLI | — | — | — | none; fallback only |
 

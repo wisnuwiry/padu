@@ -11,7 +11,7 @@ Padu is an open-source native application that lets you run and orchestrate AI c
 
 Engineered with Rust and GPUI (the GPU-accelerated UI engine behind Zed), Padu delivers instant startup, minimal memory consumption, and smooth 120fps transcript streaming. A self-hosted daemon manages subprocess lifecycles, structured event streaming, Git worktree isolation, and turn-by-turn checkpoint rewinds.
 
-Padu provides native direct drivers and ACP integrations for leading coding agents: Claude Code, OpenAI Codex CLI, OpenCode, Pi Agent, Oh My Pi, Amp, DeepSeek, Cursor CLI, Fx, Grok Build, and Kimi Code.
+Padu provides native direct drivers and ACP integrations for leading coding agents: Claude Code, OpenAI Codex CLI, OpenCode, Antigravity, Pi Agent, Oh My Pi, Amp, DeepSeek, Cursor CLI, Fx, Grok Build, and Kimi Code.
 
 Distribution: Native desktop apps for macOS, Windows, Linux; web application; companion mobile clients. License: GPL-3.0 at https://github.com/wisnuwiry/padu. Marketing site: https://padu.dev.
 `;
