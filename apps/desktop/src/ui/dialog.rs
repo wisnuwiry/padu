@@ -9,7 +9,6 @@ use crate::ui::icon;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConfirmVariant {
-    Default,
     Danger,
 }
 
@@ -118,7 +117,7 @@ pub fn dialog_cancel_button<V: 'static>(
         }))
 }
 
-/// Standardized 32px height confirm button supporting Default and Danger variants.
+/// Standardized 32px height danger confirmation button.
 pub fn dialog_confirm_button<V: 'static>(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
@@ -134,11 +133,6 @@ pub fn dialog_confirm_button<V: 'static>(
 
     let (bg, text_color, badge_border) = match variant {
         ConfirmVariant::Danger => (theme.danger, gpui::white(), gpui::hsla(0.0, 0.0, 1.0, 0.25)),
-        ConfirmVariant::Default => (
-            theme.inverse,
-            theme.on_inverse,
-            gpui::hsla(0.0, 0.0, 1.0, 0.20),
-        ),
     };
 
     div()
