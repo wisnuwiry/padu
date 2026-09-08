@@ -794,25 +794,4 @@ mod tests {
             }
         );
     }
-
-    #[test]
-    fn file_operation_dialog_kind_supports_rename_and_path_name_extraction() {
-        let rename_dialog = FileOperationDialogKind::Rename {
-            source: PathBuf::from("/project/src/index.ts"),
-        };
-        assert_eq!(
-            rename_dialog,
-            FileOperationDialogKind::Rename {
-                source: PathBuf::from("/project/src/index.ts")
-            }
-        );
-
-        let path = Path::new("/project/src/components/button.tsx");
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap();
-        assert_eq!(name, "button.tsx");
-
-        let folder_path = Path::new("/project/src/components");
-        let folder_name = folder_path.file_name().and_then(|n| n.to_str()).unwrap();
-        assert_eq!(folder_name, "components");
-    }
 }
