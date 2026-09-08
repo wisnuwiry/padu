@@ -24,6 +24,7 @@ import {
 import { useCopyFeedback } from '@/hooks/use-copy-feedback'
 import {
   authenticateAgy,
+  checkAgyAuth,
   daemonKeys,
   displayTitle,
   installAgyAcp,
@@ -348,6 +349,7 @@ function ProvidersSettings() {
   const [agyAuthenticated, setAgyAuthenticated] = useState(false)
   useEffect(() => {
     if (!client) return
+    void checkAgyAuth(client).then(setAgyAuthenticated).catch(() => setAgyAuthenticated(false))
     return client.subscribeProviderInstallProgress((progress) => {
       if (progress.provider === 'agy') setAgyInstallPercent(progress.percent)
     })

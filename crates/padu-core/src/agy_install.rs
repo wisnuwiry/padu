@@ -221,7 +221,11 @@ fn download(
             progress(percent.clamp(0.0, 100.0) as u8, "Downloading");
         }
         if text.len() > 256 {
-            text.drain(..text.len() - 256);
+            let mut cut = text.len() - 256;
+            while cut < text.len() && !text.is_char_boundary(cut) {
+                cut += 1;
+            }
+            text.drain(..cut);
         }
     }
     let status = child

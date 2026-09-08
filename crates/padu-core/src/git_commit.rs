@@ -338,9 +338,10 @@ fn agent_arguments(
             push(&mut args, "--output-format");
             push(&mut args, "text");
             if let Some(model) = model {
-                let resolved = crate::driver::resolve_agy_model_id(model, reasoning_effort, None);
+                // Commit generation has no discovered model options, so do not
+                // append a reasoning suffix that the provider may not support.
                 push(&mut args, "--model");
-                push(&mut args, &resolved);
+                push(&mut args, model);
             }
             return args;
         }

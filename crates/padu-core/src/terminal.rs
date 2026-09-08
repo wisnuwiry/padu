@@ -16,6 +16,7 @@ use crate::EventSink;
 #[cfg(unix)]
 mod platform {
     use std::io::{Read as _, Write as _};
+    use std::os::fd::AsRawFd;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::thread::JoinHandle;
@@ -76,6 +77,14 @@ mod platform {
             let pty = tty::new(&options, size, 0)
                 .with_context(|| format!("spawn terminal in {}", cwd.display()))?;
             let mut output = pty.file().try_clone().context("clone terminal output")?;
+            // A blocking PTY read can outlive the child on macOS. Nonblocking
+            // reads let the shutdown flag be observed before joining the reader.
+            let flags = unsafe { libc::fcntl(output.as_raw_fd(), libc::F_GETFL) };
+            if flags >= 0 {
+                unsafe {
+                    libc::fcntl(output.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK);
+                }
+            }
             let pty = Arc::new(Mutex::new(pty));
             let stopped = Arc::new(AtomicBool::new(false));
             let reader_pty = pty.clone();

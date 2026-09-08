@@ -872,6 +872,14 @@ pub(crate) fn resolve_agy_model_id(
     }
 }
 
+pub fn agy_auth_status(binary: &Path) -> anyhow::Result<bool> {
+    let output = std::process::Command::new(binary)
+        .args(["auth", "status"])
+        .output()
+        .map_err(|error| anyhow!("could not query Antigravity authentication: {error}"))?;
+    Ok(output.status.success())
+}
+
 pub fn logout_agy(binary: &Path, cwd: &Path) -> anyhow::Result<()> {
     let agent = sdk_agent(
         binary,

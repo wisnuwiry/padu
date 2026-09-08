@@ -219,6 +219,19 @@ impl Backend for PaduBackend {
                     path,
                 })
             }
+            Command::CheckAgyAuth => {
+                let settings = self.settings.get();
+                let binary_override = settings
+                    .provider_binary_overrides
+                    .get(&ProviderKind::Agy)
+                    .map(String::as_str);
+                let authenticated =
+                    crate::model::provider_probe(ProviderKind::Agy, binary_override)
+                        .path
+                        .map(|path| crate::driver::agy_auth_status(&path).unwrap_or(false))
+                        .unwrap_or(false);
+                Ok(ResponsePayload::AgyAuthStatus { authenticated })
+            }
             Command::LogoutAgy => {
                 let settings = self.settings.get();
                 let binary_override = settings
@@ -1832,6 +1845,7 @@ fn handle_driver_command(
         | Command::InstallAgyAcp
         | Command::AuthenticateAgy
         | Command::LogoutAgy
+        | Command::CheckAgyAuth
         | Command::ReinstallAgyAcp
         | Command::RemoveAgyAcp
         | Command::ProbeProvider { .. }

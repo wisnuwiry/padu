@@ -170,6 +170,10 @@ export async function authenticateAgy(client: PaduClient): Promise<void> {
   expectResponse(await client.requestWithTimeout({ type: 'authenticateAgy' }, 10 * 60 * 1000), 'ack')
 }
 
+export async function checkAgyAuth(client: PaduClient): Promise<boolean> {
+  return expectResponse(await client.request({ type: 'checkAgyAuth' }), 'agyAuthStatus').authenticated
+}
+
 export async function logoutAgy(client: PaduClient): Promise<void> {
   expectResponse(await client.request({ type: 'logoutAgy' }), 'ack')
 }

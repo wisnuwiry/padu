@@ -12,8 +12,8 @@ mod pi;
 mod support;
 mod title_refresh;
 
-pub use acp::{authenticate_agy, logout_agy};
-pub(crate) use acp::{catalog_agent, discover_agy_models, resolve_agy_model_id};
+pub use acp::{agy_auth_status, authenticate_agy, logout_agy};
+pub(crate) use acp::{catalog_agent, discover_agy_models};
 
 use std::path::PathBuf;
 use std::sync::Arc;

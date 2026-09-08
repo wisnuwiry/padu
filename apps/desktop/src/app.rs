@@ -1922,6 +1922,7 @@ impl Padu {
     }
 
     fn apply_new_daemon(&mut self, daemon: padu_client::DaemonSupervisor, cx: &mut Context<Self>) {
+        self.agy_install_progress_events = daemon.client().subscribe_provider_install_progress();
         self.daemon = daemon.clone();
         self.store = StateStore::remote(daemon.clone());
         self.composer_draft_store = ComposerDraftStore::remote(daemon.clone());
@@ -2474,6 +2475,7 @@ impl Padu {
             .and_then(|state| state.0.as_ref())
             .map(|updater| (updater.status(), Some(updater.events())))
             .unwrap_or_default();
+        let auth_daemon = daemon.clone();
         let entity = cx.new(|cx| {
             let settings_focus = cx.focus_handle();
             let onboarding_add_project_focus = cx.focus_handle();
@@ -3265,6 +3267,29 @@ impl Padu {
         // that there is an entity to notify and deliberately not before the
         // first frame.
         entity.update(cx, |this, cx| {
+            let auth_daemon = auth_daemon.clone();
+            cx.spawn(async move |this, cx| {
+                let authenticated = cx
+                    .background_executor()
+                    .spawn(async move {
+                        match auth_daemon.client().request(
+                            Uuid::nil(),
+                            Uuid::nil(),
+                            padu_client::Command::CheckAgyAuth,
+                        ) {
+                            Ok(padu_client::ResponsePayload::AgyAuthStatus { authenticated }) => {
+                                authenticated
+                            }
+                            _ => false,
+                        }
+                    })
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    this.agy_authenticated = authenticated;
+                    cx.notify();
+                });
+            })
+            .detach();
             this.restart_task_state_sync();
             for session_id in startup_live_session_ids {
                 this.start_runtime_attachment(session_id, cx);

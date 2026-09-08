@@ -77,7 +77,7 @@ impl ProviderKind {
 
     pub fn short_name(self) -> &'static str {
         match self {
-            Self::Agy => "Agy",
+            Self::Agy => "Antigravity",
             Self::Amp => "Amp",
             Self::Claude => "Claude",
             Self::Codex => "Codex",

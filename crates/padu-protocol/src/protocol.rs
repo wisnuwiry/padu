@@ -138,6 +138,7 @@ pub enum Command {
     InstallAgyAcp,
     AuthenticateAgy,
     LogoutAgy,
+    CheckAgyAuth,
     ReinstallAgyAcp,
     RemoveAgyAcp,
     ProbeProvider {
@@ -408,6 +409,9 @@ pub enum ResponsePayload {
     ProviderInstalled {
         provider: ProviderKind,
         path: PathBuf,
+    },
+    AgyAuthStatus {
+        authenticated: bool,
     },
     ProviderProbe {
         probe: ProviderProbe,
