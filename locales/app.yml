@@ -2195,6 +2195,18 @@ diff.unavailable:
   en: Changes unavailable
 diff.refresh:
   en: Refresh changes
+diff.expand_all_files:
+  en: Expand all files
+diff.collapse_all_files:
+  en: Collapse all files
+diff.layout_tree:
+  en: Tree layout
+diff.layout_flat:
+  en: Flat layout
+diff.show_files:
+  en: Show changed files
+diff.hide_files:
+  en: Hide changed files
 diff.refresh_failed:
   en: "Could not refresh changes: %{error}"
 diff.truncated:

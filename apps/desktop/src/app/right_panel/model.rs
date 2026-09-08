@@ -24,6 +24,13 @@ pub(crate) struct WorkingTreeEntry {
     pub(crate) depth: usize,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum DiffFileLayout {
+    #[default]
+    Tree,
+    Flat,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ReviewDiffTreeRow {
     Directory {
@@ -117,6 +124,27 @@ pub(crate) fn review_diff_directory_paths(files: &[crate::review_diff::File]) ->
         }
     }
     paths
+}
+
+pub(crate) fn review_diff_flat_rows(
+    files: &[crate::review_diff::File],
+    filter: &str,
+) -> Vec<ReviewDiffTreeRow> {
+    let filter = filter.trim().to_ascii_lowercase();
+    let mut indexes = files
+        .iter()
+        .enumerate()
+        .filter(|(_, file)| filter.is_empty() || file.path.to_ascii_lowercase().contains(&filter))
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    indexes.sort_by_key(|index| files[*index].path.to_ascii_lowercase());
+    indexes
+        .into_iter()
+        .map(|file_index| ReviewDiffTreeRow::File {
+            file_index,
+            depth: 0,
+        })
+        .collect()
 }
 
 pub(crate) fn review_diff_tree_rows(

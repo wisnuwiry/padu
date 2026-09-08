@@ -747,6 +747,8 @@ pub(crate) struct RightPanelSessionState {
     pub(crate) diff_snapshot: Option<Arc<ReviewDiffSnapshot>>,
     pub(crate) diff_selected_file: Option<usize>,
     pub(crate) diff_expanded_paths: HashSet<String>,
+    pub(crate) diff_file_layout: right_panel::DiffFileLayout,
+    pub(crate) diff_files_visible: bool,
 }
 
 impl RightPanelSessionState {
@@ -767,6 +769,8 @@ impl RightPanelSessionState {
             diff_snapshot: None,
             diff_selected_file: None,
             diff_expanded_paths: HashSet::new(),
+            diff_file_layout: right_panel::DiffFileLayout::default(),
+            diff_files_visible: true,
         }
     }
 
@@ -1414,6 +1418,8 @@ pub struct Padu {
     right_panel_diff_generation: u64,
     right_panel_diff_selected_file: Option<usize>,
     right_panel_diff_expanded_paths: HashSet<String>,
+    right_panel_diff_file_layout: right_panel::DiffFileLayout,
+    right_panel_diff_files_visible: bool,
     right_panel_diff_tree_rows: RefCell<Vec<right_panel::ReviewDiffTreeRow>>,
     right_panel_diff_tree_cursor: Option<usize>,
     /// The working tree as currently drawn. Held so a refresh can redraw the
@@ -3139,6 +3145,8 @@ impl Padu {
                 right_panel_diff_generation: 0,
                 right_panel_diff_selected_file: None,
                 right_panel_diff_expanded_paths: HashSet::new(),
+                right_panel_diff_file_layout: right_panel::DiffFileLayout::default(),
+                right_panel_diff_files_visible: true,
                 right_panel_diff_tree_rows: RefCell::new(Vec::new()),
                 right_panel_diff_tree_cursor: None,
                 right_panel_working_tree: Vec::new(),

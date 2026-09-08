@@ -264,6 +264,33 @@ mod tests {
     }
 
     #[test]
+    fn review_flat_layout_lists_filtered_files_by_full_path() {
+        assert_eq!(
+            review_diff_flat_rows(&review_files(), "APP"),
+            vec![
+                ReviewDiffTreeRow::File {
+                    file_index: 1,
+                    depth: 0,
+                },
+                ReviewDiffTreeRow::File {
+                    file_index: 2,
+                    depth: 0,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn review_flat_layout_keeps_root_files_and_nested_files_at_one_depth() {
+        let rows = review_diff_flat_rows(&review_files(), "");
+        assert!(
+            rows.iter()
+                .all(|row| matches!(row, ReviewDiffTreeRow::File { depth: 0, .. }))
+        );
+        assert_eq!(rows.len(), review_files().len());
+    }
+
+    #[test]
     fn review_render_path_only_reads_the_in_memory_snapshot() {
         let source = include_str!("diff.rs");
         let start = source

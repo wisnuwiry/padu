@@ -1058,6 +1058,12 @@ diff.preparing_review: 正在准备审阅…
 diff.loading_description: 正在捕获一致的 Git 快照以供审阅
 diff.unavailable: 无法查看更改
 diff.refresh: 刷新更改
+diff.expand_all_files: 展开所有文件
+diff.collapse_all_files: 折叠所有文件
+diff.layout_tree: 树形布局
+diff.layout_flat: 平铺布局
+diff.show_files: 显示更改的文件
+diff.hide_files: 隐藏更改的文件
 diff.refresh_failed: "无法刷新更改：%{error}"
 diff.truncated: 大型差异 · 仅显示前 50,000 行
 diff.unmodified_lines: "%{count} 行未更改"

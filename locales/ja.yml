@@ -1101,6 +1101,12 @@ diff.preparing_review: レビューを準備中…
 diff.loading_description: レビュー用に一貫した Git スナップショットを取得しています
 diff.unavailable: 変更を利用できません
 diff.refresh: 変更を更新
+diff.expand_all_files: すべてのファイルを展開
+diff.collapse_all_files: すべてのファイルを折りたたむ
+diff.layout_tree: ツリーレイアウト
+diff.layout_flat: フラットレイアウト
+diff.show_files: 変更したファイルを表示
+diff.hide_files: 変更したファイルを非表示
 diff.refresh_failed: "変更を更新できませんでした：%{error}"
 diff.truncated: 大きな差分 · 先頭 50,000 行を表示
 diff.unmodified_lines: "未変更の行 %{count} 行"
