@@ -1,7 +1,7 @@
 import type { AgentSession, FileEntry, ProviderKind, ProviderSessionSummary, SessionMessageMatch } from '@padu/client'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { ProviderIcon, PROVIDERS, providerMeta, PaduIcon, type PaduIconName } from '@/components/padu-icon'
+import { FileTypeIcon, ProviderIcon, PROVIDERS, providerMeta, PaduIcon, type PaduIconName } from '@/components/padu-icon'
 import { Kbd } from '@/components/ui/kbd'
 import type { SettingsPageId } from '@/components/settings-view'
 import { SETTINGS_PAGES } from '@/components/settings-view'
@@ -581,7 +581,7 @@ function PaletteRows({
           aria-selected={index === selected}
           className={cn(
             'flex w-full items-center gap-2 rounded-[8px] border border-transparent px-2.5 text-left outline-none hover:bg-accent',
-            item.content || fileResult ? 'h-[54px]' : 'h-10',
+            item.content ? 'h-[54px]' : fileResult ? 'h-12' : 'h-10',
             index === selected && 'border-input bg-accent',
           )}
           id={`palette-${item.id}`}
@@ -595,7 +595,9 @@ function PaletteRows({
               ? <PaduIcon className="size-3.5 animate-spin motion-reduce:animate-none" name="loaderCircle" />
               : item.provider
               ? <ProviderIcon className="size-3.5" provider={item.provider} />
-              : item.icon && <PaduIcon className={fileResult ? 'size-4' : 'size-3.5'} name={item.icon} />}
+              : fileResult
+              ? <FileTypeIcon className="size-4" path={item.keywords} />
+              : item.icon && <PaduIcon className="size-3.5" name={item.icon} />}
           </span>
           <span className="min-w-0 flex-1">
             <span className={cn('flex min-w-0', fileResult ? 'flex-col gap-[2px]' : 'items-baseline gap-[7px]')}>

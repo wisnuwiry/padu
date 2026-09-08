@@ -39,6 +39,7 @@ const SECTION_HEADER_HEIGHT: f32 = 26.0;
 const PROVIDER_SECTION_TOP_MARGIN: f32 = 6.0;
 const RESULT_ROW_HEIGHT: f32 = 40.0;
 const CONTENT_RESULT_ROW_HEIGHT: f32 = 54.0;
+const FILE_RESULT_ROW_HEIGHT: f32 = 48.0;
 const EMPTY_RESULTS_HEIGHT: f32 = 160.0;
 const RESULTS_BOTTOM_PADDING: f32 = 6.0;
 const MAX_CARD_HEIGHT: f32 = 440.0;
@@ -314,7 +315,9 @@ fn palette_content_match_text(
 }
 
 fn command_palette_row_height(item: &CommandPaletteItem) -> f32 {
-    if item.content_match.is_some() || matches!(item.action, PaletteAction::OpenFile(_)) {
+    if matches!(item.action, PaletteAction::OpenFile(_)) {
+        FILE_RESULT_ROW_HEIGHT
+    } else if item.content_match.is_some() {
         CONTENT_RESULT_ROW_HEIGHT
     } else {
         RESULT_ROW_HEIGHT

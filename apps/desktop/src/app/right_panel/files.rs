@@ -41,6 +41,7 @@ impl Padu {
                 cx,
             );
         };
+        let show_project_name = selected_path.is_none();
         let project_name = project.display_name();
         // Read only. The walk is filesystem I/O, so it happens in
         // `refresh_right_panel_working_tree`, never in a frame.
@@ -454,30 +455,113 @@ impl Padu {
                     .gap(px(8.0))
                     .border_b_1()
                     .border_color(theme.border)
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(icon("icons/folder.svg", 13.0, theme.text_tertiary))
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_size(sp(12.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text_secondary)
-                                    .child(project_name),
-                            ),
-                    )
+                    .when(show_project_name, |header| {
+                        header.child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .child(icon("icons/folder.svg", 13.0, theme.text_tertiary))
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_size(sp(12.5))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(theme.text_secondary)
+                                        .child(project_name.clone()),
+                                ),
+                        )
+                    })
                     .child(
                         div()
                             .flex()
                             .items_center()
                             .gap(px(4.0))
                             .flex_none()
+                            .child({
+                                let focus =
+                                    self.transcript_control_focus("right-panel-find-file", cx);
+                                div()
+                                    .id("right-panel-find-file")
+                                    .track_focus(&focus)
+                                    .tab_index(0)
+                                    .size(px(26.0))
+                                    .rounded(px(7.0))
+                                    .flex_none()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .cursor_pointer()
+                                    .focus_visible(|style| {
+                                        style.border_1().border_color(theme.accent)
+                                    })
+                                    .hover(|style| style.bg(theme.overlay))
+                                    .child(icon("icons/search.svg", 13.0, theme.text_tertiary))
+                                    .tooltip(|window, cx| {
+                                        Tooltip::new(tr!("command_palette.find_file"))
+                                            .build(window, cx)
+                                    })
+                                    .on_click(|_, _, cx| {
+                                        cx.defer(|cx| cx.dispatch_action(&OpenFilePicker));
+                                    })
+                                    .on_key_down(|event: &KeyDownEvent, _, cx| {
+                                        if matches!(event.keystroke.key.as_str(), "enter" | "space")
+                                        {
+                                            cx.defer(|cx| cx.dispatch_action(&OpenFilePicker));
+                                            cx.stop_propagation();
+                                        }
+                                    })
+                            })
+                            .child(
+                                icon_button("right-panel-new-file", "icons/file.svg", theme)
+                                    .tooltip(|window, cx| {
+                                        Tooltip::new(tr!("files.new_file")).build(window, cx)
+                                    })
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        if let Some(root) =
+                                            this.selected_workspace_path().map(Path::to_path_buf)
+                                        {
+                                            this.begin_inline_create(false, root, 0, window, cx);
+                                        }
+                                    })),
+                            )
+                            .child(
+                                icon_button(
+                                    "right-panel-new-folder",
+                                    "icons/folder-new.svg",
+                                    theme,
+                                )
+                                .tooltip(|window, cx| {
+                                    Tooltip::new(tr!("files.new_folder")).build(window, cx)
+                                })
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| {
+                                        if let Some(root) =
+                                            this.selected_workspace_path().map(Path::to_path_buf)
+                                        {
+                                            this.begin_inline_create(true, root, 0, window, cx);
+                                        }
+                                    },
+                                )),
+                            )
+                            .child(
+                                icon_button(
+                                    "right-panel-refresh-files",
+                                    "icons/rotate-cw.svg",
+                                    theme,
+                                )
+                                .tooltip(|window, cx| {
+                                    Tooltip::new(tr!("files.refresh")).build(window, cx)
+                                })
+                                .on_click(cx.listener(
+                                    |this, _, _, cx| {
+                                        this.refresh_right_panel_working_tree(cx);
+                                    },
+                                )),
+                            )
                             .child({
                                 let hidden = self.right_panel_show_hidden_files;
                                 let focus =
@@ -528,54 +612,7 @@ impl Padu {
                                             }
                                         },
                                     ))
-                            })
-                            .child(
-                                icon_button("right-panel-new-file", "icons/file.svg", theme)
-                                    .tooltip(|window, cx| {
-                                        Tooltip::new(tr!("files.new_file")).build(window, cx)
-                                    })
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        if let Some(root) =
-                                            this.selected_workspace_path().map(Path::to_path_buf)
-                                        {
-                                            this.begin_inline_create(false, root, 0, window, cx);
-                                        }
-                                    })),
-                            )
-                            .child(
-                                icon_button(
-                                    "right-panel-new-folder",
-                                    "icons/folder-new.svg",
-                                    theme,
-                                )
-                                .tooltip(|window, cx| {
-                                    Tooltip::new(tr!("files.new_folder")).build(window, cx)
-                                })
-                                .on_click(cx.listener(
-                                    |this, _, window, cx| {
-                                        if let Some(root) =
-                                            this.selected_workspace_path().map(Path::to_path_buf)
-                                        {
-                                            this.begin_inline_create(true, root, 0, window, cx);
-                                        }
-                                    },
-                                )),
-                            )
-                            .child(
-                                icon_button(
-                                    "right-panel-refresh-files",
-                                    "icons/rotate-cw.svg",
-                                    theme,
-                                )
-                                .tooltip(|window, cx| {
-                                    Tooltip::new(tr!("files.refresh")).build(window, cx)
-                                })
-                                .on_click(cx.listener(
-                                    |this, _, _, cx| {
-                                        this.refresh_right_panel_working_tree(cx);
-                                    },
-                                )),
-                            ),
+                            }),
                     ),
             )
             .child({

@@ -125,6 +125,7 @@ export interface RightPanelProps {
   onExpandableChange?: (expandable: boolean) => void
   onTabsReport?: (tabs: PanelTab[], activeId: string | null) => void
   onAddToChat?: (name: string, isDir?: boolean) => void
+  onFindFile?: () => void
 }
 
 interface PanelState {
@@ -155,6 +156,7 @@ export const RightPanel = forwardRef<RightPanelHandle, RightPanelProps>(function
   onExpandableChange,
   onTabsReport,
   onAddToChat,
+  onFindFile,
 }, ref) {
   const { t } = useI18n()
   const [{ tabs, activeId }, setPanelState] = useState<PanelState>({
@@ -556,6 +558,7 @@ export const RightPanel = forwardRef<RightPanelHandle, RightPanelProps>(function
               onDirtyChange={setTabDirty}
               onOpenFile={openFile}
               onAddToChat={onAddToChat}
+              onFindFile={onFindFile}
             />
           )}
           {tab.surface === 'changes' && (
@@ -963,6 +966,7 @@ function FilesPanel({
   onDirtyChange,
   onOpenFile,
   onAddToChat,
+  onFindFile,
 }: {
   active: boolean
   buffers: Record<string, FileBuffer>
@@ -975,6 +979,7 @@ function FilesPanel({
   onDirtyChange: (tabId: string, dirty: boolean) => void
   onOpenFile: (tabId: string, path: string, treeWidth: number) => void
   onAddToChat?: (name: string, isDir?: boolean) => void
+  onFindFile?: () => void
 }) {
   const { t } = useI18n()
   const { client, config, phase } = useDaemon()
@@ -1289,29 +1294,43 @@ function FilesPanel({
       )}
       <div className="flex h-[42px] shrink-0 items-center justify-between border-b px-3 text-[11.5px] font-medium text-[var(--text-secondary)]">
         <div className="flex min-w-0 flex-1 items-center gap-1">
-          <PaduIcon className="ml-1 size-[13px] text-[var(--text-tertiary)]" name="folder" />
-          <span className="min-w-0 truncate px-1">
-            {project ? projectDisplayName(project, t('project.no_project_name')) : ''}
-          </span>
+          {!selected && <>
+            <PaduIcon className="ml-1 size-[13px] text-[var(--text-tertiary)]" name="folder" />
+            <span className="min-w-0 truncate px-1">
+              {project ? projectDisplayName(project, t('project.no_project_name')) : ''}
+            </span>
+          </>}
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <ControlMenu
-            align="right"
-            caret={false}
-            icon="plus"
-            label={t('files.actions')}
-            placement="below"
-            triggerClassName="size-6 justify-center px-0"
-            items={[
-              { id: 'new-file', label: t('files.new_file'), icon: 'file', onSelect: () => void createEntry(false, '') },
-              { id: 'new-folder', label: t('files.new_folder'), icon: 'folderNew', onSelect: () => void createEntry(true, '') },
-            ]}
-          />
-          <button aria-label={showHidden ? t('files.hide_hidden') : t('files.show_hidden')} className="grid size-6 place-items-center rounded hover:bg-accent" type="button" onClick={() => setShowHidden((value) => !value)}>
-            <PaduIcon className="size-3.5 text-[var(--text-tertiary)]" name={showHidden ? 'eye' : 'eyeOff'} />
+          <button
+            aria-label={t('command_palette.find_file')}
+            className="grid size-6 place-items-center rounded hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            type="button"
+            onClick={onFindFile}
+          >
+            <PaduIcon className="size-3.5 text-[var(--text-tertiary)]" name="search" />
+          </button>
+          <button
+            aria-label={t('files.new_file')}
+            className="grid size-6 place-items-center rounded hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            type="button"
+            onClick={() => void createEntry(false, '')}
+          >
+            <PaduIcon className="size-3.5 text-[var(--text-tertiary)]" name="file" />
+          </button>
+          <button
+            aria-label={t('files.new_folder')}
+            className="grid size-6 place-items-center rounded hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            type="button"
+            onClick={() => void createEntry(true, '')}
+          >
+            <PaduIcon className="size-3.5 text-[var(--text-tertiary)]" name="folderNew" />
           </button>
           <button aria-label={t('files.refresh')} className="grid size-6 place-items-center rounded hover:bg-accent" type="button" onClick={refreshTree}>
             <PaduIcon className="size-3.5 text-[var(--text-tertiary)]" name="rotateCw" />
+          </button>
+          <button aria-label={showHidden ? t('files.hide_hidden') : t('files.show_hidden')} className="grid size-6 place-items-center rounded hover:bg-accent" type="button" onClick={() => setShowHidden((value) => !value)}>
+            <PaduIcon className="size-3.5 text-[var(--text-tertiary)]" name={showHidden ? 'eye' : 'eyeOff'} />
           </button>
         </div>
       </div>

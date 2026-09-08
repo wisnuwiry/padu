@@ -1541,6 +1541,7 @@ export function PaduApp() {
             sidebarVisible={sidebarVisible}
             sidebarWidth={sidebarVisible ? sidebarWidth : 0}
             onToggleSidebar={() => setSidebarVisible((value) => !value)}
+            onFindFile={() => openCommandPalette('findFile')}
             expanded={isActive && fullscreen.expanded}
             showConversation={isActive && fullscreen.conversation}
             onExpandedChange={(expanded) => {
