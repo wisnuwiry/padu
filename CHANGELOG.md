@@ -16,6 +16,25 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## 0.1.3 - 2026-09-08
+
+### Added
+
+- **Antigravity Provider Support**: Added Antigravity as a supported coding agent provider, including installation detection, model grouping, settings configuration, and provider-specific session handling.
+- **File Search Command Palette**: Added a command palette action for quickly finding files in the current workspace.
+- **Task Pinning and Archive Browsing**: Added task pinning and archive metadata so important tasks are easier to find and revisit.
+- **Inline File Mentions**: Added file mention support with keyboard shortcuts, workspace mention staging, and attachment chips for referencing files in conversations.
+
+### Improved
+
+- **Review Diff Controls**: Added file-level controls and clearer navigation for reviewing changes in the diff view.
+- **Workspace File Actions**: Refined file panel actions and consolidated destructive actions around shared confirmation dialogs.
+- **Desktop Dialogs**: Introduced reusable dialog and button primitives for a more consistent desktop interaction experience.
+
+### Fixed
+
+- **Antigravity Provider State**: Fixed provider state detection and model propagation for Antigravity sessions and commit-message generation.
+
 ## 0.1.2 - 2026-09-07
 
 - **Right Panel Full-Size Mode**: Maximize the right panel to full-size view with dedicated keyboard shortcuts (`ctrl+tab` / `ctrl+shift+tab` tab navigation), unified headers, and balanced transcript layout sizing.
