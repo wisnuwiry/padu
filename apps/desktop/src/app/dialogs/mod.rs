@@ -39,9 +39,7 @@ impl Padu {
         if let Some(element) = self.render_host_dialog(window, cx) {
             return Some(element);
         }
-        if let Some(element) = self.render_file_operation_dialog(window, cx) {
-            return Some(element);
-        }
+
         None
     }
 }
