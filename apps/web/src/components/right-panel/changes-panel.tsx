@@ -317,7 +317,7 @@ export function ChangesPanel({
                 type="button"
                 onClick={() => setLayout('tree')}
               >
-                Tree
+                <PaduIcon className="size-3.5" name="folder" />
               </button>
               <button
                 aria-label="Flat layout"
@@ -326,7 +326,7 @@ export function ChangesPanel({
                 type="button"
                 onClick={() => setLayout('flat')}
               >
-                Flat
+                <PaduIcon className="size-3.5" name="list" />
               </button>
             </div>
             {layout === 'tree' && (
@@ -347,7 +347,7 @@ export function ChangesPanel({
                   type="button"
                   onClick={() => setExpandedPaths(new Set())}
                 >
-                  <PaduIcon className="size-3.5" name="chevronRight" />
+                  <PaduIcon className="size-3.5" name="chevronUp" />
                 </button>
               </>
             )}

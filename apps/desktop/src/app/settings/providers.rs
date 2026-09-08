@@ -459,6 +459,9 @@ impl Padu {
         cx: &mut Context<Self>,
     ) -> Div {
         let override_value = self.state.provider_binary_overrides.get(&kind).cloned();
+        let installed = self
+            .provider_probe(kind)
+            .is_some_and(|probe| probe.installed);
         let full_path = self
             .provider_probe(kind)
             .filter(|probe| probe.installed)
@@ -527,68 +530,65 @@ impl Padu {
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .when(
-                        kind == ProviderKind::Agy && override_value.is_none(),
-                        |element| {
-                            let installing = self.agy_installing;
-                            element.child(
-                                div()
-                                    .id("install-agy-acp")
-                                    .tab_index(0)
-                                    .focus_visible(|style| style.border_color(theme.accent))
-                                    .h(px(29.0))
-                                    .px(px(10.0))
-                                    .rounded(px(7.0))
-                                    .border_1()
-                                    .border_color(theme.border_strong)
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(6.0))
-                                    .cursor(if installing {
-                                        gpui::CursorStyle::Arrow
-                                    } else {
-                                        gpui::CursorStyle::PointingHand
-                                    })
-                                    .opacity(if installing { 0.65 } else { 1.0 })
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.text_secondary)
-                                    .hover(|element| element.bg(theme.overlay))
-                                    .when(installing, |element| {
-                                        element.child(crate::ui::motion::spin(icon(
-                                            "icons/loader-circle.svg",
-                                            12.0,
-                                            theme.text_secondary,
-                                        )))
-                                    })
-                                    .child(if installing {
-                                        SharedString::from(tr!(
-                                            "providers.agy_downloading",
-                                            percent = self.agy_install_percent
-                                        ))
-                                    } else {
-                                        SharedString::from(tr!("providers.agy_install_acp"))
-                                    })
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        if !installing {
+                    .when(kind == ProviderKind::Agy && !installed, |element| {
+                        let installing = self.agy_installing;
+                        element.child(
+                            div()
+                                .id("install-agy-acp")
+                                .tab_index(0)
+                                .focus_visible(|style| style.border_color(theme.accent))
+                                .h(px(29.0))
+                                .px(px(10.0))
+                                .rounded(px(7.0))
+                                .border_1()
+                                .border_color(theme.border_strong)
+                                .flex()
+                                .items_center()
+                                .gap(px(6.0))
+                                .cursor(if installing {
+                                    gpui::CursorStyle::Arrow
+                                } else {
+                                    gpui::CursorStyle::PointingHand
+                                })
+                                .opacity(if installing { 0.65 } else { 1.0 })
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_secondary)
+                                .hover(|element| element.bg(theme.overlay))
+                                .when(installing, |element| {
+                                    element.child(crate::ui::motion::spin(icon(
+                                        "icons/loader-circle.svg",
+                                        12.0,
+                                        theme.text_secondary,
+                                    )))
+                                })
+                                .child(if installing {
+                                    SharedString::from(tr!(
+                                        "providers.agy_downloading",
+                                        percent = self.agy_install_percent
+                                    ))
+                                } else {
+                                    SharedString::from(tr!("providers.agy_install_acp"))
+                                })
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    if !installing {
+                                        this.install_agy_acp(cx);
+                                    }
+                                }))
+                                .on_key_down(cx.listener(
+                                    move |this, event: &KeyDownEvent, _, cx| {
+                                        if !installing
+                                            && matches!(
+                                                event.keystroke.key.as_str(),
+                                                "enter" | "space"
+                                            )
+                                        {
                                             this.install_agy_acp(cx);
+                                            cx.stop_propagation();
                                         }
-                                    }))
-                                    .on_key_down(cx.listener(
-                                        move |this, event: &KeyDownEvent, _, cx| {
-                                            if !installing
-                                                && matches!(
-                                                    event.keystroke.key.as_str(),
-                                                    "enter" | "space"
-                                                )
-                                            {
-                                                this.install_agy_acp(cx);
-                                                cx.stop_propagation();
-                                            }
-                                        },
-                                    )),
-                            )
-                        },
-                    )
+                                    },
+                                )),
+                        )
+                    })
                     .child(
                         TextField::new(
                             SharedString::from(format!("provider-path-field-{}", kind.id())),
@@ -599,156 +599,153 @@ impl Padu {
                     )
                     .when(override_value.is_some(), |element| element.child(reset)),
             )
-            .when(
-                kind == ProviderKind::Agy && override_value.is_some(),
-                |element| {
-                    let installing = self.agy_installing;
-                    element.child(
-                        div()
-                            .mt(px(6.0))
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .child(
-                                div()
-                                    .id("agy-sign-in")
-                                    .tab_index(0)
-                                    .focus_visible(|style| style.border_color(theme.accent))
-                                    .h(px(29.0))
-                                    .px(px(9.0))
-                                    .rounded(px(7.0))
-                                    .border_1()
-                                    .border_color(theme.border_strong)
-                                    .flex()
-                                    .items_center()
-                                    .cursor(if installing {
-                                        gpui::CursorStyle::Arrow
-                                    } else {
-                                        gpui::CursorStyle::PointingHand
-                                    })
-                                    .opacity(if installing { 0.65 } else { 1.0 })
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.text_secondary)
-                                    .hover(|element| element.bg(theme.overlay))
-                                    .child(if installing {
-                                        tr!("providers.agy_working")
-                                    } else if self.agy_authenticated {
-                                        tr!("providers.agy_sign_out")
-                                    } else {
-                                        tr!("providers.agy_sign_in")
-                                    })
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        if !this.agy_installing {
+            .when(kind == ProviderKind::Agy && installed, |element| {
+                let installing = self.agy_installing;
+                element.child(
+                    div()
+                        .mt(px(6.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(
+                            div()
+                                .id("agy-sign-in")
+                                .tab_index(0)
+                                .focus_visible(|style| style.border_color(theme.accent))
+                                .h(px(29.0))
+                                .px(px(9.0))
+                                .rounded(px(7.0))
+                                .border_1()
+                                .border_color(theme.border_strong)
+                                .flex()
+                                .items_center()
+                                .cursor(if installing {
+                                    gpui::CursorStyle::Arrow
+                                } else {
+                                    gpui::CursorStyle::PointingHand
+                                })
+                                .opacity(if installing { 0.65 } else { 1.0 })
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_secondary)
+                                .hover(|element| element.bg(theme.overlay))
+                                .child(if installing {
+                                    tr!("providers.agy_working")
+                                } else if self.agy_authenticated {
+                                    tr!("providers.agy_sign_out")
+                                } else {
+                                    tr!("providers.agy_sign_in")
+                                })
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    if !this.agy_installing {
+                                        if this.agy_authenticated {
+                                            this.confirm_sign_out_agy(window, cx);
+                                        } else {
+                                            this.authenticate_agy(cx);
+                                        }
+                                    }
+                                }))
+                                .on_key_down(cx.listener(
+                                    move |this, event: &KeyDownEvent, window, cx| {
+                                        if !this.agy_installing
+                                            && matches!(
+                                                event.keystroke.key.as_str(),
+                                                "enter" | "space"
+                                            )
+                                        {
                                             if this.agy_authenticated {
                                                 this.confirm_sign_out_agy(window, cx);
                                             } else {
                                                 this.authenticate_agy(cx);
                                             }
+                                            cx.stop_propagation();
                                         }
-                                    }))
-                                    .on_key_down(cx.listener(
-                                        move |this, event: &KeyDownEvent, window, cx| {
-                                            if !this.agy_installing
-                                                && matches!(
-                                                    event.keystroke.key.as_str(),
-                                                    "enter" | "space"
-                                                )
-                                            {
-                                                if this.agy_authenticated {
-                                                    this.confirm_sign_out_agy(window, cx);
-                                                } else {
-                                                    this.authenticate_agy(cx);
-                                                }
-                                                cx.stop_propagation();
-                                            }
-                                        },
-                                    )),
-                            )
-                            .child(
-                                div()
-                                    .id("agy-reinstall")
-                                    .tab_index(0)
-                                    .focus_visible(|style| style.border_color(theme.accent))
-                                    .h(px(29.0))
-                                    .px(px(9.0))
-                                    .rounded(px(7.0))
-                                    .border_1()
-                                    .border_color(theme.border_strong)
-                                    .flex()
-                                    .items_center()
-                                    .cursor(if installing {
-                                        gpui::CursorStyle::Arrow
-                                    } else {
-                                        gpui::CursorStyle::PointingHand
-                                    })
-                                    .opacity(if installing { 0.65 } else { 1.0 })
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.text_secondary)
-                                    .hover(|element| element.bg(theme.overlay))
-                                    .child(tr!("providers.agy_reinstall"))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        if !this.agy_installing {
+                                    },
+                                )),
+                        )
+                        .child(
+                            div()
+                                .id("agy-reinstall")
+                                .tab_index(0)
+                                .focus_visible(|style| style.border_color(theme.accent))
+                                .h(px(29.0))
+                                .px(px(9.0))
+                                .rounded(px(7.0))
+                                .border_1()
+                                .border_color(theme.border_strong)
+                                .flex()
+                                .items_center()
+                                .cursor(if installing {
+                                    gpui::CursorStyle::Arrow
+                                } else {
+                                    gpui::CursorStyle::PointingHand
+                                })
+                                .opacity(if installing { 0.65 } else { 1.0 })
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_secondary)
+                                .hover(|element| element.bg(theme.overlay))
+                                .child(tr!("providers.agy_reinstall"))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    if !this.agy_installing {
+                                        this.confirm_reinstall_agy(window, cx);
+                                    }
+                                }))
+                                .on_key_down(cx.listener(
+                                    move |this, event: &KeyDownEvent, window, cx| {
+                                        if !this.agy_installing
+                                            && matches!(
+                                                event.keystroke.key.as_str(),
+                                                "enter" | "space"
+                                            )
+                                        {
                                             this.confirm_reinstall_agy(window, cx);
+                                            cx.stop_propagation();
                                         }
-                                    }))
-                                    .on_key_down(cx.listener(
-                                        move |this, event: &KeyDownEvent, window, cx| {
-                                            if !this.agy_installing
-                                                && matches!(
-                                                    event.keystroke.key.as_str(),
-                                                    "enter" | "space"
-                                                )
-                                            {
-                                                this.confirm_reinstall_agy(window, cx);
-                                                cx.stop_propagation();
-                                            }
-                                        },
-                                    )),
-                            )
-                            .child(
-                                div()
-                                    .id("agy-remove-download")
-                                    .tab_index(0)
-                                    .focus_visible(|style| style.border_color(theme.accent))
-                                    .h(px(29.0))
-                                    .px(px(9.0))
-                                    .rounded(px(7.0))
-                                    .border_1()
-                                    .border_color(theme.border_strong)
-                                    .flex()
-                                    .items_center()
-                                    .cursor(if installing {
-                                        gpui::CursorStyle::Arrow
-                                    } else {
-                                        gpui::CursorStyle::PointingHand
-                                    })
-                                    .opacity(if installing { 0.65 } else { 1.0 })
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.warning)
-                                    .hover(|element| element.bg(theme.overlay))
-                                    .child(tr!("providers.agy_remove_download"))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        if !this.agy_installing {
+                                    },
+                                )),
+                        )
+                        .child(
+                            div()
+                                .id("agy-remove-download")
+                                .tab_index(0)
+                                .focus_visible(|style| style.border_color(theme.accent))
+                                .h(px(29.0))
+                                .px(px(9.0))
+                                .rounded(px(7.0))
+                                .border_1()
+                                .border_color(theme.border_strong)
+                                .flex()
+                                .items_center()
+                                .cursor(if installing {
+                                    gpui::CursorStyle::Arrow
+                                } else {
+                                    gpui::CursorStyle::PointingHand
+                                })
+                                .opacity(if installing { 0.65 } else { 1.0 })
+                                .text_size(sp(12.5))
+                                .text_color(theme.warning)
+                                .hover(|element| element.bg(theme.overlay))
+                                .child(tr!("providers.agy_remove_download"))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    if !this.agy_installing {
+                                        this.confirm_remove_agy(window, cx);
+                                    }
+                                }))
+                                .on_key_down(cx.listener(
+                                    move |this, event: &KeyDownEvent, window, cx| {
+                                        if !this.agy_installing
+                                            && matches!(
+                                                event.keystroke.key.as_str(),
+                                                "enter" | "space"
+                                            )
+                                        {
                                             this.confirm_remove_agy(window, cx);
+                                            cx.stop_propagation();
                                         }
-                                    }))
-                                    .on_key_down(cx.listener(
-                                        move |this, event: &KeyDownEvent, window, cx| {
-                                            if !this.agy_installing
-                                                && matches!(
-                                                    event.keystroke.key.as_str(),
-                                                    "enter" | "space"
-                                                )
-                                            {
-                                                this.confirm_remove_agy(window, cx);
-                                                cx.stop_propagation();
-                                            }
-                                        },
-                                    )),
-                            ),
-                    )
-                },
-            )
+                                    },
+                                )),
+                        ),
+                )
+            })
             .child(
                 div()
                     .text_size(sp(12.5))
