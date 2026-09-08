@@ -180,11 +180,7 @@ impl Padu {
                     && !review_diff_directory_paths(&snapshot.files)
                         .is_subset(&self.right_panel_diff_expanded_paths)
             });
-        let expand_icon = if expand_all {
-            "icons/chevron-down.svg"
-        } else {
-            "icons/chevron-up.svg"
-        };
+        let expand_icon = "icons/chevrons-up-down.svg";
         let expand_tooltip = if expand_all {
             tr!("diff.expand_all_files")
         } else {
@@ -218,8 +214,13 @@ impl Padu {
             }));
         let layout_handle = self.menu_handle("right-panel-diff-layout", cx);
         let current_layout = self.right_panel_diff_file_layout;
+        let layout_icon = match self.right_panel_diff_file_layout {
+            DiffFileLayout::Tree => "icons/folder.svg",
+            DiffFileLayout::Flat => "icons/list.svg",
+        };
         let layout = dropdown_menu(
             MenuChip::new("right-panel-diff-layout")
+                .icon(layout_icon, theme.text_tertiary)
                 .label(match self.right_panel_diff_file_layout {
                     DiffFileLayout::Tree => tr!("diff.layout_tree"),
                     DiffFileLayout::Flat => tr!("diff.layout_flat"),
@@ -234,17 +235,26 @@ impl Padu {
                 let weak = cx.entity().downgrade();
                 move |_| {
                     [
-                        (DiffFileLayout::Tree, tr!("diff.layout_tree")),
-                        (DiffFileLayout::Flat, tr!("diff.layout_flat")),
+                        (
+                            DiffFileLayout::Tree,
+                            tr!("diff.layout_tree"),
+                            "icons/folder.svg",
+                        ),
+                        (
+                            DiffFileLayout::Flat,
+                            tr!("diff.layout_flat"),
+                            "icons/list.svg",
+                        ),
                     ]
                     .into_iter()
-                    .map(|(choice, label)| {
+                    .map(|(choice, label, icon_path)| {
                         let weak = weak.clone();
                         MenuItem::new(label, move |_, cx| {
                             let _ = weak.update(cx, |this, cx| {
                                 this.set_right_panel_diff_file_layout(choice, cx)
                             });
                         })
+                        .icon(icon_path)
                         .selected(choice == current_layout)
                     })
                     .collect()
@@ -267,15 +277,7 @@ impl Padu {
             .when(!files_visible, |control| control.bg(theme.overlay))
             .focus_visible(|style| style.border_1().border_color(theme.accent))
             .hover(|style| style.bg(theme.overlay))
-            .child(icon(
-                if files_visible {
-                    "icons/eye-off.svg"
-                } else {
-                    "icons/eye.svg"
-                },
-                13.0,
-                theme.text_tertiary,
-            ))
+            .child(icon("icons/list.svg", 13.0, theme.text_tertiary))
             .tooltip(move |window, cx| {
                 Tooltip::new(if files_visible {
                     tr!("diff.hide_files")
