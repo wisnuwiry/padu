@@ -2491,7 +2491,7 @@ mod tests {
 
     #[test]
     fn elph_launches_acp_over_stdio() {
-        let launch = launch_for(ProviderKind::Elph, None).unwrap();
+        let launch = launch_for(ProviderKind::Elph, None).expect("Elph launch should succeed");
         assert_eq!(launch.args, ["acp", "--stdio"]);
         assert!(launch.env.is_empty());
     }
