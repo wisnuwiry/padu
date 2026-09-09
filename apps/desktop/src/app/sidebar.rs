@@ -219,7 +219,7 @@ const SIDEBAR_SESSION_ROW_HEIGHT: f32 = SIDEBAR_SESSION_CARD_HEIGHT + SIDEBAR_SE
 const SIDEBAR_PROJECT_SESSION_ROW_HEIGHT: f32 =
     SIDEBAR_PROJECT_SESSION_CARD_HEIGHT + SIDEBAR_SESSION_ROW_GAP;
 const SIDEBAR_ACTION_ROW_HEIGHT: f32 = 32.0;
-const SIDEBAR_SEARCH_BOTTOM_GAP: f32 = 10.0;
+
 const SIDEBAR_GROUP_HEADER_HEIGHT: f32 = 28.0;
 const SIDEBAR_GROUP_HEADER_BOTTOM_GAP: f32 = 2.0;
 const SIDEBAR_SHOW_MORE_ROW_HEIGHT: f32 = 30.0;
@@ -345,6 +345,8 @@ pub(super) fn format_time_ago(seconds: u64) -> String {
 pub(super) enum SidebarRow {
     /// Opens the window-wide command palette and scrolls with history.
     Search,
+    /// Opens the notes workspace.
+    Notes,
     /// Group header; the first row also carries the sidebar actions.
     Header(SidebarGroup),
     /// A started session.
@@ -364,7 +366,8 @@ fn sidebar_session_row_index(rows: &[SidebarRow], session_id: Uuid) -> Option<us
 
 fn sidebar_row_height(row: SidebarRow, grouping: SidebarGrouping) -> Pixels {
     px(match row {
-        SidebarRow::Search => SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_SEARCH_BOTTOM_GAP,
+        SidebarRow::Search => SIDEBAR_ACTION_ROW_HEIGHT,
+        SidebarRow::Notes => SIDEBAR_ACTION_ROW_HEIGHT,
         SidebarRow::Header(_) => SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP,
         SidebarRow::Session(_) => {
             if grouping == SidebarGrouping::Project {
@@ -852,9 +855,28 @@ impl Padu {
             }));
         div()
             .w_full()
-            .h(px(SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_SEARCH_BOTTOM_GAP))
+            .h(px(SIDEBAR_ACTION_ROW_HEIGHT))
             .flex_none()
             .child(search)
+    }
+
+    fn render_sidebar_notes(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        self.render_sidebar_action_row(
+            "sidebar-notes",
+            "icons/file.svg",
+            tr!("settings.notes"),
+            Some(crate::platform::primary_shortcut("⌘⇧N", "Ctrl+Shift+N")),
+            cx,
+        )
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.open_notes(cx);
+        }))
+        .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                this.open_notes(cx);
+                cx.stop_propagation();
+            }
+        }))
     }
 
     pub(super) fn start_available_update(&mut self, cx: &mut Context<Self>) {
@@ -1175,33 +1197,6 @@ impl Padu {
                     .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                         if matches!(event.keystroke.key.as_str(), "enter" | "space") {
                             this.open_settings_action(&OpenSettings, window, cx);
-                            cx.stop_propagation();
-                        }
-                    })),
-            )
-            .child(
-                div()
-                    .id("open-notes")
-                    .tab_index(0)
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
-                    .w(px(26.0))
-                    .h(px(26.0))
-                    .flex_none()
-                    .rounded(px(6.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .cursor_pointer()
-                    .hover(|element| element.bg(theme.overlay))
-                    .active(|element| element.bg(theme.overlay_strong))
-                    .tooltip(Tooltip::text(tr!("settings.notes")))
-                    .child(icon("icons/package.svg", 14.0, theme.text_tertiary))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.open_notes(cx);
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            this.open_notes(cx);
                             cx.stop_propagation();
                         }
                     })),
@@ -1568,7 +1563,12 @@ impl Padu {
             .collect::<Vec<_>>();
         sort_sidebar_sessions(&mut sorted_sessions, self.state.sidebar_ordering);
 
-        let mut rows = vec![SidebarRow::Search];
+        let mut rows = vec![
+            SidebarRow::Search,
+            SidebarRow::Notes,
+            SidebarRow::PinnedSeparator,
+            SidebarRow::GroupSpacer,
+        ];
         let pinned_sessions = sorted_sessions
             .iter()
             .filter(|session| session.pinned_at.is_some())
@@ -1653,7 +1653,7 @@ impl Padu {
                 }
             }
         }
-        if rows.len() == 1 {
+        if rows.len() == 3 {
             // Keep the header actions visible while there is no history.
             let group = match self.state.sidebar_grouping {
                 SidebarGrouping::Updated => SidebarGroup::Updated(SessionDateGroup::Today),
@@ -1720,6 +1720,7 @@ impl Padu {
         };
         match *row {
             SidebarRow::Search => self.render_sidebar_search(cx).into_any_element(),
+            SidebarRow::Notes => self.render_sidebar_notes(cx).into_any_element(),
             SidebarRow::Header(group) => {
                 let first_regular_group = rows.iter().position(|row| {
                     matches!(row, SidebarRow::Header(group) if *group != SidebarGroup::Pinned)
@@ -3213,7 +3214,13 @@ mod tests {
     fn selected_session_uses_nearest_bottom_edge_for_an_unmeasured_lower_row() {
         let target = Uuid::from_u128(31);
         let group = SidebarGroup::Updated(SessionDateGroup::Today);
-        let mut rows = vec![SidebarRow::Search, SidebarRow::Header(group)];
+        let mut rows = vec![
+            SidebarRow::Search,
+            SidebarRow::Notes,
+            SidebarRow::PinnedSeparator,
+            SidebarRow::GroupSpacer,
+            SidebarRow::Header(group),
+        ];
         rows.extend((1..=40).map(|id| SidebarRow::Session(Uuid::from_u128(id))));
         rows.push(SidebarRow::GroupSpacer);
 
@@ -3221,8 +3228,8 @@ mod tests {
         let offset =
             sidebar_bottom_aligned_offset(&rows, index, px(400.0), SidebarGrouping::Updated);
 
-        assert_eq!(index, 32);
-        assert_eq!(offset.item_ix, 25);
+        assert_eq!(index, 35);
+        assert_eq!(offset.item_ix, 28);
         assert_eq!(offset.offset_in_item, px(16.0));
         let visible_height = rows[offset.item_ix..=index]
             .iter()

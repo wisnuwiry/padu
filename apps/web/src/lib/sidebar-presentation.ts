@@ -25,6 +25,7 @@ export interface SessionGroup {
 
 export type SidebarListRow =
   | { kind: 'search'; key: 'search' }
+  | { kind: 'notes'; key: 'notes' }
   | { kind: 'group'; key: string; group: SessionGroup; collapsed: boolean; first: boolean }
   | { kind: 'session'; key: string; item: SessionItem }
   | { kind: 'showMore'; key: string; groupId: string }
@@ -49,7 +50,12 @@ export function sidebarRows(
   groups: SessionGroup[],
   collapsed: ReadonlySet<string>,
 ): SidebarListRow[] {
-  const rows: SidebarListRow[] = [{ kind: 'search', key: 'search' }]
+  const rows: SidebarListRow[] = [
+    { kind: 'search', key: 'search' },
+    { kind: 'notes', key: 'notes' },
+    { kind: 'separator', key: 'actions-separator' },
+    { kind: 'spacer', key: 'actions-spacer' },
+  ]
   const visibleGroups = groups.length
     ? groups
     // Desktop keeps the first header so Add Project never disappears merely
