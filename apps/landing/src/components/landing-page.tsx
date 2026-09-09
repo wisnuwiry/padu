@@ -771,8 +771,8 @@ function FAQ() {
           Agents communicate directly with their provider APIs using the credentials on your computer.
         </FAQItem>
         <FAQItem question="What AI coding agents does Padu support?">
-          Padu supports leading coding agents with native direct drivers and ACP (Agent Client
-          Protocol) integrations: Claude Code, OpenAI Codex CLI, OpenCode, Pi Agent, Amp, DeepSeek,
+          supports: leading coding agents with native direct drivers and ACP (Agent Client
+          Protocol) integrations: Claude Code, OpenAI Codex CLI, OpenCode, Elph, Pi Agent, Amp, DeepSeek,
           Cursor CLI, Fx, Grok Build, Kimi Code, GitHub Copilot, Google Gemini CLI, Cline, Goose, and
           Mistral Vibe. See the full catalog on the{" "}
           <a href="/agents" className="underline hover:text-white transition-colors">
