@@ -1494,15 +1494,27 @@ impl StateStore {
 
     pub fn list_notes(&self, project_id: Uuid) -> io::Result<Vec<NoteSummary>> {
         let connection = self.open()?;
-        let mut statement = connection
-            .prepare(
-                "SELECT id, project_id, title, content, revision, created_at, updated_at
-                 FROM notes WHERE project_id = ?1 ORDER BY updated_at DESC, id",
-            )
-            .map_err(to_io_error)?;
-        let rows = statement
-            .query_map(params![project_id.to_string()], note_summary_from_row)
-            .map_err(to_io_error)?;
+        let mut statement = if project_id.is_nil() {
+            connection
+                .prepare(
+                    "SELECT id, project_id, title, content, revision, created_at, updated_at
+                     FROM notes ORDER BY updated_at DESC, id",
+                )
+                .map_err(to_io_error)?
+        } else {
+            connection
+                .prepare(
+                    "SELECT id, project_id, title, content, revision, created_at, updated_at
+                     FROM notes WHERE project_id = ?1 ORDER BY updated_at DESC, id",
+                )
+                .map_err(to_io_error)?
+        };
+        let rows = if project_id.is_nil() {
+            statement.query_map([], note_summary_from_row)
+        } else {
+            statement.query_map(params![project_id.to_string()], note_summary_from_row)
+        }
+        .map_err(to_io_error)?;
         rows.map(|row| row.map_err(to_io_error)).collect()
     }
 

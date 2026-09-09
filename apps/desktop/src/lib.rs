@@ -81,6 +81,7 @@ actions!(
         OpenReview,
         ToggleCommandPalette,
         OpenResumePicker,
+        OpenNotePicker,
         ToggleFpsCounter,
         NavigateBack,
         NavigateForward,

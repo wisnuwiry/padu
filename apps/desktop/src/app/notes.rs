@@ -7,7 +7,7 @@ pub(super) enum NotesLayout {
     Preview,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct Note {
     pub id: Uuid,
     pub project_id: Uuid,
@@ -22,17 +22,11 @@ impl Padu {
     pub(super) fn open_notes(&mut self, cx: &mut Context<Self>) {
         self.settings_page = None;
         self.workspace_page = WorkspacePage::Notes;
-        let Some(project_id) = self.active_project().map(|project| project.id) else {
-            self.notes.clear();
-            self.notes_selected = 0;
-            cx.notify();
-            return;
-        };
-        self.load_notes_from_daemon(project_id, cx);
+        self.load_notes_from_daemon(Uuid::nil(), cx);
         cx.notify();
     }
 
-    fn load_notes_from_daemon(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
+    pub(super) fn load_notes_from_daemon(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
         let daemon = self.daemon.clone();
         cx.spawn(async move |padu, cx| {
             let result = cx
@@ -52,7 +46,7 @@ impl Padu {
                             Uuid::nil(),
                             Uuid::nil(),
                             padu_client::Command::GetNote {
-                                project_id,
+                                project_id: summary.project_id,
                                 note_id: summary.id,
                             },
                         )?;
@@ -82,6 +76,10 @@ impl Padu {
                     this.notes_selected =
                         this.notes_selected.min(this.notes.len().saturating_sub(1));
                     this.sync_note_editors(cx);
+                    if this.command_palette.open {
+                        let query = this.command_palette.search.read(cx).content().to_owned();
+                        this.refresh_command_palette_results(&query, true, cx);
+                    }
                     cx.notify();
                 }
             });
@@ -198,11 +196,18 @@ impl Padu {
         let Some(note) = self.notes.get_mut(self.notes_selected) else {
             return;
         };
-        note.title = self.notes_title.read(cx).content().trim().to_owned();
-        if note.title.is_empty() {
-            note.title = tr!("notes.untitled");
+        let title = self.notes_title.read(cx).content().trim().to_owned();
+        let body = self.notes_body.read(cx).content().to_owned();
+        let normalized_title = if title.is_empty() {
+            tr!("notes.untitled")
+        } else {
+            title
+        };
+        if normalized_title == note.title && body == note.body {
+            return;
         }
-        note.body = self.notes_body.read(cx).content().to_owned();
+        note.title = normalized_title;
+        note.body = body;
         note.updated_at = unix_time();
         let note_snapshot = note.clone();
         let daemon = self.daemon.clone();
@@ -273,21 +278,132 @@ impl Padu {
     }
 
     pub(super) fn add_content_to_selected_note(&mut self, content: &str, cx: &mut Context<Self>) {
-        if self.notes.is_empty() {
-            self.create_note(cx);
+        let content = content.trim();
+        if content.is_empty() {
             return;
         }
-        self.save_note_edit(cx);
+        let Some(project_id) = self.active_project().map(|project| project.id) else {
+            self.show_toast(tr!("notes.add_failed"));
+            cx.notify();
+            return;
+        };
+
+        if self.notes.is_empty() {
+            let title = self
+                .selected_session()
+                .map(|session| session.display_title().to_owned())
+                .filter(|title| !title.trim().is_empty())
+                .unwrap_or_else(|| tr!("notes.untitled"));
+            let content = content.to_owned();
+            let daemon = self.daemon.clone();
+            cx.spawn(async move |padu, cx| {
+                let result = cx
+                    .background_executor()
+                    .spawn(async move {
+                        let response = daemon.client().request(
+                            Uuid::nil(),
+                            Uuid::nil(),
+                            padu_client::Command::CreateNote {
+                                note: padu_client::notes::CreateNote {
+                                    project_id,
+                                    title,
+                                    content,
+                                },
+                            },
+                        )?;
+                        let padu_client::ResponsePayload::NoteCreated { note } = response else {
+                            anyhow::bail!("daemon returned an invalid Notes create response");
+                        };
+                        Ok::<_, anyhow::Error>(note)
+                    })
+                    .await;
+                let _ = padu.update(cx, |this, cx| match result {
+                    Ok(note) => {
+                        this.notes.push(Note {
+                            id: note.id,
+                            project_id: note.project_id,
+                            title: note.title,
+                            body: note.content,
+                            revision: note.revision,
+                            created_at: note.created_at,
+                            updated_at: note.updated_at,
+                        });
+                        this.notes_selected = this.notes.len() - 1;
+                        this.sync_note_editors(cx);
+                        this.show_success_toast(tr!("notes.added_to_note"));
+                        cx.notify();
+                    }
+                    Err(error) => {
+                        this.show_toast(tr!("notes.add_failed_error", error = error));
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+            return;
+        }
+
+        self.notes_save_generation = self.notes_save_generation.wrapping_add(1);
+        let title = self.notes_title.read(cx).content().trim().to_owned();
+        let body = self.notes_body.read(cx).content().to_owned();
         let Some(note) = self.notes.get_mut(self.notes_selected) else {
             return;
         };
+        note.title = if title.is_empty() {
+            tr!("notes.untitled")
+        } else {
+            title
+        };
+        note.body = body;
         if !note.body.is_empty() {
             note.body.push_str("\n\n");
         }
-        note.body.push_str(content.trim());
+        note.body.push_str(content);
         note.updated_at = unix_time();
+        let note_snapshot = note.clone();
+        let daemon = self.daemon.clone();
         self.sync_note_editors(cx);
-        self.open_notes(cx);
+        cx.spawn(async move |padu, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let response = daemon.client().request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        padu_client::Command::UpdateNote {
+                            note: padu_client::notes::UpdateNote {
+                                project_id: note_snapshot.project_id,
+                                note_id: note_snapshot.id,
+                                title: note_snapshot.title,
+                                content: note_snapshot.body,
+                                expected_revision: note_snapshot.revision,
+                            },
+                        },
+                    )?;
+                    let padu_client::ResponsePayload::NoteUpdated { note } = response else {
+                        anyhow::bail!("daemon returned an invalid Notes update response");
+                    };
+                    Ok::<_, anyhow::Error>(note)
+                })
+                .await;
+            let _ = padu.update(cx, |this, cx| match result {
+                Ok(note) => {
+                    if let Some(current) =
+                        this.notes.iter_mut().find(|current| current.id == note.id)
+                    {
+                        current.revision = note.revision;
+                        current.updated_at = note.updated_at;
+                    }
+                    this.show_success_toast(tr!("notes.added_to_note"));
+                    cx.notify();
+                }
+                Err(error) => {
+                    this.show_toast(tr!("notes.add_failed_error", error = error));
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
     }
 
     fn notes_key_down(
@@ -397,8 +513,9 @@ impl Padu {
                 .find(|project| project.id == note.project_id)
                 .map(Project::display_name)
                 .unwrap_or_else(|| tr!("notes.no_project"));
-            let created_ago =
-                super::sidebar::format_time_ago(unix_time().saturating_sub(note.created_at));
+            let created_ago = super::notes_utils::format_note_time_ago(
+                unix_time().saturating_sub(note.created_at),
+            );
             let note_id = note.id;
             let note_menu =
                 self.menu_handle(SharedString::from(format!("note-menu-{note_id}")), cx);
@@ -494,10 +611,12 @@ impl Padu {
         let layout = self.notes_layout;
         let mut editor = div().flex_1().min_w_0().flex().flex_col().gap(px(10.0));
         if let Some(note) = selected_note {
-            let created_ago =
-                super::sidebar::format_time_ago(unix_time().saturating_sub(note.created_at));
-            let updated_ago =
-                super::sidebar::format_time_ago(unix_time().saturating_sub(note.updated_at));
+            let created_ago = super::notes_utils::format_note_time_ago(
+                unix_time().saturating_sub(note.created_at),
+            );
+            let updated_ago = super::notes_utils::format_note_time_ago(
+                unix_time().saturating_sub(note.updated_at),
+            );
             editor = editor
                 .child(TextField::new("note-title", self.notes_title.clone()))
                 .child(

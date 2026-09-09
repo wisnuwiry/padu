@@ -390,10 +390,11 @@ impl Padu {
                 // it to the same turn so the transcript mirrors the provider
                 // conversation (no new turn boundary).
                 if let Some(session) = self.state.session_mut(session_id) {
-                    session.push_user_message_with_presentation(
+                    session.push_user_message_with_presentation_and_notes(
                         message,
                         submission.display_content,
                         submission.attachments,
+                        submission.embedded_notes,
                     );
                     session.updated_at = unix_time();
                 }

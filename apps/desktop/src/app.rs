@@ -69,11 +69,12 @@ use crate::{
     CancelTaskSwitch, CancelTurn, CloseFind, CloseWindow, ConfirmTaskSwitch, CopySelection,
     FindNext, FindPrevious, FocusComposer, NavigateBack, NavigateForward, NewProject, NewSession,
     NextRightPanelTab, OpenBrowser, OpenFilePicker, OpenFiles, OpenFind, OpenFindReplace,
-    OpenResumePicker, OpenReview, OpenSettings, OpenTerminal, PrevRightPanelTab, ReplaceAllMatches,
-    SaveFile, SelectFirstTask, SelectLastTask, SelectNextSession, SelectPreviousSession,
-    SwitchTaskBackward, SwitchTaskForward, ToggleCommandPalette, ToggleFindCaseSensitive,
-    ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter, ToggleModelPicker, ToggleRightPanel,
-    ToggleRightPanelFullscreen, ToggleSidebar, ToggleUsagePanel,
+    OpenNotePicker, OpenResumePicker, OpenReview, OpenSettings, OpenTerminal, PrevRightPanelTab,
+    ReplaceAllMatches, SaveFile, SelectFirstTask, SelectLastTask, SelectNextSession,
+    SelectPreviousSession, SwitchTaskBackward, SwitchTaskForward, ToggleCommandPalette,
+    ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter,
+    ToggleModelPicker, ToggleRightPanel, ToggleRightPanelFullscreen, ToggleSidebar,
+    ToggleUsagePanel,
 };
 
 #[cfg(target_os = "macos")]
@@ -343,6 +344,7 @@ struct ComposerSubmission {
     prompt: String,
     display_content: Option<String>,
     attachments: Vec<MessageAttachment>,
+    embedded_notes: Vec<padu_protocol::notes::EmbeddedNote>,
 }
 
 impl ComposerSubmission {
@@ -351,11 +353,13 @@ impl ComposerSubmission {
             prompt,
             display_content: None,
             attachments: Vec::new(),
+            embedded_notes: Vec::new(),
         }
     }
 
     fn into_queued_message(self) -> QueuedMessage {
         QueuedMessage::with_presentation(self.prompt, self.display_content, self.attachments)
+            .with_embedded_notes(self.embedded_notes)
     }
 
     fn from_queued_message(message: QueuedMessage) -> Self {
@@ -363,6 +367,7 @@ impl ComposerSubmission {
             prompt: message.content,
             display_content: message.display_content,
             attachments: message.attachments,
+            embedded_notes: message.embedded_notes,
         }
     }
 
@@ -1290,6 +1295,8 @@ pub struct Padu {
     /// Files dropped onto the composer, drawn as chips above the input and
     /// drained into the next submission.
     composer_attachments: Vec<ComposerAttachment>,
+    /// Immutable note snapshots selected with `/note`, drained into the next submission.
+    composer_embedded_notes: Vec<padu_protocol::notes::EmbeddedNote>,
     /// Window-modal expansion of an image attachment. The path is already
     /// cached attachment metadata; render never probes the filesystem.
     image_preview: Option<image_preview::ImagePreviewState>,
@@ -1674,6 +1681,7 @@ mod drafts;
 mod file_search;
 mod image_preview;
 mod notes;
+mod notes_utils;
 mod onboarding;
 mod render;
 pub(crate) mod right_panel;
@@ -2392,7 +2400,7 @@ impl Padu {
         let crate::persistence::ComposerDraft {
             text: initial_composer_text,
             attachments: initial_composer_attachments,
-            ..
+            embedded_notes: initial_composer_embedded_notes,
         } = initial_composer_draft;
         if !initial_composer_text.is_empty() {
             composer.update(cx, |input, cx| input.set_content(initial_composer_text, cx));
@@ -3132,6 +3140,7 @@ impl Padu {
                 composer_sources_stale: false,
                 composer_autocomplete: autocomplete::AutocompleteUi::new(),
                 composer_attachments,
+                composer_embedded_notes: initial_composer_embedded_notes,
                 image_preview: None,
                 image_preview_generation: 0,
                 remote_images: RefCell::new(HashMap::new()),

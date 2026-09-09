@@ -2216,11 +2216,13 @@ impl Padu {
             .collect::<Vec<_>>();
         let submission = merged_submission(prompt, &mentions)?;
         let display_content = (!attachments.is_empty()).then(|| prompt.trim().to_owned());
+        let embedded_notes = std::mem::take(&mut self.composer_embedded_notes);
         self.discard_current_composer_draft(cx);
         Some(ComposerSubmission {
             prompt: submission,
             display_content,
             attachments,
+            embedded_notes,
         })
     }
 
@@ -2240,11 +2242,14 @@ impl Padu {
             return false;
         };
         if content.is_empty() {
-            self.open_notes(cx);
+            // Match `/resume`: the composer command opens a focused picker and
+            // does not start a provider turn.
+            self.composer.update(cx, |input, cx| input.clear(cx));
+            cx.defer(|cx| cx.dispatch_action(&OpenNotePicker));
         } else {
             self.add_content_to_selected_note(content, cx);
+            self.composer.update(cx, |input, cx| input.clear(cx));
         }
-        self.composer.update(cx, |input, cx| input.clear(cx));
         true
     }
 
@@ -2371,6 +2376,7 @@ impl Padu {
             .into_iter()
             .map(ComposerAttachment::from)
             .collect();
+        self.composer_embedded_notes = submission.embedded_notes;
         let content = submission.display_content.unwrap_or(submission.prompt);
         self.composer
             .update(cx, |input, cx| input.set_content(content, cx));
@@ -2770,7 +2776,8 @@ impl Padu {
                 .is_armed_for(EscapeStopTarget::for_session(session), Instant::now())
         });
         let has_draft = !self.composer.read(cx).content(cx).trim().is_empty()
-            || !self.composer_attachments.is_empty();
+            || !self.composer_attachments.is_empty()
+            || !self.composer_embedded_notes.is_empty();
         // With no provider to run it, a draft has nowhere to go. The button
         // reads as unavailable and the submission path refuses too, so
         // `enter` cannot slip past a disabled control.

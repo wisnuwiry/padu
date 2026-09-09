@@ -2175,6 +2175,7 @@ impl Padu {
                 prompt: provider_prompt,
                 display_content,
                 attachments: edit.attachments,
+                embedded_notes: Vec::new(),
             },
             cx,
         );
@@ -3248,10 +3249,11 @@ impl Padu {
         };
         let transcript_anchor = if let Some(session) = self.state.session_mut(session_id) {
             session.set_title_from_prompt(&human_prompt);
-            let turn_id = session.begin_turn_with_presentation(
+            let turn_id = session.begin_turn_with_presentation_and_notes(
                 &prompt,
                 submission.display_content.clone(),
                 submission.attachments.clone(),
+                submission.embedded_notes.clone(),
             );
             session.status = SessionStatus::Connecting;
             session.updated_at = unix_time();

@@ -226,6 +226,8 @@ pub(super) fn render_message_footer(
         .line_height(sp(14.0))
         .text_color(footer_color)
         .child(format_message_time(footer_time));
+    let note_content = copy_content.clone();
+    let note_padu = padu.clone();
     let copy_button = div()
         .id(SharedString::from(format!("copy-message-{message_id}")))
         .w(px(27.0))
@@ -256,6 +258,25 @@ pub(super) fn render_message_footer(
                 this.show_message_copied(message_id, cx);
             });
         });
+    let add_to_note_button = div()
+        .id(SharedString::from(format!(
+            "add-response-to-note-{message_id}"
+        )))
+        .w(px(27.0))
+        .h(px(27.0))
+        .rounded(px(8.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .hover(|element| element.bg(theme.overlay_strong))
+        .child(icon("icons/package.svg", 14.0, footer_color))
+        .tooltip(Tooltip::text(tr!("notes.add_to_note")))
+        .on_click(move |_, _, cx| {
+            let _ = note_padu.update(cx, |this, cx| {
+                this.add_content_to_selected_note(note_content.as_ref(), cx);
+            });
+        });
     let mut footer = div()
         .w_full()
         .h(px(27.0))
@@ -274,6 +295,9 @@ pub(super) fn render_message_footer(
         footer = footer.child(timestamp).child(copy_button);
     } else {
         footer = footer.child(copy_button);
+        if message.role == MessageRole::Assistant {
+            footer = footer.child(add_to_note_button);
+        }
         if let Some(action) = assistant_message_action {
             let fork_padu = padu.clone();
             let fork_icon = if action.preparing {
@@ -371,6 +395,52 @@ pub(super) struct MessageRender<'a> {
     pub(super) menu: ContextMenuHandle,
     pub(super) padu: gpui::WeakEntity<Padu>,
     pub(super) composer: Entity<ComposerInput>,
+}
+
+fn render_embedded_notes(
+    notes: &[padu_protocol::notes::EmbeddedNote],
+    theme: &Theme,
+) -> Option<AnyElement> {
+    if notes.is_empty() {
+        return None;
+    }
+    let mut column = div()
+        .w_full()
+        .max_w(px(540.0))
+        .flex()
+        .flex_col()
+        .gap(px(6.0));
+    for note in notes {
+        let title = if note.title.is_empty() {
+            tr!("notes.untitled")
+        } else {
+            note.title.clone()
+        };
+        column = column.child(
+            div()
+                .w_full()
+                .rounded(px(10.0))
+                .border_1()
+                .border_color(theme.border)
+                .bg(theme.inset)
+                .px(px(11.0))
+                .py(px(8.0))
+                .text_size(sp(12.0))
+                .child(
+                    div()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text_secondary)
+                        .child(format!("{} · {}", tr!("settings.notes"), title)),
+                )
+                .child(
+                    div()
+                        .mt(px(5.0))
+                        .text_color(theme.text)
+                        .child(note.content.clone()),
+                ),
+        );
+    }
+    Some(column.into_any_element())
 }
 
 fn render_sent_message_attachments(
@@ -609,6 +679,9 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                 theme,
             ) {
                 column = column.child(attachments);
+            }
+            if let Some(notes) = render_embedded_notes(&message.embedded_notes, theme) {
+                column = column.child(notes);
             }
             if let Some(edit_input) = message_edit_input {
                 let can_submit = !edit_input.read(cx).content(cx).trim().is_empty()
