@@ -141,6 +141,7 @@ export function Composer({
   onPrefillSignalHandled,
   mentionSignal,
   onMentionSignalHandled,
+  onNoteCommand,
 }: {
   session: AgentSession
   project: Project
@@ -161,6 +162,8 @@ export function Composer({
   onAttachmentSignalHandled?: () => void
   mentionSignal?: { signal: number; mention: string }
   onMentionSignalHandled?: () => void
+  /** Opens the project-scoped Notes picker for a native `/note` command. */
+  onNoteCommand?: (query: string) => void
   onAddProject?: () => void
   onProjectless?: () => void
   onResume?: () => void
@@ -419,9 +422,18 @@ export function Composer({
   }
 
   function executeLocalComposerCommand(submittedPrompt = prompt): boolean {
-    return executeResumeCommand(submittedPrompt)
+    return executeNoteCommand(submittedPrompt)
+      || executeResumeCommand(submittedPrompt)
       || executeFastModeToggle(submittedPrompt)
       || executeGoalCommand(submittedPrompt)
+  }
+
+  function executeNoteCommand(submittedPrompt: string): boolean {
+    const match = submittedPrompt.trim().match(/^\/note(?:\s+([\s\S]*))?$/u)
+    if (!match || !onNoteCommand) return false
+    clearComposerDraft()
+    onNoteCommand((match[1] ?? '').trim())
+    return true
   }
 
   function clearComposerDraft() {

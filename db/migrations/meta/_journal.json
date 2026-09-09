@@ -29,6 +29,20 @@
       "when": 1788776705511,
       "tag": "0003_chubby_starhawk",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1788951633090,
+      "tag": "0004_safe_night_nurse",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1788952075161,
+      "tag": "0005_blushing_young_avengers",
+      "breakpoints": true
     }
   ]
 }

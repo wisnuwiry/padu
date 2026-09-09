@@ -1,0 +1,1 @@
+ALTER TABLE `messages` ADD `embedded_notes` text DEFAULT '[]' NOT NULL;

@@ -48,6 +48,7 @@ interface SidebarProps {
   onSearch: () => void
   onSettings: () => void
   onUsage?: () => void
+  onNotes?: () => void
 }
 
 const GROUP_TRANSLATION_KEYS: Record<DateGroup, string> = {
@@ -79,6 +80,7 @@ export function Sidebar({
   onSearch,
   onSettings,
   onUsage,
+  onNotes,
 }: SidebarProps) {
   const { t } = useI18n()
   const [grouping, setGrouping] = useState<SidebarGrouping>(() => {
@@ -247,6 +249,16 @@ export function Sidebar({
               onMobileOpenChange(false)
             }}
           />
+          {onNotes && (
+            <SidebarAction
+              icon={<PaduIcon name="compose" />}
+              label="Notes"
+              onClick={() => {
+                onNotes()
+                onMobileOpenChange(false)
+              }}
+            />
+          )}
         </div>
 
         <nav aria-label={t('sidebar.tasks')} className="min-h-0 flex-1">

@@ -827,6 +827,14 @@ fn message_menu_items(
         },
     ));
 
+    let note_content = content.to_owned();
+    let padu_for_note = padu.clone();
+    items.push(MenuItem::new(tr!("notes.add_to_note"), move |_, cx| {
+        let _ = padu_for_note.update(cx, |this, cx| {
+            this.add_content_to_selected_note(&note_content, cx);
+        });
+    }));
+
     if role == MessageRole::User && user_message_action.is_none() {
         let composer = composer.clone();
         let edit_content = content.to_owned();

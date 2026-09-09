@@ -214,6 +214,12 @@ enum BranchPickerAction {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkspacePage {
+    Conversation,
+    Notes,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SettingsPage {
     General,
     Appearance,
@@ -1449,11 +1455,19 @@ pub struct Padu {
     /// swapping in frozen page pixels while an overlay is open.
     scene_overlay_enabled: bool,
     settings_page: Option<SettingsPage>,
+    workspace_page: WorkspacePage,
     /// Cached notification permission status, refreshed when the Notifications
     /// page is opened and after permission is requested.
     notification_permission: crate::platform::NotificationPermissionStatus,
 
-    /// The Skills page's library snapshot, scanned off-thread. Frames read
+    /// Cached project Notes state. Loading and mutations are performed through
+    /// daemon RPCs off the UI thread; render only reads this snapshot.
+    notes: Vec<notes::Note>,
+    notes_selected: usize,
+    notes_title: Entity<TextInput>,
+    notes_body: Entity<TextInput>,
+    notes_layout: notes::NotesLayout,
+    /// The Settings page's library snapshot, scanned off-thread. Frames read
     /// only this; `None` means the first scan has not landed yet.
     skills_catalog: Option<Rc<crate::skills::SkillsCatalog>>,
     /// Bumped per scan; a result from a superseded scan is discarded.
@@ -1654,6 +1668,7 @@ pub(crate) mod dialogs;
 mod drafts;
 mod file_search;
 mod image_preview;
+mod notes;
 mod onboarding;
 mod render;
 pub(crate) mod right_panel;
@@ -2178,6 +2193,13 @@ impl Padu {
                 .clear_on_escape()
                 .placeholder(tr!("settings.archived_search"))
         });
+        let notes_title =
+            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("notes.title_placeholder")));
+        let notes_body = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .multi_line()
+                .placeholder(tr!("notes.body_placeholder"))
+        });
         let keybindings_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -2359,6 +2381,7 @@ impl Padu {
         let crate::persistence::ComposerDraft {
             text: initial_composer_text,
             attachments: initial_composer_attachments,
+            ..
         } = initial_composer_draft;
         if !initial_composer_text.is_empty() {
             composer.update(cx, |input, cx| input.set_content(initial_composer_text, cx));
@@ -3171,6 +3194,12 @@ impl Padu {
                 right_panel_pending_browser_focus: None,
                 scene_overlay_enabled,
                 settings_page: None,
+                workspace_page: WorkspacePage::Conversation,
+                notes: Vec::new(),
+                notes_selected: 0,
+                notes_title,
+                notes_body,
+                notes_layout: notes::NotesLayout::Edit,
                 notification_permission:
                     crate::platform::NotificationPermissionStatus::NotDetermined,
 

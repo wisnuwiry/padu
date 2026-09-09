@@ -43,6 +43,7 @@ import { Sidebar } from '@/components/sidebar'
 import { StartupScreen } from '@/components/startup-screen'
 import type { SettingsPageId } from '@/components/settings-view'
 import { Transcript } from '@/components/transcript'
+import { addContentToNote } from '@/components/notes-page'
 import { PaduIcon } from '@/components/padu-icon'
 import {
   useComposerDrafts,
@@ -1281,6 +1282,7 @@ export function PaduApp() {
           onAddProject={openProjectPicker}
           onMobileOpenChange={setMobileSidebar}
           onNewTask={(project) => startNewTask(project)}
+          onNotes={() => void navigate({ to: '/notes', search: { q: undefined, projectId: activeProject?.id } })}
           onRemoveSession={removeSessionById}
           onRenameSession={renameSession}
           onSetSessionArchived={(sessionId, archived) => updateSessionFlag(sessionId, 'archived_at', archived)}
@@ -1367,6 +1369,7 @@ export function PaduApp() {
                 onMentionSignalHandled={() => setComposerMention((value) =>
                   value?.sessionId === activeSession.id ? null : value)}
                 onAddProject={openProjectPicker}
+                onNoteCommand={(query) => void navigate({ to: '/notes', search: { q: query || undefined, projectId: activeProject.id } })}
                 onFocusSignalHandled={() => setFocusComposerSignal(0)}
                 onModelPickerSignalHandled={() => setModelPickerSignal(0)}
                 onProjectless={() => void createProjectlessTask()}
@@ -1420,6 +1423,15 @@ export function PaduApp() {
               rewindingTurnCount={messageRewinds[current.id]}
               rewindTurnCounts={sessionTurnRefs.data ?? []}
               session={current}
+              onAddToNote={(text) => {
+                if (!client) {
+                  toast.error('The daemon is not connected')
+                  return
+                }
+                void addContentToNote(client, activeProject?.id, text)
+                  .then(() => toast.success('Added assistant response to note'))
+                  .catch((error) => toast.error(error instanceof Error ? error.message : 'Could not add response to note'))
+              }}
               onCopyToComposer={(text) => setComposerPrefill((previous) => ({
                 sessionId: current.id,
                 text,
@@ -1452,6 +1464,7 @@ export function PaduApp() {
                   onMentionSignalHandled={() => setComposerMention((value) =>
                     value?.sessionId === current.id ? null : value)}
                   onAddProject={openProjectPicker}
+                  onNoteCommand={(query) => void navigate({ to: '/notes', search: { q: query || undefined, projectId: activeProject?.id } })}
                   onFocusSignalHandled={() => setFocusComposerSignal(0)}
                   onModelPickerSignalHandled={() => setModelPickerSignal(0)}
                   onPrefillSignalHandled={() => setComposerPrefill((value) =>

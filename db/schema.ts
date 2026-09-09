@@ -24,6 +24,20 @@ export const projects = sqliteTable("projects", {
   createdAt: integer("created_at").notNull(),
 });
 
+export const notes = sqliteTable(
+  "notes",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull(),
+    title: text("title").notNull(),
+    content: text("content").notNull(),
+    revision: integer("revision").notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [index("notes_by_project").on(table.projectId, table.updatedAt)],
+);
+
 export const sessions = sqliteTable(
   "sessions",
   {
@@ -80,6 +94,8 @@ export const messages = sqliteTable(
     displayContent: text("display_content"),
     /** JSON-serialized MessageAttachment array. */
     attachments: text("attachments").notNull().default("[]"),
+    /** JSON-serialized immutable EmbeddedNote snapshot array. */
+    embeddedNotes: text("embedded_notes").notNull().default("[]"),
     createdAt: integer("created_at").notNull(),
     streaming: integer("streaming", { mode: "boolean" }).notNull(),
   },

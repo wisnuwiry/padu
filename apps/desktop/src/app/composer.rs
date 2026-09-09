@@ -2230,8 +2230,22 @@ impl Padu {
         cx: &mut Context<Self>,
     ) -> bool {
         self.execute_resume_composer_command(prompt, cx)
+            || self.execute_note_composer_command(prompt, cx)
             || self.execute_fast_mode_toggle(prompt, cx)
             || self.execute_goal_composer_command(prompt, cx)
+    }
+
+    fn execute_note_composer_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
+        let Some(content) = prompt.strip_prefix("/note").map(str::trim) else {
+            return false;
+        };
+        if content.is_empty() {
+            self.open_notes(cx);
+        } else {
+            self.add_content_to_selected_note(content, cx);
+        }
+        self.composer.update(cx, |input, cx| input.clear(cx));
+        true
     }
 
     fn execute_resume_composer_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {

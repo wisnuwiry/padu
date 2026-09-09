@@ -90,6 +90,7 @@ export function Transcript({
   onOpenLink,
   onOpenBackgroundWork,
   onCopyToComposer,
+  onAddToNote,
   onForkResponse,
   onRewindMessage,
   forkingTurnCount,
@@ -102,6 +103,7 @@ export function Transcript({
   onOpenLink?: (target: string) => boolean
   onOpenBackgroundWork?: (key: BackgroundWorkKey) => void
   onCopyToComposer?: (content: string) => void
+  onAddToNote?: (content: string) => void
   onForkResponse?: (turnCount: number) => void
   onRewindMessage?: (
     turnCount: number,
@@ -248,6 +250,7 @@ export function Transcript({
               sessionId={session.id}
               t={t}
               onCopyToComposer={onCopyToComposer}
+              onAddToNote={onAddToNote}
               onOpenBackgroundWork={onOpenBackgroundWork}
               onForkResponse={onForkResponse}
               forkingTurnCount={forkingTurnCount}
@@ -730,6 +733,7 @@ function TranscriptItemView({
   onToggleTurn,
   onReviewChanges,
   onCopyToComposer,
+  onAddToNote,
   onOpenBackgroundWork,
   onForkResponse,
   forkingTurnCount,
@@ -747,6 +751,7 @@ function TranscriptItemView({
   onToggleTurn: (turnId: string) => void
   onReviewChanges?: (source: ReviewDiffSource) => void
   onCopyToComposer?: (content: string) => void
+  onAddToNote?: (content: string) => void
   onOpenBackgroundWork?: (key: BackgroundWorkKey) => void
   onForkResponse?: (turnCount: number) => void
   forkingTurnCount?: number
@@ -807,6 +812,7 @@ function TranscriptItemView({
         message={item.message}
         t={t}
         onCopyToComposer={onCopyToComposer}
+        onAddToNote={onAddToNote}
         editing={messageEdit?.messageId === item.message.id}
         editContent={messageEdit?.messageId === item.message.id ? messageEdit.content : undefined}
         onCancelEdit={onCancelMessageEdit}
@@ -1008,6 +1014,7 @@ function MessageRow({
   footer,
   beforeFooter,
   onCopyToComposer,
+  onAddToNote,
   forkAction,
   rewindAction,
   editing = false,
@@ -1021,6 +1028,7 @@ function MessageRow({
   footer: AssistantResponseFooter | null
   beforeFooter?: ReactNode
   onCopyToComposer?: (content: string) => void
+  onAddToNote?: (content: string) => void
   forkAction?: ResponseForkAction
   rewindAction?: MessageRewindAction
   editing?: boolean
@@ -1048,6 +1056,12 @@ function MessageRow({
               ))}
             </div>
           ) : null}
+          {message.embedded_notes?.map((note) => (
+            <article key={`${note.id}-${note.revision}`} className="w-full rounded-xl border border-border bg-[var(--inset)] p-4 text-left">
+              <div className="mb-2 flex items-center gap-2 text-xs font-medium text-[var(--text-tertiary)]"><PaduIcon name="compose" /> Attached note · {note.title}</div>
+              <div className="markdown max-h-72 overflow-y-auto text-[14px] leading-6"><Markdown text={note.content} compact /></div>
+            </article>
+          ))}
           {editing && onCancelEdit && onSubmitEdit ? (
             <MessageEditBubble
               attachments={message.attachments ?? []}
@@ -1094,6 +1108,7 @@ function MessageRow({
           <MessageFooter
             content={footer.content}
             forkAction={forkAction}
+            onAddToNote={onAddToNote}
             locale={locale}
             t={t}
             timestamp={footer.timestamp}
@@ -1201,6 +1216,7 @@ function MessageFooter({
   alignRight = false,
   forkAction,
   rewindAction,
+  onAddToNote,
 }: {
   content: string
   locale: AppLocale
@@ -1209,6 +1225,7 @@ function MessageFooter({
   alignRight?: boolean
   forkAction?: ResponseForkAction
   rewindAction?: MessageRewindAction
+  onAddToNote?: (content: string) => void
 }) {
   const [copied, setCopied] = useState(false)
   const copiedTimeout = useRef<number | null>(null)
@@ -1252,6 +1269,17 @@ function MessageFooter({
             className={cn('size-3.5', rewindAction.pending && 'motion-safe:animate-spin')}
             name={rewindAction.pending ? 'loaderCircle' : 'rewind'}
           />
+        </button>
+      )}
+      {!alignRight && onAddToNote && (
+        <button
+          aria-label="Add assistant response to note"
+          className="grid size-[27px] place-items-center rounded-lg outline-none hover:bg-accent hover:text-[var(--text-secondary)] focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring"
+          title="Add to note"
+          type="button"
+          onClick={() => onAddToNote(content)}
+        >
+          <PaduIcon className="size-3.5" name="compose" />
         </button>
       )}
       {!alignRight && forkAction && (

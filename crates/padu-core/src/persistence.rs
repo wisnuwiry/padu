@@ -34,6 +34,8 @@ use crate::model::{
     ProviderKind, RuntimeMode, SessionWorkspace,
 };
 use crate::theme::ThemePreference;
+use padu_protocol::notes::EmbeddedNote;
+pub use padu_protocol::notes::{CreateNote, Note, NoteSummary, UpdateNote};
 pub use padu_protocol::persistence::{
     ComposerDraft, ComposerDraftAttachment, ComposerDraftChange, ComposerDraftKey,
     ComposerDraftTarget, ComposerDrafts, SessionMessageMatch,
@@ -708,6 +710,83 @@ fn build_session_search_snippet(text: &str, query: &str) -> String {
     )
 }
 
+fn note_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Note> {
+    Ok(Note {
+        id: Uuid::parse_str(&row.get::<_, String>(0)?).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?,
+        project_id: Uuid::parse_str(&row.get::<_, String>(1)?).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                1,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?,
+        title: row.get(2)?,
+        content: row.get(3)?,
+        revision: row.get::<_, i64>(4)? as u64,
+        created_at: row.get::<_, i64>(5)? as u64,
+        updated_at: row.get::<_, i64>(6)? as u64,
+    })
+}
+
+fn note_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteSummary> {
+    let note = note_from_row(row)?;
+    Ok(NoteSummary {
+        id: note.id,
+        project_id: note.project_id,
+        title: note.title,
+        preview: note_preview(&note.content),
+        revision: note.revision,
+        created_at: note.created_at,
+        updated_at: note.updated_at,
+    })
+}
+
+fn note_preview(content: &str) -> String {
+    const PREVIEW_CHARS: usize = 160;
+    let normalized = content.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.chars().count() <= PREVIEW_CHARS {
+        normalized
+    } else {
+        format!(
+            "{}…",
+            normalized
+                .chars()
+                .take(PREVIEW_CHARS - 1)
+                .collect::<String>()
+        )
+    }
+}
+
+fn note_revision_error(
+    connection: &Connection,
+    project_id: Uuid,
+    note_id: Uuid,
+    expected_revision: u64,
+) -> io::Error {
+    let current: Option<i64> = connection
+        .query_row(
+            "SELECT revision FROM notes WHERE project_id = ?1 AND id = ?2",
+            params![project_id.to_string(), note_id.to_string()],
+            |row| row.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten();
+    match current {
+        Some(current) => io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("note revision conflict: expected {expected_revision}, current {current}"),
+        ),
+        None => io::Error::new(io::ErrorKind::NotFound, "note not found"),
+    }
+}
+
 fn search_session_messages(
     path: &Path,
     query: &str,
@@ -1224,7 +1303,7 @@ impl StateStore {
 
         let mut statement = connection
             .prepare(
-                "SELECT id, turn_id, role, content, display_content, attachments,
+                "SELECT id, turn_id, role, content, display_content, attachments, embedded_notes,
                         created_at, streaming
                  FROM messages WHERE session_id = ?1 ORDER BY position",
             )
@@ -1238,8 +1317,9 @@ impl StateStore {
                     row.get::<_, String>(3)?,
                     row.get::<_, Option<String>>(4)?,
                     row.get::<_, String>(5)?,
-                    row.get::<_, i64>(6)?,
+                    row.get::<_, String>(6)?,
                     row.get::<_, i64>(7)?,
+                    row.get::<_, i64>(8)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -1412,6 +1492,132 @@ impl StateStore {
         Ok(())
     }
 
+    pub fn list_notes(&self, project_id: Uuid) -> io::Result<Vec<NoteSummary>> {
+        let connection = self.open()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT id, project_id, title, content, revision, created_at, updated_at
+                 FROM notes WHERE project_id = ?1 ORDER BY updated_at DESC, id",
+            )
+            .map_err(to_io_error)?;
+        let rows = statement
+            .query_map(params![project_id.to_string()], note_summary_from_row)
+            .map_err(to_io_error)?;
+        rows.map(|row| row.map_err(to_io_error)).collect()
+    }
+
+    pub fn get_note(&self, project_id: Uuid, note_id: Uuid) -> io::Result<Option<Note>> {
+        let connection = self.open()?;
+        connection
+            .query_row(
+                "SELECT id, project_id, title, content, revision, created_at, updated_at
+                 FROM notes WHERE project_id = ?1 AND id = ?2",
+                params![project_id.to_string(), note_id.to_string()],
+                note_from_row,
+            )
+            .optional()
+            .map_err(to_io_error)
+    }
+
+    pub fn create_note(&self, input: CreateNote) -> io::Result<Note> {
+        let connection = self.open()?;
+        let project_id = input.project_id.to_string();
+        let project_exists: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?1)",
+                params![project_id],
+                |row| row.get(0),
+            )
+            .map_err(to_io_error)?;
+        if !project_exists {
+            return Err(io::Error::new(io::ErrorKind::NotFound, "project not found"));
+        }
+        let now = crate::model::unix_time();
+        let note = Note {
+            id: Uuid::new_v4(),
+            project_id: input.project_id,
+            title: input.title,
+            content: input.content,
+            revision: 1,
+            created_at: now,
+            updated_at: now,
+        };
+        connection
+            .execute(
+                "INSERT INTO notes(id, project_id, title, content, revision, created_at, updated_at)
+                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    note.id.to_string(),
+                    note.project_id.to_string(),
+                    &note.title,
+                    &note.content,
+                    note.revision as i64,
+                    note.created_at as i64,
+                    note.updated_at as i64,
+                ],
+            )
+            .map_err(to_io_error)?;
+        Ok(note)
+    }
+
+    pub fn update_note(&self, input: UpdateNote) -> io::Result<Note> {
+        let connection = self.open()?;
+        let now = crate::model::unix_time();
+        let changed = connection
+            .execute(
+                "UPDATE notes
+                    SET title = ?1, content = ?2, revision = revision + 1, updated_at = ?3
+                  WHERE project_id = ?4 AND id = ?5 AND revision = ?6",
+                params![
+                    input.title,
+                    input.content,
+                    now as i64,
+                    input.project_id.to_string(),
+                    input.note_id.to_string(),
+                    input.expected_revision as i64,
+                ],
+            )
+            .map_err(to_io_error)?;
+        if changed == 0 {
+            return Err(note_revision_error(
+                &connection,
+                input.project_id,
+                input.note_id,
+                input.expected_revision,
+            ));
+        }
+        self.get_note(input.project_id, input.note_id)?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "note not found after update"))
+    }
+
+    pub fn delete_note(
+        &self,
+        project_id: Uuid,
+        note_id: Uuid,
+        expected_revision: u64,
+    ) -> io::Result<u64> {
+        let connection = self.open()?;
+        let changed = connection
+            .execute(
+                "DELETE FROM notes WHERE project_id = ?1 AND id = ?2 AND revision = ?3",
+                params![
+                    project_id.to_string(),
+                    note_id.to_string(),
+                    expected_revision as i64
+                ],
+            )
+            .map_err(to_io_error)?;
+        if changed == 0 {
+            return Err(note_revision_error(
+                &connection,
+                project_id,
+                note_id,
+                expected_revision,
+            ));
+        }
+        Ok(expected_revision)
+    }
+
     /// Builds a blob sweep.
     ///
     /// Both halves are filesystem and database work, so the whole thing runs on
@@ -1535,12 +1741,23 @@ type MessageColumns = (
     String,
     Option<String>,
     String,
+    String,
     i64,
     i64,
 );
 
 fn message_from_row(row: MessageColumns) -> Option<Message> {
-    let (id, turn_id, role, content, display_content, attachments, created_at, streaming) = row;
+    let (
+        id,
+        turn_id,
+        role,
+        content,
+        display_content,
+        attachments,
+        embedded_notes,
+        created_at,
+        streaming,
+    ) = row;
     Some(Message {
         id: Uuid::parse_str(&id).ok()?,
         turn_id: turn_id.as_deref().and_then(|id| Uuid::parse_str(id).ok()),
@@ -1548,6 +1765,8 @@ fn message_from_row(row: MessageColumns) -> Option<Message> {
         content,
         display_content,
         attachments: serde_json::from_str::<Vec<MessageAttachment>>(&attachments)
+            .unwrap_or_default(),
+        embedded_notes: serde_json::from_str::<Vec<EmbeddedNote>>(&embedded_notes)
             .unwrap_or_default(),
         created_at: created_at as u64,
         streaming: streaming != 0,
@@ -1568,8 +1787,8 @@ fn session_data(session: &AgentSession) -> io::Result<String> {
 
 const UPSERT_MESSAGE: &str = "INSERT INTO messages(
          id, session_id, turn_id, position, role, content, display_content,
-         attachments, created_at, streaming
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         attachments, embedded_notes, created_at, streaming
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
      ON CONFLICT(id) DO UPDATE SET
          session_id = excluded.session_id,
          turn_id    = excluded.turn_id,
@@ -1578,6 +1797,7 @@ const UPSERT_MESSAGE: &str = "INSERT INTO messages(
          content    = excluded.content,
          display_content = excluded.display_content,
          attachments = excluded.attachments,
+         embedded_notes = excluded.embedded_notes,
          created_at = excluded.created_at,
          streaming  = excluded.streaming";
 
@@ -1616,6 +1836,11 @@ fn write_messages(
         } else {
             serde_json::to_string(&message.attachments).map_err(to_io_error)?
         };
+        let embedded_notes = if message.embedded_notes.is_empty() {
+            "[]".to_owned()
+        } else {
+            serde_json::to_string(&message.embedded_notes).map_err(to_io_error)?
+        };
         transaction
             .execute(
                 UPSERT_MESSAGE,
@@ -1633,6 +1858,7 @@ fn write_messages(
                         .clone()
                         .map_or(Value::Null, Value::Text),
                     Value::Text(attachments),
+                    Value::Text(embedded_notes),
                     Value::Integer(message.created_at as i64),
                     Value::Integer(i64::from(message.streaming)),
                 ]),
@@ -1715,6 +1941,14 @@ fn message_fingerprint(message: &Message, position: usize) -> u64 {
             fold(0);
         }
     }
+    fold(message.embedded_notes.len() as u64);
+    for note in &message.embedded_notes {
+        fold(fingerprint(&note.id.to_string()));
+        fold(fingerprint(&note.title));
+        fold(fingerprint(&note.content));
+        fold(note.revision);
+    }
+    fold(message.created_at);
     hash
 }
 
@@ -1824,6 +2058,7 @@ mod tests {
         ComposerDraft {
             text: text.to_owned(),
             attachments: Vec::new(),
+            embedded_notes: Vec::new(),
         }
     }
 
@@ -2029,6 +2264,7 @@ mod tests {
                 is_image: true,
                 blob_reference: None,
             }],
+            embedded_notes: Vec::new(),
         };
         let mut drafts = ComposerDrafts::default();
         drafts.set(ComposerDraftKey::NewSession(project_id), draft.clone());
@@ -2202,6 +2438,14 @@ mod tests {
             Some("compare".to_owned()),
             vec![attachment.clone()],
         );
+        state.sessions[0].messages[0]
+            .embedded_notes
+            .push(EmbeddedNote {
+                id: Uuid::from_u128(1),
+                title: "Plan".to_owned(),
+                content: "Keep the API compatible.".to_owned(),
+                revision: 3,
+            });
         store.save(&mut state).unwrap();
 
         let restored = load_hydrated(&store);
@@ -2209,6 +2453,9 @@ mod tests {
         assert_eq!(message.content, "compare @/tmp/reference.png");
         assert_eq!(message.visible_content(), "compare");
         assert_eq!(message.attachments, vec![attachment]);
+        assert_eq!(message.embedded_notes.len(), 1);
+        assert_eq!(message.embedded_notes[0].title, "Plan");
+        assert_eq!(message.embedded_notes[0].revision, 3);
 
         fs::remove_dir_all(directory).ok();
     }
@@ -2396,6 +2643,7 @@ mod tests {
                     is_image: true,
                     blob_reference: Some(reference),
                 }],
+                embedded_notes: Vec::new(),
             },
         );
         ComposerDraftStore::for_state_path(&directory.join("app.db"))
@@ -2405,6 +2653,61 @@ mod tests {
         store.blob_sweep()();
 
         assert_eq!(fs::read(path).unwrap(), payload);
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn notes_crud_enforces_project_scope_and_revision() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        store.save(&mut state).unwrap();
+        let project_id = state.projects[0].id;
+
+        let note = store
+            .create_note(CreateNote {
+                project_id,
+                title: "Plan".into(),
+                content: "first\nsecond".into(),
+            })
+            .unwrap();
+        assert_eq!(note.revision, 1);
+        assert_eq!(
+            store.list_notes(project_id).unwrap()[0].preview,
+            "first second"
+        );
+        assert_eq!(
+            store.get_note(project_id, note.id).unwrap(),
+            Some(note.clone())
+        );
+
+        let updated = store
+            .update_note(UpdateNote {
+                project_id,
+                note_id: note.id,
+                title: "Updated".into(),
+                content: "details".into(),
+                expected_revision: 1,
+            })
+            .unwrap();
+        assert_eq!(updated.revision, 2);
+        let conflict = store.update_note(UpdateNote {
+            project_id,
+            note_id: note.id,
+            title: "stale".into(),
+            content: "stale".into(),
+            expected_revision: 1,
+        });
+        assert!(
+            conflict
+                .unwrap_err()
+                .to_string()
+                .contains("revision conflict")
+        );
+        assert!(store.get_note(Uuid::new_v4(), note.id).unwrap().is_none());
+        assert_eq!(store.delete_note(project_id, note.id, 2).unwrap(), 2);
+        assert!(store.get_note(project_id, note.id).unwrap().is_none());
+
         fs::remove_dir_all(directory).ok();
     }
 

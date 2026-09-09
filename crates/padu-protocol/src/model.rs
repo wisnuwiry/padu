@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
+use crate::notes::EmbeddedNote;
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum ProviderKind {
@@ -701,6 +703,8 @@ pub struct QueuedMessage {
     pub display_content: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<MessageAttachment>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub embedded_notes: Vec<EmbeddedNote>,
     pub created_at: u64,
 }
 
@@ -711,6 +715,7 @@ impl QueuedMessage {
             content: content.into(),
             display_content: None,
             attachments: Vec::new(),
+            embedded_notes: Vec::new(),
             created_at: unix_time(),
         }
     }
@@ -1619,6 +1624,8 @@ pub struct Message {
     pub display_content: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<MessageAttachment>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub embedded_notes: Vec<EmbeddedNote>,
     pub created_at: u64,
     pub streaming: bool,
 }
@@ -1632,6 +1639,7 @@ impl Message {
             content: content.into(),
             display_content: None,
             attachments: Vec::new(),
+            embedded_notes: Vec::new(),
             created_at: unix_time(),
             streaming: false,
         }

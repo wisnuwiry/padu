@@ -6,6 +6,7 @@ use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::model::{AgentSession, MessageRole};
+use crate::notes::EmbeddedNote;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 pub struct ComposerDraftAttachment {
@@ -25,11 +26,13 @@ pub struct ComposerDraft {
     pub text: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<ComposerDraftAttachment>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub embedded_notes: Vec<EmbeddedNote>,
 }
 
 impl ComposerDraft {
     pub fn is_empty(&self) -> bool {
-        self.text.is_empty() && self.attachments.is_empty()
+        self.text.is_empty() && self.attachments.is_empty() && self.embedded_notes.is_empty()
     }
 }
 

@@ -79,6 +79,7 @@ impl Padu {
                 .iter()
                 .map(crate::persistence::ComposerDraftAttachment::from)
                 .collect(),
+            embedded_notes: Vec::new(),
         }
     }
 

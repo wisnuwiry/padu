@@ -1179,6 +1179,33 @@ impl Padu {
                         }
                     })),
             )
+            .child(
+                div()
+                    .id("open-notes")
+                    .tab_index(0)
+                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .w(px(26.0))
+                    .h(px(26.0))
+                    .flex_none()
+                    .rounded(px(6.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .hover(|element| element.bg(theme.overlay))
+                    .active(|element| element.bg(theme.overlay_strong))
+                    .tooltip(Tooltip::text(tr!("settings.notes")))
+                    .child(icon("icons/package.svg", 14.0, theme.text_tertiary))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.open_notes(cx);
+                    }))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            this.open_notes(cx);
+                            cx.stop_propagation();
+                        }
+                    })),
+            )
             .child(self.render_sidebar_host_button(cx))
             .child(div().flex_1())
             .child(

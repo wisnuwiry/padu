@@ -9,6 +9,10 @@ import type {
   DaemonSettings,
   FileEntry,
   MessageAttachment,
+  Note,
+  NoteSummary,
+  CreateNote,
+  UpdateNote,
   PlanUsage,
   Project,
   ProviderKind,
@@ -117,6 +121,26 @@ export async function attachSession(
   return response.runtimeId
     ? { runtimeId: response.runtimeId, supportsSteer: response.supportsSteer }
     : null
+}
+
+export async function listNotes(client: PaduClient, projectId: string): Promise<NoteSummary[]> {
+  return expectResponse(await client.request({ type: 'listNotes', projectId }), 'notes').notes
+}
+
+export async function getNote(client: PaduClient, projectId: string, noteId: string): Promise<Note | null> {
+  return expectResponse(await client.request({ type: 'getNote', projectId, noteId }), 'note').note
+}
+
+export async function createNote(client: PaduClient, note: CreateNote): Promise<Note> {
+  return expectResponse(await client.request({ type: 'createNote', note }), 'noteCreated').note
+}
+
+export async function updateNote(client: PaduClient, note: UpdateNote): Promise<Note> {
+  return expectResponse(await client.request({ type: 'updateNote', note }), 'noteUpdated').note
+}
+
+export async function deleteNote(client: PaduClient, projectId: string, noteId: string, expectedRevision: number): Promise<void> {
+  expectResponse(await client.request({ type: 'deleteNote', projectId, noteId, expectedRevision }), 'noteDeleted')
 }
 
 export async function searchSessionMessages(

@@ -14,3 +14,4 @@ export * from "./transcript-presentation";
 export * from "./composer-preferences";
 export * from "./provider-probe-cache";
 export * from "./theme";
+export * from "./notes";

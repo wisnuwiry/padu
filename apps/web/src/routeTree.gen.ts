@@ -10,12 +10,18 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as NotesRouteImport } from './routes/notes'
 import { Route as SettingsIndexRouteImport } from './routes/settings.index'
 import { Route as SettingsPageRouteImport } from './routes/settings.$page'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NotesRoute = NotesRouteImport.update({
+  id: '/notes',
+  path: '/notes',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsIndexRoute = SettingsIndexRouteImport.update({
@@ -31,30 +37,34 @@ const SettingsPageRoute = SettingsPageRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/notes': typeof NotesRoute
   '/settings/$page': typeof SettingsPageRoute
   '/settings/': typeof SettingsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/notes': typeof NotesRoute
   '/settings/$page': typeof SettingsPageRoute
   '/settings': typeof SettingsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/notes': typeof NotesRoute
   '/settings/$page': typeof SettingsPageRoute
   '/settings/': typeof SettingsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/settings/$page' | '/settings/'
+  fullPaths: '/' | '/notes' | '/settings/$page' | '/settings/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/settings/$page' | '/settings'
-  id: '__root__' | '/' | '/settings/$page' | '/settings/'
+  to: '/' | '/notes' | '/settings/$page' | '/settings'
+  id: '__root__' | '/' | '/notes' | '/settings/$page' | '/settings/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  NotesRoute: typeof NotesRoute
   SettingsPageRoute: typeof SettingsPageRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
 }
@@ -66,6 +76,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/notes': {
+      id: '/notes'
+      path: '/notes'
+      fullPath: '/notes'
+      preLoaderRoute: typeof NotesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings/': {
@@ -87,6 +104,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  NotesRoute: NotesRoute,
   SettingsPageRoute: SettingsPageRoute,
   SettingsIndexRoute: SettingsIndexRoute,
 }

@@ -250,6 +250,10 @@ settings.notifications_keywords:
   en: notifications alert sound permission system audio test banner task complete
 settings.about_keywords:
   en: about info version update updates host connected github repository repo sponsor contribute
+settings.notes:
+  en: Notes
+settings.notes_keywords:
+  en: notes markdown documents writing snippets memos
 notifications.system_permission:
   en: System Permission
 notifications.system_permission_desc:
@@ -1001,6 +1005,28 @@ common.edit:
   en: Edit
 common.send:
   en: Send
+notes.new:
+  en: New Note
+notes.save:
+  en: Save
+notes.edit:
+  en: Edit
+notes.side_by_side:
+  en: Side by Side
+notes.preview:
+  en: Preview
+notes.delete:
+  en: Delete
+notes.untitled:
+  en: Untitled Note
+notes.title_placeholder:
+  en: Note title
+notes.body_placeholder:
+  en: Write in Markdown…
+notes.add_to_note:
+  en: Add to Note
+notes.command_description:
+  en: Search and embed a note in chat
 
 session.fork_task:
   en: Fork task

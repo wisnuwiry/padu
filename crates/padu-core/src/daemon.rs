@@ -730,6 +730,31 @@ impl Backend for PaduBackend {
                 self.composer_drafts.apply_changes(changes)?;
                 Ok(ResponsePayload::Ack)
             }
+            Command::ListNotes { project_id } => Ok(ResponsePayload::Notes {
+                notes: self.task_store.list_notes(project_id)?,
+            }),
+            Command::GetNote {
+                project_id,
+                note_id,
+            } => Ok(ResponsePayload::Note {
+                note: self.task_store.get_note(project_id, note_id)?,
+            }),
+            Command::CreateNote { note } => Ok(ResponsePayload::NoteCreated {
+                note: self.task_store.create_note(note)?,
+            }),
+            Command::UpdateNote { note } => Ok(ResponsePayload::NoteUpdated {
+                note: self.task_store.update_note(note)?,
+            }),
+            Command::DeleteNote {
+                project_id,
+                note_id,
+                expected_revision,
+            } => Ok(ResponsePayload::NoteDeleted {
+                note_id,
+                revision: self
+                    .task_store
+                    .delete_note(project_id, note_id, expected_revision)?,
+            }),
             Command::StoreBlob { mime_type, bytes } => {
                 let reference = self
                     .task_store
@@ -1867,6 +1892,11 @@ fn handle_driver_command(
         | Command::LoadComposerDrafts
         | Command::SaveComposerDrafts { .. }
         | Command::ApplyComposerDraftChanges { .. }
+        | Command::ListNotes { .. }
+        | Command::GetNote { .. }
+        | Command::CreateNote { .. }
+        | Command::UpdateNote { .. }
+        | Command::DeleteNote { .. }
         | Command::StoreBlob { .. }
         | Command::ImportAttachment { .. }
         | Command::ImportPathAttachment { .. }

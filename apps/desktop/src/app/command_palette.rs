@@ -171,6 +171,7 @@ enum PaletteAction {
     FindFile,
     OpenFile(String),
     OpenReview,
+    OpenNotes,
     OpenSettings(SettingsPage),
     OpenOnboarding,
     SelectTask(Uuid),
@@ -985,6 +986,16 @@ impl Padu {
                 ),
             ]);
         }
+
+        commands.push(CommandPaletteItem::command(
+            PaletteSection::Commands,
+            tr!("settings.notes"),
+            "icons/package.svg",
+            Some(crate::platform::primary_shortcut("⌘⇧N", "Ctrl+Shift+N")),
+            PaletteAction::OpenNotes,
+            "notes markdown documents writing snippets memos",
+            next(),
+        ));
 
         for (page, label_key, icon, keywords) in [
             (
@@ -1855,6 +1866,7 @@ impl Padu {
             PaletteAction::OpenFiles => self.open_files_action(&OpenFiles, window, cx),
             PaletteAction::OpenFile(path) => self.open_right_panel_file(path, cx),
             PaletteAction::OpenReview => self.open_review_action(&OpenReview, window, cx),
+            PaletteAction::OpenNotes => self.open_notes(cx),
             PaletteAction::OpenSettings(page) => {
                 self.open_settings_action(&OpenSettings, window, cx);
                 self.open_settings_page(page, cx);
