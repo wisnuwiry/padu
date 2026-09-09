@@ -30,6 +30,7 @@ actions!(
 const SEARCH_CONTEXT: &str = "CommandPalette > TextInput";
 const MAX_TASK_RESULTS: usize = 12;
 const MAX_RESUME_RESULTS: usize = 30;
+const MAX_NOTE_RESULTS: usize = 12;
 const PROVIDER_SESSION_CATALOG_LIMIT: usize = 250;
 const MESSAGE_SEARCH_LIMIT: usize = 50;
 const MESSAGE_SEARCH_CACHE_CAPACITY: usize = 24;
@@ -73,6 +74,7 @@ pub fn init(cx: &mut App) {
 enum PaletteSection {
     Suggested,
     Tasks,
+    Notes,
     Sessions,
     Providers,
     Commands,
@@ -84,6 +86,7 @@ impl PaletteSection {
         crate::i18n::translate(match self {
             Self::Suggested => "command_palette.suggested",
             Self::Tasks => "command_palette.tasks",
+            Self::Notes => "command_palette.notes",
             Self::Sessions => "command_palette.sessions",
             Self::Providers => "command_palette.providers",
             Self::Commands => "command_palette.commands",
@@ -94,7 +97,7 @@ impl PaletteSection {
     fn query_rank(self) -> usize {
         match self {
             Self::Commands | Self::Suggested | Self::Sessions | Self::Providers => 0,
-            Self::Tasks => 1,
+            Self::Tasks | Self::Notes => 1,
             Self::Settings => 2,
         }
     }
@@ -516,6 +519,7 @@ impl Padu {
         self.command_palette
             .search
             .update(cx, |input, cx| input.clear(cx));
+        self.load_notes_from_daemon(Uuid::nil(), cx);
         self.refresh_command_palette_results("", false, cx);
 
         // Closing an open GPUI menu can call its toggle observers back into
@@ -1386,7 +1390,7 @@ impl Padu {
             .iter()
             .enumerate()
             .map(|(order, note)| CommandPaletteItem {
-                section: PaletteSection::Commands,
+                section: PaletteSection::Notes,
                 label: if note.title.is_empty() {
                     tr!("notes.untitled")
                 } else {
@@ -1604,6 +1608,26 @@ impl Padu {
                 .then(b.score.cmp(&a.score))
                 .then(a.item.order.cmp(&b.item.order))
         });
+        let mut notes = self
+            .command_palette_note_candidates()
+            .into_iter()
+            .filter_map(|item| {
+                pattern
+                    .score(
+                        Utf32Str::new(&item.search_text, &mut utf32),
+                        &mut self.command_palette.matcher,
+                    )
+                    .map(|score| ScoredPaletteItem { score, item })
+            })
+            .collect::<Vec<_>>();
+        notes.sort_by(|a, b| {
+            b.score
+                .cmp(&a.score)
+                .then(b.item.recency.cmp(&a.item.recency))
+                .then(a.item.order.cmp(&b.item.order))
+        });
+        notes.truncate(MAX_NOTE_RESULTS);
+        commands.extend(notes);
 
         let selected_action = preserve_selection.then(|| {
             self.command_palette
@@ -1999,7 +2023,10 @@ impl Padu {
             PaletteAction::OpenBrowser => self.open_browser_action(&OpenBrowser, window, cx),
             PaletteAction::OpenTerminal => self.open_terminal_action(&OpenTerminal, window, cx),
             PaletteAction::OpenFiles => self.open_files_action(&OpenFiles, window, cx),
-            PaletteAction::OpenFile(path) => self.open_right_panel_file(path, cx),
+            PaletteAction::OpenFile(path) => {
+                self.ensure_initial_right_panel_file_editor_width();
+                self.open_right_panel_surface(RightPanelSurface::File(path), cx)
+            }
             PaletteAction::OpenReview => self.open_review_action(&OpenReview, window, cx),
             PaletteAction::OpenNotes => self.open_notes(cx),
             PaletteAction::OpenSettings(page) => {

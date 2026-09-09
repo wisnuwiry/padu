@@ -1,4 +1,4 @@
-import type { AgentSession, FileEntry, ProviderKind, ProviderSessionSummary, SessionMessageMatch } from '@padu/client'
+import type { AgentSession, FileEntry, NoteSummary, ProviderKind, ProviderSessionSummary, SessionMessageMatch } from '@padu/client'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { FileTypeIcon, ProviderIcon, PROVIDERS, providerMeta, PaduIcon, type PaduIconName } from '@/components/padu-icon'
@@ -7,6 +7,7 @@ import type { SettingsPageId } from '@/components/settings-view'
 import { SETTINGS_PAGES } from '@/components/settings-view'
 import {
   displayTitle,
+  listNotes,
   listProviderSessions,
   providerSessionNativeId,
   sameProviderSession,
@@ -22,7 +23,9 @@ import { projectDisplayName } from '@/lib/project-presentation'
 import { formatTimeAgo, sessionHasStarted } from '@/lib/sidebar-presentation'
 import { cn } from '@/lib/utils'
 
-type PaletteSection = 'suggested' | 'tasks' | 'sessions' | 'providers' | 'commands' | 'settings'
+type PaletteSection = 'suggested' | 'tasks' | 'notes' | 'sessions' | 'providers' | 'commands' | 'settings'
+const ALL_NOTES_PROJECT_ID = '00000000-0000-0000-0000-000000000000'
+const MAX_NOTE_RESULTS = 12
 export type CommandPaletteView = 'commands' | 'resume' | 'resumeProviders' | 'findFile'
 type Translator = (key: string, params?: Record<string, string | number>) => string
 
@@ -58,6 +61,7 @@ export interface CommandPaletteActions {
   selectNextTask?: () => void
   resumeProviderSession: (summary: ProviderSessionSummary) => Promise<void>
   openFile: (path: string) => void
+  openNotes: (query?: string) => void
 }
 
 export function CommandPalette({
@@ -100,6 +104,7 @@ export function CommandPalette({
   const [resumeProvider, setResumeProvider] = useState<ProviderKind>(currentProvider)
   const [query, setQuery] = useState('')
   const [matches, setMatches] = useState<SessionMessageMatch[]>([])
+  const [noteSummaries, setNoteSummaries] = useState<NoteSummary[]>([])
   const [matchesQuery, setMatchesQuery] = useState<string | null>(null)
   const [searchPending, setSearchPending] = useState(false)
   const [providerSessions, setProviderSessions] = useState<ProviderSessionSummary[]>([])
@@ -143,6 +148,24 @@ export function CommandPalette({
     messageSearchCache.current.clear()
     requestAnimationFrame(() => input.current?.focus())
   }, [currentProvider, initialView, open])
+
+  useEffect(() => {
+    if (!open || !client) {
+      setNoteSummaries([])
+      return
+    }
+    let current = true
+    void listNotes(client, ALL_NOTES_PROJECT_ID)
+      .then((notes) => {
+        if (current) setNoteSummaries(notes)
+      })
+      .catch(() => {
+        if (current) setNoteSummaries([])
+      })
+    return () => {
+      current = false
+    }
+  }, [client, open])
 
   useEffect(() => {
     if (!open || view !== 'commands' || !client || !query.trim()) {
@@ -277,7 +300,7 @@ export function CommandPalette({
 
   const selectableResumeProviders = PROVIDERS.filter(({ id }) =>
     id === resumeProvider || !settings.data?.disabled_providers.includes(id))
-  const nextItems = view === 'resume'
+  const baseItems = view === 'resume'
     ? buildResumeItems({
         taskState,
         query,
@@ -312,6 +335,9 @@ export function CommandPalette({
         openFileView,
         t,
       })
+  const nextItems = view === 'commands'
+    ? [...baseItems, ...buildNoteItems(noteSummaries, query, actions.openNotes)]
+    : baseItems
   const items = view === 'commands' && shouldKeepPreviousPaletteItems(
     nextItems.length,
     searchPending,
@@ -630,6 +656,32 @@ function Highlighted({ text, query }: { text: string; query: string }) {
   return <>{text.slice(0, at)}<mark className="bg-transparent font-medium text-foreground">{text.slice(at, at + normalized.length)}</mark>{text.slice(at + normalized.length)}</>
 }
 
+function buildNoteItems(
+  notes: NoteSummary[],
+  query: string,
+  openNotes: (query?: string) => void,
+): PaletteItem[] {
+  const normalized = query.trim()
+  if (!normalized) return []
+  return notes
+    .map((note) => ({
+      note,
+      score: fuzzyScore(normalized, `${note.title} ${note.preview} notes note`),
+    }))
+    .filter((entry): entry is { note: NoteSummary; score: number } => entry.score !== null)
+    .sort((left, right) => right.score - left.score || right.note.updatedAt - left.note.updatedAt)
+    .slice(0, MAX_NOTE_RESULTS)
+    .map(({ note }) => ({
+      id: `note-${note.id}`,
+      section: 'notes',
+      label: note.title || 'Untitled note',
+      detail: note.preview || 'Empty note',
+      icon: 'file',
+      keywords: `${note.title} ${note.preview} note notes`,
+      run: () => openNotes(note.title || note.preview),
+    }))
+}
+
 function buildItems({
   taskState,
   query,
@@ -757,6 +809,7 @@ function buildItems({
 
   const sectionRank: Record<PaletteSection, number> = {
     tasks: 0,
+    notes: 0,
     sessions: 0,
     providers: 0,
     commands: 1,

@@ -1214,6 +1214,12 @@ export function PaduApp() {
     newTask: () => startNewTask(),
     openProject: openProjectPicker,
     openFile: (path) => openPanel('files', 'uncommitted', path),
+    openNotes: (query) => {
+      void navigate({
+        to: '/notes',
+        search: { q: query || undefined, projectId: activeProject?.id },
+      })
+    },
     chooseModel: () => {
       setModelPickerSignal((value) => value + 1)
     },
