@@ -1017,6 +1017,28 @@ notes.preview:
   en: Preview
 notes.delete:
   en: Delete
+notes.delete_title:
+  en: Delete note?
+notes.delete_message:
+  en: "Are you sure you want to delete “%{title}”? This action cannot be undone."
+notes.empty_title:
+  en: No notes yet
+notes.empty_message:
+  en: Create a note to keep ideas, snippets, and reminders.
+notes.search_placeholder:
+  en: Search notes
+notes.no_matches:
+  en: No matching notes
+notes.collapse:
+  en: Collapse notes
+notes.expand:
+  en: Expand notes
+notes.details:
+  en: Note details
+notes.created:
+  en: Created %{time}
+notes.updated:
+  en: Updated %{time}
 notes.untitled:
   en: Untitled Note
 notes.title_placeholder:

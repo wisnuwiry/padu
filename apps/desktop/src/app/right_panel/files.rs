@@ -798,6 +798,7 @@ impl Padu {
                 &editor_state,
                 panel_width - file_tree_width,
                 writable,
+                theme.surface,
                 window,
                 cx,
             )
@@ -1169,6 +1170,7 @@ impl Padu {
         editor_state: &Entity<TextInput>,
         pane_width: f32,
         writable: bool,
+        background: Hsla,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
@@ -1250,9 +1252,10 @@ impl Padu {
             .key_context("FileEditorPane")
             .flex_1()
             .min_h_0()
+            .min_w_0()
             .flex()
             .flex_col()
-            .bg(theme.surface)
+            .bg(background)
             .font_family(md::render::MONO_FAMILY)
             .text_size(px(text_size))
             .line_height(px(line_height))

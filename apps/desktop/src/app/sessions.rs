@@ -709,6 +709,7 @@ impl Padu {
                 self.right_panel_file_tree_width = width;
                 width
             }
+            PanelResizeTarget::NotesSplit => self.notes_split_ratio,
         };
         self.panel_resize_drag = Some(PanelResizeDrag {
             target,
@@ -769,6 +770,10 @@ impl Padu {
                 }
                 self.right_panel_file_tree_width = width;
             }
+            PanelResizeTarget::NotesSplit => {
+                self.notes_split_ratio =
+                    (drag.start_width + delta / viewport_width).clamp(0.2, 0.8);
+            }
         }
         cx.notify();
     }
@@ -776,13 +781,16 @@ impl Padu {
     pub(super) fn finish_panel_resize(
         &mut self,
         event: &MouseUpEvent,
-        _: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if event.button == MouseButton::Left
             && let Some(drag) = self.panel_resize_drag.take()
         {
-            if drag.target != PanelResizeTarget::FileTree {
+            if matches!(
+                drag.target,
+                PanelResizeTarget::Sidebar | PanelResizeTarget::RightPanel
+            ) {
                 self.persist_panel_layout();
             }
             cx.notify();

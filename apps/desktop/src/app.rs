@@ -271,6 +271,7 @@ enum PanelResizeTarget {
     Sidebar,
     RightPanel,
     FileTree,
+    NotesSplit,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1466,7 +1467,11 @@ pub struct Padu {
     notes_selected: usize,
     notes_title: Entity<TextInput>,
     notes_body: Entity<TextInput>,
+    notes_search: Entity<TextInput>,
     notes_layout: notes::NotesLayout,
+    notes_list_collapsed: bool,
+    notes_split_ratio: f32,
+    notes_save_generation: u64,
     /// The Settings page's library snapshot, scanned off-thread. Frames read
     /// only this; `None` means the first scan has not landed yet.
     skills_catalog: Option<Rc<crate::skills::SkillsCatalog>>,
@@ -2198,7 +2203,13 @@ impl Padu {
         let notes_body = cx.new(|cx| {
             TextInput::new(window, cx)
                 .multi_line()
+                .syntax(Some("markdown"))
                 .placeholder(tr!("notes.body_placeholder"))
+        });
+        let notes_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .placeholder(tr!("notes.search_placeholder"))
         });
         let keybindings_search = cx.new(|cx| {
             TextInput::new(window, cx)
@@ -2793,6 +2804,27 @@ impl Padu {
                 },
             )
             .detach();
+            cx.subscribe(&notes_search, |_: &mut Self, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Edited) {
+                    cx.notify();
+                }
+            })
+            .detach();
+            cx.subscribe(
+                &notes_title,
+                |this: &mut Self, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Edited) {
+                        this.schedule_note_save(cx);
+                    }
+                },
+            )
+            .detach();
+            cx.subscribe(&notes_body, |this: &mut Self, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Edited) {
+                    this.schedule_note_save(cx);
+                }
+            })
+            .detach();
             cx.subscribe(
                 &daemon_port_input,
                 |this: &mut Self, _, event: &InputEvent, cx| match event {
@@ -3199,7 +3231,11 @@ impl Padu {
                 notes_selected: 0,
                 notes_title,
                 notes_body,
+                notes_search,
                 notes_layout: notes::NotesLayout::Edit,
+                notes_list_collapsed: false,
+                notes_split_ratio: 0.5,
+                notes_save_generation: 0,
                 notification_permission:
                     crate::platform::NotificationPermissionStatus::NotDetermined,
 

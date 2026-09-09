@@ -1,16 +1,5 @@
 use super::*;
 
-fn format_timestamp(value: u64) -> String {
-    DateTime::from_timestamp(value as i64, 0)
-        .map(|timestamp| {
-            timestamp
-                .with_timezone(&Local)
-                .format("%Y-%m-%d %H:%M")
-                .to_string()
-        })
-        .unwrap_or_else(|| "—".to_owned())
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum NotesLayout {
     Edit,
@@ -174,7 +163,38 @@ impl Padu {
         .detach();
     }
 
+    pub(super) fn schedule_note_save(&mut self, cx: &mut Context<Self>) {
+        let Some(note) = self.notes.get(self.notes_selected) else {
+            return;
+        };
+        let title = self.notes_title.read(cx).content().trim().to_owned();
+        let body = self.notes_body.read(cx).content().to_owned();
+        let normalized_title = if title.is_empty() {
+            tr!("notes.untitled")
+        } else {
+            title
+        };
+        if normalized_title == note.title && body == note.body {
+            return;
+        }
+        cx.notify();
+        self.notes_save_generation = self.notes_save_generation.wrapping_add(1);
+        let generation = self.notes_save_generation;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(650))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.notes_save_generation == generation {
+                    this.save_note_edit(cx);
+                }
+            });
+        })
+        .detach();
+    }
+
     fn save_note_edit(&mut self, cx: &mut Context<Self>) {
+        self.notes_save_generation = self.notes_save_generation.wrapping_add(1);
         let Some(note) = self.notes.get_mut(self.notes_selected) else {
             return;
         };
@@ -223,11 +243,12 @@ impl Padu {
         .detach();
     }
 
-    fn delete_note(&mut self, cx: &mut Context<Self>) {
-        if self.notes.is_empty() {
+    pub(super) fn delete_note_at(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index >= self.notes.len() {
             return;
         }
-        let note = self.notes.remove(self.notes_selected);
+        self.notes_save_generation = self.notes_save_generation.wrapping_add(1);
+        let note = self.notes.remove(index);
         let daemon = self.daemon.clone();
         cx.spawn(async move |_, cx| {
             let _ = cx
@@ -269,123 +290,285 @@ impl Padu {
         self.open_notes(cx);
     }
 
-    pub(super) fn render_notes_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    fn notes_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !event.keystroke.modifiers.modified() {
+            return;
+        }
+        let key = event.keystroke.key.as_str();
+        let modifiers = event.keystroke.modifiers;
+        let plain_primary = !modifiers.shift && !modifiers.alt;
+        match key {
+            "n" if modifiers.alt && !modifiers.shift => self.create_note(cx),
+            "1" if plain_primary => {
+                self.notes_layout = NotesLayout::Edit;
+                cx.notify();
+            }
+            "2" if plain_primary => {
+                self.notes_layout = NotesLayout::Split;
+                cx.notify();
+            }
+            "3" if plain_primary => {
+                self.notes_layout = NotesLayout::Preview;
+                cx.notify();
+            }
+            "backspace" if plain_primary => {
+                if let Some(note) = self.notes.get(self.notes_selected) {
+                    self.confirm_delete_note(note.id, window, cx);
+                }
+            }
+            "l" if modifiers.shift && !modifiers.alt => {
+                self.notes_list_collapsed = !self.notes_list_collapsed;
+                cx.notify();
+            }
+            _ => return,
+        }
+        cx.stop_propagation();
+    }
+
+    pub(super) fn render_notes_page(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
         let notes = self.notes.clone();
         let selected = self.notes_selected;
+        let query = self.notes_search.read(cx).content().trim().to_lowercase();
+        let visible_notes = notes
+            .iter()
+            .enumerate()
+            .filter(|(_, note)| {
+                query.is_empty()
+                    || note.title.to_lowercase().contains(&query)
+                    || note.body.to_lowercase().contains(&query)
+            })
+            .map(|(index, note)| (index, note.clone()))
+            .collect::<Vec<_>>();
         let mut list = div().flex().flex_col().gap(px(3.0));
-        for (index, note) in notes.iter().enumerate() {
+        if visible_notes.is_empty() {
+            list = list.child(
+                div()
+                    .w_full()
+                    .py(px(28.0))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(8.0))
+                    .text_center()
+                    .child(icon("icons/file.svg", 22.0, theme.text_tertiary))
+                    .child(
+                        div()
+                            .text_size(sp(13.0))
+                            .text_color(theme.text_secondary)
+                            .child(if notes.is_empty() {
+                                tr!("notes.empty_title")
+                            } else {
+                                tr!("notes.no_matches")
+                            }),
+                    )
+                    .child(
+                        div()
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_tertiary)
+                            .child(if notes.is_empty() {
+                                tr!("notes.empty_message")
+                            } else {
+                                query.clone()
+                            }),
+                    ),
+            );
+        }
+        for (index, note) in visible_notes.iter().cloned() {
             let title = if note.title.is_empty() {
                 tr!("notes.untitled")
             } else {
                 note.title.clone()
             };
-            let label = if note.body.is_empty() {
-                title.clone()
-            } else {
-                format!("{title}\n{}", note.body.lines().next().unwrap_or_default())
-            };
-            list = list.child(
-                div()
-                    .id(SharedString::from(format!("note-row-{}", note.id)))
-                    .tab_index(0)
-                    .tab_stop(true)
-                    .w_full()
-                    .min_h(px(48.0))
-                    .px(px(10.0))
-                    .py(px(7.0))
-                    .rounded(px(7.0))
-                    .cursor_pointer()
-                    .when(index == selected, |row| {
-                        row.bg(theme.sidebar_item_background)
-                    })
-                    .hover(|row| row.bg(theme.overlay))
-                    .focus_visible(|row| row.border_1().border_color(theme.accent))
-                    .text_size(sp(12.5))
-                    .text_color(theme.text)
-                    .whitespace_normal()
-                    .child(SharedString::from(label))
-                    .on_click(cx.listener(move |this, _, _, cx| {
+            let preview = note.body.lines().next().unwrap_or("—").to_owned();
+            let project_name = self
+                .state
+                .projects
+                .iter()
+                .find(|project| project.id == note.project_id)
+                .map(Project::display_name)
+                .unwrap_or_else(|| tr!("notes.no_project"));
+            let created_ago =
+                super::sidebar::format_time_ago(unix_time().saturating_sub(note.created_at));
+            let note_id = note.id;
+            let note_menu =
+                self.menu_handle(SharedString::from(format!("note-menu-{note_id}")), cx);
+            let weak = cx.entity().downgrade();
+            let row = div()
+                .id(SharedString::from(format!("note-row-{note_id}")))
+                .tab_index(0)
+                .tab_stop(true)
+                .w_full()
+                .min_h(px(56.0))
+                .px(px(9.0))
+                .py(px(7.0))
+                .rounded(px(8.0))
+                .cursor_pointer()
+                .when(index == selected, |row| {
+                    row.bg(theme.sidebar_item_background)
+                })
+                .hover(|row| row.bg(theme.overlay))
+                .focus_visible(|row| row.border_1().border_color(theme.accent))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .w(px(26.0))
+                        .h(px(26.0))
+                        .flex_none()
+                        .rounded(px(6.0))
+                        .bg(theme.overlay)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(icon("icons/file.svg", 13.0, theme.text_secondary)),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .flex()
+                        .flex_col()
+                        .gap(px(2.0))
+                        .child(
+                            div()
+                                .truncate()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text)
+                                .child(title),
+                        )
+                        .child(
+                            div()
+                                .truncate()
+                                .text_size(sp(11.0))
+                                .text_color(theme.text_tertiary)
+                                .child(preview),
+                        )
+                        .child(
+                            div()
+                                .truncate()
+                                .text_size(sp(10.0))
+                                .text_color(theme.text_tertiary)
+                                .child(format!("{project_name} · {created_ago}")),
+                        ),
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.select_note(index, cx);
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
                         this.select_note(index, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            this.select_note(index, cx);
-                            cx.stop_propagation();
-                        }
-                    })),
-            );
+                        cx.stop_propagation();
+                    }
+                }));
+            list = list.child(context_menu(
+                row,
+                SharedString::from(format!("note-row-menu-{note_id}")),
+                &note_menu,
+                move |_| {
+                    let weak = weak.clone();
+                    vec![
+                        MenuItem::new(tr!("notes.delete"), move |window, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.confirm_delete_note(note_id, window, cx);
+                            });
+                        })
+                        .icon("icons/trash.svg")
+                        .destructive(true),
+                    ]
+                },
+            ));
         }
 
         let selected_note = self.notes.get(selected);
         let layout = self.notes_layout;
         let mut editor = div().flex_1().min_w_0().flex().flex_col().gap(px(10.0));
         if let Some(note) = selected_note {
+            let created_ago =
+                super::sidebar::format_time_ago(unix_time().saturating_sub(note.created_at));
+            let updated_ago =
+                super::sidebar::format_time_ago(unix_time().saturating_sub(note.updated_at));
             editor = editor
                 .child(TextField::new("note-title", self.notes_title.clone()))
                 .child(
                     div()
+                        .w_full()
                         .flex_none()
                         .flex()
-                        .gap(px(6.0))
+                        .items_center()
+                        .justify_between()
+                        .gap(px(8.0))
                         .child(
-                            self.notes_button("note-save", tr!("notes.save"), cx, |this, cx| {
-                                this.save_note_edit(cx);
-                                cx.notify();
-                            }),
+                            div()
+                                .min_w_0()
+                                .flex()
+                                .gap(px(6.0))
+                                .text_size(sp(11.0))
+                                .text_color(theme.text_tertiary)
+                                .child(tr!("notes.created", time = created_ago))
+                                .child(tr!("notes.updated", time = updated_ago)),
                         )
-                        .child(self.notes_button(
-                            "note-toggle-preview",
-                            tr!("notes.edit"),
-                            cx,
-                            |this, cx| {
-                                this.save_note_edit(cx);
-                                this.notes_layout = NotesLayout::Edit;
-                                cx.notify();
-                            },
-                        ))
-                        .child(self.notes_button(
-                            "note-split",
-                            tr!("notes.side_by_side"),
-                            cx,
-                            |this, cx| {
-                                this.save_note_edit(cx);
-                                this.notes_layout = NotesLayout::Split;
-                                cx.notify();
-                            },
-                        ))
-                        .child(self.notes_button(
-                            "note-preview",
-                            tr!("notes.preview"),
-                            cx,
-                            |this, cx| {
-                                this.save_note_edit(cx);
-                                this.notes_layout = NotesLayout::Preview;
-                                cx.notify();
-                            },
-                        ))
-                        .child(self.notes_button(
-                            "note-delete",
-                            tr!("notes.delete"),
-                            cx,
-                            |this, cx| {
-                                this.delete_note(cx);
-                            },
-                        )),
-                )
-                .child(
-                    div()
-                        .flex_none()
-                        .text_size(sp(11.0))
-                        .text_color(theme.text_tertiary)
-                        .child(format!(
-                            "{} · created {} · updated {}",
-                            self.active_project()
-                                .map(|project| project.display_name())
-                                .unwrap_or_else(|| tr!("notes.no_project")),
-                            format_timestamp(note.created_at),
-                            format_timestamp(note.updated_at),
-                        )),
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(2.0))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .gap(px(1.0))
+                                        .p(px(2.0))
+                                        .rounded(px(7.0))
+                                        .bg(theme.overlay)
+                                        .child(self.notes_button(
+                                            "note-toggle-preview",
+                                            tr!("notes.edit"),
+                                            cx,
+                                            |this, _, cx| {
+                                                this.notes_layout = NotesLayout::Edit;
+                                                cx.notify();
+                                            },
+                                        ))
+                                        .child(self.notes_button(
+                                            "note-split",
+                                            tr!("notes.side_by_side"),
+                                            cx,
+                                            |this, _, cx| {
+                                                this.notes_layout = NotesLayout::Split;
+                                                cx.notify();
+                                            },
+                                        ))
+                                        .child(self.notes_button(
+                                            "note-preview",
+                                            tr!("notes.preview"),
+                                            cx,
+                                            |this, _, cx| {
+                                                this.notes_layout = NotesLayout::Preview;
+                                                cx.notify();
+                                            },
+                                        )),
+                                )
+                                .child(self.notes_button(
+                                    "note-delete",
+                                    tr!("notes.delete"),
+                                    cx,
+                                    |this, window, cx| {
+                                        if let Some(note) = this.notes.get(this.notes_selected) {
+                                            this.confirm_delete_note(note.id, window, cx);
+                                        }
+                                    },
+                                )),
+                        ),
                 );
             let palette = MarkdownPalette::from_theme(&theme);
             let cache_key = format!("note:{}", note.id);
@@ -414,6 +597,7 @@ impl Padu {
                 .id("note-preview-pane")
                 .flex_1()
                 .min_h_0()
+                .min_w_0()
                 .relative()
                 .overflow_y_scroll()
                 .track_scroll(&self.file_preview_scroll_handle)
@@ -427,49 +611,81 @@ impl Padu {
                     &self.file_preview_scroll_handle,
                     &self.file_preview_scrollbar,
                 ));
-            let edit_pane = div()
-                .id("note-editor-pane")
-                .flex_1()
-                .min_h(px(180.0))
-                .min_w_0()
-                .p(px(10.0))
-                .rounded(px(8.0))
-                .border_1()
-                .border_color(theme.border_strong)
-                .bg(theme.inset)
-                .child(self.notes_body.clone());
+            let notes_body = self.notes_body.clone();
+            let edit_pane = self
+                .render_file_editor_body(
+                    "notes.md",
+                    &notes_body,
+                    720.0,
+                    true,
+                    theme.inset,
+                    window,
+                    cx,
+                )
+                .rounded(px(8.0));
             editor = match layout {
                 NotesLayout::Edit => editor.child(edit_pane),
                 NotesLayout::Preview => editor.child(preview_pane),
-                NotesLayout::Split => editor.child(
-                    div()
-                        .flex_1()
-                        .min_h_0()
-                        .flex()
-                        .gap(px(10.0))
-                        .child(edit_pane)
-                        .child(preview_pane),
-                ),
+                NotesLayout::Split => {
+                    let split_ratio = self.notes_split_ratio;
+                    editor.child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .flex()
+                            .gap(px(6.0))
+                            .child(edit_pane.flex_grow(split_ratio))
+                            .child(
+                                div()
+                                    .relative()
+                                    .ml(px(4.0))
+                                    .flex_grow(1.0 - split_ratio)
+                                    .min_w_0()
+                                    .child(self.render_panel_resize_handle(
+                                        "notes-split-resize-handle",
+                                        PanelResizeTarget::NotesSplit,
+                                        cx,
+                                    ))
+                                    .child(preview_pane),
+                            ),
+                    )
+                }
             };
         }
 
-        div()
-            .id("notes-page")
-            .size_full()
+        let list_collapsed = self.notes_list_collapsed;
+        let mut body = div()
+            .id("notes-page-body")
+            .flex_1()
+            .min_h_0()
             .flex()
             .gap(px(16.0))
-            .p(px(24.0))
-            .child(
+            .px(px(16.0))
+            .pb(px(24.0))
+            .pt(px(0.0));
+        if !list_collapsed {
+            body = body.child(
                 div()
-                    .w(px(220.0))
+                    .w(px(240.0))
                     .flex_none()
                     .flex()
                     .flex_col()
                     .gap(px(8.0))
                     .child(
-                        self.notes_button("note-new", tr!("notes.new"), cx, |this, cx| {
+                        self.notes_button("note-new", tr!("notes.new"), cx, |this, _, cx| {
                             this.create_note(cx);
                         }),
+                    )
+                    .child(
+                        div()
+                            .h(px(30.0))
+                            .flex_none()
+                            .rounded(px(6.0))
+                            .bg(theme.inset)
+                            .child(
+                                TextField::new("notes-search", self.notes_search.clone())
+                                    .icon("icons/search.svg", 13.0),
+                            ),
                     )
                     .child(
                         div()
@@ -479,8 +695,54 @@ impl Padu {
                             .overflow_y_scroll()
                             .child(list),
                     ),
+            );
+        }
+        body = body.child(editor);
+
+        div()
+            .id("notes-page")
+            .key_context("NotesPage")
+            .on_key_down(cx.listener(Self::notes_key_down))
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(theme.canvas)
+            .child(
+                div()
+                    .id("notes-page-header")
+                    .h(px(48.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .px(px(16.0))
+                    .child(icon("icons/file.svg", 16.0, theme.text_secondary))
+                    .child(
+                        div()
+                            .text_size(sp(13.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!("settings.notes")),
+                    )
+                    .child(self.window_drag_region(
+                        div().id("notes-page-drag-region").h_full().flex_1(),
+                        cx,
+                    ))
+                    .child(self.notes_button(
+                        "note-toggle-list",
+                        if list_collapsed {
+                            tr!("notes.expand")
+                        } else {
+                            tr!("notes.collapse")
+                        },
+                        cx,
+                        |this, _, cx| {
+                            this.notes_list_collapsed = !this.notes_list_collapsed;
+                            cx.notify();
+                        },
+                    )),
             )
-            .child(editor)
+            .child(body)
             .into_any_element()
     }
 
@@ -489,9 +751,36 @@ impl Padu {
         id: &'static str,
         label: String,
         cx: &mut Context<Self>,
-        action: impl Fn(&mut Padu, &mut Context<Self>) + 'static,
+        action: impl Fn(&mut Padu, &mut Window, &mut Context<Self>) + 'static,
     ) -> Stateful<Div> {
         let theme = Theme::current(cx);
+        let selected = match id {
+            "note-toggle-preview" => self.notes_layout == NotesLayout::Edit,
+            "note-split" => self.notes_layout == NotesLayout::Split,
+            "note-preview" => self.notes_layout == NotesLayout::Preview,
+            _ => false,
+        };
+        let (icon_path, icon_only) = match id {
+            "note-new" => ("icons/plus.svg", false),
+            "note-toggle-preview" => ("icons/pencil.svg", true),
+            "note-split" => ("icons/panel-right.svg", true),
+            "note-preview" => ("icons/eye.svg", true),
+            "note-delete" => ("icons/trash.svg", true),
+            "note-toggle-list" => ("icons/panel-left.svg", true),
+            _ => ("icons/check.svg", false),
+        };
+        let tooltip = label.clone();
+        let shortcut = match id {
+            "note-new" => crate::platform::primary_shortcut("⌘⌥N", "Ctrl+Alt+N"),
+            "note-toggle-preview" => crate::platform::primary_shortcut("⌘1", "Ctrl+1"),
+            "note-split" => crate::platform::primary_shortcut("⌘2", "Ctrl+2"),
+            "note-preview" => crate::platform::primary_shortcut("⌘3", "Ctrl+3"),
+            "note-delete" => crate::platform::primary_shortcut("⌘⌫", "Ctrl+Backspace"),
+            "note-toggle-list" => crate::platform::primary_shortcut("⌘⇧L", "Ctrl+Shift+L"),
+            _ => "",
+        };
+        let shortcut_id = id;
+        let tooltip = Tooltip::with_shortcut(tooltip, shortcut);
         let action = Rc::new(action);
         let key_action = action.clone();
         div()
@@ -504,19 +793,46 @@ impl Padu {
             .flex()
             .items_center()
             .justify_center()
+            .gap(px(6.0))
             .cursor_pointer()
-            .bg(theme.overlay)
+            .when(selected, |button| button.bg(theme.overlay_strong))
             .text_size(sp(12.5))
             .text_color(theme.text_secondary)
             .focus_visible(|style| style.border_1().border_color(theme.accent))
             .hover(|style| style.bg(theme.overlay_strong))
-            .on_click(cx.listener(move |this, _, _, cx| action(this, cx)))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    key_action(this, cx);
+            .tooltip(tooltip)
+            .on_click(cx.listener(move |this, _, window, cx| action(this, window, cx)))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                let key = event.keystroke.key.as_str();
+                let shortcut_pressed = event.keystroke.modifiers.modified()
+                    && match shortcut_id {
+                        "note-new" => {
+                            key == "n"
+                                && event.keystroke.modifiers.alt
+                                && !event.keystroke.modifiers.shift
+                        }
+                        "note-toggle-preview" => key == "1",
+                        "note-split" => key == "2",
+                        "note-preview" => key == "3",
+                        "note-delete" => key == "backspace",
+                        "note-toggle-list" => {
+                            key == "l"
+                                && event.keystroke.modifiers.shift
+                                && !event.keystroke.modifiers.alt
+                        }
+                        _ => false,
+                    };
+                if (!event.keystroke.modifiers.modified() && matches!(key, "enter" | "space"))
+                    || shortcut_pressed
+                {
+                    key_action(this, window, cx);
                     cx.stop_propagation();
                 }
             }))
-            .child(label)
+            .child(icon(icon_path, 14.0, theme.text_secondary))
+            .when(!icon_only, |button| button.child(label))
+            .when(id == "note-new", |button| {
+                button.child(crate::ui::kbd_badge(shortcut, &theme))
+            })
     }
 }

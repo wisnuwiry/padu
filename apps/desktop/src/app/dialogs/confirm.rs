@@ -29,6 +29,7 @@ pub fn init(cx: &mut App) {
 pub(crate) enum ConfirmAction {
     DeleteSession { session_id: Uuid },
     DeletePath { path: PathBuf },
+    DeleteNote { note_id: Uuid },
     DeleteHost { profile_id: String },
     ReinstallAgy,
     RemoveAgy,
@@ -73,6 +74,41 @@ impl Padu {
             variant: ConfirmVariant::Danger,
             icon_name: Some("icons/trash.svg"),
             action: ConfirmAction::DeleteSession { session_id },
+            cancel_focus,
+            confirm_focus,
+            previous_focus,
+        });
+        cx.notify();
+    }
+
+    pub(crate) fn confirm_delete_note(
+        &mut self,
+        note_id: Uuid,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(note) = self.notes.iter().find(|note| note.id == note_id) else {
+            return;
+        };
+        let title = if note.title.is_empty() {
+            tr!("notes.untitled")
+        } else {
+            note.title.clone()
+        };
+        let previous_focus = window.focused(cx);
+        let cancel_focus = cx.focus_handle();
+        let confirm_focus = cx.focus_handle();
+        let focus_target = confirm_focus.clone();
+        window.on_next_frame(move |window, cx| window.focus(&focus_target, cx));
+
+        self.confirm_dialog = Some(ConfirmDialogState {
+            title: tr!("notes.delete_title").into(),
+            message: tr!("notes.delete_message", title = title).into(),
+            confirm_label: tr!("notes.delete").into(),
+            cancel_label: tr!("common.cancel").into(),
+            variant: ConfirmVariant::Danger,
+            icon_name: Some("icons/trash.svg"),
+            action: ConfirmAction::DeleteNote { note_id },
             cancel_focus,
             confirm_focus,
             previous_focus,
@@ -238,6 +274,11 @@ impl Padu {
             }
             ConfirmAction::DeletePath { path } => {
                 self.execute_delete_path(path, cx);
+            }
+            ConfirmAction::DeleteNote { note_id } => {
+                if let Some(index) = self.notes.iter().position(|note| note.id == note_id) {
+                    self.delete_note_at(index, cx);
+                }
             }
             ConfirmAction::ReinstallAgy => {
                 self.install_agy_acp(cx);

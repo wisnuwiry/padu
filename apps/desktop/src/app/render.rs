@@ -30,7 +30,9 @@ impl Padu {
         // conventional straddle.
         let (strip_left, strip_width) = match target {
             PanelResizeTarget::RightPanel => (-7.0, 8.0),
-            PanelResizeTarget::Sidebar | PanelResizeTarget::FileTree => (-5.0, 10.0),
+            PanelResizeTarget::Sidebar
+            | PanelResizeTarget::FileTree
+            | PanelResizeTarget::NotesSplit => (-5.0, 10.0),
         };
         div()
             .id(id)
@@ -467,7 +469,7 @@ impl Render for Padu {
                         element.child(self.render_header(window, cx))
                     })
                     .child(if notes_page {
-                        self.render_notes_page(cx)
+                        self.render_notes_page(window, cx)
                     } else if empty {
                         self.render_empty_state(cx).into_any_element()
                     } else {
