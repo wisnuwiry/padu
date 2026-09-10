@@ -480,7 +480,7 @@ impl Render for Padu {
                             .cached(StyleRefinement::default().flex_1().min_h(px(0.0)).w_full())
                             .into_any_element()
                     })
-                    .when(!notes_page, |element| element.children(permission))
+                    .children(permission)
                     .when(
                         !notes_page && self.selected_project().is_some(),
                         |element| {

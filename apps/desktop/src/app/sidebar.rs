@@ -1653,7 +1653,7 @@ impl Padu {
                 }
             }
         }
-        if rows.len() == 3 {
+        if rows.len() == 4 {
             // Keep the header actions visible while there is no history.
             let group = match self.state.sidebar_grouping {
                 SidebarGrouping::Updated => SidebarGroup::Updated(SessionDateGroup::Today),
