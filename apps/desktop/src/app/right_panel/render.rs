@@ -138,7 +138,7 @@ impl Padu {
     }
 
     /// Drop browser views whose tab no longer exists in any session.
-    pub(crate) fn retain_right_panel_browsers(&mut self) {
+    pub(crate) fn retain_right_panel_browsers(&mut self, cx: &mut Context<Self>) {
         let retained_browser_ids = self
             .right_panel_surfaces
             .iter()
@@ -150,8 +150,22 @@ impl Padu {
                     .filter_map(RightPanelSurface::browser_id)
             }))
             .collect::<HashSet<_>>();
-        self.right_panel_browsers
-            .retain(|browser_id, _| retained_browser_ids.contains(browser_id));
+        let stale_ids = self
+            .right_panel_browsers
+            .keys()
+            .filter(|browser_id| !retained_browser_ids.contains(browser_id))
+            .copied()
+            .collect::<Vec<_>>();
+        for browser_id in stale_ids {
+            self.destroy_right_panel_browser(browser_id, cx);
+        }
+    }
+
+    pub(crate) fn destroy_right_panel_browser(&mut self, browser_id: Uuid, cx: &mut Context<Self>) {
+        let Some(browser) = self.right_panel_browsers.remove(&browser_id) else {
+            return;
+        };
+        browser.update(cx, |browser, cx| browser.shutdown(cx));
     }
 
     /// Whether any GPUI overlay that could float above the right panel is
@@ -188,20 +202,26 @@ impl Padu {
         // at full width. Keep it down until the panel has finished moving.
         // Fullscreen conversation shows the transcript, so its browser stays
         // down the same way a hidden panel does.
-        let active_browser = if self.settings_page.is_none()
-            && self.right_panel_visible
-            && self.right_panel_slide.is_none()
-            && !(self.right_panel_fullscreen_active() && self.right_panel_fullscreen_conversation)
-        {
+        let logically_active_browser = if self.settings_page.is_none() {
             self.active_right_panel_surface()
                 .and_then(RightPanelSurface::browser_id)
         } else {
             None
         };
+        let visible_browser = if self.settings_page.is_none()
+            && self.right_panel_visible
+            && self.right_panel_slide.is_none()
+            && !(self.right_panel_fullscreen_active() && self.right_panel_fullscreen_conversation)
+        {
+            logically_active_browser
+        } else {
+            None
+        };
         for (browser_id, browser) in &self.right_panel_browsers {
-            let surface_visible = active_browser == Some(*browser_id);
+            let logically_active = logically_active_browser == Some(*browser_id);
+            let surface_visible = visible_browser == Some(*browser_id);
             browser.update(cx, |view, cx| {
-                view.sync_native_state(surface_visible, overlay_open, cx);
+                view.sync_native_state(logically_active, surface_visible, overlay_open, cx);
             });
         }
     }

@@ -411,7 +411,7 @@ impl Padu {
         self.goal_observed_at.remove(&session_id);
         self.reset_session_runtime(session_id);
         self.background_work.remove(&session_id);
-        self.remove_right_panel_session_state(session_id);
+        self.remove_right_panel_session_state(session_id, cx);
         self.remove_composer_draft(composer_draft_key, cx);
         self.state.sessions.remove(index);
         if let Err(error) = self.store.remove_session(session_id) {
