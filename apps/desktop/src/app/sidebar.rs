@@ -819,7 +819,7 @@ impl Padu {
     fn render_sidebar_new_session(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         self.render_sidebar_action_row(
             "sidebar-new-session",
-            "icons/compose.svg",
+            "icons/plus.svg",
             tr!("menu.new_task"),
             Some(crate::platform::primary_shortcut("⌘N", "Ctrl+N")),
             cx,
