@@ -796,6 +796,7 @@ providers.agy_install_acp:
   en: Install ACP server
 providers.agy_downloading:
   en: Downloading… %{percent}%
+
 providers.agy_working:
   en: Working…
 providers.agy_sign_in:

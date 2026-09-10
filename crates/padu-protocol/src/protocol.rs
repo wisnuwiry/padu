@@ -136,6 +136,7 @@ pub enum Command {
         settings: DaemonSettings,
     },
     InstallAgyAcp,
+    CancelAgyAcpInstall,
     AuthenticateAgy,
     LogoutAgy,
     CheckAgyAuth,
@@ -668,6 +669,10 @@ mod tests {
         assert_eq!(
             serde_json::to_value(Command::InstallAgyAcp).unwrap()["type"],
             "installAgyAcp"
+        );
+        assert_eq!(
+            serde_json::to_value(Command::CancelAgyAcpInstall).unwrap()["type"],
+            "cancelAgyAcpInstall"
         );
         assert_eq!(
             serde_json::to_value(Command::AuthenticateAgy).unwrap()["type"],
