@@ -608,14 +608,16 @@ impl Padu {
                         .child(self.render_history_button(
                             "navigate-back",
                             "icons/arrow-left.svg",
-                            !self.session_navigation.back.is_empty(),
+                            self.workspace_navigation.back_target().is_some()
+                                || !self.session_navigation.back.is_empty(),
                             true,
                             cx,
                         ))
                         .child(self.render_history_button(
                             "navigate-forward",
                             "icons/arrow-right.svg",
-                            !self.session_navigation.forward.is_empty(),
+                            self.workspace_navigation.forward_target().is_some()
+                                || !self.session_navigation.forward.is_empty(),
                             false,
                             cx,
                         )),

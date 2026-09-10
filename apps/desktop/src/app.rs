@@ -220,6 +220,41 @@ enum WorkspacePage {
     Notes,
 }
 
+#[derive(Debug, Default)]
+struct WorkspaceNavigation {
+    back: Vec<WorkspacePage>,
+    forward: Vec<WorkspacePage>,
+}
+
+impl WorkspaceNavigation {
+    fn visit(&mut self, current: WorkspacePage, next: WorkspacePage) {
+        if current != next {
+            self.back.push(current);
+            self.forward.clear();
+        }
+    }
+
+    fn back_target(&self) -> Option<WorkspacePage> {
+        self.back.last().copied()
+    }
+
+    fn forward_target(&self) -> Option<WorkspacePage> {
+        self.forward.last().copied()
+    }
+
+    fn go_back(&mut self, current: WorkspacePage) -> Option<WorkspacePage> {
+        let target = self.back.pop()?;
+        self.forward.push(current);
+        Some(target)
+    }
+
+    fn go_forward(&mut self, current: WorkspacePage) -> Option<WorkspacePage> {
+        let target = self.forward.pop()?;
+        self.back.push(current);
+        Some(target)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SettingsPage {
     General,
@@ -1473,6 +1508,7 @@ pub struct Padu {
     scene_overlay_enabled: bool,
     settings_page: Option<SettingsPage>,
     workspace_page: WorkspacePage,
+    workspace_navigation: WorkspaceNavigation,
     /// Cached notification permission status, refreshed when the Notifications
     /// page is opened and after permission is requested.
     notification_permission: crate::platform::NotificationPermissionStatus,
@@ -1830,8 +1866,30 @@ impl Padu {
             }
             return;
         }
+        self.workspace_navigation.visit(self.workspace_page, page);
         self.workspace_page = page;
         cx.notify();
+    }
+
+    fn navigate_workspace_page_back(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(page) = self.workspace_navigation.go_back(self.workspace_page) else {
+            return false;
+        };
+        self.workspace_page = page;
+        cx.notify();
+        true
+    }
+
+    fn navigate_workspace_page_forward(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(page) = self.workspace_navigation.go_forward(self.workspace_page) else {
+            return false;
+        };
+        self.workspace_page = page;
+        if page == WorkspacePage::Notes {
+            self.ensure_notes_loaded(cx);
+        }
+        cx.notify();
+        true
     }
 
     fn updater_button_expanded(&self) -> bool {
@@ -3295,6 +3353,7 @@ impl Padu {
                 scene_overlay_enabled,
                 settings_page: None,
                 workspace_page: WorkspacePage::Conversation,
+                workspace_navigation: WorkspaceNavigation::default(),
                 notes: Vec::new(),
                 notes_selected: 0,
                 notes_title,

@@ -809,6 +809,13 @@ impl Padu {
             return;
         }
 
+        if self.navigate_workspace_page_back(cx) {
+            if self.workspace_page == WorkspacePage::Notes {
+                self.ensure_notes_loaded(cx);
+            }
+            return;
+        }
+
         let Some(current) = self.state.selected_session else {
             return;
         };
@@ -829,6 +836,10 @@ impl Padu {
         cx: &mut Context<Self>,
     ) {
         if self.settings_page.is_some() {
+            return;
+        }
+
+        if self.navigate_workspace_page_forward(cx) {
             return;
         }
 
