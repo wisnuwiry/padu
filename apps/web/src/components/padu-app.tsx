@@ -645,6 +645,7 @@ export function PaduApp() {
       if (!taskState.data) return
       if (key === 'n' && event.shiftKey) {
         event.preventDefault()
+        window.sessionStorage.setItem('padu.note-target-session', current?.id ?? 'new')
         void navigate({ to: '/notes', search: { q: undefined, noteId: undefined, projectId: activeProject?.id } })
       } else if (key === 'n') {
         event.preventDefault()
@@ -1263,6 +1264,7 @@ export function PaduApp() {
     openProject: openProjectPicker,
     openFile: (path) => openPanel('files', 'uncommitted', path),
     openNotes: (query, noteId) => {
+      window.sessionStorage.setItem('padu.note-target-session', current?.id ?? 'new')
       void navigate({
         to: '/notes',
         search: { q: query || undefined, noteId: noteId || undefined, projectId: activeProject?.id },
@@ -1338,7 +1340,10 @@ export function PaduApp() {
           onAddProject={openProjectPicker}
           onMobileOpenChange={setMobileSidebar}
           onNewTask={(project) => startNewTask(project)}
-          onNotes={() => void navigate({ to: '/notes', search: { q: undefined, noteId: undefined, projectId: activeProject?.id } })}
+          onNotes={() => {
+            window.sessionStorage.setItem('padu.note-target-session', current?.id ?? 'new')
+            void navigate({ to: '/notes', search: { q: undefined, noteId: undefined, projectId: activeProject?.id } })
+          }}
           onRemoveSession={removeSessionById}
           onRenameSession={renameSession}
           onSetSessionArchived={(sessionId, archived) => updateSessionFlag(sessionId, 'archived_at', archived)}
