@@ -764,7 +764,16 @@ impl Padu {
                 unix_time().saturating_sub(note.updated_at),
             );
             editor = editor
-                .child(TextField::new("note-title", self.notes_title.clone()))
+                .child(
+                    div()
+                        .w_full()
+                        .h(px(38.0))
+                        .flex()
+                        .items_center()
+                        .text_size(sp(22.0))
+                        .font_weight(FontWeight::BOLD)
+                        .child(self.notes_title.clone()),
+                )
                 .child(
                     div()
                         .w_full()
@@ -861,7 +870,7 @@ impl Padu {
             let preview_pane = div()
                 .id("note-preview-pane")
                 .flex_1()
-                .min_h_0()
+                .min_h_full()
                 .min_w_0()
                 .relative()
                 .overflow_y_scroll()
@@ -870,7 +879,14 @@ impl Padu {
                 .rounded(px(8.0))
                 .bg(theme.inset)
                 .child(md::render::frame_reset(self.file_preview_selection.clone()))
-                .children(document)
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .whitespace_normal()
+                        .children(document),
+                )
                 .child(selection_input)
                 .child(scrollbar::vertical(
                     &self.file_preview_scroll_handle,
@@ -899,12 +915,21 @@ impl Padu {
                             .min_h_0()
                             .flex()
                             .gap(px(6.0))
-                            .child(edit_pane.flex_grow(split_ratio))
+                            .child(
+                                edit_pane
+                                    .w(px(0.0))
+                                    .flex_grow(split_ratio)
+                                    .flex_shrink(1.0)
+                                    .min_w_0(),
+                            )
                             .child(
                                 div()
                                     .relative()
                                     .ml(px(4.0))
+                                    .pl(px(8.0))
+                                    .w(px(0.0))
                                     .flex_grow(1.0 - split_ratio)
+                                    .flex_shrink(1.0)
                                     .min_w_0()
                                     .child(self.render_panel_resize_handle(
                                         "notes-split-resize-handle",

@@ -219,11 +219,11 @@ export function NotesPage() {
               <div className="mx-auto flex h-full max-w-3xl flex-col gap-4 p-6">
                 <div className="flex items-center gap-2">
                   <label className="sr-only" htmlFor="note-title">Note title</label>
-                  <input id="note-title" className="min-w-0 flex-1 bg-transparent text-2xl font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring" value={selected.title} onChange={(event) => setSelected({ ...selected, title: event.target.value })} />
+                  <input id="note-title" className="min-w-0 flex-1 border-0 bg-transparent px-0 text-3xl font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring" value={selected.title} onChange={(event) => setSelected({ ...selected, title: event.target.value })} />
                 </div>
                 <div className="flex items-center justify-between gap-3 text-xs text-[var(--text-tertiary)]"><span className="min-w-0 truncate">Created {formatNoteTimeAgo(selected.createdAt, t)} · {saving ? 'Saving…' : `Updated ${formatNoteTimeAgo(selected.updatedAt, t)}`}</span><div className="flex items-center gap-1 rounded-md bg-muted p-1"><button className={`rounded px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring ${!preview ? 'bg-background shadow-sm' : 'hover:bg-accent'}`} type="button" aria-label="Edit mode" aria-pressed={!preview} onClick={() => setPreview(false)}><PaduIcon name="pencil" /></button><button className={`rounded px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring ${preview ? 'bg-background shadow-sm' : 'hover:bg-accent'}`} type="button" aria-label="Preview mode" aria-pressed={preview} onClick={() => setPreview(true)}><PaduIcon name="eye" /></button><button className="rounded px-2 py-1 text-destructive outline-none hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-ring" type="button" aria-label="Delete note" onClick={() => void removeNote()}><PaduIcon name="trash" /></button></div></div>
                 {preview ? (
-                  <article className="markdown min-h-0 flex-1 overflow-y-auto text-[15px] leading-7">
+                  <article className="markdown min-h-full min-w-0 flex-1 overflow-x-hidden overflow-y-auto break-words px-2 text-[15px] leading-7">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{selected.content}</ReactMarkdown>
                   </article>
                 ) : (
