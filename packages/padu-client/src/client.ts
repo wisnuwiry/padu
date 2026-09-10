@@ -196,14 +196,12 @@ export class PaduClient {
       socket.addEventListener("close", (event) => {
         if (generation !== this.connectionGeneration) return;
         const reason = event.reason?.trim();
-        failHandshake(
-          new Error(
-            reason ||
-              (socketErrored
-                ? "Padu daemon connection failed"
-                : "Padu daemon disconnected during handshake"),
-          ),
-        );
+        const message =
+          reason ||
+          (socketErrored
+            ? browserHandshakeFailureMessage()
+            : "Padu daemon disconnected during handshake");
+        failHandshake(new Error(message));
         this.markDisconnected(new Error("Padu daemon disconnected"));
       });
     });
@@ -424,6 +422,13 @@ export function daemonUrl(address: string): string {
 
 function subscriptionKey(sessionId: string, runtimeId: string): string {
   return `${sessionId}:${runtimeId}`;
+}
+
+function browserHandshakeFailureMessage(): string {
+  if (typeof window !== "undefined" && window.location.origin !== "null") {
+    return `Padu daemon connection failed. Allow browser origin ${window.location.origin} in the daemon's --allow-origin list.`;
+  }
+  return "Padu daemon connection failed";
 }
 
 function asError(error: unknown): Error {
