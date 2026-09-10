@@ -5,7 +5,7 @@ import type {
   Project,
   ProviderKind,
 } from '@padu/client'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import { ControlMenu } from '@/components/control-menu'
 import { HostDialog } from '@/components/host-dialog'
@@ -24,6 +24,7 @@ import {
 import { useCopyFeedback } from '@/hooks/use-copy-feedback'
 import {
   authenticateAgy,
+  cancelAgyInstall,
   checkAgyAuth,
   daemonKeys,
   displayTitle,
@@ -347,6 +348,7 @@ function ProvidersSettings() {
   const [installingAgy, setInstallingAgy] = useState(false)
   const [agyInstallPercent, setAgyInstallPercent] = useState(0)
   const [agyAuthenticated, setAgyAuthenticated] = useState(false)
+  const agyCancelRequested = useRef(false)
   useEffect(() => {
     if (!client) return
     void checkAgyAuth(client).then(setAgyAuthenticated).catch(() => setAgyAuthenticated(false))
@@ -488,10 +490,15 @@ function ProvidersSettings() {
                     {provider.id === 'agy' && !installed && (
                       <button
                         className="flex h-[29px] shrink-0 items-center gap-1.5 rounded-[7px] border border-input px-2.5 text-[10.5px] text-[var(--text-secondary)] outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
-                        disabled={installingAgy}
                         type="button"
                         onClick={async () => {
                           if (!client || !config) return
+                          if (installingAgy) {
+                            agyCancelRequested.current = true
+                            await cancelAgyInstall(client).catch(() => undefined)
+                            return
+                          }
+                          agyCancelRequested.current = false
                           setInstallingAgy(true)
                           setAgyInstallPercent(0)
                           try {
@@ -499,6 +506,7 @@ function ProvidersSettings() {
                             await queryClient.invalidateQueries({ queryKey: daemonKeys.settings(config.address) })
                             await queryClient.invalidateQueries({ queryKey: daemonKeys.providers(config.address) })
                           } catch (error) {
+                            if (agyCancelRequested.current) return
                             // The button already communicates the active download;
                             // keep failures as a neutral notification rather than an
                             // error alert that looks like an interactive prompt.
@@ -514,6 +522,7 @@ function ProvidersSettings() {
                         {installingAgy
                           ? t('providers.agy_downloading', { percent: agyInstallPercent })
                           : t('providers.agy_install_acp')}
+                        {installingAgy && <PaduIcon className="size-3" name="x" />}
                       </button>
                     )}
                     {provider.id === 'agy' && installed && (
@@ -547,10 +556,15 @@ function ProvidersSettings() {
                         </button>
                         <button
                           className="h-[29px] rounded-[7px] border border-input px-2.5 text-[10.5px] text-[var(--text-secondary)] outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"
-                          disabled={installingAgy}
                           type="button"
                           onClick={async () => {
                             if (!client || !config) return
+                            if (installingAgy) {
+                              agyCancelRequested.current = true
+                              await cancelAgyInstall(client).catch(() => undefined)
+                              return
+                            }
+                            agyCancelRequested.current = false
                             setInstallingAgy(true)
                             setAgyInstallPercent(0)
                             try {
@@ -558,6 +572,7 @@ function ProvidersSettings() {
                               await queryClient.invalidateQueries({ queryKey: daemonKeys.settings(config.address) })
                               await queryClient.invalidateQueries({ queryKey: daemonKeys.providers(config.address) })
                             } catch (error) {
+                              if (agyCancelRequested.current) return
                               toast(errorMessage(error))
                             } finally {
                               setInstallingAgy(false)
@@ -567,6 +582,7 @@ function ProvidersSettings() {
                           {installingAgy
                             ? t('providers.agy_downloading', { percent: agyInstallPercent })
                             : t('providers.agy_reinstall')}
+                          {installingAgy && <PaduIcon className="size-3" name="x" />}
                         </button>
                         <button
                           className="h-[29px] rounded-[7px] border border-input px-2.5 text-[10.5px] text-destructive outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60"

@@ -265,6 +265,7 @@ impl Padu {
         }
 
         self.agy_installing = true;
+        self.agy_install_cancelling = false;
         self.agy_install_percent = 0;
         cx.notify();
 
@@ -283,7 +284,9 @@ impl Padu {
                 .await;
 
             let _ = this.update(cx, |this, cx| {
+                let cancelled = this.agy_install_cancelling;
                 this.agy_installing = false;
+                this.agy_install_cancelling = false;
                 match result {
                     Ok(padu_client::ResponsePayload::ProviderInstalled { path, .. }) => {
                         let display_path = path.display().to_string();
@@ -324,15 +327,39 @@ impl Padu {
                             "Antigravity ACP installation returned an unexpected response: {response:?}"
                         ));
                     }
-                    Err(error) => {
+                    Err(error) if !cancelled => {
                         this.show_toast(tr!(
                             "providers.agy_install_failed",
                             error = error
                         ));
                     }
+                    Err(_) => {}
                 }
                 cx.notify();
             });
+        })
+        .detach();
+    }
+
+    pub(crate) fn cancel_agy_install(&mut self, cx: &mut Context<Self>) {
+        if !self.agy_installing || self.agy_install_cancelling {
+            return;
+        }
+        self.agy_install_cancelling = true;
+        cx.notify();
+        let daemon = self.daemon.client();
+        cx.spawn(async move |_this, cx| {
+            let _ = cx
+                .background_executor()
+                .spawn(async move {
+                    daemon.request_with_timeout(
+                        uuid::Uuid::nil(),
+                        uuid::Uuid::nil(),
+                        padu_client::Command::CancelAgyAcpInstall,
+                        std::time::Duration::from_secs(10),
+                    )
+                })
+                .await;
         })
         .detach();
     }
@@ -545,12 +572,7 @@ impl Padu {
                                 .flex()
                                 .items_center()
                                 .gap(px(6.0))
-                                .cursor(if installing {
-                                    gpui::CursorStyle::Arrow
-                                } else {
-                                    gpui::CursorStyle::PointingHand
-                                })
-                                .opacity(if installing { 0.65 } else { 1.0 })
+                                .cursor(gpui::CursorStyle::PointingHand)
                                 .text_size(sp(12.5))
                                 .text_color(theme.text_secondary)
                                 .hover(|element| element.bg(theme.overlay))
@@ -569,20 +591,25 @@ impl Padu {
                                 } else {
                                     SharedString::from(tr!("providers.agy_install_acp"))
                                 })
+                                .when(installing, |element| {
+                                    element.child(icon("icons/x.svg", 12.0, theme.text_secondary))
+                                })
                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                    if !installing {
+                                    if installing {
+                                        this.cancel_agy_install(cx);
+                                    } else {
                                         this.install_agy_acp(cx);
                                     }
                                 }))
                                 .on_key_down(cx.listener(
                                     move |this, event: &KeyDownEvent, _, cx| {
-                                        if !installing
-                                            && matches!(
-                                                event.keystroke.key.as_str(),
-                                                "enter" | "space"
-                                            )
+                                        if matches!(event.keystroke.key.as_str(), "enter" | "space")
                                         {
-                                            this.install_agy_acp(cx);
+                                            if installing {
+                                                this.cancel_agy_install(cx);
+                                            } else {
+                                                this.install_agy_acp(cx);
+                                            }
                                             cx.stop_propagation();
                                         }
                                     },
@@ -683,21 +710,33 @@ impl Padu {
                                 .text_size(sp(12.5))
                                 .text_color(theme.text_secondary)
                                 .hover(|element| element.bg(theme.overlay))
-                                .child(tr!("providers.agy_reinstall"))
+                                .child(if installing {
+                                    tr!(
+                                        "providers.agy_downloading",
+                                        percent = self.agy_install_percent
+                                    )
+                                } else {
+                                    tr!("providers.agy_reinstall")
+                                })
+                                .when(installing, |element| {
+                                    element.child(icon("icons/x.svg", 12.0, theme.text_secondary))
+                                })
                                 .on_click(cx.listener(|this, _, window, cx| {
-                                    if !this.agy_installing {
+                                    if this.agy_installing {
+                                        this.cancel_agy_install(cx);
+                                    } else {
                                         this.confirm_reinstall_agy(window, cx);
                                     }
                                 }))
                                 .on_key_down(cx.listener(
                                     move |this, event: &KeyDownEvent, window, cx| {
-                                        if !this.agy_installing
-                                            && matches!(
-                                                event.keystroke.key.as_str(),
-                                                "enter" | "space"
-                                            )
+                                        if matches!(event.keystroke.key.as_str(), "enter" | "space")
                                         {
-                                            this.confirm_reinstall_agy(window, cx);
+                                            if this.agy_installing {
+                                                this.cancel_agy_install(cx);
+                                            } else {
+                                                this.confirm_reinstall_agy(window, cx);
+                                            }
                                             cx.stop_propagation();
                                         }
                                     },

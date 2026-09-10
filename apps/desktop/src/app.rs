@@ -1124,6 +1124,8 @@ pub struct Padu {
     provider_detection_remaining: usize,
     /// Whether the Agy ACP server installation request is in flight.
     agy_installing: bool,
+    /// Whether the user requested cancellation of the current Agy install.
+    agy_install_cancelling: bool,
     /// Whether the current Agy ACP credential is authenticated.
     agy_authenticated: bool,
     /// Latest daemon-reported Agy download percentage.
@@ -3001,6 +3003,7 @@ impl Padu {
                 provider_detection_events,
                 provider_detection_remaining: 0,
                 agy_installing: false,
+                agy_install_cancelling: false,
                 agy_authenticated: false,
                 agy_install_percent: 0,
                 agy_install_progress_events,
