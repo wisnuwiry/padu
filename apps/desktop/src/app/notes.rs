@@ -50,13 +50,22 @@ impl Note {
 
 impl Padu {
     pub(super) fn open_notes(&mut self, cx: &mut Context<Self>) {
-        self.settings_page = None;
-        self.workspace_page = WorkspacePage::Notes;
+        self.navigate_workspace_page(WorkspacePage::Notes, cx);
+        self.ensure_notes_loaded(cx);
+    }
+
+    pub(super) fn ensure_notes_loaded(&mut self, cx: &mut Context<Self>) {
+        if self.notes_loaded || self.notes_load_pending {
+            return;
+        }
         self.load_notes_from_daemon(Uuid::nil(), cx);
-        cx.notify();
     }
 
     pub(super) fn load_notes_from_daemon(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
+        if self.notes_load_pending {
+            return;
+        }
+        self.notes_load_pending = true;
         self.notes_load_generation = self.notes_load_generation.wrapping_add(1);
         let generation = self.notes_load_generation;
         let daemon = self.daemon.clone();
@@ -95,7 +104,9 @@ impl Padu {
                 if this.notes_load_generation != generation {
                     return;
                 }
+                this.notes_load_pending = false;
                 if let Ok(notes) = result {
+                    this.notes_loaded = true;
                     this.notes = notes.into_iter().map(Note::from_protocol).collect();
                     this.notes_data_generation = this.notes_data_generation.wrapping_add(1);
                     this.notes_selected =
@@ -505,6 +516,10 @@ impl Padu {
         let Some(note) = self.notes.iter().find(|note| note.id == note_id).cloned() else {
             return;
         };
+        // Adding a note is a navigation action as well as a composer update.
+        // Leave Notes first so the user can immediately see the embedded note
+        // in the active session's composer.
+        self.navigate_workspace_page(WorkspacePage::Conversation, cx);
         let already_embedded = self
             .composer_embedded_notes
             .iter()
@@ -553,6 +568,11 @@ impl Padu {
             "backspace" if plain_primary => {
                 if let Some(note) = self.notes.get(self.notes_selected) {
                     self.confirm_delete_note(note.id, window, cx);
+                }
+            }
+            "enter" if plain_primary => {
+                if let Some(note) = self.notes.get(self.notes_selected) {
+                    self.add_note_to_chat(note.id, window, cx);
                 }
             }
             "l" if modifiers.shift && !modifiers.alt => {
@@ -615,7 +635,13 @@ impl Padu {
         } else {
             note.title.clone()
         };
-        let preview = note.body.lines().next().unwrap_or("—").to_owned();
+        let preview = note
+            .body
+            .lines()
+            .next()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_owned);
         let project_name = self
             .state
             .projects
@@ -664,7 +690,7 @@ impl Padu {
                     .flex_1()
                     .flex()
                     .flex_col()
-                    .gap(px(2.0))
+                    .gap(px(1.0))
                     .child(
                         div()
                             .truncate()
@@ -672,13 +698,15 @@ impl Padu {
                             .text_color(theme.text)
                             .child(title),
                     )
-                    .child(
-                        div()
-                            .truncate()
-                            .text_size(sp(11.0))
-                            .text_color(theme.text_tertiary)
-                            .child(preview),
-                    )
+                    .when_some(preview, |column, preview| {
+                        column.child(
+                            div()
+                                .truncate()
+                                .text_size(sp(11.0))
+                                .text_color(theme.text_tertiary)
+                                .child(preview),
+                        )
+                    })
                     .child(
                         div()
                             .truncate()
@@ -885,70 +913,85 @@ impl Padu {
                                 )),
                         ),
                 );
-            let palette = MarkdownPalette::from_theme(&theme);
-            let cache_key = format!("note:{}", note.id);
-            let mut cache = self.file_preview_markdown.borrow_mut();
-            if !matches!(cache.as_ref(), Some((key, _)) if key == &cache_key) {
-                *cache = Some((cache_key.clone(), MarkdownView::new()));
-            }
-            let (_, view) = cache.as_mut().expect("note preview cache entry ensured");
-            view.set_text(&note.body, false);
-            let ctx = MarkdownCtx::new(
-                format!("note-preview-{}", note.id),
-                &palette,
-                self.scaled_markdown_metrics(MarkdownMetrics::BODY),
-                self.file_preview_selection.clone(),
-            );
-            let document = md::render::markdown(view, &ctx);
-            drop(cache);
-            let selection_input = canvas(|_, _, _| (), {
-                let selection = self.file_preview_selection.clone();
-                move |_, _, window, _| md::render::install_selection_input(window, &selection)
-            })
-            .absolute()
-            .w(px(0.0))
-            .h(px(0.0));
-            let preview_pane = div()
-                .id("note-preview-pane")
-                .flex_1()
-                .min_h_full()
-                .min_w_0()
-                .relative()
-                .overflow_y_scroll()
-                .track_scroll(&self.file_preview_scroll_handle)
-                .p(px(14.0))
-                .rounded(px(8.0))
-                .bg(theme.inset)
-                .child(md::render::frame_reset(self.file_preview_selection.clone()))
-                .child(
+            let preview_pane = if matches!(layout, NotesLayout::Preview | NotesLayout::Split) {
+                let palette = MarkdownPalette::from_theme(&theme);
+                let cache_key = format!("note:{}", note.id);
+                let mut cache = self.file_preview_markdown.borrow_mut();
+                if !matches!(cache.as_ref(), Some((key, _)) if key == &cache_key) {
+                    *cache = Some((cache_key.clone(), MarkdownView::new()));
+                }
+                let (_, view) = cache.as_mut().expect("note preview cache entry ensured");
+                view.set_text(&note.body, false);
+                let ctx = MarkdownCtx::new(
+                    format!("note-preview-{}", note.id),
+                    &palette,
+                    self.scaled_markdown_metrics(MarkdownMetrics::BODY),
+                    self.file_preview_selection.clone(),
+                );
+                let document = md::render::markdown(view, &ctx);
+                drop(cache);
+                let selection_input = canvas(|_, _, _| (), {
+                    let selection = self.file_preview_selection.clone();
+                    move |_, _, window, _| md::render::install_selection_input(window, &selection)
+                })
+                .absolute()
+                .w(px(0.0))
+                .h(px(0.0));
+                Some(
                     div()
-                        .w_full()
+                        .id("note-preview-pane")
+                        .flex_1()
+                        .min_h_full()
                         .min_w_0()
-                        .overflow_hidden()
-                        .whitespace_normal()
-                        .children(document),
+                        .relative()
+                        .overflow_y_scroll()
+                        .track_scroll(&self.file_preview_scroll_handle)
+                        .p(px(14.0))
+                        .rounded(px(8.0))
+                        .bg(theme.inset)
+                        .child(md::render::frame_reset(self.file_preview_selection.clone()))
+                        .child(
+                            div()
+                                .w_full()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .whitespace_normal()
+                                .children(document),
+                        )
+                        .child(selection_input)
+                        .child(scrollbar::vertical(
+                            &self.file_preview_scroll_handle,
+                            &self.file_preview_scrollbar,
+                        )),
                 )
-                .child(selection_input)
-                .child(scrollbar::vertical(
-                    &self.file_preview_scroll_handle,
-                    &self.file_preview_scrollbar,
-                ));
-            let notes_body = self.notes_body.clone();
-            let edit_pane = self
-                .render_file_editor_body(
-                    "notes.md",
-                    &notes_body,
-                    720.0,
-                    true,
-                    theme.inset,
-                    window,
-                    cx,
+            } else {
+                None
+            };
+            let edit_pane = if matches!(layout, NotesLayout::Edit | NotesLayout::Split) {
+                let notes_body = self.notes_body.clone();
+                Some(
+                    self.render_file_editor_body(
+                        "notes.md",
+                        &notes_body,
+                        720.0,
+                        true,
+                        theme.inset,
+                        window,
+                        cx,
+                    )
+                    .rounded(px(8.0)),
                 )
-                .rounded(px(8.0));
+            } else {
+                None
+            };
             editor = match layout {
-                NotesLayout::Edit => editor.child(edit_pane),
-                NotesLayout::Preview => editor.child(preview_pane),
+                NotesLayout::Edit => editor.child(edit_pane.expect("editor pane is present")),
+                NotesLayout::Preview => {
+                    editor.child(preview_pane.expect("preview pane is present"))
+                }
                 NotesLayout::Split => {
+                    let edit_pane = edit_pane.expect("editor pane is present");
+                    let preview_pane = preview_pane.expect("preview pane is present");
                     let split_ratio = self.notes_split_ratio;
                     editor.child(
                         div()
@@ -1117,6 +1160,7 @@ impl Padu {
             "note-split" => crate::platform::primary_shortcut("⌘2", "Ctrl+2"),
             "note-preview" => crate::platform::primary_shortcut("⌘3", "Ctrl+3"),
             "note-delete" => crate::platform::primary_shortcut("⌘⌫", "Ctrl+Backspace"),
+            "note-add-to-chat" => crate::platform::primary_shortcut("⌘↵", "Ctrl+Enter"),
             "note-toggle-list" => crate::platform::primary_shortcut("⌘⇧L", "Ctrl+Shift+L"),
             _ => "",
         };
@@ -1144,7 +1188,7 @@ impl Padu {
                 button.hover(|style| style.bg(theme.overlay_strong))
             })
             .when(id == "note-add-to-chat", |button| button.bg(theme.inverse))
-            .tooltip(tooltip)
+            .when(id != "note-add-to-chat", |button| button.tooltip(tooltip))
             .on_click(cx.listener(move |this, _, window, cx| action(this, window, cx)))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 let key = event.keystroke.key.as_str();
@@ -1159,6 +1203,7 @@ impl Padu {
                         "note-split" => key == "2",
                         "note-preview" => key == "3",
                         "note-delete" => key == "backspace",
+                        "note-add-to-chat" => key == "enter",
                         "note-toggle-list" => {
                             key == "l"
                                 && event.keystroke.modifiers.shift
@@ -1175,7 +1220,7 @@ impl Padu {
             }))
             .child(icon(icon_path, 14.0, foreground))
             .when(!icon_only, |button| button.child(label))
-            .when(id == "note-new", |button| {
+            .when(matches!(id, "note-new" | "note-add-to-chat"), |button| {
                 button.child(crate::ui::kbd_badge(shortcut, &theme))
             })
     }

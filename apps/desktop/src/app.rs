@@ -69,12 +69,12 @@ use crate::{
     CancelTaskSwitch, CancelTurn, CloseFind, CloseWindow, ConfirmTaskSwitch, CopySelection,
     FindNext, FindPrevious, FocusComposer, NavigateBack, NavigateForward, NewProject, NewSession,
     NextRightPanelTab, OpenBrowser, OpenFilePicker, OpenFiles, OpenFind, OpenFindReplace,
-    OpenNotePicker, OpenResumePicker, OpenReview, OpenSettings, OpenTerminal, PrevRightPanelTab,
-    ReplaceAllMatches, SaveFile, SelectFirstTask, SelectLastTask, SelectNextSession,
-    SelectPreviousSession, SwitchTaskBackward, SwitchTaskForward, ToggleCommandPalette,
-    ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter,
-    ToggleModelPicker, ToggleRightPanel, ToggleRightPanelFullscreen, ToggleSidebar,
-    ToggleUsagePanel,
+    OpenNotePicker, OpenNotes, OpenResumePicker, OpenReview, OpenSettings, OpenTerminal,
+    PrevRightPanelTab, ReplaceAllMatches, SaveFile, SelectFirstTask, SelectLastTask,
+    SelectNextSession, SelectPreviousSession, SwitchTaskBackward, SwitchTaskForward,
+    ToggleCommandPalette, ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord,
+    ToggleFpsCounter, ToggleModelPicker, ToggleRightPanel, ToggleRightPanelFullscreen,
+    ToggleSidebar, ToggleUsagePanel,
 };
 
 #[cfg(target_os = "macos")]
@@ -1482,6 +1482,8 @@ pub struct Padu {
     notes_list_collapsed: bool,
     notes_split_ratio: f32,
     notes_save_generation: u64,
+    notes_loaded: bool,
+    notes_load_pending: bool,
     /// Bumped per daemon load; a completion from a superseded request is
     /// discarded so a stale project's notes cannot replace the current set.
     notes_load_generation: u64,
@@ -1811,6 +1813,21 @@ fn migrate_legacy_projectless_projects(
 }
 
 impl Padu {
+    /// Changes the primary workspace without allowing individual pages to
+    /// duplicate route-reset logic. Page-local entities remain alive while
+    /// another workspace is visible.
+    fn navigate_workspace_page(&mut self, page: WorkspacePage, cx: &mut Context<Self>) {
+        let left_settings = self.settings_page.take().is_some();
+        if self.workspace_page == page {
+            if left_settings {
+                cx.notify();
+            }
+            return;
+        }
+        self.workspace_page = page;
+        cx.notify();
+    }
+
     fn updater_button_expanded(&self) -> bool {
         self.updater_button_hovered || self.updater_button_focused
     }
@@ -2013,6 +2030,17 @@ impl Padu {
         }
 
         self.state = new_state;
+        // Notes belong to the active daemon. Retain the page entities and
+        // sidebar, but invalidate the daemon-backed Notes snapshot on host
+        // changes so a later activation cannot show another host's data.
+        self.notes_loaded = false;
+        self.notes_load_pending = false;
+        self.notes.clear();
+        self.notes_selected = 0;
+        self.notes_data_generation = self.notes_data_generation.wrapping_add(1);
+        if self.workspace_page == WorkspacePage::Notes {
+            self.ensure_notes_loaded(cx);
+        }
 
         let row_count = self.transcript_row_count();
         self.reset_transcript_rows(row_count);
@@ -3266,6 +3294,8 @@ impl Padu {
                 notes_list_collapsed: false,
                 notes_split_ratio: 0.5,
                 notes_save_generation: 0,
+                notes_loaded: false,
+                notes_load_pending: false,
                 notes_load_generation: 0,
                 notes_data_generation: 0,
                 notes_filtered: RefCell::new(Vec::new()),

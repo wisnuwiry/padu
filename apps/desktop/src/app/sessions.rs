@@ -24,7 +24,7 @@ impl Padu {
     }
 
     pub(super) fn select_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        self.workspace_page = WorkspacePage::Conversation;
+        self.navigate_workspace_page(WorkspacePage::Conversation, cx);
         self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
     }
 
@@ -492,8 +492,7 @@ impl Padu {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.settings_page = None;
-        self.workspace_page = WorkspacePage::Conversation;
+        self.navigate_workspace_page(WorkspacePage::Conversation, cx);
         let current_project = self
             .selected_project()
             .map(|project| (project.id, project.is_projectless()));
@@ -871,8 +870,7 @@ impl Padu {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.settings_page = None;
-        self.workspace_page = WorkspacePage::Conversation;
+        self.navigate_workspace_page(WorkspacePage::Conversation, cx);
         let focus_handle = self.composer_focus(cx);
         window.focus(&focus_handle, cx);
         cx.notify();

@@ -797,22 +797,7 @@ impl Padu {
                     .child(label),
             )
             .when_some(shortcut, |row, shortcut| {
-                row.child(
-                    div()
-                        .h(px(20.0))
-                        .min_w(px(24.0))
-                        .px(px(6.0))
-                        .rounded(px(5.0))
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .bg(theme.overlay_strong)
-                        .text_size(sp(11.5))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text_tertiary)
-                        .child(shortcut),
-                )
+                row.child(crate::ui::kbd_badge(shortcut, &theme))
             })
     }
 
@@ -865,7 +850,7 @@ impl Padu {
             "sidebar-notes",
             "icons/file.svg",
             tr!("settings.notes"),
-            Some(crate::platform::primary_shortcut("⌘⇧N", "Ctrl+Shift+N")),
+            Some(crate::platform::primary_shortcut("⌘⇧M", "Ctrl+Shift+M")),
             cx,
         )
         .on_click(cx.listener(|this, _, _, cx| {

@@ -159,7 +159,7 @@ export function Sidebar({
   const projectShortcut = usePrimaryShortcut('⌘O', 'Ctrl+O')
   const newTaskShortcut = usePrimaryShortcut('⌘N', 'Ctrl+N')
   const searchShortcut = usePrimaryShortcut('⌘K', 'Ctrl+K')
-  const notesShortcut = usePrimaryShortcut('⌘⇧N', 'Ctrl+Shift+N')
+  const notesShortcut = usePrimaryShortcut('⌘⇧M', 'Ctrl+Shift+M')
 
   useEffect(() => {
     try {

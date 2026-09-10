@@ -737,6 +737,7 @@ function buildItems({
       closeOnRun: false,
     },
     command('open-project', commandSection, t('command_palette.open_project'), 'folder', shortcut('⌘O', 'Ctrl+O'), `open add folder project workspace repository repo ${t('command_palette.open_project')}`, actions.openProject),
+    command('open-notes', commandSection, t('settings.notes'), 'file', shortcut('⌘⇧M', 'Ctrl+Shift+M'), `notes markdown documents writing snippets memos ${t('settings.notes')}`, () => actions.openNotes()),
     {
       ...command('find-file', commandSection, t('command_palette.find_file'), 'search', shortcut('⌘P', 'Ctrl+P'), `find search file path workspace project ${t('command_palette.find_file')}`, openFileView),
       closeOnRun: false,

@@ -709,11 +709,18 @@ impl Padu {
         }
     }
 
+    fn show_conversation_for_right_panel(&mut self, cx: &mut Context<Self>) {
+        if self.workspace_page == WorkspacePage::Notes {
+            self.navigate_workspace_page(WorkspacePage::Conversation, cx);
+        }
+    }
+
     pub(crate) fn open_right_panel_surface(
         &mut self,
         surface: RightPanelSurface,
         cx: &mut Context<Self>,
     ) {
+        self.show_conversation_for_right_panel(cx);
         let reusable_index = reusable_surface_index(&self.right_panel_surfaces, &surface);
         if matches!(&surface, RightPanelSurface::File(_)) {
             self.ensure_initial_right_panel_file_editor_width();
@@ -759,7 +766,8 @@ impl Padu {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.toggle_or_open_browser_surface(Some(window), cx);
+        self.show_conversation_for_right_panel(cx);
+        self.ensure_browser_surface(Some(window), cx);
     }
 
     pub(crate) fn open_terminal_action(
@@ -768,7 +776,11 @@ impl Padu {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.toggle_or_open_terminal_surface(Some(window), cx);
+        self.show_conversation_for_right_panel(cx);
+        // “Open Terminal” is an idempotent navigation command. Toggling is
+        // reserved for the explicit right-panel toggle command so palette and
+        // keyboard navigation never unexpectedly hides the terminal.
+        self.ensure_terminal_surface(Some(window), cx);
     }
 
     pub(crate) fn open_files_action(
@@ -777,7 +789,8 @@ impl Padu {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.toggle_or_open_files_surface(Some(window), cx);
+        self.show_conversation_for_right_panel(cx);
+        self.ensure_files_surface(Some(window), cx);
     }
 
     pub(crate) fn open_review_action(
@@ -786,10 +799,11 @@ impl Padu {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.toggle_or_open_review_surface(Some(window), cx);
+        self.show_conversation_for_right_panel(cx);
+        self.ensure_review_surface(Some(window), cx);
     }
 
-    pub(crate) fn toggle_or_open_browser_surface(
+    pub(crate) fn ensure_browser_surface(
         &mut self,
         window: Option<&mut Window>,
         cx: &mut Context<Self>,
@@ -800,33 +814,15 @@ impl Padu {
             .enumerate()
             .find(|(_, surface)| matches!(surface, RightPanelSurface::Browser(_)))
         {
-            if self.right_panel_fullscreen_active() {
-                if !self.right_panel_fullscreen_conversation
-                    && self.right_panel_active_surface == Some(index)
-                {
-                    self.select_right_panel_fullscreen_conversation(window, cx);
-                } else {
-                    self.right_panel_fullscreen_conversation = false;
-                    self.right_panel_active_surface = Some(index);
-                    self.reveal_right_panel_tab(index);
-                    self.request_active_browser_focus();
-                    if let Some(window) = window {
-                        self.focus_active_surface(window, cx);
-                    }
-                    cx.notify();
-                }
-            } else if self.right_panel_visible && self.right_panel_active_surface == Some(index) {
-                self.set_right_panel_visible(false, cx);
-            } else {
-                self.right_panel_active_surface = Some(index);
-                self.reveal_right_panel_tab(index);
-                self.request_active_browser_focus();
-                self.set_right_panel_visible(true, cx);
-                if let Some(window) = window {
-                    self.focus_active_surface(window, cx);
-                }
-                cx.notify();
+            self.right_panel_fullscreen_conversation = false;
+            self.right_panel_active_surface = Some(index);
+            self.reveal_right_panel_tab(index);
+            self.request_active_browser_focus();
+            self.set_right_panel_visible(true, cx);
+            if let Some(window) = window {
+                self.focus_active_surface(window, cx);
             }
+            cx.notify();
         } else {
             self.open_right_panel_surface(RightPanelSurface::new_browser(), cx);
             if let Some(window) = window {
@@ -835,7 +831,7 @@ impl Padu {
         }
     }
 
-    pub(crate) fn toggle_or_open_terminal_surface(
+    pub(crate) fn ensure_terminal_surface(
         &mut self,
         window: Option<&mut Window>,
         cx: &mut Context<Self>,
@@ -846,39 +842,18 @@ impl Padu {
             .enumerate()
             .find(|(_, surface)| matches!(surface, RightPanelSurface::Terminal(_)))
         {
-            if self.right_panel_fullscreen_active() {
-                if !self.right_panel_fullscreen_conversation
-                    && self.right_panel_active_surface == Some(index)
-                {
-                    self.select_right_panel_fullscreen_conversation(window, cx);
-                } else {
-                    self.right_panel_fullscreen_conversation = false;
-                    if let Some(terminal_id) = surface.terminal_id() {
-                        self.ensure_right_panel_terminal(terminal_id, cx);
-                    }
-                    self.right_panel_active_surface = Some(index);
-                    self.reveal_right_panel_tab(index);
-                    self.request_active_terminal_focus();
-                    if let Some(window) = window {
-                        self.focus_active_surface(window, cx);
-                    }
-                    cx.notify();
-                }
-            } else if self.right_panel_visible && self.right_panel_active_surface == Some(index) {
-                self.set_right_panel_visible(false, cx);
-            } else {
-                if let Some(terminal_id) = surface.terminal_id() {
-                    self.ensure_right_panel_terminal(terminal_id, cx);
-                }
-                self.right_panel_active_surface = Some(index);
-                self.reveal_right_panel_tab(index);
-                self.request_active_terminal_focus();
-                self.set_right_panel_visible(true, cx);
-                if let Some(window) = window {
-                    self.focus_active_surface(window, cx);
-                }
-                cx.notify();
+            if let Some(terminal_id) = surface.terminal_id() {
+                self.ensure_right_panel_terminal(terminal_id, cx);
             }
+            self.right_panel_fullscreen_conversation = false;
+            self.right_panel_active_surface = Some(index);
+            self.reveal_right_panel_tab(index);
+            self.request_active_terminal_focus();
+            self.set_right_panel_visible(true, cx);
+            if let Some(window) = window {
+                self.focus_active_surface(window, cx);
+            }
+            cx.notify();
         } else {
             self.open_right_panel_surface(RightPanelSurface::new_terminal(), cx);
             if let Some(window) = window {
@@ -887,7 +862,7 @@ impl Padu {
         }
     }
 
-    pub(crate) fn toggle_or_open_files_surface(
+    pub(crate) fn ensure_files_surface(
         &mut self,
         window: Option<&mut Window>,
         cx: &mut Context<Self>,
@@ -906,33 +881,15 @@ impl Padu {
                     )
                 })
         {
-            if self.right_panel_fullscreen_active() {
-                if !self.right_panel_fullscreen_conversation
-                    && self.right_panel_active_surface == Some(index)
-                {
-                    self.select_right_panel_fullscreen_conversation(window, cx);
-                } else {
-                    self.right_panel_fullscreen_conversation = false;
-                    self.refresh_right_panel_working_tree(cx);
-                    self.right_panel_active_surface = Some(index);
-                    self.reveal_right_panel_tab(index);
-                    if let Some(window) = window {
-                        self.focus_active_surface(window, cx);
-                    }
-                    cx.notify();
-                }
-            } else if self.right_panel_visible && self.right_panel_active_surface == Some(index) {
-                self.set_right_panel_visible(false, cx);
-            } else {
-                self.refresh_right_panel_working_tree(cx);
-                self.right_panel_active_surface = Some(index);
-                self.reveal_right_panel_tab(index);
-                self.set_right_panel_visible(true, cx);
-                if let Some(window) = window {
-                    self.focus_active_surface(window, cx);
-                }
-                cx.notify();
+            self.right_panel_fullscreen_conversation = false;
+            self.refresh_right_panel_working_tree(cx);
+            self.right_panel_active_surface = Some(index);
+            self.reveal_right_panel_tab(index);
+            self.set_right_panel_visible(true, cx);
+            if let Some(window) = window {
+                self.focus_active_surface(window, cx);
             }
+            cx.notify();
         } else {
             self.open_right_panel_surface(RightPanelSurface::Files, cx);
             if let Some(window) = window {
@@ -941,7 +898,7 @@ impl Padu {
         }
     }
 
-    pub(crate) fn toggle_or_open_review_surface(
+    pub(crate) fn ensure_review_surface(
         &mut self,
         window: Option<&mut Window>,
         cx: &mut Context<Self>,
@@ -955,33 +912,15 @@ impl Padu {
             .enumerate()
             .find(|(_, surface)| matches!(surface, RightPanelSurface::Diff))
         {
-            if self.right_panel_fullscreen_active() {
-                if !self.right_panel_fullscreen_conversation
-                    && self.right_panel_active_surface == Some(index)
-                {
-                    self.select_right_panel_fullscreen_conversation(window, cx);
-                } else {
-                    self.right_panel_fullscreen_conversation = false;
-                    self.refresh_right_panel_diff(cx);
-                    self.right_panel_active_surface = Some(index);
-                    self.reveal_right_panel_tab(index);
-                    if let Some(window) = window {
-                        self.focus_active_surface(window, cx);
-                    }
-                    cx.notify();
-                }
-            } else if self.right_panel_visible && self.right_panel_active_surface == Some(index) {
-                self.set_right_panel_visible(false, cx);
-            } else {
-                self.refresh_right_panel_diff(cx);
-                self.right_panel_active_surface = Some(index);
-                self.reveal_right_panel_tab(index);
-                self.set_right_panel_visible(true, cx);
-                if let Some(window) = window {
-                    self.focus_active_surface(window, cx);
-                }
-                cx.notify();
+            self.right_panel_fullscreen_conversation = false;
+            self.refresh_right_panel_diff(cx);
+            self.right_panel_active_surface = Some(index);
+            self.reveal_right_panel_tab(index);
+            self.set_right_panel_visible(true, cx);
+            if let Some(window) = window {
+                self.focus_active_surface(window, cx);
             }
+            cx.notify();
         } else {
             self.open_right_panel_surface(RightPanelSurface::Diff, cx);
             if let Some(window) = window {

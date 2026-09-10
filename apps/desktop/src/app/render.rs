@@ -397,6 +397,7 @@ impl Render for Padu {
             .on_action(cx.listener(Self::open_files_action))
             .on_action(cx.listener(Self::open_file_picker_action))
             .on_action(cx.listener(Self::open_review_action))
+            .on_action(cx.listener(|this, _: &OpenNotes, _, cx| this.open_notes(cx)))
             .on_action(cx.listener(Self::toggle_command_palette_action))
             .on_action(cx.listener(Self::open_resume_picker_action))
             .on_action(cx.listener(Self::open_note_picker_action))

@@ -643,7 +643,7 @@ export function PaduApp() {
         return
       }
       if (!taskState.data) return
-      if (key === 'n' && event.shiftKey) {
+      if (key === 'm' && event.shiftKey) {
         event.preventDefault()
         window.sessionStorage.setItem('padu.note-target-session', current?.id ?? 'new')
         void navigate({ to: '/notes', search: { q: undefined, noteId: undefined, projectId: activeProject?.id } })

@@ -450,7 +450,7 @@ impl Padu {
         if !self.command_palette.open {
             self.open_command_palette(window, cx);
         }
-        self.load_notes_from_daemon(Uuid::nil(), cx);
+        self.ensure_notes_loaded(cx);
         self.open_command_palette_note_view(cx);
     }
 
@@ -519,7 +519,6 @@ impl Padu {
         self.command_palette
             .search
             .update(cx, |input, cx| input.clear(cx));
-        self.load_notes_from_daemon(Uuid::nil(), cx);
         self.refresh_command_palette_results("", false, cx);
 
         // Closing an open GPUI menu can call its toggle observers back into
@@ -1034,7 +1033,7 @@ impl Padu {
             PaletteSection::Commands,
             tr!("settings.notes"),
             "icons/package.svg",
-            Some(crate::platform::primary_shortcut("⌘⇧N", "Ctrl+Shift+N")),
+            Some(crate::platform::primary_shortcut("⌘⇧M", "Ctrl+Shift+M")),
             PaletteAction::OpenNotes,
             "notes markdown documents writing snippets memos",
             next(),
