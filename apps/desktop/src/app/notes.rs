@@ -1099,8 +1099,27 @@ impl Padu {
                     .flex_none()
                     .flex()
                     .items_center()
-                    .gap(px(8.0))
-                    .px(px(16.0))
+                    .gap(px(6.0))
+                    .pl(if self.sidebar_visible {
+                        px(10.0)
+                    } else {
+                        px(0.0)
+                    })
+                    .pr(px(14.0))
+                    .when(!self.sidebar_visible, |element| {
+                        element
+                            .child(
+                                self.window_drag_region(
+                                    div()
+                                        .id("notes-page-traffic-light-drag-region")
+                                        .w(px((TRAFFIC_LIGHT_CLEARANCE - 8.0).max(0.0)))
+                                        .h_full()
+                                        .flex_none(),
+                                    cx,
+                                ),
+                            )
+                            .child(self.render_sidebar_navigation_controls(true, cx))
+                    })
                     .child(icon("icons/file.svg", 16.0, theme.text_secondary))
                     .child(
                         div()

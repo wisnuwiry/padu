@@ -477,35 +477,7 @@ impl Padu {
                             cx,
                         ),
                     )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .child(self.render_sidebar_toggle(cx))
-                            .when(showing_conversation, |element| {
-                                element.child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(2.0))
-                                        .child(self.render_history_button(
-                                            "navigate-back",
-                                            "icons/arrow-left.svg",
-                                            !self.session_navigation.back.is_empty(),
-                                            true,
-                                            cx,
-                                        ))
-                                        .child(self.render_history_button(
-                                            "navigate-forward",
-                                            "icons/arrow-right.svg",
-                                            !self.session_navigation.forward.is_empty(),
-                                            false,
-                                            cx,
-                                        )),
-                                )
-                            }),
-                    )
+                    .child(self.render_sidebar_navigation_controls(showing_conversation, cx))
             })
             .when(showing_conversation, |element| {
                 let session = self.selected_session();

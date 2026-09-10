@@ -589,6 +589,40 @@ impl Padu {
             .child(icon(icon_path, 14.0, theme.text_tertiary))
     }
 
+    pub(super) fn render_sidebar_navigation_controls(
+        &self,
+        show_history: bool,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        div()
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .child(self.render_sidebar_toggle(cx))
+            .when(show_history, |element| {
+                element.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(2.0))
+                        .child(self.render_history_button(
+                            "navigate-back",
+                            "icons/arrow-left.svg",
+                            !self.session_navigation.back.is_empty(),
+                            true,
+                            cx,
+                        ))
+                        .child(self.render_history_button(
+                            "navigate-forward",
+                            "icons/arrow-right.svg",
+                            !self.session_navigation.forward.is_empty(),
+                            false,
+                            cx,
+                        )),
+                )
+            })
+    }
+
     fn render_sidebar_titlebar(&self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
         div()
             .id("sidebar-titlebar")
@@ -611,28 +645,7 @@ impl Padu {
                     cx,
                 ),
             )
-            .child(self.render_sidebar_toggle(cx))
-            .child(
-                div()
-                    .ml(px(6.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(2.0))
-                    .child(self.render_history_button(
-                        "navigate-back",
-                        "icons/arrow-left.svg",
-                        !self.session_navigation.back.is_empty(),
-                        true,
-                        cx,
-                    ))
-                    .child(self.render_history_button(
-                        "navigate-forward",
-                        "icons/arrow-right.svg",
-                        !self.session_navigation.forward.is_empty(),
-                        false,
-                        cx,
-                    )),
-            )
+            .child(self.render_sidebar_navigation_controls(true, cx))
             .child(self.window_drag_region(
                 div().id("sidebar-titlebar-drag-region").h_full().flex_1(),
                 cx,
@@ -2595,33 +2608,7 @@ impl Padu {
                             cx,
                         ),
                     )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .child(self.render_sidebar_toggle(cx))
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(2.0))
-                                    .child(self.render_history_button(
-                                        "navigate-back",
-                                        "icons/arrow-left.svg",
-                                        !self.session_navigation.back.is_empty(),
-                                        true,
-                                        cx,
-                                    ))
-                                    .child(self.render_history_button(
-                                        "navigate-forward",
-                                        "icons/arrow-right.svg",
-                                        !self.session_navigation.forward.is_empty(),
-                                        false,
-                                        cx,
-                                    )),
-                            ),
-                    )
+                    .child(self.render_sidebar_navigation_controls(true, cx))
             })
             .child(
                 self.window_drag_region(
