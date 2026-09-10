@@ -3,8 +3,8 @@
 use std::fs::{self, File};
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
+use crate::download_manager::{DownloadCancellation, DownloadManager, DownloadRequest};
 use anyhow::{Context, bail};
 use sha2::{Digest, Sha256};
 
@@ -33,7 +33,10 @@ pub fn remove() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn install(mut progress: impl FnMut(u8, &'static str)) -> anyhow::Result<PathBuf> {
+pub fn install(
+    cancellation: &DownloadCancellation,
+    mut progress: impl FnMut(u8, &'static str),
+) -> anyhow::Result<PathBuf> {
     let asset = distribution()?;
     progress(0, "Downloading");
     let root = dirs::home_dir()
@@ -49,24 +52,43 @@ pub fn install(mut progress: impl FnMut(u8, &'static str)) -> anyhow::Result<Pat
     let _ = fs::remove_file(&archive);
     let _ = fs::remove_dir_all(&extract);
     fs::create_dir_all(&extract)?;
+    let _cleanup = InstallCleanup {
+        archive: archive.clone(),
+        extract: extract.clone(),
+    };
 
-    download(&archive, asset.url, &mut progress)?;
+    DownloadManager::new()?.download(
+        DownloadRequest {
+            url: asset.url,
+            destination: &archive,
+            expected_bytes: Some(asset.archive_bytes),
+            cancellation,
+        },
+        |download| {
+            if let Some(percent) = download.percent() {
+                progress(((u16::from(percent) * 90) / 100) as u8, "Downloading");
+            }
+        },
+    )?;
     progress(90, "Verifying");
-    verify_archive(&archive, &asset)?;
+    verify_archive(&archive, &asset, cancellation)?;
 
     progress(92, "Extracting");
-    let status = Command::new("unzip")
-        .args(["-q", "-o"])
-        .arg(&archive)
-        .arg("-d")
-        .arg(&extract)
-        .status()
-        .context("could not start unzip; install unzip to install Antigravity")?;
-    if !status.success() {
-        bail!("Antigravity archive extraction failed with status {status}");
-    }
+    let harness_name = if cfg!(target_os = "windows") {
+        "localharness_external.exe"
+    } else {
+        "localharness_external"
+    };
+    extract_binaries(
+        &archive,
+        &extract,
+        asset.executable_name,
+        harness_name,
+        cancellation,
+    )?;
 
     progress(97, "Installing");
+    cancellation.check()?;
     let source = find_file(&extract, asset.executable_name)?;
     let executable_size = fs::metadata(&source)
         .context("could not inspect the downloaded Antigravity executable")?
@@ -78,7 +100,8 @@ pub fn install(mut progress: impl FnMut(u8, &'static str)) -> anyhow::Result<Pat
         );
     }
     let destination = root.join(asset.executable_name);
-    fs::copy(&source, &destination).context("could not install agy_acp_server.par")?;
+    replace_installed_file(&source, &destination)
+        .context("could not install agy_acp_server.par")?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -87,14 +110,10 @@ pub fn install(mut progress: impl FnMut(u8, &'static str)) -> anyhow::Result<Pat
         fs::set_permissions(&destination, permissions)?;
     }
 
-    let harness_name = if cfg!(target_os = "windows") {
-        "localharness_external.exe"
-    } else {
-        "localharness_external"
-    };
     if let Ok(harness_source) = find_file(&extract, harness_name) {
         let harness_dest = root.join(harness_name);
-        fs::copy(&harness_source, &harness_dest)
+        cancellation.check()?;
+        replace_installed_file(&harness_source, &harness_dest)
             .context("could not install localharness_external")?;
         #[cfg(unix)]
         {
@@ -105,8 +124,7 @@ pub fn install(mut progress: impl FnMut(u8, &'static str)) -> anyhow::Result<Pat
         }
     }
 
-    let _ = fs::remove_file(&archive);
-    let _ = fs::remove_dir_all(&extract);
+    cancellation.check()?;
     progress(100, "Complete");
     Ok(destination)
 }
@@ -129,115 +147,120 @@ fn distribution() -> anyhow::Result<ReleaseAsset> {
     }
     #[cfg(target_os = "linux")]
     {
-        return Ok(if cfg!(target_arch = "aarch64") {
-            ReleaseAsset {
-                url: "https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-agy_acp_server_1.1.1-linux-arm64.zip",
-                archive_sha256: "ed69e64b308fcb123ab54bf3277bf9cb0d651064f885ea5aab0ff520c7175398",
-                archive_bytes: 656_572_786,
-                executable_name: "agy_acp_server.par",
-                executable_bytes: 1_862_073_131,
-            }
-        } else {
-            ReleaseAsset {
-                url: "https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-agy_acp_server_1.1.1-linux-x86_64.zip",
-                archive_sha256: "38f62d01b32deb0907b3d39a71ec301fd36369f6ffd1cf262d4af385177f79df",
-                archive_bytes: 681_969_407,
-                executable_name: "agy_acp_server.par",
-                executable_bytes: 1_880_360_328,
-            }
+        #[cfg(target_arch = "aarch64")]
+        return Ok(ReleaseAsset {
+            url: "https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-agy_acp_server_1.1.1-linux-arm64.zip",
+            archive_sha256: "ed69e64b308fcb123ab54bf3277bf9cb0d651064f885ea5aab0ff520c7175398",
+            archive_bytes: 656_572_786,
+            executable_name: "agy_acp_server.par",
+            executable_bytes: 1_862_073_131,
         });
+        #[cfg(target_arch = "x86_64")]
+        return Ok(ReleaseAsset {
+            url: "https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-agy_acp_server_1.1.1-linux-x86_64.zip",
+            archive_sha256: "38f62d01b32deb0907b3d39a71ec301fd36369f6ffd1cf262d4af385177f79df",
+            archive_bytes: 681_969_407,
+            executable_name: "agy_acp_server.par",
+            executable_bytes: 1_880_360_328,
+        });
+        #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+        bail!("Antigravity ACP is not distributed for this Linux architecture");
     }
     #[cfg(target_os = "windows")]
     {
-        return Ok(if cfg!(target_arch = "aarch64") {
-            ReleaseAsset {
-                url: "https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-agy_acp_server_1.1.1-windows-arm64.zip",
-                archive_sha256: "35f4b1f47ba6a3fea7b0a3e30010df5ea73a64b4f0e7cf991cddc673ddfbcafc",
-                archive_bytes: 468_521_191,
-                executable_name: "agy_acp_server.exe",
-                executable_bytes: 435_075_816,
-            }
-        } else {
-            ReleaseAsset {
-                url: "https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-agy_acp_server_1.1.1-windows-x86_64.zip",
-                archive_sha256: "47cb50eef14f0a4655d78cfcfda869bcea7aaee5f9787e936bc2935ea612c3b8",
-                archive_bytes: 468_238_392,
-                executable_name: "agy_acp_server.exe",
-                executable_bytes: 430_801_616,
-            }
+        #[cfg(target_arch = "aarch64")]
+        return Ok(ReleaseAsset {
+            url: "https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-agy_acp_server_1.1.1-windows-arm64.zip",
+            archive_sha256: "35f4b1f47ba6a3fea7b0a3e30010df5ea73a64b4f0e7cf991cddc673ddfbcafc",
+            archive_bytes: 468_521_191,
+            executable_name: "agy_acp_server.exe",
+            executable_bytes: 435_075_816,
         });
+        #[cfg(target_arch = "x86_64")]
+        return Ok(ReleaseAsset {
+            url: "https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-agy_acp_server_1.1.1-windows-x86_64.zip",
+            archive_sha256: "47cb50eef14f0a4655d78cfcfda869bcea7aaee5f9787e936bc2935ea612c3b8",
+            archive_bytes: 468_238_392,
+            executable_name: "agy_acp_server.exe",
+            executable_bytes: 430_801_616,
+        });
+        #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+        bail!("Antigravity ACP is not distributed for this Windows architecture");
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     bail!("Antigravity ACP is not distributed for this platform")
 }
 
-fn download(
+fn extract_binaries(
+    archive_path: &Path,
     destination: &Path,
-    url: &str,
-    progress: &mut impl FnMut(u8, &'static str),
+    executable_name: &str,
+    harness_name: &str,
+    cancellation: &DownloadCancellation,
 ) -> anyhow::Result<()> {
-    let mut child = Command::new("curl")
-        .args([
-            "--fail",
-            "--location",
-            "--show-error",
-            "--progress-bar",
-            "--connect-timeout",
-            "15",
-            "--max-time",
-            "540",
-            "--retry",
-            "2",
-            "--retry-delay",
-            "1",
-            "--retry-all-errors",
-            "--output",
-        ])
-        .arg(destination)
-        .arg(url)
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("could not start curl; install curl to download Antigravity")?;
+    let archive_file =
+        File::open(archive_path).context("could not open the Antigravity archive")?;
+    let mut archive =
+        zip::ZipArchive::new(archive_file).context("could not read the Antigravity ZIP archive")?;
+    let mut found_executable = false;
+    let mut found_harness = false;
 
-    let mut stderr = child
-        .stderr
-        .take()
-        .context("curl did not expose its progress stream")?;
-    let mut bytes = [0_u8; 256];
-    let mut text = String::new();
-    loop {
-        let count = stderr
-            .read(&mut bytes)
-            .context("could not read Antigravity download progress")?;
-        if count == 0 {
-            break;
+    for index in 0..archive.len() {
+        cancellation.check()?;
+        let mut entry = archive
+            .by_index(index)
+            .context("could not read an Antigravity ZIP entry")?;
+        let enclosed_path = entry
+            .enclosed_name()
+            .ok_or_else(|| anyhow::anyhow!("Antigravity ZIP contains an unsafe path"))?;
+        let Some(name) = enclosed_path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let is_executable = name == executable_name;
+        let is_harness = name == harness_name;
+        if (!is_executable && !is_harness) || entry.is_dir() {
+            continue;
         }
-        text.push_str(&String::from_utf8_lossy(&bytes[..count]));
-        if let Some(percent) = text
-            .rsplit(['%', '\r', '\n'])
-            .nth(1)
-            .and_then(|value| value.trim().parse::<f32>().ok())
-        {
-            progress(percent.clamp(0.0, 100.0) as u8, "Downloading");
+        if entry.is_symlink() {
+            bail!("Antigravity ZIP contains a symbolic link for {name}");
         }
-        if text.len() > 256 {
-            let mut cut = text.len() - 256;
-            while cut < text.len() && !text.is_char_boundary(cut) {
-                cut += 1;
+        if (is_executable && found_executable) || (is_harness && found_harness) {
+            bail!("Antigravity ZIP contains duplicate entries for {name}");
+        }
+
+        let output_path = destination.join(name);
+        let mut output = File::create(&output_path)
+            .with_context(|| format!("could not create {}", output_path.display()))?;
+        let mut buffer = vec![0_u8; 1024 * 1024];
+        loop {
+            cancellation.check()?;
+            let count = entry
+                .read(&mut buffer)
+                .with_context(|| format!("could not extract {name}"))?;
+            if count == 0 {
+                break;
             }
-            text.drain(..cut);
+            std::io::Write::write_all(&mut output, &buffer[..count])
+                .with_context(|| format!("could not write extracted {name}"))?;
+        }
+        if is_executable {
+            found_executable = true;
+        } else {
+            found_harness = true;
         }
     }
-    let status = child
-        .wait()
-        .context("could not finish the Antigravity download")?;
-    if !status.success() {
-        bail!("Google Antigravity download failed with status {status}");
+
+    if !found_executable {
+        bail!("the downloaded archive did not contain {executable_name}");
     }
     Ok(())
 }
 
-fn verify_archive(path: &Path, asset: &ReleaseAsset) -> anyhow::Result<()> {
+fn verify_archive(
+    path: &Path,
+    asset: &ReleaseAsset,
+    cancellation: &DownloadCancellation,
+) -> anyhow::Result<()> {
     let metadata =
         fs::metadata(path).context("could not inspect the downloaded Antigravity archive")?;
     if metadata.len() != asset.archive_bytes {
@@ -253,6 +276,7 @@ fn verify_archive(path: &Path, asset: &ReleaseAsset) -> anyhow::Result<()> {
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 1024 * 1024];
     loop {
+        cancellation.check()?;
         let read = reader
             .read(&mut buffer)
             .context("could not hash the downloaded Antigravity archive")?;
@@ -269,6 +293,27 @@ fn verify_archive(path: &Path, asset: &ReleaseAsset) -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+fn replace_installed_file(source: &Path, destination: &Path) -> anyhow::Result<()> {
+    #[cfg(windows)]
+    if destination.exists() {
+        fs::remove_file(destination)?;
+    }
+    fs::rename(source, destination)?;
+    Ok(())
+}
+
+struct InstallCleanup {
+    archive: PathBuf,
+    extract: PathBuf,
+}
+
+impl Drop for InstallCleanup {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.archive);
+        let _ = fs::remove_dir_all(&self.extract);
+    }
 }
 
 fn find_file(root: &Path, name: &str) -> anyhow::Result<PathBuf> {
@@ -288,14 +333,18 @@ fn find_file(root: &Path, name: &str) -> anyhow::Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write as _;
+
     use super::*;
 
     #[test]
     fn distribution_asset_is_valid() {
         #[cfg(any(
             all(target_os = "macos", target_arch = "aarch64"),
-            target_os = "linux",
-            target_os = "windows"
+            all(
+                any(target_os = "linux", target_os = "windows"),
+                any(target_arch = "aarch64", target_arch = "x86_64")
+            )
         ))]
         {
             let asset = distribution().expect("supported platform should have distribution");
@@ -336,15 +385,16 @@ mod tests {
             executable_bytes: 100,
         };
 
+        let cancellation = DownloadCancellation::new();
         // Verification succeeds with valid size and sha256
-        assert!(verify_archive(&file_path, &valid_asset).is_ok());
+        assert!(verify_archive(&file_path, &valid_asset, &cancellation).is_ok());
 
         // Verification fails when length mismatches
         let wrong_size_asset = ReleaseAsset {
             archive_bytes: (content.len() + 1) as u64,
             ..valid_asset
         };
-        let err = verify_archive(&file_path, &wrong_size_asset).unwrap_err();
+        let err = verify_archive(&file_path, &wrong_size_asset, &cancellation).unwrap_err();
         assert!(err.to_string().contains("size mismatch"));
 
         // Verification fails when sha256 mismatches
@@ -352,9 +402,54 @@ mod tests {
             archive_sha256: "0000000000000000000000000000000000000000000000000000000000000000",
             ..valid_asset
         };
-        let err = verify_archive(&file_path, &wrong_hash_asset).unwrap_err();
+        let err = verify_archive(&file_path, &wrong_hash_asset, &cancellation).unwrap_err();
         assert!(err.to_string().contains("checksum mismatch"));
 
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn extracts_required_binaries_without_a_system_unzip() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("agy-test-extract-{}", uuid::Uuid::new_v4()));
+        let archive_path = temp_dir.join("archive.zip");
+        let extract_dir = temp_dir.join("extract");
+        fs::create_dir_all(&extract_dir).unwrap();
+
+        let archive_file = File::create(&archive_path).unwrap();
+        let mut archive = zip::ZipWriter::new(archive_file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        archive
+            .start_file("nested/agy_acp_server.par", options)
+            .unwrap();
+        archive.write_all(b"server").unwrap();
+        archive
+            .start_file("nested/localharness_external", options)
+            .unwrap();
+        archive.write_all(b"harness").unwrap();
+        archive.start_file("nested/unneeded.bin", options).unwrap();
+        archive.write_all(b"unneeded").unwrap();
+        archive.finish().unwrap();
+
+        extract_binaries(
+            &archive_path,
+            &extract_dir,
+            "agy_acp_server.par",
+            "localharness_external",
+            &DownloadCancellation::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read(extract_dir.join("agy_acp_server.par")).unwrap(),
+            b"server"
+        );
+        assert_eq!(
+            fs::read(extract_dir.join("localharness_external")).unwrap(),
+            b"harness"
+        );
+        assert!(!extract_dir.join("unneeded.bin").exists());
         let _ = fs::remove_dir_all(&temp_dir);
     }
 
