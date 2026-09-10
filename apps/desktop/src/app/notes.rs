@@ -501,6 +501,29 @@ impl Padu {
         true
     }
 
+    fn add_note_to_chat(&mut self, note_id: Uuid, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(note) = self.notes.iter().find(|note| note.id == note_id).cloned() else {
+            return;
+        };
+        let already_embedded = self
+            .composer_embedded_notes
+            .iter()
+            .any(|embedded| embedded.id == note.id);
+        if !already_embedded {
+            self.composer_embedded_notes
+                .push(padu_protocol::notes::EmbeddedNote {
+                    id: note.id,
+                    title: note.title,
+                    content: note.body,
+                    revision: note.revision,
+                });
+            self.schedule_composer_draft_save(cx);
+            cx.notify();
+        }
+        let focus = self.composer_focus(cx);
+        window.focus(&focus, cx);
+    }
+
     fn notes_key_down(
         &mut self,
         event: &KeyDownEvent,
@@ -679,9 +702,17 @@ impl Padu {
             &note_menu,
             move |_| {
                 let weak = weak.clone();
+                let add_to_chat_id = note_id;
+                let delete_weak = weak.clone();
                 vec![
-                    MenuItem::new(tr!("notes.delete"), move |window, cx| {
+                    MenuItem::new(tr!("files.add_to_chat"), move |window, cx| {
                         let _ = weak.update(cx, |this, cx| {
+                            this.add_note_to_chat(add_to_chat_id, window, cx);
+                        });
+                    })
+                    .icon("icons/compose.svg"),
+                    MenuItem::new(tr!("notes.delete"), move |window, cx| {
+                        let _ = delete_weak.update(cx, |this, cx| {
                             this.confirm_delete_note(note_id, window, cx);
                         });
                     })
@@ -757,6 +788,7 @@ impl Padu {
         let layout = self.notes_layout;
         let mut editor = div().flex_1().min_w_0().flex().flex_col().gap(px(10.0));
         if let Some(note) = selected_note {
+            let note_id = note.id;
             let created_ago = super::notes_utils::format_note_time_ago(
                 unix_time().saturating_sub(note.created_at),
             );
@@ -786,9 +818,18 @@ impl Padu {
                             div()
                                 .min_w_0()
                                 .flex()
+                                .items_center()
                                 .gap(px(6.0))
                                 .text_size(sp(11.0))
                                 .text_color(theme.text_tertiary)
+                                .child(self.notes_button(
+                                    "note-add-to-chat",
+                                    tr!("files.add_to_chat"),
+                                    cx,
+                                    move |this, window, cx| {
+                                        this.add_note_to_chat(note_id, window, cx);
+                                    },
+                                ))
                                 .child(tr!("notes.created", time = created_ago))
                                 .child(tr!("notes.updated", time = updated_ago)),
                         )
@@ -1060,8 +1101,14 @@ impl Padu {
             "note-split" => ("icons/panel-right.svg", true),
             "note-preview" => ("icons/eye.svg", true),
             "note-delete" => ("icons/trash.svg", true),
+            "note-add-to-chat" => ("icons/compose.svg", false),
             "note-toggle-list" => ("icons/panel-left.svg", true),
             _ => ("icons/check.svg", false),
+        };
+        let foreground = if id == "note-add-to-chat" {
+            theme.on_inverse
+        } else {
+            theme.text_secondary
         };
         let tooltip = label.clone();
         let shortcut = match id {
@@ -1091,9 +1138,12 @@ impl Padu {
             .cursor_pointer()
             .when(selected, |button| button.bg(theme.overlay_strong))
             .text_size(sp(12.5))
-            .text_color(theme.text_secondary)
+            .text_color(foreground)
             .focus_visible(|style| style.border_1().border_color(theme.accent))
-            .hover(|style| style.bg(theme.overlay_strong))
+            .when(id != "note-add-to-chat", |button| {
+                button.hover(|style| style.bg(theme.overlay_strong))
+            })
+            .when(id == "note-add-to-chat", |button| button.bg(theme.inverse))
             .tooltip(tooltip)
             .on_click(cx.listener(move |this, _, window, cx| action(this, window, cx)))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
@@ -1123,7 +1173,7 @@ impl Padu {
                     cx.stop_propagation();
                 }
             }))
-            .child(icon(icon_path, 14.0, theme.text_secondary))
+            .child(icon(icon_path, 14.0, foreground))
             .when(!icon_only, |button| button.child(label))
             .when(id == "note-new", |button| {
                 button.child(crate::ui::kbd_badge(shortcut, &theme))
