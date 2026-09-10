@@ -38,6 +38,8 @@ pub mod i18n;
 pub mod identity;
 pub mod model;
 pub mod model_catalog;
+pub mod notes;
+pub use notes::EmbeddedNote;
 pub mod persistence;
 pub mod projectless;
 pub mod provider_session;

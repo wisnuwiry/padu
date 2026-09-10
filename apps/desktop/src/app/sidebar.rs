@@ -219,7 +219,7 @@ const SIDEBAR_SESSION_ROW_HEIGHT: f32 = SIDEBAR_SESSION_CARD_HEIGHT + SIDEBAR_SE
 const SIDEBAR_PROJECT_SESSION_ROW_HEIGHT: f32 =
     SIDEBAR_PROJECT_SESSION_CARD_HEIGHT + SIDEBAR_SESSION_ROW_GAP;
 const SIDEBAR_ACTION_ROW_HEIGHT: f32 = 32.0;
-const SIDEBAR_SEARCH_BOTTOM_GAP: f32 = 10.0;
+
 const SIDEBAR_GROUP_HEADER_HEIGHT: f32 = 28.0;
 const SIDEBAR_GROUP_HEADER_BOTTOM_GAP: f32 = 2.0;
 const SIDEBAR_SHOW_MORE_ROW_HEIGHT: f32 = 30.0;
@@ -345,6 +345,8 @@ pub(super) fn format_time_ago(seconds: u64) -> String {
 pub(super) enum SidebarRow {
     /// Opens the window-wide command palette and scrolls with history.
     Search,
+    /// Opens the notes workspace.
+    Notes,
     /// Group header; the first row also carries the sidebar actions.
     Header(SidebarGroup),
     /// A started session.
@@ -364,7 +366,8 @@ fn sidebar_session_row_index(rows: &[SidebarRow], session_id: Uuid) -> Option<us
 
 fn sidebar_row_height(row: SidebarRow, grouping: SidebarGrouping) -> Pixels {
     px(match row {
-        SidebarRow::Search => SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_SEARCH_BOTTOM_GAP,
+        SidebarRow::Search => SIDEBAR_ACTION_ROW_HEIGHT,
+        SidebarRow::Notes => SIDEBAR_ACTION_ROW_HEIGHT,
         SidebarRow::Header(_) => SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP,
         SidebarRow::Session(_) => {
             if grouping == SidebarGrouping::Project {
@@ -586,6 +589,42 @@ impl Padu {
             .child(icon(icon_path, 14.0, theme.text_tertiary))
     }
 
+    pub(super) fn render_sidebar_navigation_controls(
+        &self,
+        show_history: bool,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        div()
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .child(self.render_sidebar_toggle(cx))
+            .when(show_history, |element| {
+                element.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(2.0))
+                        .child(self.render_history_button(
+                            "navigate-back",
+                            "icons/arrow-left.svg",
+                            self.workspace_navigation.back_target().is_some()
+                                || !self.session_navigation.back.is_empty(),
+                            true,
+                            cx,
+                        ))
+                        .child(self.render_history_button(
+                            "navigate-forward",
+                            "icons/arrow-right.svg",
+                            self.workspace_navigation.forward_target().is_some()
+                                || !self.session_navigation.forward.is_empty(),
+                            false,
+                            cx,
+                        )),
+                )
+            })
+    }
+
     fn render_sidebar_titlebar(&self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
         div()
             .id("sidebar-titlebar")
@@ -608,28 +647,7 @@ impl Padu {
                     cx,
                 ),
             )
-            .child(self.render_sidebar_toggle(cx))
-            .child(
-                div()
-                    .ml(px(6.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(2.0))
-                    .child(self.render_history_button(
-                        "navigate-back",
-                        "icons/arrow-left.svg",
-                        !self.session_navigation.back.is_empty(),
-                        true,
-                        cx,
-                    ))
-                    .child(self.render_history_button(
-                        "navigate-forward",
-                        "icons/arrow-right.svg",
-                        !self.session_navigation.forward.is_empty(),
-                        false,
-                        cx,
-                    )),
-            )
+            .child(self.render_sidebar_navigation_controls(true, cx))
             .child(self.window_drag_region(
                 div().id("sidebar-titlebar-drag-region").h_full().flex_1(),
                 cx,
@@ -794,29 +812,14 @@ impl Padu {
                     .child(label),
             )
             .when_some(shortcut, |row, shortcut| {
-                row.child(
-                    div()
-                        .h(px(20.0))
-                        .min_w(px(24.0))
-                        .px(px(6.0))
-                        .rounded(px(5.0))
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .bg(theme.overlay_strong)
-                        .text_size(sp(11.5))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text_tertiary)
-                        .child(shortcut),
-                )
+                row.child(crate::ui::kbd_badge(shortcut, &theme))
             })
     }
 
     fn render_sidebar_new_session(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         self.render_sidebar_action_row(
             "sidebar-new-session",
-            "icons/compose.svg",
+            "icons/plus.svg",
             tr!("menu.new_task"),
             Some(crate::platform::primary_shortcut("⌘N", "Ctrl+N")),
             cx,
@@ -852,9 +855,28 @@ impl Padu {
             }));
         div()
             .w_full()
-            .h(px(SIDEBAR_ACTION_ROW_HEIGHT + SIDEBAR_SEARCH_BOTTOM_GAP))
+            .h(px(SIDEBAR_ACTION_ROW_HEIGHT))
             .flex_none()
             .child(search)
+    }
+
+    fn render_sidebar_notes(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        self.render_sidebar_action_row(
+            "sidebar-notes",
+            "icons/note.svg",
+            tr!("settings.notes"),
+            Some(crate::platform::primary_shortcut("⌘⇧M", "Ctrl+Shift+M")),
+            cx,
+        )
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.open_notes(cx);
+        }))
+        .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                this.open_notes(cx);
+                cx.stop_propagation();
+            }
+        }))
     }
 
     pub(super) fn start_available_update(&mut self, cx: &mut Context<Self>) {
@@ -1560,7 +1582,12 @@ impl Padu {
             .collect::<Vec<_>>();
         sort_sidebar_sessions(&mut sorted_sessions, self.state.sidebar_ordering);
 
-        let mut rows = vec![SidebarRow::Search];
+        let mut rows = vec![
+            SidebarRow::Search,
+            SidebarRow::Notes,
+            SidebarRow::PinnedSeparator,
+            SidebarRow::GroupSpacer,
+        ];
         let pinned_sessions = sorted_sessions
             .iter()
             .filter(|session| session.pinned_at.is_some())
@@ -1645,7 +1672,7 @@ impl Padu {
                 }
             }
         }
-        if rows.len() == 1 {
+        if rows.len() == 4 {
             // Keep the header actions visible while there is no history.
             let group = match self.state.sidebar_grouping {
                 SidebarGrouping::Updated => SidebarGroup::Updated(SessionDateGroup::Today),
@@ -1712,6 +1739,7 @@ impl Padu {
         };
         match *row {
             SidebarRow::Search => self.render_sidebar_search(cx).into_any_element(),
+            SidebarRow::Notes => self.render_sidebar_notes(cx).into_any_element(),
             SidebarRow::Header(group) => {
                 let first_regular_group = rows.iter().position(|row| {
                     matches!(row, SidebarRow::Header(group) if *group != SidebarGroup::Pinned)
@@ -2601,33 +2629,7 @@ impl Padu {
                             cx,
                         ),
                     )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .child(self.render_sidebar_toggle(cx))
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(2.0))
-                                    .child(self.render_history_button(
-                                        "navigate-back",
-                                        "icons/arrow-left.svg",
-                                        !self.session_navigation.back.is_empty(),
-                                        true,
-                                        cx,
-                                    ))
-                                    .child(self.render_history_button(
-                                        "navigate-forward",
-                                        "icons/arrow-right.svg",
-                                        !self.session_navigation.forward.is_empty(),
-                                        false,
-                                        cx,
-                                    )),
-                            ),
-                    )
+                    .child(self.render_sidebar_navigation_controls(true, cx))
             })
             .child(
                 self.window_drag_region(
@@ -3205,7 +3207,13 @@ mod tests {
     fn selected_session_uses_nearest_bottom_edge_for_an_unmeasured_lower_row() {
         let target = Uuid::from_u128(31);
         let group = SidebarGroup::Updated(SessionDateGroup::Today);
-        let mut rows = vec![SidebarRow::Search, SidebarRow::Header(group)];
+        let mut rows = vec![
+            SidebarRow::Search,
+            SidebarRow::Notes,
+            SidebarRow::PinnedSeparator,
+            SidebarRow::GroupSpacer,
+            SidebarRow::Header(group),
+        ];
         rows.extend((1..=40).map(|id| SidebarRow::Session(Uuid::from_u128(id))));
         rows.push(SidebarRow::GroupSpacer);
 
@@ -3213,8 +3221,8 @@ mod tests {
         let offset =
             sidebar_bottom_aligned_offset(&rows, index, px(400.0), SidebarGrouping::Updated);
 
-        assert_eq!(index, 32);
-        assert_eq!(offset.item_ix, 25);
+        assert_eq!(index, 35);
+        assert_eq!(offset.item_ix, 28);
         assert_eq!(offset.offset_in_item, px(16.0));
         let visible_height = rows[offset.item_ix..=index]
             .iter()

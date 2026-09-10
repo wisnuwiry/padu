@@ -54,9 +54,16 @@ describe('composer autocomplete', () => {
     ]
     expect(mergeComposerCommands(discovered, reported)).toEqual([
       command('compact', 'Builtin', 'Compact context', null),
+      { ...command('note', 'Builtin', 'Search and embed a note in chat', null), argument_hint: '<text>' },
       discovered[0],
       discovered[1],
     ])
+  })
+
+  test('keeps a provider or project note command without adding a duplicate', () => {
+    const existing = command('note', 'Project', 'Project note command', 'use note')
+    const merged = mergeComposerCommands([existing], [])
+    expect(merged.filter((item) => item.name === 'note')).toEqual([existing])
   })
 
   test('recognizes only the resolved Codex fast-mode command', () => {

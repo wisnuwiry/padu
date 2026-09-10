@@ -2214,13 +2214,46 @@ impl Padu {
             .iter()
             .map(|attachment| attachment.mention.clone())
             .collect::<Vec<_>>();
-        let submission = merged_submission(prompt, &mentions)?;
-        let display_content = (!attachments.is_empty()).then(|| prompt.trim().to_owned());
+        let embedded_notes = std::mem::take(&mut self.composer_embedded_notes);
+        let note_reference = if embedded_notes.len() == 1 {
+            let note = &embedded_notes[0];
+            let title = if note.title.trim().is_empty() {
+                tr!("notes.untitled")
+            } else {
+                note.title.clone()
+            };
+            format!("{title}\n{}", note.content)
+        } else {
+            embedded_notes
+                .iter()
+                .map(|note| {
+                    let title = if note.title.trim().is_empty() {
+                        tr!("notes.untitled")
+                    } else {
+                        note.title.clone()
+                    };
+                    format!("Reference note: {title}\n{}", note.content)
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        };
+        let submission = merged_submission(prompt, &mentions)
+            .map(|prompt| {
+                if note_reference.is_empty() {
+                    prompt
+                } else {
+                    format!("{prompt}\n\n{note_reference}")
+                }
+            })
+            .or_else(|| (!note_reference.is_empty()).then_some(note_reference))?;
+        let display_content = (!attachments.is_empty() || !embedded_notes.is_empty())
+            .then(|| prompt.trim().to_owned());
         self.discard_current_composer_draft(cx);
         Some(ComposerSubmission {
             prompt: submission,
             display_content,
             attachments,
+            embedded_notes,
         })
     }
 
@@ -2230,8 +2263,28 @@ impl Padu {
         cx: &mut Context<Self>,
     ) -> bool {
         self.execute_resume_composer_command(prompt, cx)
+            || self.execute_note_composer_command(prompt, cx)
             || self.execute_fast_mode_toggle(prompt, cx)
             || self.execute_goal_composer_command(prompt, cx)
+    }
+
+    fn execute_note_composer_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
+        let Some(rest) = prompt.strip_prefix("/note") else {
+            return false;
+        };
+        if !rest.is_empty() && !rest.starts_with(char::is_whitespace) {
+            return false;
+        }
+        let content = rest.trim();
+        if content.is_empty() {
+            // Match `/resume`: the composer command opens a focused picker and
+            // does not start a provider turn.
+            self.composer.update(cx, |input, cx| input.clear(cx));
+            cx.defer(|cx| cx.dispatch_action(&OpenNotePicker));
+        } else if self.add_content_to_selected_note(content, cx) {
+            self.composer.update(cx, |input, cx| input.clear(cx));
+        }
+        true
     }
 
     fn execute_resume_composer_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
@@ -2357,6 +2410,7 @@ impl Padu {
             .into_iter()
             .map(ComposerAttachment::from)
             .collect();
+        self.composer_embedded_notes = submission.embedded_notes;
         let content = submission.display_content.unwrap_or(submission.prompt);
         self.composer
             .update(cx, |input, cx| input.set_content(content, cx));
@@ -2364,19 +2418,12 @@ impl Padu {
         cx.notify();
     }
 
-    /// The staged-attachment chips above the input: a thumbnail tile per
-    /// image, a file-type icon and basename for everything else, each with a
-    /// floating remove button — T3 Code's attachment row in graphite.
+    /// The staged file and note chips above the input. Notes selected through
+    /// `/note` live in the same row so their inclusion in the next submission
+    /// is visible and can be undone before sending.
     fn render_composer_attachments(&self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
-        let mut row = div()
-            .px(px(14.0))
-            .pt(px(2.0))
-            .pb(px(8.0))
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap(px(6.0));
+        let mut attachment_row = div().flex().flex_wrap().items_center().gap(px(6.0));
         for (index, attachment) in self.composer_attachments.iter().enumerate() {
             let menu = self.menu_handle(format!("composer-attachment-{index}-menu"), cx);
             let icon_path = if attachment.is_dir {
@@ -2522,12 +2569,154 @@ impl Padu {
                     })),
             );
             let reveal_path = attachment.path.clone();
-            row = row.child(context_menu(
+            attachment_row = attachment_row.child(context_menu(
                 chip,
                 SharedString::from(format!("composer-attachment-{index}-context-menu")),
                 &menu,
                 move |_| image_preview::attachment_menu_items(reveal_path.clone(), can_reveal),
             ));
+        }
+
+        let mut notes = div().flex().flex_col().gap(px(6.0));
+        for (index, note) in self.composer_embedded_notes.iter().enumerate() {
+            let title = if note.title.is_empty() {
+                tr!("notes.untitled")
+            } else {
+                note.title.clone()
+            };
+            let preview = note
+                .content
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_owned();
+            let project_name = self
+                .notes
+                .iter()
+                .find(|source| source.id == note.id)
+                .and_then(|source| {
+                    self.state
+                        .projects
+                        .iter()
+                        .find(|project| project.id == source.project_id)
+                })
+                .map(Project::display_name)
+                .filter(|name| !name.trim().is_empty());
+            let note_label = project_name
+                .map(|project_name| format!("{} · {project_name}", tr!("notes.label")))
+                .unwrap_or_else(|| tr!("notes.label"));
+            let remove_focus = cx.focus_handle();
+            notes = notes.child(
+                div()
+                    .id(SharedString::from(format!("composer-note-{index}")))
+                    .w_full()
+                    .rounded(px(9.0))
+                    .border_1()
+                    .border_color(theme.border)
+                    .bg(theme.inset)
+                    .px(px(11.0))
+                    .py(px(8.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(icon("icons/note.svg", 24.0, theme.text_secondary).flex_none())
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap(px(2.0))
+                            .child(
+                                div()
+                                    .text_size(sp(12.0))
+                                    .font_weight(FontWeight::NORMAL)
+                                    .text_color(theme.text)
+                                    .whitespace_nowrap()
+                                    .truncate()
+                                    .child(title),
+                            )
+                            .child(
+                                div()
+                                    .text_size(sp(11.5))
+                                    .font_weight(FontWeight::NORMAL)
+                                    .text_color(theme.text_secondary)
+                                    .truncate()
+                                    .child(if preview.is_empty() {
+                                        "Empty note".to_owned()
+                                    } else {
+                                        preview
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .text_size(sp(10.5))
+                                    .font_weight(FontWeight::NORMAL)
+                                    .text_color(theme.text_tertiary)
+                                    .whitespace_nowrap()
+                                    .truncate()
+                                    .child(note_label),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("composer-note-remove-{index}")))
+                            .size(px(20.0))
+                            .rounded(px(5.0))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .cursor_pointer()
+                            .track_focus(&remove_focus)
+                            .tab_index(0)
+                            .focus_visible(|style| style.border_1().border_color(theme.accent))
+                            .hover(|element| element.bg(theme.overlay_strong))
+                            .active(|element| element.opacity(0.8))
+                            .tooltip(Tooltip::text(tr!("common.remove")))
+                            .child(icon("icons/x.svg", 10.0, theme.text_secondary))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                cx.stop_propagation();
+                                if index < this.composer_embedded_notes.len() {
+                                    this.composer_embedded_notes.remove(index);
+                                    this.schedule_composer_draft_save(cx);
+                                    cx.notify();
+                                }
+                            }))
+                            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    if index < this.composer_embedded_notes.len() {
+                                        this.composer_embedded_notes.remove(index);
+                                        this.schedule_composer_draft_save(cx);
+                                        cx.notify();
+                                    }
+                                    cx.stop_propagation();
+                                }
+                            })),
+                    ),
+            );
+        }
+
+        let mut row = div()
+            .px(px(14.0))
+            .pt(px(2.0))
+            .pb(px(8.0))
+            .flex()
+            .flex_col()
+            .gap(px(8.0));
+        if !self.composer_attachments.is_empty() {
+            row = row.child(
+                div()
+                    .text_size(sp(10.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_tertiary)
+                    .child("FILES"),
+            );
+            row = row.child(attachment_row);
+        }
+        if !self.composer_embedded_notes.is_empty() {
+            row = row.child(notes);
         }
         row
     }
@@ -2756,7 +2945,8 @@ impl Padu {
                 .is_armed_for(EscapeStopTarget::for_session(session), Instant::now())
         });
         let has_draft = !self.composer.read(cx).content(cx).trim().is_empty()
-            || !self.composer_attachments.is_empty();
+            || !self.composer_attachments.is_empty()
+            || !self.composer_embedded_notes.is_empty();
         // With no provider to run it, a draft has nowhere to go. The button
         // reads as unavailable and the submission path refuses too, so
         // `enter` cannot slip past a disabled control.
@@ -2824,9 +3014,11 @@ impl Padu {
                         }))
                 })
                 .children(autocomplete)
-                .when(!self.composer_attachments.is_empty(), |card| {
-                    card.child(self.render_composer_attachments(cx))
-                })
+                .when(
+                    !self.composer_attachments.is_empty()
+                        || !self.composer_embedded_notes.is_empty(),
+                    |card| card.child(self.render_composer_attachments(cx)),
+                )
                 .child(div().pt(px(2.0)).child(self.composer.clone()))
                 .child(
                     div()

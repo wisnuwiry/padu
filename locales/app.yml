@@ -86,12 +86,16 @@ command_palette.placeholder:
   en: Search tasks or run a command…
 command_palette.resume_placeholder:
   en: Search terminal sessions…
+command_palette.note_placeholder:
+  en: Search notes…
 command_palette.resume_provider_placeholder:
   en: Select a provider…
 command_palette.suggested:
   en: Suggested
 command_palette.tasks:
   en: Tasks
+command_palette.notes:
+  en: Notes
 command_palette.sessions:
   en: Terminal sessions
 command_palette.providers:
@@ -250,6 +254,10 @@ settings.notifications_keywords:
   en: notifications alert sound permission system audio test banner task complete
 settings.about_keywords:
   en: about info version update updates host connected github repository repo sponsor contribute
+settings.notes:
+  en: Notes
+settings.notes_keywords:
+  en: notes markdown documents writing snippets memos
 notifications.system_permission:
   en: System Permission
 notifications.system_permission_desc:
@@ -1002,6 +1010,68 @@ common.edit:
   en: Edit
 common.send:
   en: Send
+notes.new:
+  en: New Note
+notes.save:
+  en: Save
+notes.edit:
+  en: Edit
+notes.side_by_side:
+  en: Side by Side
+notes.preview:
+  en: Preview
+notes.delete:
+  en: Delete
+notes.delete_title:
+  en: Delete note?
+notes.delete_message:
+  en: "Are you sure you want to delete “%{title}”? This action cannot be undone."
+notes.empty_title:
+  en: No notes yet
+notes.empty_message:
+  en: Create a note to keep ideas, snippets, and reminders.
+notes.search_placeholder:
+  en: Search notes
+notes.no_matches:
+  en: No matching notes
+notes.collapse:
+  en: Collapse notes
+notes.expand:
+  en: Expand notes
+notes.details:
+  en: Note details
+notes.created:
+  en: Created %{time}
+notes.updated:
+  en: Updated %{time}
+notes.label:
+  en: Note
+notes.untitled:
+  en: Untitled Note
+notes.title_placeholder:
+  en: Note title
+notes.body_placeholder:
+  en: Write in Markdown…
+notes.add_to_note:
+  en: Add to Note
+notes.added_to_note:
+  en: Added to note
+notes.add_failed:
+  en: Could not add to note
+notes.add_failed_error:
+  en: "Could not add to note: %{error}"
+notes.command_description:
+  en: Search and embed a note in chat
+notes.save_failed:
+  en: "Could not save note: %{error}"
+notes.time_just_now:
+  en: just now
+notes.time_minutes_ago:
+  en: "%{count}m ago"
+notes.time_hours_ago:
+  en: "%{count}h ago"
+notes.time_days_ago:
+  en: "%{count}d ago"
 
 session.fork_task:
   en: Fork task

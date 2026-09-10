@@ -30,7 +30,9 @@ impl Padu {
         // conventional straddle.
         let (strip_left, strip_width) = match target {
             PanelResizeTarget::RightPanel => (-7.0, 8.0),
-            PanelResizeTarget::Sidebar | PanelResizeTarget::FileTree => (-5.0, 10.0),
+            PanelResizeTarget::Sidebar
+            | PanelResizeTarget::FileTree
+            | PanelResizeTarget::NotesSplit => (-5.0, 10.0),
         };
         div()
             .id(id)
@@ -212,6 +214,15 @@ impl Padu {
             .into_any_element()
     }
 
+    /// [`PaduPane`] delegate for the Notes island.
+    pub(super) fn notes_pane_content(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.render_notes_page(window, cx)
+    }
+
     /// [`PaduPane`] delegate for the right-panel island.
     pub(super) fn right_panel_pane_content(
         &mut self,
@@ -333,6 +344,7 @@ impl Render for Padu {
             self.tick_fps(window);
         }
         let image_preview = self.render_image_preview(cx);
+        let note_preview = self.render_note_preview(cx);
         let task_switcher = self.render_task_switcher(window, cx);
         let onboarding_modal = self.render_onboarding_modal(window, cx);
         if self.settings_page.is_some() {
@@ -344,6 +356,7 @@ impl Render for Padu {
                 .size_full()
                 .on_action(cx.listener(Self::toggle_command_palette_action))
                 .on_action(cx.listener(Self::open_resume_picker_action))
+                .on_action(cx.listener(Self::open_note_picker_action))
                 .on_action(cx.listener(Self::switch_task_forward_action))
                 .on_action(cx.listener(Self::switch_task_backward_action))
                 .on_action(cx.listener(Self::select_first_task_action))
@@ -356,6 +369,7 @@ impl Render for Padu {
                 .children(command_palette)
                 .children(active_dialog)
                 .children(image_preview)
+                .children(note_preview)
                 .children(task_switcher)
                 .children(onboarding_modal)
                 .into_any_element();
@@ -366,15 +380,16 @@ impl Render for Padu {
         self.schedule_time_label_wake(cx);
 
         let theme = Theme::current(cx);
-        let empty = should_render_empty_state(self.selected_session());
+        let notes_page = self.workspace_page == WorkspacePage::Notes;
+        let empty = !notes_page && should_render_empty_state(self.selected_session());
         let permission = self.render_permission(cx);
         let computer_use = self.render_computer_use_overlay(cx);
         let command_palette = self.render_command_palette(window, cx);
         let active_dialog = self.render_active_dialog(window, cx);
         let toast = self.render_active_toast(cx);
-        // Fullscreen owns the transcript column: sidebar stays, the docked
-        // panel slides away, and the center renders the takeover instead.
-        let fullscreen = self.right_panel_fullscreen_active();
+        // Fullscreen owns the transcript column, except Notes which replaces
+        // the center workspace and never shares the right-panel takeover.
+        let fullscreen = self.right_panel_fullscreen_active() && !notes_page;
         let content = div()
             .key_context("Padu")
             .on_action(cx.listener(Self::close_window_or_right_panel_tab_action))
@@ -391,8 +406,10 @@ impl Render for Padu {
             .on_action(cx.listener(Self::open_files_action))
             .on_action(cx.listener(Self::open_file_picker_action))
             .on_action(cx.listener(Self::open_review_action))
+            .on_action(cx.listener(|this, _: &OpenNotes, _, cx| this.open_notes(cx)))
             .on_action(cx.listener(Self::toggle_command_palette_action))
             .on_action(cx.listener(Self::open_resume_picker_action))
+            .on_action(cx.listener(Self::open_note_picker_action))
             .on_action(cx.listener(Self::toggle_fps_counter_action))
             .on_action(cx.listener(Self::navigate_back_action))
             .on_action(cx.listener(Self::navigate_forward_action))
@@ -462,8 +479,15 @@ impl Render for Padu {
                     .when(panels.sidebar > 0.0, |element| {
                         element.border_l_1().border_color(theme.sidebar_border)
                     })
-                    .child(self.render_header(window, cx))
-                    .child(if empty {
+                    .when(!notes_page, |element| {
+                        element.child(self.render_header(window, cx))
+                    })
+                    .child(if notes_page {
+                        self.notes_pane
+                            .clone()
+                            .cached(StyleRefinement::default().flex_1().min_h(px(0.0)).w_full())
+                            .into_any_element()
+                    } else if empty {
                         self.render_empty_state(cx).into_any_element()
                     } else {
                         self.transcript_pane
@@ -472,12 +496,15 @@ impl Render for Padu {
                             .into_any_element()
                     })
                     .children(permission)
-                    .when(self.selected_project().is_some(), |element| {
-                        element
-                            .children(self.render_queued_messages(cx))
-                            .child(self.render_composer(window, cx))
-                            .child(self.render_workspace_footer(cx))
-                    })
+                    .when(
+                        !notes_page && self.selected_project().is_some(),
+                        |element| {
+                            element
+                                .children(self.render_queued_messages(cx))
+                                .child(self.render_composer(window, cx))
+                                .child(self.render_workspace_footer(cx))
+                        },
+                    )
                     .relative()
                     .children(toast)
                     .children(computer_use)
@@ -490,35 +517,39 @@ impl Render for Padu {
                     })
                     .into_any_element()
             })
-            .when(panels.right_panel > 0.0 && !fullscreen, |root| {
-                root.child(
-                    div()
-                        .h_full()
-                        .flex_none()
-                        .w(px(panels.right_panel))
-                        .flex()
-                        .relative()
-                        .when(panels.right_panel_sliding, |element| {
-                            element.overflow_hidden()
-                        })
-                        // Pinned to the window's right edge, so the panel is
-                        // uncovered from that edge inward rather than dragged
-                        // across the screen.
-                        .child(
-                            self.right_panel_pane.clone().cached(
-                                StyleRefinement::default()
-                                    .absolute()
-                                    .top_0()
-                                    .right_0()
-                                    .w(px(panels.right_panel_content))
-                                    .h_full(),
+            .when(
+                panels.right_panel > 0.0 && !fullscreen && !notes_page,
+                |root| {
+                    root.child(
+                        div()
+                            .h_full()
+                            .flex_none()
+                            .w(px(panels.right_panel))
+                            .flex()
+                            .relative()
+                            .when(panels.right_panel_sliding, |element| {
+                                element.overflow_hidden()
+                            })
+                            // Pinned to the window's right edge, so the panel is
+                            // uncovered from that edge inward rather than dragged
+                            // across the screen.
+                            .child(
+                                self.right_panel_pane.clone().cached(
+                                    StyleRefinement::default()
+                                        .absolute()
+                                        .top_0()
+                                        .right_0()
+                                        .w(px(panels.right_panel_content))
+                                        .h_full(),
+                                ),
                             ),
-                        ),
-                )
-            })
+                    )
+                },
+            )
             .children(command_palette)
             .children(active_dialog)
             .children(image_preview)
+            .children(note_preview)
             .children(task_switcher)
             .children(onboarding_modal)
             .into_any_element();

@@ -58,6 +58,15 @@ export function mergeComposerCommands(
       template: null,
     })
   }
+  if (!merged.some((command) => command.name === 'note')) {
+    merged.push({
+      name: 'note',
+      description: 'Search and embed a note in chat',
+      scope: 'Builtin',
+      argument_hint: '<text>',
+      template: null,
+    })
+  }
   return merged.sort((left, right) => {
     const byScope = commandScopeRank(left.scope) - commandScopeRank(right.scope)
     return byScope || left.name.localeCompare(right.name)

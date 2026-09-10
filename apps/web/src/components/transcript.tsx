@@ -1,6 +1,7 @@
 import type {
   ActivityItem,
   AgentSession,
+  EmbeddedNote,
   MessageAttachment,
   ReviewDiffSource,
 } from '@padu/client'
@@ -90,6 +91,7 @@ export function Transcript({
   onOpenLink,
   onOpenBackgroundWork,
   onCopyToComposer,
+  onAddToNote,
   onForkResponse,
   onRewindMessage,
   forkingTurnCount,
@@ -102,6 +104,7 @@ export function Transcript({
   onOpenLink?: (target: string) => boolean
   onOpenBackgroundWork?: (key: BackgroundWorkKey) => void
   onCopyToComposer?: (content: string) => void
+  onAddToNote?: (content: string) => void
   onForkResponse?: (turnCount: number) => void
   onRewindMessage?: (
     turnCount: number,
@@ -248,6 +251,7 @@ export function Transcript({
               sessionId={session.id}
               t={t}
               onCopyToComposer={onCopyToComposer}
+              onAddToNote={onAddToNote}
               onOpenBackgroundWork={onOpenBackgroundWork}
               onForkResponse={onForkResponse}
               forkingTurnCount={forkingTurnCount}
@@ -730,6 +734,7 @@ function TranscriptItemView({
   onToggleTurn,
   onReviewChanges,
   onCopyToComposer,
+  onAddToNote,
   onOpenBackgroundWork,
   onForkResponse,
   forkingTurnCount,
@@ -747,6 +752,7 @@ function TranscriptItemView({
   onToggleTurn: (turnId: string) => void
   onReviewChanges?: (source: ReviewDiffSource) => void
   onCopyToComposer?: (content: string) => void
+  onAddToNote?: (content: string) => void
   onOpenBackgroundWork?: (key: BackgroundWorkKey) => void
   onForkResponse?: (turnCount: number) => void
   forkingTurnCount?: number
@@ -807,6 +813,7 @@ function TranscriptItemView({
         message={item.message}
         t={t}
         onCopyToComposer={onCopyToComposer}
+        onAddToNote={onAddToNote}
         editing={messageEdit?.messageId === item.message.id}
         editContent={messageEdit?.messageId === item.message.id ? messageEdit.content : undefined}
         onCancelEdit={onCancelMessageEdit}
@@ -1001,6 +1008,59 @@ function TranscriptRow({
   )
 }
 
+function EmbeddedNoteCard({
+  note,
+  t,
+}: {
+  note: EmbeddedNote
+  t: Translator
+}) {
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const title = note.title.trim() || t('notes.untitled')
+  const excerpt = note.content.split(/\r?\n/u)[0]?.trim() || 'Empty note'
+
+  return (
+    <>
+      <button
+        className="flex w-fit min-w-[180px] max-w-[540px] items-start gap-2 rounded-lg border border-border bg-[var(--inset)] px-2.5 py-2 text-left outline-none transition-colors hover:bg-card focus-visible:ring-2 focus-visible:ring-ring"
+        type="button"
+        onClick={() => setPreviewOpen(true)}
+      >
+        <PaduIcon name="file" className="mt-0.5 size-4 shrink-0 text-[var(--text-secondary)]" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[10px] font-medium text-[var(--text-tertiary)]">{t('notes.label')}</span>
+          <span className="block truncate text-xs text-foreground">{title}</span>
+          <span className="block truncate text-[11px] text-[var(--text-secondary)]">{excerpt}</span>
+        </span>
+      </button>
+      {previewOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-6" role="presentation">
+          <div
+            className="relative flex max-h-[min(620px,calc(100dvh-3rem))] w-full max-w-2xl flex-col gap-3 overflow-hidden rounded-xl border bg-card p-5 shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`note-preview-${note.id}`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              className="absolute right-3 top-3 rounded-full p-1.5 outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+              type="button"
+              aria-label="Close note preview"
+              onClick={() => setPreviewOpen(false)}
+            >
+              <PaduIcon name="x" className="size-4" />
+            </button>
+            <h2 id={`note-preview-${note.id}`} className="pr-8 text-base font-semibold">{title}</h2>
+            <div className="markdown min-h-0 overflow-y-auto text-sm leading-6">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{note.content}</ReactMarkdown>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
 function MessageRow({
   message,
   locale,
@@ -1008,6 +1068,7 @@ function MessageRow({
   footer,
   beforeFooter,
   onCopyToComposer,
+  onAddToNote,
   forkAction,
   rewindAction,
   editing = false,
@@ -1021,6 +1082,7 @@ function MessageRow({
   footer: AssistantResponseFooter | null
   beforeFooter?: ReactNode
   onCopyToComposer?: (content: string) => void
+  onAddToNote?: (content: string) => void
   forkAction?: ResponseForkAction
   rewindAction?: MessageRewindAction
   editing?: boolean
@@ -1048,6 +1110,9 @@ function MessageRow({
               ))}
             </div>
           ) : null}
+          {message.embedded_notes?.map((note) => (
+            <EmbeddedNoteCard key={`${note.id}-${note.revision}`} note={note} t={t} />
+          ))}
           {editing && onCancelEdit && onSubmitEdit ? (
             <MessageEditBubble
               attachments={message.attachments ?? []}
@@ -1094,6 +1159,7 @@ function MessageRow({
           <MessageFooter
             content={footer.content}
             forkAction={forkAction}
+            onAddToNote={onAddToNote}
             locale={locale}
             t={t}
             timestamp={footer.timestamp}
@@ -1201,6 +1267,7 @@ function MessageFooter({
   alignRight = false,
   forkAction,
   rewindAction,
+  onAddToNote,
 }: {
   content: string
   locale: AppLocale
@@ -1209,6 +1276,7 @@ function MessageFooter({
   alignRight?: boolean
   forkAction?: ResponseForkAction
   rewindAction?: MessageRewindAction
+  onAddToNote?: (content: string) => void
 }) {
   const [copied, setCopied] = useState(false)
   const copiedTimeout = useRef<number | null>(null)
@@ -1252,6 +1320,17 @@ function MessageFooter({
             className={cn('size-3.5', rewindAction.pending && 'motion-safe:animate-spin')}
             name={rewindAction.pending ? 'loaderCircle' : 'rewind'}
           />
+        </button>
+      )}
+      {!alignRight && onAddToNote && (
+        <button
+          aria-label="Add assistant response to note"
+          className="grid size-[27px] place-items-center rounded-lg outline-none hover:bg-accent hover:text-[var(--text-secondary)] focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring"
+          title="Add to note"
+          type="button"
+          onClick={() => onAddToNote(content)}
+        >
+          <PaduIcon className="size-3.5" name="compose" />
         </button>
       )}
       {!alignRight && forkAction && (

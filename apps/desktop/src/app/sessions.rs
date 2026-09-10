@@ -24,6 +24,7 @@ impl Padu {
     }
 
     pub(super) fn select_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        self.navigate_workspace_page(WorkspacePage::Conversation, cx);
         self.request_session_activation(session_id, SessionActivationTransition::Visit, cx);
     }
 
@@ -491,7 +492,7 @@ impl Padu {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.settings_page = None;
+        self.navigate_workspace_page(WorkspacePage::Conversation, cx);
         let current_project = self
             .selected_project()
             .map(|project| (project.id, project.is_projectless()));
@@ -707,6 +708,7 @@ impl Padu {
                 self.right_panel_file_tree_width = width;
                 width
             }
+            PanelResizeTarget::NotesSplit => self.notes_split_ratio,
         };
         self.panel_resize_drag = Some(PanelResizeDrag {
             target,
@@ -767,6 +769,10 @@ impl Padu {
                 }
                 self.right_panel_file_tree_width = width;
             }
+            PanelResizeTarget::NotesSplit => {
+                self.notes_split_ratio =
+                    (drag.start_width + delta / viewport_width).clamp(0.2, 0.8);
+            }
         }
         cx.notify();
     }
@@ -774,13 +780,16 @@ impl Padu {
     pub(super) fn finish_panel_resize(
         &mut self,
         event: &MouseUpEvent,
-        _: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if event.button == MouseButton::Left
             && let Some(drag) = self.panel_resize_drag.take()
         {
-            if drag.target != PanelResizeTarget::FileTree {
+            if matches!(
+                drag.target,
+                PanelResizeTarget::Sidebar | PanelResizeTarget::RightPanel
+            ) {
                 self.persist_panel_layout();
             }
             cx.notify();
@@ -797,6 +806,13 @@ impl Padu {
             let focus_handle = self.composer_focus(cx);
             window.focus(&focus_handle, cx);
             cx.notify();
+            return;
+        }
+
+        if self.navigate_workspace_page_back(cx) {
+            if self.workspace_page == WorkspacePage::Notes {
+                self.ensure_notes_loaded(cx);
+            }
             return;
         }
 
@@ -820,6 +836,10 @@ impl Padu {
         cx: &mut Context<Self>,
     ) {
         if self.settings_page.is_some() {
+            return;
+        }
+
+        if self.navigate_workspace_page_forward(cx) {
             return;
         }
 
@@ -861,7 +881,7 @@ impl Padu {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.settings_page = None;
+        self.navigate_workspace_page(WorkspacePage::Conversation, cx);
         let focus_handle = self.composer_focus(cx);
         window.focus(&focus_handle, cx);
         cx.notify();

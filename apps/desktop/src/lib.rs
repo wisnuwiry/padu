@@ -79,8 +79,10 @@ actions!(
         OpenFiles,
         OpenFilePicker,
         OpenReview,
+        OpenNotes,
         ToggleCommandPalette,
         OpenResumePicker,
+        OpenNotePicker,
         ToggleFpsCounter,
         NavigateBack,
         NavigateForward,
@@ -221,6 +223,7 @@ pub fn run() {
             crate::app::init_command_palette(cx);
             crate::app::init_dialog_keys(cx);
             crate::app::init_image_preview_keys(cx);
+            crate::app::init_note_preview_keys(cx);
             crate::app::init_onboarding_keys(cx);
             crate::app::init_sidebar_keys(cx);
             crate::app::init_right_panel_files_keys(cx);
@@ -258,6 +261,7 @@ pub fn run() {
                 KeyBinding::new("secondary-shift-e", OpenFiles, None),
                 KeyBinding::new("secondary-p", OpenFilePicker, None),
                 KeyBinding::new("secondary-d", OpenReview, None),
+                KeyBinding::new("secondary-shift-m", OpenNotes, None),
                 KeyBinding::new("secondary-k", ToggleCommandPalette, None),
                 KeyBinding::new("secondary-alt-shift-f", ToggleFpsCounter, None),
                 KeyBinding::new("secondary-[", NavigateBack, Some("Padu")),

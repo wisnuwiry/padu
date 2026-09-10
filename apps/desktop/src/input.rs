@@ -2780,13 +2780,11 @@ impl ComposerInput {
         let _subscriptions = vec![
             cx.subscribe(&input, |composer, _, event: &InputEvent, cx| match event {
                 InputEvent::Submit(raw) => {
-                    // The prompt is consumed by sending it, and whitespace
-                    // alone is nothing to send.
+                    // Empty submissions are forwarded so the app can send a
+                    // staged note as a prompt even when the text field is blank.
                     let value = raw.trim().to_owned();
-                    if !value.is_empty() {
-                        composer.input.update(cx, |input, cx| input.clear(cx));
-                        cx.emit(ComposerEvent::Submit(value));
-                    }
+                    composer.input.update(cx, |input, cx| input.clear(cx));
+                    cx.emit(ComposerEvent::Submit(value));
                 }
                 InputEvent::Focus => cx.emit(ComposerEvent::Focus),
                 InputEvent::Edited => cx.emit(ComposerEvent::Edited),

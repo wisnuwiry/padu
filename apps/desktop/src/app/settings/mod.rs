@@ -128,7 +128,11 @@ pub(super) fn visible_settings_pages(
 }
 
 impl Padu {
-    pub(super) fn render_settings(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_settings(
+        &mut self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::current(cx);
 
         div()
@@ -144,6 +148,7 @@ impl Padu {
             .on_action(cx.listener(Self::open_terminal_action))
             .on_action(cx.listener(Self::open_files_action))
             .on_action(cx.listener(Self::open_review_action))
+            .on_action(cx.listener(|this, _: &OpenNotes, _, cx| this.open_notes(cx)))
             .on_action(cx.listener(Self::toggle_command_palette_action))
             .on_action(cx.listener(Self::toggle_fps_counter_action))
             .on_action(cx.listener(Self::navigate_back_action))
@@ -332,7 +337,7 @@ impl Padu {
             )
     }
 
-    fn render_settings_content(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+    fn render_settings_content(&mut self, window: &Window, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
         let page = self.settings_page.unwrap_or(SettingsPage::General);
         let right_window_controls = self.render_client_window_controls(

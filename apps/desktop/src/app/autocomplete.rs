@@ -133,9 +133,17 @@ impl Padu {
         let command_key = (provider, project_path.clone(), binary_override.clone());
         match self.slash_commands.read(&command_key) {
             Query::Ready(commands) => {
-                self.slash_command_index = Rc::new(composer_complete::merge_reported_commands(
-                    &commands, &reported,
-                ));
+                let mut commands = composer_complete::merge_reported_commands(&commands, &reported);
+                if !commands.iter().any(|command| command.name == "note") {
+                    commands.push(SlashCommand {
+                        name: "note".into(),
+                        description: tr!("notes.command_description"),
+                        scope: composer_complete::CommandScope::Builtin,
+                        argument_hint: Some("<text>".into()),
+                        template: None,
+                    });
+                }
+                self.slash_command_index = Rc::new(commands);
                 self.slash_command_index_key = Some(command_key);
                 self.slash_command_index_loading = false;
             }

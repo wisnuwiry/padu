@@ -226,6 +226,8 @@ pub(super) fn render_message_footer(
         .line_height(sp(14.0))
         .text_color(footer_color)
         .child(format_message_time(footer_time));
+    let note_content = copy_content.clone();
+    let note_padu = padu.clone();
     let copy_button = div()
         .id(SharedString::from(format!("copy-message-{message_id}")))
         .w(px(27.0))
@@ -256,6 +258,25 @@ pub(super) fn render_message_footer(
                 this.show_message_copied(message_id, cx);
             });
         });
+    let add_to_note_button = div()
+        .id(SharedString::from(format!(
+            "add-response-to-note-{message_id}"
+        )))
+        .w(px(27.0))
+        .h(px(27.0))
+        .rounded(px(8.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .hover(|element| element.bg(theme.overlay_strong))
+        .child(icon("icons/note-add.svg", 14.0, footer_color))
+        .tooltip(Tooltip::text(tr!("notes.add_to_note")))
+        .on_click(move |_, _, cx| {
+            let _ = note_padu.update(cx, |this, cx| {
+                this.add_content_to_new_note(note_content.as_ref(), cx);
+            });
+        });
     let mut footer = div()
         .w_full()
         .h(px(27.0))
@@ -274,6 +295,9 @@ pub(super) fn render_message_footer(
         footer = footer.child(timestamp).child(copy_button);
     } else {
         footer = footer.child(copy_button);
+        if message.role == MessageRole::Assistant {
+            footer = footer.child(add_to_note_button);
+        }
         if let Some(action) = assistant_message_action {
             let fork_padu = padu.clone();
             let fork_icon = if action.preparing {
@@ -371,6 +395,123 @@ pub(super) struct MessageRender<'a> {
     pub(super) menu: ContextMenuHandle,
     pub(super) padu: gpui::WeakEntity<Padu>,
     pub(super) composer: Entity<ComposerInput>,
+}
+
+fn render_embedded_notes(
+    notes: &[padu_protocol::notes::EmbeddedNote],
+    padu: &gpui::WeakEntity<Padu>,
+    theme: &Theme,
+    cx: &mut App,
+) -> Option<AnyElement> {
+    if notes.is_empty() {
+        return None;
+    }
+    let mut column = div()
+        .max_w(px(540.0))
+        .flex()
+        .flex_col()
+        .items_start()
+        .gap(px(6.0));
+    for note in notes {
+        let title = if note.title.is_empty() {
+            tr!("notes.untitled")
+        } else {
+            note.title.clone()
+        };
+        let excerpt = note
+            .content
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+
+        let preview_focus = cx.focus_handle();
+        let preview_padu = padu.clone();
+        let preview_note = note.clone();
+        column = column.child(
+            div()
+                .id(SharedString::from(format!("embedded-note-{}", note.id)))
+                .min_w(px(180.0))
+                .max_w(px(540.0))
+                .rounded(px(8.0))
+                .border_1()
+                .border_color(theme.border)
+                .bg(theme.inset)
+                .px(px(10.0))
+                .py(px(7.0))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .cursor_pointer()
+                .track_focus(&preview_focus)
+                .tab_index(0)
+                .focus_visible(|style| style.border_color(theme.accent))
+                .hover(|style| style.bg(theme.surface))
+                .tooltip(Tooltip::text(tr!("settings.notes")))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                    cx.stop_propagation();
+                })
+                .child(icon("icons/note.svg", 24.0, theme.text_secondary).flex_none())
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .flex()
+                        .flex_col()
+                        .gap(px(2.0))
+                        .child(
+                            div()
+                                .text_size(sp(14.0))
+                                .font_weight(FontWeight::NORMAL)
+                                .text_color(theme.text)
+                                .whitespace_nowrap()
+                                .truncate()
+                                .child(title),
+                        )
+                        .child(
+                            div()
+                                .text_size(sp(11.5))
+                                .font_weight(FontWeight::NORMAL)
+                                .text_color(theme.text_secondary)
+                                .whitespace_nowrap()
+                                .truncate()
+                                .child(if excerpt.is_empty() {
+                                    "Empty note".to_owned()
+                                } else {
+                                    excerpt
+                                }),
+                        )
+                        .child(
+                            div()
+                                .text_size(sp(10.0))
+                                .font_weight(FontWeight::NORMAL)
+                                .text_color(theme.text_tertiary)
+                                .child(tr!("notes.label")),
+                        ),
+                )
+                .on_click(move |_, window, cx| {
+                    let note = preview_note.clone();
+                    let _ = preview_padu.update(cx, |this, cx| {
+                        this.open_note_preview(note, window, cx);
+                    });
+                })
+                .on_key_down({
+                    let key_padu = padu.clone();
+                    let key_note = note.clone();
+                    move |event, window, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            let note = key_note.clone();
+                            let _ = key_padu.update(cx, |this, cx| {
+                                this.open_note_preview(note, window, cx);
+                            });
+                            cx.stop_propagation();
+                        }
+                    }
+                }),
+        );
+    }
+    Some(column.into_any_element())
 }
 
 fn render_sent_message_attachments(
@@ -610,6 +751,9 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
             ) {
                 column = column.child(attachments);
             }
+            if let Some(notes) = render_embedded_notes(&message.embedded_notes, &padu, theme, cx) {
+                column = column.child(notes);
+            }
             if let Some(edit_input) = message_edit_input {
                 let can_submit = !edit_input.read(cx).content(cx).trim().is_empty()
                     || !message.attachments.is_empty();
@@ -826,6 +970,14 @@ fn message_menu_items(
             cx.write_to_clipboard(ClipboardItem::new_string(copy_content.clone()));
         },
     ));
+
+    let note_content = content.to_owned();
+    let padu_for_note = padu.clone();
+    items.push(MenuItem::new(tr!("notes.add_to_note"), move |_, cx| {
+        let _ = padu_for_note.update(cx, |this, cx| {
+            this.add_content_to_new_note(&note_content, cx);
+        });
+    }));
 
     if role == MessageRole::User && user_message_action.is_none() {
         let composer = composer.clone();

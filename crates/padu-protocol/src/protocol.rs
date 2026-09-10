@@ -11,6 +11,7 @@ use crate::model::{
     AgentSession, GoalOperation, Project, ProviderKind, ProviderProbe, ProviderResumeCursor,
     ProviderSessionHistory, ProviderSessionSummary, UserInputAnswer,
 };
+use crate::notes::{CreateNote, Note, NoteSummary, UpdateNote};
 use crate::persistence::{ComposerDraftChange, ComposerDrafts, SessionMessageMatch};
 use crate::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
 use crate::settings::DaemonSettings;
@@ -19,7 +20,7 @@ use crate::usage::PlanUsage;
 use crate::usage_history::{UsageHistory, UsageWindow};
 use crate::workspace::{WorkspaceOperation, WorkspaceResult};
 
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 pub const MAX_WIRE_MESSAGE_BYTES: usize = 48 * 1024 * 1024;
 pub const DAEMON_TOKEN_ENV: &str = "PADU_DAEMON_TOKEN";
 pub const DAEMON_ADDRESS_ENV: &str = "PADU_DAEMON_ADDRESS";
@@ -210,6 +211,24 @@ pub enum Command {
     },
     ApplyComposerDraftChanges {
         changes: Vec<ComposerDraftChange>,
+    },
+    ListNotes {
+        project_id: Uuid,
+    },
+    GetNote {
+        project_id: Uuid,
+        note_id: Uuid,
+    },
+    CreateNote {
+        note: CreateNote,
+    },
+    UpdateNote {
+        note: UpdateNote,
+    },
+    DeleteNote {
+        project_id: Uuid,
+        note_id: Uuid,
+        expected_revision: u64,
     },
     StoreBlob {
         mime_type: String,
@@ -457,6 +476,22 @@ pub enum ResponsePayload {
     ComposerDrafts {
         drafts: ComposerDrafts,
     },
+    Notes {
+        notes: Vec<NoteSummary>,
+    },
+    Note {
+        note: Option<Note>,
+    },
+    NoteCreated {
+        note: Note,
+    },
+    NoteUpdated {
+        note: Note,
+    },
+    NoteDeleted {
+        note_id: Uuid,
+        revision: u64,
+    },
     BlobStored {
         reference: String,
         path: PathBuf,
@@ -574,7 +609,6 @@ mod tests {
 
         assert_eq!(json["type"], "forkSessionFromResponse");
         assert_eq!(json["turnCount"], 7);
-        assert_eq!(PROTOCOL_VERSION, 7);
     }
 
     #[test]
@@ -583,7 +617,6 @@ mod tests {
 
         assert_eq!(json["type"], "rewindSessionToMessage");
         assert_eq!(json["turnCount"], 4);
-        assert_eq!(PROTOCOL_VERSION, 7);
     }
 
     #[test]
@@ -650,6 +683,7 @@ mod tests {
                 draft: Some(crate::persistence::ComposerDraft {
                     text: "unfinished".into(),
                     attachments: Vec::new(),
+                    embedded_notes: Vec::new(),
                 }),
             }],
         };

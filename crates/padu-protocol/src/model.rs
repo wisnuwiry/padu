@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
+use crate::notes::EmbeddedNote;
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum ProviderKind {
@@ -701,6 +703,8 @@ pub struct QueuedMessage {
     pub display_content: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<MessageAttachment>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub embedded_notes: Vec<EmbeddedNote>,
     pub created_at: u64,
 }
 
@@ -711,6 +715,7 @@ impl QueuedMessage {
             content: content.into(),
             display_content: None,
             attachments: Vec::new(),
+            embedded_notes: Vec::new(),
             created_at: unix_time(),
         }
     }
@@ -725,6 +730,11 @@ impl QueuedMessage {
             attachments,
             ..Self::new(content)
         }
+    }
+
+    pub fn with_embedded_notes(mut self, embedded_notes: Vec<EmbeddedNote>) -> Self {
+        self.embedded_notes = embedded_notes;
+        self
     }
 
     pub fn visible_content(&self) -> &str {
@@ -1317,6 +1327,21 @@ impl AgentSession {
         display_content: Option<String>,
         attachments: Vec<MessageAttachment>,
     ) -> Uuid {
+        self.begin_turn_with_presentation_and_notes(
+            prompt,
+            display_content,
+            attachments,
+            Vec::new(),
+        )
+    }
+
+    pub fn begin_turn_with_presentation_and_notes(
+        &mut self,
+        prompt: impl Into<String>,
+        display_content: Option<String>,
+        attachments: Vec<MessageAttachment>,
+        embedded_notes: Vec<EmbeddedNote>,
+    ) -> Uuid {
         let id = Uuid::new_v4();
         let now = unix_time();
         self.turns.push(AgentTurn {
@@ -1331,7 +1356,8 @@ impl AgentSession {
         });
         self.messages.push(
             Message::new_for_turn(MessageRole::User, prompt, id)
-                .with_presentation(display_content, attachments),
+                .with_presentation(display_content, attachments)
+                .with_embedded_notes(embedded_notes),
         );
         self.last_reply_at = Some(now);
         id
@@ -1464,11 +1490,27 @@ impl AgentSession {
         display_content: Option<String>,
         attachments: Vec<MessageAttachment>,
     ) -> Uuid {
+        self.push_user_message_with_presentation_and_notes(
+            content,
+            display_content,
+            attachments,
+            Vec::new(),
+        )
+    }
+
+    pub fn push_user_message_with_presentation_and_notes(
+        &mut self,
+        content: impl Into<String>,
+        display_content: Option<String>,
+        attachments: Vec<MessageAttachment>,
+        embedded_notes: Vec<EmbeddedNote>,
+    ) -> Uuid {
         let message = match self.active_turn_id() {
             Some(turn_id) => Message::new_for_turn(MessageRole::User, content, turn_id),
             None => Message::new(MessageRole::User, content),
         }
-        .with_presentation(display_content, attachments);
+        .with_presentation(display_content, attachments)
+        .with_embedded_notes(embedded_notes);
         let id = message.id;
         self.messages.push(message);
         id
@@ -1619,6 +1661,8 @@ pub struct Message {
     pub display_content: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<MessageAttachment>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub embedded_notes: Vec<EmbeddedNote>,
     pub created_at: u64,
     pub streaming: bool,
 }
@@ -1632,6 +1676,7 @@ impl Message {
             content: content.into(),
             display_content: None,
             attachments: Vec::new(),
+            embedded_notes: Vec::new(),
             created_at: unix_time(),
             streaming: false,
         }
@@ -1651,6 +1696,11 @@ impl Message {
     ) -> Self {
         self.display_content = display_content;
         self.attachments = attachments;
+        self
+    }
+
+    pub fn with_embedded_notes(mut self, embedded_notes: Vec<EmbeddedNote>) -> Self {
+        self.embedded_notes = embedded_notes;
         self
     }
 

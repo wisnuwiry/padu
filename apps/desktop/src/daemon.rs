@@ -29,11 +29,45 @@ pub fn start_process() -> anyhow::Result<padu_client::DaemonSupervisor> {
     }
     let app_settings = padu_client::persistence::load_or_create_app_settings()
         .context("could not load desktop daemon settings")?;
-    padu_client::DaemonSupervisor::spawn_configured(
+    let exposure = app_settings.daemon_exposure;
+    match padu_client::DaemonSupervisor::spawn_configured(
         &daemon_executable_path()?,
         cfg!(debug_assertions),
-        app_settings.daemon_exposure,
-    )
+        exposure.clone(),
+    ) {
+        Ok(supervisor) => Ok(supervisor),
+        Err(error) if exposure.enabled => {
+            // A previous desktop process can leave its exposed daemon alive
+            // briefly while the app is being relaunched. Reuse it only when
+            // the persisted token authenticates successfully; an unrelated
+            // listener still produces the original startup error below.
+            let address = format!("ws://127.0.0.1:{}", exposure.port);
+            match padu_client::DaemonSupervisor::connect(&address, exposure.token.clone()) {
+                Ok(supervisor) => Ok(supervisor),
+                Err(_) if cfg!(debug_assertions) => {
+                    // Development must remain launchable after a stale daemon
+                    // with an incompatible token has claimed the configured
+                    // port. Keep the preference intact, but use a private
+                    // ephemeral listener for this process instead of exposing
+                    // the app on an address it does not own.
+                    let mut fallback = exposure;
+                    fallback.enabled = false;
+                    padu_client::DaemonSupervisor::spawn_configured(
+                        &daemon_executable_path()?,
+                        true,
+                        fallback,
+                    )
+                    .map_err(|fallback_error| {
+                        error.context(format!(
+                            "could not start the development daemon on its fallback listener: {fallback_error:#}"
+                        ))
+                    })
+                }
+                Err(_) => Err(error),
+            }
+        }
+        Err(error) => Err(error),
+    }
 }
 
 /// Resolve the local host name once during app construction. Settings can

@@ -1,4 +1,4 @@
-import type { AgentSession, FileEntry, ProviderKind, ProviderSessionSummary, SessionMessageMatch } from '@padu/client'
+import type { AgentSession, FileEntry, NoteSummary, ProviderKind, ProviderSessionSummary, SessionMessageMatch } from '@padu/client'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { FileTypeIcon, ProviderIcon, PROVIDERS, providerMeta, PaduIcon, type PaduIconName } from '@/components/padu-icon'
@@ -7,6 +7,7 @@ import type { SettingsPageId } from '@/components/settings-view'
 import { SETTINGS_PAGES } from '@/components/settings-view'
 import {
   displayTitle,
+  listNotes,
   listProviderSessions,
   providerSessionNativeId,
   sameProviderSession,
@@ -22,8 +23,10 @@ import { projectDisplayName } from '@/lib/project-presentation'
 import { formatTimeAgo, sessionHasStarted } from '@/lib/sidebar-presentation'
 import { cn } from '@/lib/utils'
 
-type PaletteSection = 'suggested' | 'tasks' | 'sessions' | 'providers' | 'commands' | 'settings'
-export type CommandPaletteView = 'commands' | 'resume' | 'resumeProviders' | 'findFile'
+type PaletteSection = 'suggested' | 'tasks' | 'notes' | 'sessions' | 'providers' | 'commands' | 'settings'
+const ALL_NOTES_PROJECT_ID = '00000000-0000-0000-0000-000000000000'
+const MAX_NOTE_RESULTS = 12
+export type CommandPaletteView = 'commands' | 'notes' | 'resume' | 'resumeProviders' | 'findFile'
 type Translator = (key: string, params?: Record<string, string | number>) => string
 
 interface PaletteItem {
@@ -58,6 +61,8 @@ export interface CommandPaletteActions {
   selectNextTask?: () => void
   resumeProviderSession: (summary: ProviderSessionSummary) => Promise<void>
   openFile: (path: string) => void
+  openNotes: (query?: string, noteId?: string) => void
+  embedNote: (note: NoteSummary) => void
 }
 
 export function CommandPalette({
@@ -74,6 +79,7 @@ export function CommandPalette({
   files = [],
   filesLoading = false,
   initialView = 'commands',
+  initialQuery = '',
   actions,
   onOpenChange,
 }: {
@@ -90,6 +96,7 @@ export function CommandPalette({
   files?: FileEntry[]
   filesLoading?: boolean
   initialView?: CommandPaletteView
+  initialQuery?: string
   actions: CommandPaletteActions
   onOpenChange: (open: boolean) => void
 }) {
@@ -100,6 +107,7 @@ export function CommandPalette({
   const [resumeProvider, setResumeProvider] = useState<ProviderKind>(currentProvider)
   const [query, setQuery] = useState('')
   const [matches, setMatches] = useState<SessionMessageMatch[]>([])
+  const [noteSummaries, setNoteSummaries] = useState<NoteSummary[]>([])
   const [matchesQuery, setMatchesQuery] = useState<string | null>(null)
   const [searchPending, setSearchPending] = useState(false)
   const [providerSessions, setProviderSessions] = useState<ProviderSessionSummary[]>([])
@@ -130,7 +138,7 @@ export function CommandPalette({
       : null
     setView(initialView)
     setResumeProvider(currentProvider)
-    setQuery('')
+    setQuery(initialQuery)
     setMatches([])
     setMatchesQuery(null)
     setSearchPending(false)
@@ -142,7 +150,25 @@ export function CommandPalette({
     setSelected(0)
     messageSearchCache.current.clear()
     requestAnimationFrame(() => input.current?.focus())
-  }, [currentProvider, initialView, open])
+  }, [currentProvider, initialQuery, initialView, open])
+
+  useEffect(() => {
+    if (!open || !client) {
+      setNoteSummaries([])
+      return
+    }
+    let current = true
+    void listNotes(client, ALL_NOTES_PROJECT_ID)
+      .then((notes) => {
+        if (current) setNoteSummaries(notes)
+      })
+      .catch(() => {
+        if (current) setNoteSummaries([])
+      })
+    return () => {
+      current = false
+    }
+  }, [client, open])
 
   useEffect(() => {
     if (!open || view !== 'commands' || !client || !query.trim()) {
@@ -277,7 +303,7 @@ export function CommandPalette({
 
   const selectableResumeProviders = PROVIDERS.filter(({ id }) =>
     id === resumeProvider || !settings.data?.disabled_providers.includes(id))
-  const nextItems = view === 'resume'
+  const baseItems = view === 'resume'
     ? buildResumeItems({
         taskState,
         query,
@@ -295,7 +321,9 @@ export function CommandPalette({
         })
     : view === 'findFile'
     ? buildFileItems({ files, query, openFile: actions.openFile })
-    : buildItems({
+    : view === 'notes'
+      ? buildNoteItems(noteSummaries, query, actions.embedNote, true)
+      : buildItems({
         taskState,
         query,
         matches: matchesQuery === query.trim() ? matches : [],
@@ -312,6 +340,9 @@ export function CommandPalette({
         openFileView,
         t,
       })
+  const nextItems = view === 'commands'
+    ? [...baseItems, ...buildNoteItems(noteSummaries, query, (note) => actions.openNotes(undefined, note.id))]
+    : baseItems
   const items = view === 'commands' && shouldKeepPreviousPaletteItems(
     nextItems.length,
     searchPending,
@@ -354,7 +385,7 @@ export function CommandPalette({
       requestAnimationFrame(() => input.current?.focus())
       return
     }
-    if (view === 'findFile') {
+    if (view === 'findFile' || view === 'notes') {
       setView('commands')
       setQuery('')
       setSelected(0)
@@ -400,7 +431,9 @@ export function CommandPalette({
                 ? 'command_palette.resume_provider_placeholder'
                 : view === 'findFile'
                   ? 'command_palette.find_file_placeholder'
-                  : 'command_palette.placeholder')}
+                  : view === 'notes'
+                    ? 'command_palette.note_placeholder'
+                    : 'command_palette.placeholder')}
             autoComplete="off"
             className="h-full min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-[var(--text-ghost)]"
             placeholder={t(view === 'resume'
@@ -409,7 +442,9 @@ export function CommandPalette({
                 ? 'command_palette.resume_provider_placeholder'
                 : view === 'findFile'
                   ? 'command_palette.find_file_placeholder'
-                  : 'command_palette.placeholder')}
+                  : view === 'notes'
+                    ? 'command_palette.note_placeholder'
+                    : 'command_palette.placeholder')}
             ref={input}
             role="combobox"
             value={query}
@@ -630,6 +665,35 @@ function Highlighted({ text, query }: { text: string; query: string }) {
   return <>{text.slice(0, at)}<mark className="bg-transparent font-medium text-foreground">{text.slice(at, at + normalized.length)}</mark>{text.slice(at + normalized.length)}</>
 }
 
+function buildNoteItems(
+  notes: NoteSummary[],
+  query: string,
+  selectNote: (note: NoteSummary) => void,
+  showAll = false,
+): PaletteItem[] {
+  const normalized = query.trim()
+  if (!normalized && !showAll) return []
+  return notes
+    .map((note) => ({
+      note,
+      score: normalized
+        ? fuzzyScore(normalized, `${note.title} ${note.preview} notes note`)
+        : 0,
+    }))
+    .filter((entry): entry is { note: NoteSummary; score: number } => entry.score !== null)
+    .sort((left, right) => right.score - left.score || right.note.updatedAt - left.note.updatedAt)
+    .slice(0, MAX_NOTE_RESULTS)
+    .map(({ note }) => ({
+      id: `note-${note.id}`,
+      section: 'notes',
+      label: note.title || 'Untitled note',
+      detail: note.preview || 'Empty note',
+      icon: 'file',
+      keywords: `${note.title} ${note.preview} note notes`,
+      run: () => selectNote(note),
+    }))
+}
+
 function buildItems({
   taskState,
   query,
@@ -673,6 +737,7 @@ function buildItems({
       closeOnRun: false,
     },
     command('open-project', commandSection, t('command_palette.open_project'), 'folder', shortcut('⌘O', 'Ctrl+O'), `open add folder project workspace repository repo ${t('command_palette.open_project')}`, actions.openProject),
+    command('open-notes', commandSection, t('settings.notes'), 'file', shortcut('⌘⇧M', 'Ctrl+Shift+M'), `notes markdown documents writing snippets memos ${t('settings.notes')}`, () => actions.openNotes()),
     {
       ...command('find-file', commandSection, t('command_palette.find_file'), 'search', shortcut('⌘P', 'Ctrl+P'), `find search file path workspace project ${t('command_palette.find_file')}`, openFileView),
       closeOnRun: false,
@@ -757,6 +822,7 @@ function buildItems({
 
   const sectionRank: Record<PaletteSection, number> = {
     tasks: 0,
+    notes: 0,
     sessions: 0,
     providers: 0,
     commands: 1,

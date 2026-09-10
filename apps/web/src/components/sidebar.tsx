@@ -48,6 +48,7 @@ interface SidebarProps {
   onSearch: () => void
   onSettings: () => void
   onUsage?: () => void
+  onNotes?: () => void
 }
 
 const GROUP_TRANSLATION_KEYS: Record<DateGroup, string> = {
@@ -79,6 +80,7 @@ export function Sidebar({
   onSearch,
   onSettings,
   onUsage,
+  onNotes,
 }: SidebarProps) {
   const { t } = useI18n()
   const [grouping, setGrouping] = useState<SidebarGrouping>(() => {
@@ -157,6 +159,7 @@ export function Sidebar({
   const projectShortcut = usePrimaryShortcut('⌘O', 'Ctrl+O')
   const newTaskShortcut = usePrimaryShortcut('⌘N', 'Ctrl+N')
   const searchShortcut = usePrimaryShortcut('⌘K', 'Ctrl+K')
+  const notesShortcut = usePrimaryShortcut('⌘⇧M', 'Ctrl+Shift+M')
 
   useEffect(() => {
     try {
@@ -247,6 +250,7 @@ export function Sidebar({
               onMobileOpenChange(false)
             }}
           />
+
         </div>
 
         <nav aria-label={t('sidebar.tasks')} className="min-h-0 flex-1">
@@ -259,12 +263,27 @@ export function Sidebar({
             itemContent={(_, row) => {
               if (row.kind === 'search') {
                 return (
-                  <div className="h-[42px] px-2.5">
+                  <div className="h-8 px-2.5">
                     <SidebarAction
                       icon={<PaduIcon name="search" />}
                       label={t('sidebar.search')}
                       shortcut={searchShortcut}
                       onClick={onSearch}
+                    />
+                  </div>
+                )
+              }
+              if (row.kind === 'notes') {
+                return (
+                  <div className="h-8 px-2.5">
+                    <SidebarAction
+                      icon={<PaduIcon name="file" />}
+                      label={t('settings.notes')}
+                      shortcut={notesShortcut}
+                      onClick={() => {
+                        onNotes?.()
+                        onMobileOpenChange(false)
+                      }}
                     />
                   </div>
                 )

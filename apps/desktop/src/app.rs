@@ -69,11 +69,12 @@ use crate::{
     CancelTaskSwitch, CancelTurn, CloseFind, CloseWindow, ConfirmTaskSwitch, CopySelection,
     FindNext, FindPrevious, FocusComposer, NavigateBack, NavigateForward, NewProject, NewSession,
     NextRightPanelTab, OpenBrowser, OpenFilePicker, OpenFiles, OpenFind, OpenFindReplace,
-    OpenResumePicker, OpenReview, OpenSettings, OpenTerminal, PrevRightPanelTab, ReplaceAllMatches,
-    SaveFile, SelectFirstTask, SelectLastTask, SelectNextSession, SelectPreviousSession,
-    SwitchTaskBackward, SwitchTaskForward, ToggleCommandPalette, ToggleFindCaseSensitive,
-    ToggleFindRegex, ToggleFindWholeWord, ToggleFpsCounter, ToggleModelPicker, ToggleRightPanel,
-    ToggleRightPanelFullscreen, ToggleSidebar, ToggleUsagePanel,
+    OpenNotePicker, OpenNotes, OpenResumePicker, OpenReview, OpenSettings, OpenTerminal,
+    PrevRightPanelTab, ReplaceAllMatches, SaveFile, SelectFirstTask, SelectLastTask,
+    SelectNextSession, SelectPreviousSession, SwitchTaskBackward, SwitchTaskForward,
+    ToggleCommandPalette, ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord,
+    ToggleFpsCounter, ToggleModelPicker, ToggleRightPanel, ToggleRightPanelFullscreen,
+    ToggleSidebar, ToggleUsagePanel,
 };
 
 #[cfg(target_os = "macos")]
@@ -214,6 +215,47 @@ enum BranchPickerAction {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkspacePage {
+    Conversation,
+    Notes,
+}
+
+#[derive(Debug, Default)]
+struct WorkspaceNavigation {
+    back: Vec<WorkspacePage>,
+    forward: Vec<WorkspacePage>,
+}
+
+impl WorkspaceNavigation {
+    fn visit(&mut self, current: WorkspacePage, next: WorkspacePage) {
+        if current != next {
+            self.back.push(current);
+            self.forward.clear();
+        }
+    }
+
+    fn back_target(&self) -> Option<WorkspacePage> {
+        self.back.last().copied()
+    }
+
+    fn forward_target(&self) -> Option<WorkspacePage> {
+        self.forward.last().copied()
+    }
+
+    fn go_back(&mut self, current: WorkspacePage) -> Option<WorkspacePage> {
+        let target = self.back.pop()?;
+        self.forward.push(current);
+        Some(target)
+    }
+
+    fn go_forward(&mut self, current: WorkspacePage) -> Option<WorkspacePage> {
+        let target = self.forward.pop()?;
+        self.back.push(current);
+        Some(target)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SettingsPage {
     General,
     Appearance,
@@ -265,6 +307,7 @@ enum PanelResizeTarget {
     Sidebar,
     RightPanel,
     FileTree,
+    NotesSplit,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -336,6 +379,7 @@ struct ComposerSubmission {
     prompt: String,
     display_content: Option<String>,
     attachments: Vec<MessageAttachment>,
+    embedded_notes: Vec<padu_protocol::notes::EmbeddedNote>,
 }
 
 impl ComposerSubmission {
@@ -344,11 +388,13 @@ impl ComposerSubmission {
             prompt,
             display_content: None,
             attachments: Vec::new(),
+            embedded_notes: Vec::new(),
         }
     }
 
     fn into_queued_message(self) -> QueuedMessage {
         QueuedMessage::with_presentation(self.prompt, self.display_content, self.attachments)
+            .with_embedded_notes(self.embedded_notes)
     }
 
     fn from_queued_message(message: QueuedMessage) -> Self {
@@ -356,6 +402,7 @@ impl ComposerSubmission {
             prompt: message.content,
             display_content: message.display_content,
             attachments: message.attachments,
+            embedded_notes: message.embedded_notes,
         }
     }
 
@@ -851,6 +898,7 @@ struct MessageEdit {
     turn_count: usize,
     input: Entity<ComposerInput>,
     attachments: Vec<MessageAttachment>,
+    embedded_notes: Vec<padu_protocol::notes::EmbeddedNote>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1285,10 +1333,14 @@ pub struct Padu {
     /// Files dropped onto the composer, drawn as chips above the input and
     /// drained into the next submission.
     composer_attachments: Vec<ComposerAttachment>,
+    /// Immutable note snapshots selected with `/note`, drained into the next submission.
+    composer_embedded_notes: Vec<padu_protocol::notes::EmbeddedNote>,
     /// Window-modal expansion of an image attachment. The path is already
     /// cached attachment metadata; render never probes the filesystem.
     image_preview: Option<image_preview::ImagePreviewState>,
     image_preview_generation: u64,
+    note_preview: Option<note_preview::NotePreviewState>,
+    note_preview_generation: u64,
     /// In-memory GPUI images for daemon-owned bytes. A missing entry schedules
     /// one background fetch only when a visible row asks to render it; the
     /// desktop never creates another attachment file.
@@ -1406,6 +1458,12 @@ pub struct Padu {
     file_preview_selection: TranscriptSelection,
     file_preview_scroll_handle: ScrollHandle,
     file_preview_scrollbar: Rc<ScrollbarState>,
+    /// Markdown preview state for the Notes page. This must stay separate from
+    /// the right-panel file preview because both surfaces can be visible at once.
+    notes_preview_markdown: RefCell<Option<(String, MarkdownView)>>,
+    notes_preview_selection: TranscriptSelection,
+    notes_preview_scroll_handle: ScrollHandle,
+    notes_preview_scrollbar: Rc<ScrollbarState>,
     right_panel_pending_tab_reveal: Option<usize>,
     right_panel_pending_terminal_focus: Option<Uuid>,
     right_panel_expanded_paths: HashSet<PathBuf>,
@@ -1451,11 +1509,40 @@ pub struct Padu {
     /// swapping in frozen page pixels while an overlay is open.
     scene_overlay_enabled: bool,
     settings_page: Option<SettingsPage>,
+    workspace_page: WorkspacePage,
+    workspace_navigation: WorkspaceNavigation,
     /// Cached notification permission status, refreshed when the Notifications
     /// page is opened and after permission is requested.
     notification_permission: crate::platform::NotificationPermissionStatus,
 
-    /// The Skills page's library snapshot, scanned off-thread. Frames read
+    /// Cached project Notes state. Loading and mutations are performed through
+    /// daemon RPCs off the UI thread; render only reads this snapshot.
+    notes: Vec<notes::Note>,
+    notes_selected: usize,
+    notes_title: Entity<TextInput>,
+    notes_body: Entity<TextInput>,
+    notes_search: Entity<TextInput>,
+    notes_layout: notes::NotesLayout,
+    notes_list_collapsed: bool,
+    notes_split_ratio: f32,
+    notes_save_generation: u64,
+    notes_loaded: bool,
+    notes_load_pending: bool,
+    /// Bumped per daemon load; a completion from a superseded request is
+    /// discarded so a stale project's notes cannot replace the current set.
+    notes_load_generation: u64,
+    /// Bumped whenever the in-memory note set changes shape or content.
+    notes_data_generation: u64,
+    /// Filtered note indices for the Notes list, rebuilt only when the search
+    /// query or the note set changes instead of every frame.
+    notes_filtered: RefCell<Vec<usize>>,
+    notes_filtered_query: String,
+    notes_filtered_generation: u64,
+    /// Virtualized Notes list and its scrollbar, mirroring the sidebar pattern
+    /// so frame work stays proportional to the visible rows.
+    notes_list_state: ListState,
+    notes_scrollbar: Rc<ScrollbarState>,
+    /// The Settings page's library snapshot, scanned off-thread. Frames read
     /// only this; `None` means the first scan has not landed yet.
     skills_catalog: Option<Rc<crate::skills::SkillsCatalog>>,
     /// Bumped per scan; a result from a superseded scan is discarded.
@@ -1634,6 +1721,7 @@ pub struct Padu {
     sidebar_pane: Entity<PaduPane>,
     transcript_pane: Entity<PaduPane>,
     right_panel_pane: Entity<PaduPane>,
+    notes_pane: Entity<PaduPane>,
     /// The unix second the pending time-label wake-up targets, or `None` when
     /// none is armed. See `schedule_time_label_wake`.
     time_label_wake: Cell<Option<u64>>,
@@ -1656,6 +1744,9 @@ pub(crate) mod dialogs;
 mod drafts;
 mod file_search;
 mod image_preview;
+mod note_preview;
+mod notes;
+mod notes_utils;
 mod onboarding;
 mod render;
 pub(crate) mod right_panel;
@@ -1679,6 +1770,7 @@ pub use command_palette::init as init_command_palette;
 use components::*;
 pub use dialogs::init as init_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
+pub use note_preview::init as init_note_preview_keys;
 pub use onboarding::init as init_onboarding_keys;
 pub use right_panel::init_files_keys as init_right_panel_files_keys;
 pub use settings::init as init_settings_keys;
@@ -1766,6 +1858,43 @@ fn migrate_legacy_projectless_projects(
 }
 
 impl Padu {
+    /// Changes the primary workspace without allowing individual pages to
+    /// duplicate route-reset logic. Page-local entities remain alive while
+    /// another workspace is visible.
+    fn navigate_workspace_page(&mut self, page: WorkspacePage, cx: &mut Context<Self>) {
+        let left_settings = self.settings_page.take().is_some();
+        if self.workspace_page == page {
+            if left_settings {
+                cx.notify();
+            }
+            return;
+        }
+        self.workspace_navigation.visit(self.workspace_page, page);
+        self.workspace_page = page;
+        cx.notify();
+    }
+
+    fn navigate_workspace_page_back(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(page) = self.workspace_navigation.go_back(self.workspace_page) else {
+            return false;
+        };
+        self.workspace_page = page;
+        cx.notify();
+        true
+    }
+
+    fn navigate_workspace_page_forward(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(page) = self.workspace_navigation.go_forward(self.workspace_page) else {
+            return false;
+        };
+        self.workspace_page = page;
+        if page == WorkspacePage::Notes {
+            self.ensure_notes_loaded(cx);
+        }
+        cx.notify();
+        true
+    }
+
     fn updater_button_expanded(&self) -> bool {
         self.updater_button_hovered || self.updater_button_focused
     }
@@ -1968,6 +2097,17 @@ impl Padu {
         }
 
         self.state = new_state;
+        // Notes belong to the active daemon. Retain the page entities and
+        // sidebar, but invalidate the daemon-backed Notes snapshot on host
+        // changes so a later activation cannot show another host's data.
+        self.notes_loaded = false;
+        self.notes_load_pending = false;
+        self.notes.clear();
+        self.notes_selected = 0;
+        self.notes_data_generation = self.notes_data_generation.wrapping_add(1);
+        if self.workspace_page == WorkspacePage::Notes {
+            self.ensure_notes_loaded(cx);
+        }
 
         let row_count = self.transcript_row_count();
         self.reset_transcript_rows(row_count);
@@ -2180,6 +2320,19 @@ impl Padu {
                 .clear_on_escape()
                 .placeholder(tr!("settings.archived_search"))
         });
+        let notes_title =
+            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("notes.title_placeholder")));
+        let notes_body = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .multi_line()
+                .syntax(Some("markdown"))
+                .placeholder(tr!("notes.body_placeholder"))
+        });
+        let notes_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .placeholder(tr!("notes.search_placeholder"))
+        });
         let keybindings_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -2227,6 +2380,7 @@ impl Padu {
         let sidebar_pane = PaduPane::new(Padu::sidebar_pane_content, cx);
         let transcript_pane = PaduPane::new(Padu::transcript_pane_content, cx);
         let right_panel_pane = PaduPane::new(Padu::right_panel_pane_content, cx);
+        let notes_pane = PaduPane::new(Padu::notes_pane_content, cx);
         let workspace_client = padu_client::WorkspaceClient::new(daemon.client());
         let (projectless_migrated, projectless_migration_error) =
             migrate_legacy_projectless_projects(&mut state, &workspace_client);
@@ -2361,6 +2515,7 @@ impl Padu {
         let crate::persistence::ComposerDraft {
             text: initial_composer_text,
             attachments: initial_composer_attachments,
+            embedded_notes: initial_composer_embedded_notes,
         } = initial_composer_draft;
         if !initial_composer_text.is_empty() {
             composer.update(cx, |input, cx| input.set_content(initial_composer_text, cx));
@@ -2772,6 +2927,27 @@ impl Padu {
                 },
             )
             .detach();
+            cx.subscribe(&notes_search, |_: &mut Self, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Edited) {
+                    cx.notify();
+                }
+            })
+            .detach();
+            cx.subscribe(
+                &notes_title,
+                |this: &mut Self, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Edited) {
+                        this.schedule_note_save(cx);
+                    }
+                },
+            )
+            .detach();
+            cx.subscribe(&notes_body, |this: &mut Self, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Edited) {
+                    this.schedule_note_save(cx);
+                }
+            })
+            .detach();
             cx.subscribe(
                 &daemon_port_input,
                 |this: &mut Self, _, event: &InputEvent, cx| match event {
@@ -3080,8 +3256,11 @@ impl Padu {
                 composer_sources_stale: false,
                 composer_autocomplete: autocomplete::AutocompleteUi::new(),
                 composer_attachments,
+                composer_embedded_notes: initial_composer_embedded_notes,
                 image_preview: None,
                 image_preview_generation: 0,
+                note_preview: None,
+                note_preview_generation: 0,
                 remote_images: RefCell::new(HashMap::new()),
                 event_wake_tx,
                 task_state_sync_tx,
@@ -3144,6 +3323,10 @@ impl Padu {
                 file_preview_selection: TranscriptSelection::default(),
                 file_preview_scroll_handle: ScrollHandle::new(),
                 file_preview_scrollbar: ScrollbarState::new(),
+                notes_preview_markdown: RefCell::new(None),
+                notes_preview_selection: TranscriptSelection::default(),
+                notes_preview_scroll_handle: ScrollHandle::new(),
+                notes_preview_scrollbar: ScrollbarState::new(),
                 right_panel_pending_tab_reveal: None,
                 right_panel_pending_terminal_focus: None,
                 right_panel_expanded_paths: HashSet::new(),
@@ -3174,6 +3357,26 @@ impl Padu {
                 right_panel_pending_browser_focus: None,
                 scene_overlay_enabled,
                 settings_page: None,
+                workspace_page: WorkspacePage::Conversation,
+                workspace_navigation: WorkspaceNavigation::default(),
+                notes: Vec::new(),
+                notes_selected: 0,
+                notes_title,
+                notes_body,
+                notes_search,
+                notes_layout: notes::NotesLayout::Edit,
+                notes_list_collapsed: false,
+                notes_split_ratio: 0.5,
+                notes_save_generation: 0,
+                notes_loaded: false,
+                notes_load_pending: false,
+                notes_load_generation: 0,
+                notes_data_generation: 0,
+                notes_filtered: RefCell::new(Vec::new()),
+                notes_filtered_query: String::new(),
+                notes_filtered_generation: 0,
+                notes_list_state: ListState::new(0, ListAlignment::Top, px(480.0)),
+                notes_scrollbar: ScrollbarState::new(),
                 notification_permission:
                     crate::platform::NotificationPermissionStatus::NotDetermined,
 
@@ -3261,6 +3464,7 @@ impl Padu {
                 sidebar_pane: sidebar_pane.clone(),
                 transcript_pane: transcript_pane.clone(),
                 right_panel_pane: right_panel_pane.clone(),
+                notes_pane: notes_pane.clone(),
                 time_label_wake: Cell::new(None),
                 time_label_wake_generation: Cell::new(0),
                 fps_last_frame: Instant::now(),
@@ -3269,7 +3473,12 @@ impl Padu {
             }
         });
         navigation_rail.update(cx, |rail, _| rail.set_padu(entity.downgrade()));
-        for pane in [&sidebar_pane, &transcript_pane, &right_panel_pane] {
+        for pane in [
+            &sidebar_pane,
+            &transcript_pane,
+            &right_panel_pane,
+            &notes_pane,
+        ] {
             pane.update(cx, |pane, cx| pane.bind(&entity, cx));
         }
         let initial_row_count = entity.read(cx).transcript_row_count();

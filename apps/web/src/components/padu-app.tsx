@@ -5,9 +5,11 @@ import type {
   AgentSession,
   ComposerDraft,
   ComposerDraftChange,
+  EmbeddedNote,
   ComposerDrafts,
   ComposerDraftTarget,
   MessageAttachment,
+  NoteSummary,
   Project,
   ProviderSessionSummary,
   ReviewDiffSource,
@@ -43,6 +45,7 @@ import { Sidebar } from '@/components/sidebar'
 import { StartupScreen } from '@/components/startup-screen'
 import type { SettingsPageId } from '@/components/settings-view'
 import { Transcript } from '@/components/transcript'
+import { addContentToNewNote } from '@/components/notes-page'
 import { PaduIcon } from '@/components/padu-icon'
 import {
   useComposerDrafts,
@@ -61,6 +64,7 @@ import {
   createProjectlessWorkspace,
   daemonKeys,
   displayTitle,
+  getNote,
   hydrateSession,
   loadProviderSessionHistory,
   persistProject,
@@ -153,6 +157,7 @@ export function PaduApp() {
   const [retainedPanelSessionIds, setRetainedPanelSessionIds] = useState<string[]>([])
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [paletteInitialView, setPaletteInitialView] = useState<CommandPaletteView>('commands')
+  const [paletteInitialQuery, setPaletteInitialQuery] = useState('')
   const [focusComposerSignal, setFocusComposerSignal] = useState(0)
   const [modelPickerSignal, setModelPickerSignal] = useState(0)
   const [usagePanelSignal, setUsagePanelSignal] = useState(0)
@@ -170,6 +175,10 @@ export function PaduApp() {
     sessionId: string
     mention: string
     signal: number
+  } | null>(null)
+  const [composerEmbeddedNote, setComposerEmbeddedNote] = useState<{
+    sessionId: string
+    note: EmbeddedNote
   } | null>(null)
   const [requestedPanel, setRequestedPanel] = useState<PanelSurface>('files')
   const [requestedFile, setRequestedFile] = useState<string | null>(null)
@@ -204,6 +213,23 @@ export function PaduApp() {
   const [draftProject, setDraftProject] = useState<Project | null>(null)
   const hydratedSelected = selected.data?.id === search.session ? selected.data : null
   const current = newTaskMode ? null : hydratedSelected ?? displayed
+  useEffect(() => {
+    if (!client || typeof window === 'undefined') return
+    const pending = window.sessionStorage.getItem('padu.pending-composer-note')
+    if (!pending) return
+    const [targetSession, projectId, noteId] = pending.split(':')
+    if (targetSession !== (current?.id ?? 'new') || !projectId || !noteId) return
+    let cancelled = false
+    void getNote(client, projectId, noteId).then((note) => {
+      if (cancelled || !note) return
+      setComposerEmbeddedNote({
+        sessionId: targetSession,
+        note: { id: note.id, title: note.title, content: note.content, revision: note.revision },
+      })
+      window.sessionStorage.removeItem('padu.pending-composer-note')
+    }).catch((error) => toast.error(error instanceof Error ? error.message : 'Could not load note'))
+    return () => { cancelled = true }
+  }, [client, current?.id])
   useDocumentTitle(newTaskMode ? t('menu.new_task') : current ? displayTitle(current) : null)
   const currentProject = current
     ? taskState.data?.projects.find((project) => project.id === current.project_id)
@@ -617,7 +643,11 @@ export function PaduApp() {
         return
       }
       if (!taskState.data) return
-      if (key === 'n') {
+      if (key === 'm' && event.shiftKey) {
+        event.preventDefault()
+        window.sessionStorage.setItem('padu.note-target-session', current?.id ?? 'new')
+        void navigate({ to: '/notes', search: { q: undefined, noteId: undefined, projectId: activeProject?.id } })
+      } else if (key === 'n') {
         event.preventDefault()
         startNewTask()
       } else if (key === 'o') {
@@ -662,9 +692,29 @@ export function PaduApp() {
     setProjectPickerOpen(true)
   }
 
-  function openCommandPalette(view: CommandPaletteView = 'commands') {
+  function openCommandPalette(view: CommandPaletteView = 'commands', query = '') {
     setPaletteInitialView(view)
+    setPaletteInitialQuery(query)
     setPaletteOpen(true)
+  }
+
+  function embedNoteIntoComposer(note: NoteSummary) {
+    if (!client) return
+    const targetSession = current?.id ?? 'new'
+    void getNote(client, note.projectId, note.id)
+      .then((selected) => {
+        if (!selected) return
+        setComposerEmbeddedNote({
+          sessionId: targetSession,
+          note: {
+            id: selected.id,
+            title: selected.title,
+            content: selected.content,
+            revision: selected.revision,
+          },
+        })
+      })
+      .catch((error) => toast.error(error instanceof Error ? error.message : 'Could not load note'))
   }
 
   function rememberNavigation(navigation: RememberedNavigation) {
@@ -1213,6 +1263,14 @@ export function PaduApp() {
     newTask: () => startNewTask(),
     openProject: openProjectPicker,
     openFile: (path) => openPanel('files', 'uncommitted', path),
+    openNotes: (query, noteId) => {
+      window.sessionStorage.setItem('padu.note-target-session', current?.id ?? 'new')
+      void navigate({
+        to: '/notes',
+        search: { q: query || undefined, noteId: noteId || undefined, projectId: activeProject?.id },
+      })
+    },
+    embedNote: embedNoteIntoComposer,
     chooseModel: () => {
       setModelPickerSignal((value) => value + 1)
     },
@@ -1252,6 +1310,7 @@ export function PaduApp() {
       currentProvider={activeSession?.provider ?? 'codex'}
       files={composerFiles.data ?? []}
       filesLoading={composerFiles.isLoading}
+      initialQuery={paletteInitialQuery}
       initialView={paletteInitialView}
       open={paletteOpen}
       rightPanelVisible={rightPanelVisible}
@@ -1281,6 +1340,10 @@ export function PaduApp() {
           onAddProject={openProjectPicker}
           onMobileOpenChange={setMobileSidebar}
           onNewTask={(project) => startNewTask(project)}
+          onNotes={() => {
+            window.sessionStorage.setItem('padu.note-target-session', current?.id ?? 'new')
+            void navigate({ to: '/notes', search: { q: undefined, noteId: undefined, projectId: activeProject?.id } })
+          }}
           onRemoveSession={removeSessionById}
           onRenameSession={renameSession}
           onSetSessionArchived={(sessionId, archived) => updateSessionFlag(sessionId, 'archived_at', archived)}
@@ -1354,6 +1417,7 @@ export function PaduApp() {
                   type: 'newSession',
                   projectId: activeProject.id,
                 })}
+                embeddedNote={composerEmbeddedNote?.sessionId === 'new' ? composerEmbeddedNote.note : undefined}
                 key={composerDraftId({
                   type: 'newSession',
                   projectId: activeProject.id,
@@ -1367,6 +1431,7 @@ export function PaduApp() {
                 onMentionSignalHandled={() => setComposerMention((value) =>
                   value?.sessionId === activeSession.id ? null : value)}
                 onAddProject={openProjectPicker}
+                onNoteCommand={(query) => openCommandPalette('notes', query)}
                 onFocusSignalHandled={() => setFocusComposerSignal(0)}
                 onModelPickerSignalHandled={() => setModelPickerSignal(0)}
                 onProjectless={() => void createProjectlessTask()}
@@ -1380,10 +1445,13 @@ export function PaduApp() {
                   { type: 'newSession', projectId: activeProject.id },
                   nextDraft,
                 )}
-                onComposerDraftSubmitted={() => removeStoredComposerDraft({
-                  type: 'newSession',
-                  projectId: activeProject.id,
-                })}
+                onComposerDraftSubmitted={() => {
+                  setComposerEmbeddedNote(null)
+                  removeStoredComposerDraft({
+                    type: 'newSession',
+                    projectId: activeProject.id,
+                  })
+                }}
                 onActivated={(session) => {
                   setDisplayed(session)
                   setNewTaskMode(false)
@@ -1420,6 +1488,15 @@ export function PaduApp() {
               rewindingTurnCount={messageRewinds[current.id]}
               rewindTurnCounts={sessionTurnRefs.data ?? []}
               session={current}
+              onAddToNote={(text) => {
+                if (!client) {
+                  toast.error('The daemon is not connected')
+                  return
+                }
+                void addContentToNewNote(client, activeProject?.id, displayTitle(current), text)
+                  .then(() => toast.success('Added assistant response to note'))
+                  .catch((error) => toast.error(error instanceof Error ? error.message : 'Could not add response to note'))
+              }}
               onCopyToComposer={(text) => setComposerPrefill((previous) => ({
                 sessionId: current.id,
                 text,
@@ -1440,6 +1517,7 @@ export function PaduApp() {
                     type: 'session',
                     sessionId: current.id,
                   })}
+                  embeddedNote={composerEmbeddedNote?.sessionId === current.id ? composerEmbeddedNote.note : undefined}
                   key={composerDraftId({ type: 'session', sessionId: current.id })}
                   modelPickerSignal={modelPickerSignal}
                   prefillSignal={composerPrefill?.sessionId === current.id ? composerPrefill.signal : 0}
@@ -1452,6 +1530,7 @@ export function PaduApp() {
                   onMentionSignalHandled={() => setComposerMention((value) =>
                     value?.sessionId === current.id ? null : value)}
                   onAddProject={openProjectPicker}
+                  onNoteCommand={(query) => openCommandPalette('notes', query)}
                   onFocusSignalHandled={() => setFocusComposerSignal(0)}
                   onModelPickerSignalHandled={() => setModelPickerSignal(0)}
                   onPrefillSignalHandled={() => setComposerPrefill((value) =>
@@ -1467,10 +1546,13 @@ export function PaduApp() {
                     { type: 'session', sessionId: current.id },
                     nextDraft,
                   )}
-                  onComposerDraftSubmitted={() => removeStoredComposerDraft({
-                    type: 'session',
-                    sessionId: current.id,
-                  })}
+                  onComposerDraftSubmitted={() => {
+                    setComposerEmbeddedNote(null)
+                    removeStoredComposerDraft({
+                      type: 'session',
+                      sessionId: current.id,
+                    })
+                  }}
                 />
               </div>
             )}

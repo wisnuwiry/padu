@@ -44,9 +44,11 @@ updater.failed: "アップデートに失敗しました：%{error}"
 
 command_palette.placeholder: タスクを検索、またはコマンドを実行…
 command_palette.resume_placeholder: ターミナルセッションを検索…
+command_palette.note_placeholder: ノートを検索…
 command_palette.resume_provider_placeholder: プロバイダーを選択…
 command_palette.suggested: おすすめ
 command_palette.tasks: タスク
+command_palette.notes: ノート
 command_palette.sessions: ターミナルセッション
 command_palette.providers: プロバイダー
 command_palette.commands: コマンド
@@ -118,6 +120,8 @@ settings.daemon_keywords: ホスト リモート サーバー クラウド デ�
 settings.computer_use_keywords: コンピュータ 操作 画面収録 アクセシビリティ アプリ 制御 codex
 settings.notifications_keywords: 通知 アラート 音 サウンド 権限 システム オーディオ テスト バナー タスク 完了
 settings.about_keywords: 情報 バージョン アップデート 更新 ホスト 接続 github リポジトリ スポンサー 支援
+settings.notes: ノート
+settings.notes_keywords: ノート メモ ドキュメント 文章 スニペット メモ書き
 notifications.system_permission: システム権限
 notifications.system_permission_desc: タスク通知のOS配信ステータス
 notifications.permission_granted: 許可
@@ -496,6 +500,37 @@ common.copy_code: コードをコピー
 common.cancel: キャンセル
 common.edit: 編集
 common.send: 送信
+notes.new: 新しいノート
+notes.save: 保存
+notes.edit: 編集
+notes.side_by_side: 並べて表示
+notes.preview: プレビュー
+notes.delete: 削除
+notes.delete_title: ノートを削除しますか？
+notes.delete_message: "「%{title}」を削除してもよろしいですか？この操作は取り消せません。"
+notes.empty_title: ノートはまだありません
+notes.empty_message: ノートを作成してアイデア、スニペット、リマインダーを保存しましょう。
+notes.search_placeholder: ノートを検索
+notes.no_matches: 一致するノートがありません
+notes.collapse: ノートを折りたたむ
+notes.expand: ノートを展開
+notes.details: ノートの詳細
+notes.created: "%{time} に作成"
+notes.updated: "%{time} に更新"
+notes.label: ノート
+notes.untitled: 無題のノート
+notes.title_placeholder: ノートのタイトル
+notes.body_placeholder: Markdown で記述…
+notes.add_to_note: ノートに追加
+notes.added_to_note: ノートに追加しました
+notes.add_failed: ノートに追加できませんでした
+notes.add_failed_error: "ノートに追加できませんでした：%{error}"
+notes.command_description: ノートを検索してチャットに埋め込む
+notes.save_failed: "ノートを保存できませんでした：%{error}"
+notes.time_just_now: たった今
+notes.time_minutes_ago: "%{count} 分前"
+notes.time_hours_ago: "%{count} 時間前"
+notes.time_days_ago: "%{count} 日前"
 
 session.fork_task: タスクをフォーク
 session.fork_task_title: タスクをフォーク

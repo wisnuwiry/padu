@@ -42,9 +42,11 @@ updater.up_to_date: Padu 已是最新版本
 updater.failed: "更新失败：%{error}"
 command_palette.placeholder: 搜索任务或运行命令…
 command_palette.resume_placeholder: 搜索终端会话…
+command_palette.note_placeholder: 搜索笔记…
 command_palette.resume_provider_placeholder: 选择服务商…
 command_palette.suggested: 建议
 command_palette.tasks: 任务
+command_palette.notes: 笔记
 command_palette.sessions: 终端会话
 command_palette.providers: 服务商
 command_palette.commands: 命令
@@ -114,6 +116,8 @@ settings.daemon_keywords: 主机 远程 服务器 云主机 守护进程 服务 
 settings.computer_use_keywords: 电脑操作 屏幕录制 辅助功能 应用 控制 codex
 settings.notifications_keywords: 通知 提醒 声音 权限 系统 音频 测试 横幅 任务 完成
 settings.about_keywords: 关于 信息 版本 更新 检查更新 主机 已连接 github 仓库 赞助 支持
+settings.notes: 笔记
+settings.notes_keywords: 笔记 文档 书写 片段 备忘录
 notifications.system_permission: 系统权限
 notifications.system_permission_desc: 操作系统任务通知发送状态
 notifications.permission_granted: 已允许
@@ -481,6 +485,37 @@ common.copy_code: 复制代码
 common.cancel: 取消
 common.edit: 编辑
 common.send: 发送
+notes.new: 新建笔记
+notes.save: 保存
+notes.edit: 编辑
+notes.side_by_side: 并排
+notes.preview: 预览
+notes.delete: 删除
+notes.delete_title: 删除笔记？
+notes.delete_message: "确定要删除“%{title}”吗？此操作无法撤消。"
+notes.empty_title: 暂无笔记
+notes.empty_message: 创建笔记以保存想法、片段和备忘。
+notes.search_placeholder: 搜索笔记
+notes.no_matches: 无匹配笔记
+notes.collapse: 收起笔记
+notes.expand: 展开笔记
+notes.details: 笔记详情
+notes.created: "创建于 %{time}"
+notes.updated: "更新于 %{time}"
+notes.label: 笔记
+notes.untitled: 无标题笔记
+notes.title_placeholder: 笔记标题
+notes.body_placeholder: 用 Markdown 书写…
+notes.add_to_note: 添加到笔记
+notes.added_to_note: 已添加到笔记
+notes.add_failed: 无法添加到笔记
+notes.add_failed_error: "无法添加到笔记：%{error}"
+notes.command_description: 在聊天中搜索并嵌入笔记
+notes.save_failed: "无法保存笔记：%{error}"
+notes.time_just_now: 刚刚
+notes.time_minutes_ago: "%{count} 分钟前"
+notes.time_hours_ago: "%{count} 小时前"
+notes.time_days_ago: "%{count} 天前"
 session.fork_task: 从此处派生任务
 session.fork_task_title: 从此处派生任务
 session.forking_task: 正在派生任务…

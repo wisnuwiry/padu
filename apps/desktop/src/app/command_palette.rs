@@ -10,6 +10,7 @@ use gpui::{KeyBinding, StyledText, TextRun, actions};
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Matcher, Utf32Str};
 
+use super::notes::Note;
 use super::*;
 
 actions!(
@@ -29,6 +30,7 @@ actions!(
 const SEARCH_CONTEXT: &str = "CommandPalette > TextInput";
 const MAX_TASK_RESULTS: usize = 12;
 const MAX_RESUME_RESULTS: usize = 30;
+const MAX_NOTE_RESULTS: usize = 12;
 const PROVIDER_SESSION_CATALOG_LIMIT: usize = 250;
 const MESSAGE_SEARCH_LIMIT: usize = 50;
 const MESSAGE_SEARCH_CACHE_CAPACITY: usize = 24;
@@ -72,6 +74,7 @@ pub fn init(cx: &mut App) {
 enum PaletteSection {
     Suggested,
     Tasks,
+    Notes,
     Sessions,
     Providers,
     Commands,
@@ -83,6 +86,7 @@ impl PaletteSection {
         crate::i18n::translate(match self {
             Self::Suggested => "command_palette.suggested",
             Self::Tasks => "command_palette.tasks",
+            Self::Notes => "command_palette.notes",
             Self::Sessions => "command_palette.sessions",
             Self::Providers => "command_palette.providers",
             Self::Commands => "command_palette.commands",
@@ -93,7 +97,7 @@ impl PaletteSection {
     fn query_rank(self) -> usize {
         match self {
             Self::Commands | Self::Suggested | Self::Sessions | Self::Providers => 0,
-            Self::Tasks => 1,
+            Self::Tasks | Self::Notes => 1,
             Self::Settings => 2,
         }
     }
@@ -154,6 +158,7 @@ enum PaletteAction {
     ChooseResumeProvider,
     SelectResumeProvider(ProviderKind),
     ResumeProviderSession(ProviderSessionSummary),
+    EmbedNote(Note),
     OpenProject,
     FocusComposer,
     CopyIdentifier(PaletteIdentifier),
@@ -171,6 +176,7 @@ enum PaletteAction {
     FindFile,
     OpenFile(String),
     OpenReview,
+    OpenNotes,
     OpenSettings(SettingsPage),
     OpenOnboarding,
     SelectTask(Uuid),
@@ -184,6 +190,7 @@ enum CommandPaletteView {
     Commands,
     Resume,
     ResumeProviders,
+    Notes,
     FindFile,
 }
 
@@ -368,8 +375,8 @@ fn command_palette_results_height(results: &[CommandPaletteItem], show_empty_sta
 }
 
 pub(super) struct CommandPaletteUi {
-    search: Entity<TextInput>,
-    open: bool,
+    pub(super) search: Entity<TextInput>,
+    pub(super) open: bool,
     focus_generation: u64,
     previous_focus: Option<FocusHandle>,
     view: CommandPaletteView,
@@ -432,6 +439,19 @@ impl Padu {
             self.open_command_palette(window, cx);
         }
         self.open_command_palette_resume_view(None, cx);
+    }
+
+    pub(super) fn open_note_picker_action(
+        &mut self,
+        _: &OpenNotePicker,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.command_palette.open {
+            self.open_command_palette(window, cx);
+        }
+        self.ensure_notes_loaded(cx);
+        self.open_command_palette_note_view(cx);
     }
 
     pub(super) fn open_file_picker_action(
@@ -569,6 +589,26 @@ impl Padu {
         cx.notify();
     }
 
+    fn open_command_palette_note_view(&mut self, cx: &mut Context<Self>) {
+        self.command_palette.view = CommandPaletteView::Notes;
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("command_palette.note_placeholder"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+    }
+
+    fn leave_command_palette_note_view(&mut self, cx: &mut Context<Self>) {
+        self.command_palette.view = CommandPaletteView::Commands;
+        self.command_palette.search.update(cx, |input, cx| {
+            input.set_placeholder(tr!("command_palette.placeholder"), cx);
+            input.clear(cx);
+        });
+        self.refresh_command_palette_results("", false, cx);
+        cx.notify();
+    }
+
     fn open_command_palette_file_view(&mut self, cx: &mut Context<Self>) {
         self.command_palette.view = CommandPaletteView::FindFile;
         self.command_palette.search.update(cx, |input, cx| {
@@ -606,6 +646,7 @@ impl Padu {
             CommandPaletteView::ResumeProviders => {
                 self.leave_command_palette_resume_provider_view(cx)
             }
+            CommandPaletteView::Notes => self.leave_command_palette_note_view(cx),
             CommandPaletteView::FindFile => self.leave_command_palette_file_view(cx),
         }
     }
@@ -617,6 +658,7 @@ impl Padu {
             CommandPaletteView::ResumeProviders => {
                 tr!("command_palette.resume_provider_placeholder")
             }
+            CommandPaletteView::Notes => tr!("command_palette.note_placeholder"),
             CommandPaletteView::FindFile => tr!("command_palette.find_file_placeholder"),
         };
         self.command_palette
@@ -636,6 +678,7 @@ impl Padu {
             self.command_palette.view,
             CommandPaletteView::Resume
                 | CommandPaletteView::ResumeProviders
+                | CommandPaletteView::Notes
                 | CommandPaletteView::FindFile
         ) {
             self.refresh_command_palette_results(query, false, cx);
@@ -986,6 +1029,16 @@ impl Padu {
             ]);
         }
 
+        commands.push(CommandPaletteItem::command(
+            PaletteSection::Commands,
+            tr!("settings.notes"),
+            "icons/note.svg",
+            Some(crate::platform::primary_shortcut("⌘⇧M", "Ctrl+Shift+M")),
+            PaletteAction::OpenNotes,
+            "notes markdown documents writing snippets memos",
+            next(),
+        ));
+
         for (page, label_key, icon, keywords) in [
             (
                 SettingsPage::General,
@@ -1331,6 +1384,88 @@ impl Padu {
             .scroll_to_item(self.command_palette_scroll_index(self.command_palette.selected));
     }
 
+    fn command_palette_note_candidates(&self) -> Vec<CommandPaletteItem> {
+        self.notes
+            .iter()
+            .enumerate()
+            .map(|(order, note)| CommandPaletteItem {
+                section: PaletteSection::Notes,
+                label: if note.title.is_empty() {
+                    tr!("notes.untitled")
+                } else {
+                    note.title.clone()
+                },
+                detail: Some(note.body.lines().next().unwrap_or_default().to_owned()),
+                icon: PaletteIcon::Asset("icons/file.svg"),
+                shortcut: None,
+                action: PaletteAction::EmbedNote(note.clone()),
+                content_match: None,
+                search_text: format!("{} {} {}", note.title, note.body, note.id),
+                order,
+                recency: note.updated_at,
+            })
+            .collect()
+    }
+
+    fn refresh_command_palette_note_results(&mut self, query: &str, preserve_selection: bool) {
+        let selected_action = preserve_selection.then(|| {
+            self.command_palette
+                .results
+                .get(self.command_palette.selected)
+                .map(|item| item.action.clone())
+        });
+        let candidates = self.command_palette_note_candidates();
+        let query = query.trim();
+        let mut results = if query.is_empty() {
+            let mut candidates = candidates;
+            candidates.sort_by(|left, right| {
+                right
+                    .recency
+                    .cmp(&left.recency)
+                    .then(left.order.cmp(&right.order))
+            });
+            candidates
+        } else {
+            let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
+            let mut utf32 = Vec::new();
+            let mut scored = candidates
+                .into_iter()
+                .filter_map(|item| {
+                    pattern
+                        .score(
+                            Utf32Str::new(&item.search_text, &mut utf32),
+                            &mut self.command_palette.matcher,
+                        )
+                        .map(|score| ScoredPaletteItem { score, item })
+                })
+                .collect::<Vec<_>>();
+            // Score is the primary order; recency only breaks score ties so a
+            // strong older match is not pushed below a weak newer one.
+            scored.sort_by(|left, right| {
+                right
+                    .score
+                    .cmp(&left.score)
+                    .then(right.item.recency.cmp(&left.item.recency))
+                    .then(left.item.order.cmp(&right.item.order))
+            });
+            scored.into_iter().map(|scored| scored.item).collect()
+        };
+        results.truncate(MAX_NOTE_RESULTS);
+        self.command_palette.results = results;
+        self.command_palette.selected = selected_action
+            .flatten()
+            .and_then(|action| {
+                self.command_palette
+                    .results
+                    .iter()
+                    .position(|item| item.action == action)
+            })
+            .unwrap_or(0);
+        self.command_palette
+            .scroll
+            .scroll_to_item(self.command_palette.selected);
+    }
+
     fn command_palette_file_candidates(&mut self, query: &str) -> Vec<CommandPaletteItem> {
         crate::composer_complete::filter_files(
             &self.mention_file_index,
@@ -1364,7 +1499,7 @@ impl Padu {
         .collect()
     }
 
-    fn refresh_command_palette_results(
+    pub(super) fn refresh_command_palette_results(
         &mut self,
         query: &str,
         preserve_selection: bool,
@@ -1377,6 +1512,10 @@ impl Padu {
             }
             CommandPaletteView::ResumeProviders => {
                 self.refresh_command_palette_resume_provider_results(query, preserve_selection);
+                return;
+            }
+            CommandPaletteView::Notes => {
+                self.refresh_command_palette_note_results(query, preserve_selection);
                 return;
             }
             CommandPaletteView::FindFile => {
@@ -1473,6 +1612,26 @@ impl Padu {
                 .then(b.score.cmp(&a.score))
                 .then(a.item.order.cmp(&b.item.order))
         });
+        let mut notes = self
+            .command_palette_note_candidates()
+            .into_iter()
+            .filter_map(|item| {
+                pattern
+                    .score(
+                        Utf32Str::new(&item.search_text, &mut utf32),
+                        &mut self.command_palette.matcher,
+                    )
+                    .map(|score| ScoredPaletteItem { score, item })
+            })
+            .collect::<Vec<_>>();
+        notes.sort_by(|a, b| {
+            b.score
+                .cmp(&a.score)
+                .then(b.item.recency.cmp(&a.item.recency))
+                .then(a.item.order.cmp(&b.item.order))
+        });
+        notes.truncate(MAX_NOTE_RESULTS);
+        commands.extend(notes);
 
         let selected_action = preserve_selection.then(|| {
             self.command_palette
@@ -1821,6 +1980,21 @@ impl Padu {
                 self.open_command_palette_file_view(cx);
                 return;
             }
+            PaletteAction::EmbedNote(note) => {
+                self.composer_embedded_notes
+                    .push(padu_protocol::notes::EmbeddedNote {
+                        id: note.id,
+                        title: note.title,
+                        content: note.body,
+                        revision: note.revision,
+                    });
+                self.close_command_palette(window, cx);
+                let focus = self.composer_focus(cx);
+                window.focus(&focus, cx);
+                self.schedule_composer_draft_save(cx);
+                cx.notify();
+                return;
+            }
             _ => {}
         }
 
@@ -1853,8 +2027,12 @@ impl Padu {
             PaletteAction::OpenBrowser => self.open_browser_action(&OpenBrowser, window, cx),
             PaletteAction::OpenTerminal => self.open_terminal_action(&OpenTerminal, window, cx),
             PaletteAction::OpenFiles => self.open_files_action(&OpenFiles, window, cx),
-            PaletteAction::OpenFile(path) => self.open_right_panel_file(path, cx),
+            PaletteAction::OpenFile(path) => {
+                self.ensure_initial_right_panel_file_editor_width();
+                self.open_right_panel_surface(RightPanelSurface::File(path), cx)
+            }
             PaletteAction::OpenReview => self.open_review_action(&OpenReview, window, cx),
+            PaletteAction::OpenNotes => self.open_notes(cx),
             PaletteAction::OpenSettings(page) => {
                 self.open_settings_action(&OpenSettings, window, cx);
                 self.open_settings_page(page, cx);
@@ -1904,6 +2082,7 @@ impl Padu {
             | PaletteAction::ChooseResumeProvider
             | PaletteAction::SelectResumeProvider(_)
             | PaletteAction::ResumeProviderSession(_)
+            | PaletteAction::EmbedNote(_)
             | PaletteAction::FindFile => {
                 unreachable!("resume actions are handled before closing the palette")
             }
@@ -1940,7 +2119,7 @@ impl Padu {
         let results_pending = match self.command_palette.view {
             CommandPaletteView::Resume => self.command_palette.provider_sessions_pending,
             CommandPaletteView::Commands => self.command_palette.message_search_pending,
-            CommandPaletteView::ResumeProviders => false,
+            CommandPaletteView::ResumeProviders | CommandPaletteView::Notes => false,
             CommandPaletteView::FindFile => self.mention_file_index_loading,
         };
         let show_empty_state = should_show_command_palette_empty_state(
