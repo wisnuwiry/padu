@@ -280,7 +280,7 @@ pub(super) fn render_message_footer(
         .tooltip(Tooltip::text(tr!("notes.add_to_note")))
         .on_click(move |_, _, cx| {
             let _ = note_padu.update(cx, |this, cx| {
-                this.add_content_to_selected_note(note_content.as_ref(), cx);
+                this.add_content_to_new_note(note_content.as_ref(), cx);
             });
         });
     let mut footer = div()
@@ -919,7 +919,7 @@ fn message_menu_items(
     let padu_for_note = padu.clone();
     items.push(MenuItem::new(tr!("notes.add_to_note"), move |_, cx| {
         let _ = padu_for_note.update(cx, |this, cx| {
-            this.add_content_to_selected_note(&note_content, cx);
+            this.add_content_to_new_note(&note_content, cx);
         });
     }));
 

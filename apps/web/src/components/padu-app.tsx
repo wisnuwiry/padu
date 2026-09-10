@@ -43,7 +43,7 @@ import { Sidebar } from '@/components/sidebar'
 import { StartupScreen } from '@/components/startup-screen'
 import type { SettingsPageId } from '@/components/settings-view'
 import { Transcript } from '@/components/transcript'
-import { addContentToNote } from '@/components/notes-page'
+import { addContentToNewNote } from '@/components/notes-page'
 import { PaduIcon } from '@/components/padu-icon'
 import {
   useComposerDrafts,
@@ -1437,7 +1437,7 @@ export function PaduApp() {
                   toast.error('The daemon is not connected')
                   return
                 }
-                void addContentToNote(client, activeProject?.id, text)
+                void addContentToNewNote(client, activeProject?.id, displayTitle(current), text)
                   .then(() => toast.success('Added assistant response to note'))
                   .catch((error) => toast.error(error instanceof Error ? error.message : 'Could not add response to note'))
               }}

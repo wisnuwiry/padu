@@ -18,30 +18,18 @@ import { formatNoteTimeAgo, noteExcerpt } from '@/lib/notes-utils'
 
 const ALL_NOTES_PROJECT_ID = '00000000-0000-0000-0000-000000000000'
 
-export async function addContentToNote(
+export async function addContentToNewNote(
   client: PaduClient,
   projectId: string | undefined,
+  title: string | undefined,
   content: string,
 ): Promise<void> {
   if (!projectId) throw new Error('Select a project before adding a response to Notes')
-  const summaries = await listNotes(client, projectId)
-  const summary = summaries[0]
-  const current = summary ? await getNote(client, summary.projectId, summary.id) : null
-  if (current) {
-    await updateNote(client, {
-      projectId: current.projectId,
-      noteId: current.id,
-      title: current.title,
-      content: `${current.content}${current.content ? '\n\n' : ''}${content.trim()}`,
-      expectedRevision: current.revision,
-    })
-  } else {
-    await createNote(client, {
-      projectId,
-      title: 'Assistant notes',
-      content: content.trim(),
-    })
-  }
+  await createNote(client, {
+    projectId,
+    title: title?.trim() || 'Untitled note',
+    content: content.trim(),
+  })
 }
 
 

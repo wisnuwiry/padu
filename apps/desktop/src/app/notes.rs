@@ -355,7 +355,8 @@ impl Padu {
         cx.notify();
     }
 
-    pub(super) fn add_content_to_selected_note(
+    /// Creates a new note containing the supplied content and selects it.
+    pub(super) fn add_content_to_new_note(
         &mut self,
         content: &str,
         cx: &mut Context<Self>,
@@ -369,54 +370,70 @@ impl Padu {
             cx.notify();
             return false;
         };
-
-        if self.notes.is_empty() {
-            let title = self
-                .selected_session()
-                .map(|session| session.display_title().to_owned())
-                .filter(|title| !title.trim().is_empty())
-                .unwrap_or_else(|| tr!("notes.untitled"));
-            let content = content.to_owned();
-            let daemon = self.daemon.clone();
-            cx.spawn(async move |padu, cx| {
-                let result = cx
-                    .background_executor()
-                    .spawn(async move {
-                        let response = daemon.client().request(
-                            Uuid::nil(),
-                            Uuid::nil(),
-                            padu_client::Command::CreateNote {
-                                note: padu_client::notes::CreateNote {
-                                    project_id,
-                                    title,
-                                    content,
-                                },
+        let title = self
+            .selected_session()
+            .map(|session| session.display_title().to_owned())
+            .filter(|title| !title.trim().is_empty())
+            .unwrap_or_else(|| tr!("notes.untitled"));
+        let content = content.to_owned();
+        let daemon = self.daemon.clone();
+        cx.spawn(async move |padu, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let response = daemon.client().request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        padu_client::Command::CreateNote {
+                            note: padu_client::notes::CreateNote {
+                                project_id,
+                                title,
+                                content,
                             },
-                        )?;
-                        let padu_client::ResponsePayload::NoteCreated { note } = response else {
-                            anyhow::bail!("daemon returned an invalid Notes create response");
-                        };
-                        Ok::<_, anyhow::Error>(note)
-                    })
-                    .await;
-                let _ = padu.update(cx, |this, cx| match result {
-                    Ok(note) => {
-                        this.notes.push(Note::from_protocol(note));
-                        this.notes_data_generation = this.notes_data_generation.wrapping_add(1);
-                        this.notes_selected = this.notes.len() - 1;
-                        this.sync_note_editors(cx);
-                        this.show_success_toast(tr!("notes.added_to_note"));
-                        cx.notify();
-                    }
-                    Err(error) => {
-                        this.show_toast(tr!("notes.add_failed_error", error = error));
-                        cx.notify();
-                    }
-                });
-            })
-            .detach();
-            return true;
+                        },
+                    )?;
+                    let padu_client::ResponsePayload::NoteCreated { note } = response else {
+                        anyhow::bail!("daemon returned an invalid Notes create response");
+                    };
+                    Ok::<_, anyhow::Error>(note)
+                })
+                .await;
+            let _ = padu.update(cx, |this, cx| match result {
+                Ok(note) => {
+                    this.notes.push(Note::from_protocol(note));
+                    this.notes_data_generation = this.notes_data_generation.wrapping_add(1);
+                    this.notes_selected = this.notes.len() - 1;
+                    this.sync_note_editors(cx);
+                    this.show_success_toast(tr!("notes.added_to_note"));
+                    cx.notify();
+                }
+                Err(error) => {
+                    this.show_toast(tr!("notes.add_failed_error", error = error));
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        true
+    }
+
+    pub(super) fn add_content_to_selected_note(
+        &mut self,
+        content: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let content = content.trim();
+        if content.is_empty() {
+            return false;
         }
+        if self.notes.is_empty() {
+            return self.add_content_to_new_note(content, cx);
+        }
+        let Some(_project_id) = self.active_project().map(|project| project.id) else {
+            self.show_toast(tr!("notes.add_failed"));
+            cx.notify();
+            return false;
+        };
 
         self.notes_save_generation = self.notes_save_generation.wrapping_add(1);
         let title = self.notes_title.read(cx).content().trim().to_owned();
