@@ -500,6 +500,7 @@ notes.expand: Perluas catatan
 notes.details: Detail catatan
 notes.created: Dibuat %{time}
 notes.updated: Diperbarui %{time}
+notes.label: Catatan
 notes.untitled: Catatan Tanpa Judul
 notes.title_placeholder: Judul catatan
 notes.body_placeholder: Tulis dalam Markdown…

@@ -223,6 +223,7 @@ pub fn run() {
             crate::app::init_command_palette(cx);
             crate::app::init_dialog_keys(cx);
             crate::app::init_image_preview_keys(cx);
+            crate::app::init_note_preview_keys(cx);
             crate::app::init_onboarding_keys(cx);
             crate::app::init_sidebar_keys(cx);
             crate::app::init_right_panel_files_keys(cx);

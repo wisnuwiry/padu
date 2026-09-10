@@ -1043,6 +1043,8 @@ notes.created:
   en: Created %{time}
 notes.updated:
   en: Updated %{time}
+notes.label:
+  en: Note
 notes.untitled:
   en: Untitled Note
 notes.title_placeholder:

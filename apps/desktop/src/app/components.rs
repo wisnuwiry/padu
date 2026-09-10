@@ -3,12 +3,6 @@ use super::*;
 use chrono::{Datelike, Days};
 use std::path::Path;
 
-/// Embedded-note previews inside a transcript row are bounded so a note that
-/// grew through many "Add to note" captures never turns one row into a huge
-/// clone plus layout cost.
-const EMBEDDED_NOTE_PREVIEW_CHARS: usize = 1400;
-const EMBEDDED_NOTE_PREVIEW_HEIGHT: f32 = 160.0;
-
 pub(super) fn pulse_dot(size: f32, color: Hsla) -> AnyElement {
     motion::pulse(Duration::from_millis(1600), move |phase| {
         div()
@@ -405,16 +399,18 @@ pub(super) struct MessageRender<'a> {
 
 fn render_embedded_notes(
     notes: &[padu_protocol::notes::EmbeddedNote],
+    padu: &gpui::WeakEntity<Padu>,
     theme: &Theme,
+    cx: &mut App,
 ) -> Option<AnyElement> {
     if notes.is_empty() {
         return None;
     }
     let mut column = div()
-        .w_full()
         .max_w(px(540.0))
         .flex()
         .flex_col()
+        .items_start()
         .gap(px(6.0));
     for note in notes {
         let title = if note.title.is_empty() {
@@ -422,37 +418,100 @@ fn render_embedded_notes(
         } else {
             note.title.clone()
         };
-        // Bounded preview: a note grows with every "Add to note" capture, so
-        // never clone or lay out the whole body inside a transcript row.
-        let preview = note
+        let excerpt = note
             .content
-            .chars()
-            .take(EMBEDDED_NOTE_PREVIEW_CHARS)
-            .collect::<String>();
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+
+        let preview_focus = cx.focus_handle();
+        let preview_padu = padu.clone();
+        let preview_note = note.clone();
         column = column.child(
             div()
-                .w_full()
-                .rounded(px(10.0))
+                .id(SharedString::from(format!("embedded-note-{}", note.id)))
+                .min_w(px(180.0))
+                .max_w(px(540.0))
+                .rounded(px(8.0))
                 .border_1()
                 .border_color(theme.border)
                 .bg(theme.inset)
-                .px(px(11.0))
-                .py(px(8.0))
-                .text_size(sp(12.0))
+                .px(px(10.0))
+                .py(px(7.0))
+                .flex()
+                .items_start()
+                .gap(px(8.0))
+                .cursor_pointer()
+                .track_focus(&preview_focus)
+                .tab_index(0)
+                .focus_visible(|style| style.border_color(theme.accent))
+                .hover(|style| style.bg(theme.surface))
+                .tooltip(Tooltip::text(tr!("settings.notes")))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                    cx.stop_propagation();
+                })
                 .child(
-                    div()
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text_secondary)
-                        .child(format!("{} · {}", tr!("settings.notes"), title)),
+                    icon("icons/file.svg", 16.0, theme.text_secondary)
+                        .mt(px(2.0))
+                        .flex_none(),
                 )
                 .child(
                     div()
-                        .mt(px(5.0))
-                        .text_color(theme.text)
-                        .max_h(px(EMBEDDED_NOTE_PREVIEW_HEIGHT))
-                        .overflow_hidden()
-                        .child(preview),
-                ),
+                        .min_w_0()
+                        .flex_1()
+                        .flex()
+                        .flex_col()
+                        .gap(px(2.0))
+                        .child(
+                            div()
+                                .text_size(sp(10.0))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text_tertiary)
+                                .child(tr!("notes.label")),
+                        )
+                        .child(
+                            div()
+                                .text_size(sp(14.0))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(theme.text)
+                                .whitespace_nowrap()
+                                .truncate()
+                                .child(title),
+                        )
+                        .child(
+                            div()
+                                .text_size(sp(11.5))
+                                .text_color(theme.text_secondary)
+                                .whitespace_nowrap()
+                                .truncate()
+                                .child(if excerpt.is_empty() {
+                                    "Empty note".to_owned()
+                                } else {
+                                    excerpt
+                                }),
+                        ),
+                )
+                .on_click(move |_, window, cx| {
+                    let note = preview_note.clone();
+                    let _ = preview_padu.update(cx, |this, cx| {
+                        this.open_note_preview(note, window, cx);
+                    });
+                })
+                .on_key_down({
+                    let key_padu = padu.clone();
+                    let key_note = note.clone();
+                    move |event, window, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            let note = key_note.clone();
+                            let _ = key_padu.update(cx, |this, cx| {
+                                this.open_note_preview(note, window, cx);
+                            });
+                            cx.stop_propagation();
+                        }
+                    }
+                }),
         );
     }
     Some(column.into_any_element())
@@ -695,7 +754,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
             ) {
                 column = column.child(attachments);
             }
-            if let Some(notes) = render_embedded_notes(&message.embedded_notes, theme) {
+            if let Some(notes) = render_embedded_notes(&message.embedded_notes, &padu, theme, cx) {
                 column = column.child(notes);
             }
             if let Some(edit_input) = message_edit_input {

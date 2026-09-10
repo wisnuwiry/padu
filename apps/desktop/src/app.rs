@@ -1302,6 +1302,8 @@ pub struct Padu {
     /// cached attachment metadata; render never probes the filesystem.
     image_preview: Option<image_preview::ImagePreviewState>,
     image_preview_generation: u64,
+    note_preview: Option<note_preview::NotePreviewState>,
+    note_preview_generation: u64,
     /// In-memory GPUI images for daemon-owned bytes. A missing entry schedules
     /// one background fetch only when a visible row asks to render it; the
     /// desktop never creates another attachment file.
@@ -1695,6 +1697,7 @@ pub(crate) mod dialogs;
 mod drafts;
 mod file_search;
 mod image_preview;
+mod note_preview;
 mod notes;
 mod notes_utils;
 mod onboarding;
@@ -1720,6 +1723,7 @@ pub use command_palette::init as init_command_palette;
 use components::*;
 pub use dialogs::init as init_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
+pub use note_preview::init as init_note_preview_keys;
 pub use onboarding::init as init_onboarding_keys;
 pub use right_panel::init_files_keys as init_right_panel_files_keys;
 pub use settings::init as init_settings_keys;
@@ -3158,6 +3162,8 @@ impl Padu {
                 composer_embedded_notes: initial_composer_embedded_notes,
                 image_preview: None,
                 image_preview_generation: 0,
+                note_preview: None,
+                note_preview_generation: 0,
                 remote_images: RefCell::new(HashMap::new()),
                 event_wake_tx,
                 task_state_sync_tx,

@@ -501,6 +501,7 @@ notes.expand: 展开笔记
 notes.details: 笔记详情
 notes.created: "创建于 %{time}"
 notes.updated: "更新于 %{time}"
+notes.label: 笔记
 notes.untitled: 无标题笔记
 notes.title_placeholder: 笔记标题
 notes.body_placeholder: 用 Markdown 书写…

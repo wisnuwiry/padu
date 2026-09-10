@@ -335,6 +335,7 @@ impl Render for Padu {
             self.tick_fps(window);
         }
         let image_preview = self.render_image_preview(cx);
+        let note_preview = self.render_note_preview(cx);
         let task_switcher = self.render_task_switcher(window, cx);
         let onboarding_modal = self.render_onboarding_modal(window, cx);
         if self.settings_page.is_some() {
@@ -359,6 +360,7 @@ impl Render for Padu {
                 .children(command_palette)
                 .children(active_dialog)
                 .children(image_preview)
+                .children(note_preview)
                 .children(task_switcher)
                 .children(onboarding_modal)
                 .into_any_element();
@@ -534,6 +536,7 @@ impl Render for Padu {
             .children(command_palette)
             .children(active_dialog)
             .children(image_preview)
+            .children(note_preview)
             .children(task_switcher)
             .children(onboarding_modal)
             .into_any_element();

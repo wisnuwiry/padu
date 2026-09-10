@@ -516,6 +516,7 @@ notes.expand: ノートを展開
 notes.details: ノートの詳細
 notes.created: "%{time} に作成"
 notes.updated: "%{time} に更新"
+notes.label: ノート
 notes.untitled: 無題のノート
 notes.title_placeholder: ノートのタイトル
 notes.body_placeholder: Markdown で記述…
