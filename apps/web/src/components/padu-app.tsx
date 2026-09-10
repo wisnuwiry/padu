@@ -618,7 +618,10 @@ export function PaduApp() {
         return
       }
       if (!taskState.data) return
-      if (key === 'n') {
+      if (key === 'n' && event.shiftKey) {
+        event.preventDefault()
+        void navigate({ to: '/notes', search: { q: undefined, noteId: undefined, projectId: activeProject?.id } })
+      } else if (key === 'n') {
         event.preventDefault()
         startNewTask()
       } else if (key === 'o') {
@@ -1214,10 +1217,10 @@ export function PaduApp() {
     newTask: () => startNewTask(),
     openProject: openProjectPicker,
     openFile: (path) => openPanel('files', 'uncommitted', path),
-    openNotes: (query) => {
+    openNotes: (query, noteId) => {
       void navigate({
         to: '/notes',
-        search: { q: query || undefined, projectId: activeProject?.id },
+        search: { q: query || undefined, noteId: noteId || undefined, projectId: activeProject?.id },
       })
     },
     chooseModel: () => {
@@ -1288,7 +1291,7 @@ export function PaduApp() {
           onAddProject={openProjectPicker}
           onMobileOpenChange={setMobileSidebar}
           onNewTask={(project) => startNewTask(project)}
-          onNotes={() => void navigate({ to: '/notes', search: { q: undefined, projectId: activeProject?.id } })}
+          onNotes={() => void navigate({ to: '/notes', search: { q: undefined, noteId: undefined, projectId: activeProject?.id } })}
           onRemoveSession={removeSessionById}
           onRenameSession={renameSession}
           onSetSessionArchived={(sessionId, archived) => updateSessionFlag(sessionId, 'archived_at', archived)}
@@ -1375,7 +1378,7 @@ export function PaduApp() {
                 onMentionSignalHandled={() => setComposerMention((value) =>
                   value?.sessionId === activeSession.id ? null : value)}
                 onAddProject={openProjectPicker}
-                onNoteCommand={(query) => void navigate({ to: '/notes', search: { q: query || undefined, projectId: activeProject.id } })}
+                onNoteCommand={(query) => void navigate({ to: '/notes', search: { q: query || undefined, noteId: undefined, projectId: activeProject.id } })}
                 onFocusSignalHandled={() => setFocusComposerSignal(0)}
                 onModelPickerSignalHandled={() => setModelPickerSignal(0)}
                 onProjectless={() => void createProjectlessTask()}
@@ -1470,7 +1473,7 @@ export function PaduApp() {
                   onMentionSignalHandled={() => setComposerMention((value) =>
                     value?.sessionId === current.id ? null : value)}
                   onAddProject={openProjectPicker}
-                  onNoteCommand={(query) => void navigate({ to: '/notes', search: { q: query || undefined, projectId: activeProject?.id } })}
+                  onNoteCommand={(query) => void navigate({ to: '/notes', search: { q: query || undefined, noteId: undefined, projectId: activeProject?.id } })}
                   onFocusSignalHandled={() => setFocusComposerSignal(0)}
                   onModelPickerSignalHandled={() => setModelPickerSignal(0)}
                   onPrefillSignalHandled={() => setComposerPrefill((value) =>

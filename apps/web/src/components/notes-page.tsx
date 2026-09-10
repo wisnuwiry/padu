@@ -13,6 +13,7 @@ import {
   updateNote,
 } from '@/lib/daemon-api'
 import { useDaemon } from '@/lib/daemon-context'
+import { useI18n } from '@/lib/i18n'
 import { formatNoteTimeAgo, noteExcerpt } from '@/lib/notes-utils'
 
 const ALL_NOTES_PROJECT_ID = '00000000-0000-0000-0000-000000000000'
@@ -23,7 +24,7 @@ export async function addContentToNote(
   content: string,
 ): Promise<void> {
   if (!projectId) throw new Error('Select a project before adding a response to Notes')
-  const summaries = await listNotes(client, ALL_NOTES_PROJECT_ID)
+  const summaries = await listNotes(client, projectId)
   const summary = summaries[0]
   const current = summary ? await getNote(client, summary.projectId, summary.id) : null
   if (current) {
@@ -48,6 +49,7 @@ export function NotesPage() {
   const navigate = useNavigate()
   const search = useSearch({ from: '/notes' })
   const { client } = useDaemon()
+  const { t } = useI18n()
   const projectId = search.projectId
   const [notes, setNotes] = useState<NoteSummary[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -59,9 +61,15 @@ export function NotesPage() {
   const [listCollapsed, setListCollapsed] = useState(false)
   const [contextMenu, setContextMenu] = useState<{ id: string; x: number; y: number } | null>(null)
   const autosaveKey = useRef<string | null>(null)
+  // Bumped per refresh; a completion from a superseded request (project switch,
+  // a newer refresh, or an add-triggered reload) is discarded so it cannot
+  // replace newer notes or selections with stale data.
+  const refreshGeneration = useRef(0)
 
   async function refresh(preferredId?: string) {
+    const generation = ++refreshGeneration.current
     if (!client) {
+      if (generation !== refreshGeneration.current) return
       setNotes([])
       setSelected(null)
       setLoading(false)
@@ -70,23 +78,27 @@ export function NotesPage() {
     setLoading(true)
     try {
       const next = await listNotes(client, ALL_NOTES_PROJECT_ID)
+      if (generation !== refreshGeneration.current) return
       setNotes(next)
       const id = preferredId ?? selectedId ?? next[0]?.id ?? null
       const summary = next.find((note) => note.id === id)
+      if (generation !== refreshGeneration.current) return
       setSelectedId(id)
       setSelected(id && summary ? await getNote(client, summary.projectId, id) : null)
     } catch (error) {
+      if (generation !== refreshGeneration.current) return
       toast.error(error instanceof Error ? error.message : 'Could not load notes')
     } finally {
-      setLoading(false)
+      if (generation === refreshGeneration.current) setLoading(false)
     }
   }
 
   useEffect(() => {
-    void refresh()
+    void refresh(search.noteId)
     // Notes are project-independent; only the daemon connection identifies this resource.
+    // refresh intentionally reads current state when it fires.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client])
+  }, [client, search.noteId])
 
   const visibleNotes = useMemo(() => {
     const query = filter.trim().toLocaleLowerCase()
@@ -144,13 +156,14 @@ export function NotesPage() {
   async function removeNote(noteId = selectedId) {
     if (!client || !noteId) return
     const summary = notes.find((item) => item.id === noteId)
-    const note = selected?.id === noteId
-      ? selected
-      : summary
-        ? await getNote(client, summary.projectId, noteId)
-        : null
-    if (!note || !window.confirm(`Delete “${note.title || 'Untitled note'}”?`)) return
+    if (!summary && selected?.id !== noteId) return
     try {
+      const note = selected?.id === noteId
+        ? selected
+        : summary
+          ? await getNote(client, summary.projectId, noteId)
+          : null
+      if (!note || !window.confirm(`Delete “${note.title || 'Untitled note'}”?`)) return
       await deleteNote(client, note.projectId, note.id, note.revision)
       await refresh()
       setContextMenu(null)
@@ -205,9 +218,9 @@ export function NotesPage() {
             <nav className="mt-3 min-h-0 flex-1 space-y-1 overflow-y-auto" aria-label="Notes">
               {loading ? <p className="px-2 py-6 text-center text-sm text-[var(--text-tertiary)]">Loading notes…</p> : visibleNotes.length ? visibleNotes.map((note) => (
                 <div key={note.id} className="relative">
-                  <button className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring ${selected?.id === note.id ? 'bg-accent' : 'hover:bg-accent/70'}`} type="button" onContextMenu={(event) => { event.preventDefault(); setContextMenu({ id: note.id, x: event.clientX, y: event.clientY }) }} onClick={() => void selectNote(note.id)}>
+                  <button className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring ${selected?.id === note.id ? 'bg-accent' : 'hover:bg-accent/70'}`} type="button" aria-current={selected?.id === note.id ? 'page' : undefined} onContextMenu={(event) => { event.preventDefault(); setContextMenu({ id: note.id, x: event.clientX, y: event.clientY }) }} onClick={() => void selectNote(note.id)}>
                     <span className="grid size-6 shrink-0 place-items-center rounded-md bg-muted"><PaduIcon name="file" /></span>
-                    <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{note.title || 'Untitled note'}</span><span className="mt-0.5 block truncate text-xs text-[var(--text-tertiary)]">{noteExcerpt(note.preview) || 'Empty note'}</span><span className="mt-0.5 block truncate text-[11px] text-[var(--text-tertiary)]">{note.projectId ? 'Project note' : 'No project'} · Updated {formatNoteTimeAgo(note.updatedAt)}</span></span>
+                    <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{note.title || 'Untitled note'}</span><span className="mt-0.5 block truncate text-xs text-[var(--text-tertiary)]">{noteExcerpt(note.preview) || 'Empty note'}</span><span className="mt-0.5 block truncate text-[11px] text-[var(--text-tertiary)]">{note.projectId ? 'Project note' : 'No project'} · Updated {formatNoteTimeAgo(note.updatedAt, t)}</span></span>
                   </button>
                 </div>
               )) : <p className="px-2 py-6 text-center text-sm text-[var(--text-tertiary)]">{filter ? 'No matching notes' : 'No notes yet.'}</p>}
@@ -220,7 +233,7 @@ export function NotesPage() {
                   <label className="sr-only" htmlFor="note-title">Note title</label>
                   <input id="note-title" className="min-w-0 flex-1 bg-transparent text-2xl font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring" value={selected.title} onChange={(event) => setSelected({ ...selected, title: event.target.value })} />
                 </div>
-                <div className="flex items-center justify-between gap-3 text-xs text-[var(--text-tertiary)]"><span className="min-w-0 truncate">Created {formatNoteTimeAgo(selected.createdAt)} · {saving ? 'Saving…' : `Updated ${formatNoteTimeAgo(selected.updatedAt)}`}</span><div className="flex items-center gap-1 rounded-md bg-muted p-1"><button className={`rounded px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring ${!preview ? 'bg-background shadow-sm' : 'hover:bg-accent'}`} type="button" aria-label="Edit mode" aria-pressed={!preview} onClick={() => setPreview(false)}><PaduIcon name="pencil" /></button><button className={`rounded px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring ${preview ? 'bg-background shadow-sm' : 'hover:bg-accent'}`} type="button" aria-label="Preview mode" aria-pressed={preview} onClick={() => setPreview(true)}><PaduIcon name="eye" /></button><button className="rounded px-2 py-1 text-destructive outline-none hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-ring" type="button" aria-label="Delete note" onClick={() => void removeNote()}><PaduIcon name="trash" /></button></div></div>
+                <div className="flex items-center justify-between gap-3 text-xs text-[var(--text-tertiary)]"><span className="min-w-0 truncate">Created {formatNoteTimeAgo(selected.createdAt, t)} · {saving ? 'Saving…' : `Updated ${formatNoteTimeAgo(selected.updatedAt, t)}`}</span><div className="flex items-center gap-1 rounded-md bg-muted p-1"><button className={`rounded px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring ${!preview ? 'bg-background shadow-sm' : 'hover:bg-accent'}`} type="button" aria-label="Edit mode" aria-pressed={!preview} onClick={() => setPreview(false)}><PaduIcon name="pencil" /></button><button className={`rounded px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring ${preview ? 'bg-background shadow-sm' : 'hover:bg-accent'}`} type="button" aria-label="Preview mode" aria-pressed={preview} onClick={() => setPreview(true)}><PaduIcon name="eye" /></button><button className="rounded px-2 py-1 text-destructive outline-none hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-ring" type="button" aria-label="Delete note" onClick={() => void removeNote()}><PaduIcon name="trash" /></button></div></div>
                 {preview ? (
                   <article className="markdown min-h-0 flex-1 overflow-y-auto text-[15px] leading-7">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{selected.content}</ReactMarkdown>

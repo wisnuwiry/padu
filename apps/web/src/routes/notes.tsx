@@ -5,6 +5,7 @@ export const Route = createFileRoute('/notes')({
   validateSearch: (search: Record<string, unknown>) => ({
     q: typeof search.q === 'string' ? search.q : undefined,
     projectId: typeof search.projectId === 'string' ? search.projectId : undefined,
+    noteId: typeof search.noteId === 'string' ? search.noteId : undefined,
   }),
   component: NotesPage,
 })

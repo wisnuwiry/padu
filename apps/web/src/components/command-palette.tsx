@@ -61,7 +61,7 @@ export interface CommandPaletteActions {
   selectNextTask?: () => void
   resumeProviderSession: (summary: ProviderSessionSummary) => Promise<void>
   openFile: (path: string) => void
-  openNotes: (query?: string) => void
+  openNotes: (query?: string, noteId?: string) => void
 }
 
 export function CommandPalette({
@@ -659,7 +659,7 @@ function Highlighted({ text, query }: { text: string; query: string }) {
 function buildNoteItems(
   notes: NoteSummary[],
   query: string,
-  openNotes: (query?: string) => void,
+  openNotes: (query?: string, noteId?: string) => void,
 ): PaletteItem[] {
   const normalized = query.trim()
   if (!normalized) return []
@@ -678,7 +678,7 @@ function buildNoteItems(
       detail: note.preview || 'Empty note',
       icon: 'file',
       keywords: `${note.title} ${note.preview} note notes`,
-      run: () => openNotes(note.title || note.preview),
+      run: () => openNotes(undefined, note.id),
     }))
 }
 

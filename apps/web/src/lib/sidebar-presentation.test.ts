@@ -24,6 +24,9 @@ describe('desktop sidebar presentation', () => {
   test('keeps Add Project in an empty history through the first group header', () => {
     expect(sidebarRows([], new Set())).toEqual([
       { kind: 'search', key: 'search' },
+      { kind: 'notes', key: 'notes' },
+      { kind: 'separator', key: 'actions-separator' },
+      { kind: 'spacer', key: 'actions-spacer' },
       {
         kind: 'group',
         key: 'group:updated:today',
