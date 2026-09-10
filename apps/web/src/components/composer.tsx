@@ -4,6 +4,7 @@ import type {
   AgentSession,
   BranchSnapshot,
   ComposerDraft,
+  EmbeddedNote,
   GoalOperation,
   MessageAttachment,
   PlanUsage,
@@ -127,6 +128,7 @@ export function Composer({
   prefillSignal,
   prefillText,
   initialComposerDraft,
+  embeddedNote,
   onComposerDraftChange,
   onComposerDraftSubmitted,
   attachmentSignal,
@@ -155,6 +157,7 @@ export function Composer({
   prefillSignal?: number
   prefillText?: string
   initialComposerDraft?: ComposerDraft
+  embeddedNote?: EmbeddedNote
   onComposerDraftChange?: (draft: ComposerDraft) => void
   onComposerDraftSubmitted?: () => void
   attachmentSignal?: number
@@ -200,6 +203,9 @@ export function Composer({
   const [attachments, setAttachments] = useState<MessageAttachment[]>(
     () => initialComposerDraft?.attachments ?? [],
   )
+  const [embeddedNotes, setEmbeddedNotes] = useState<EmbeddedNote[]>(
+    () => initialComposerDraft?.embedded_notes ?? [],
+  )
   const [submitting, setSubmitting] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
@@ -227,7 +233,7 @@ export function Composer({
   const selectedModel = probe.data?.models.find((model) => model.id === session.model)
     ?? probe.data?.models.find((model) => model.is_default)
     ?? probe.data?.models[0]
-  const hasDraft = Boolean(prompt.trim() || attachments.length)
+  const hasDraft = Boolean(prompt.trim() || attachments.length || embeddedNotes.length)
   const canSteer = busy && session.status !== 'connecting' && runtime?.supportsSteer
   const workspace = session.workspace ?? { kind: 'local' as const }
   const projectChoices = selectableProjects(projects, project)
@@ -397,8 +403,13 @@ export function Composer({
   }, [])
 
   useEffect(() => {
-    draftChange.current?.({ text: prompt, attachments })
-  }, [attachments, prompt])
+    if (!embeddedNote || embeddedNotes.some((note) => note.id === embeddedNote.id)) return
+    setEmbeddedNotes((current) => [...current, embeddedNote])
+  }, [embeddedNote, embeddedNotes])
+
+  useEffect(() => {
+    draftChange.current?.({ text: prompt, attachments, embedded_notes: embeddedNotes })
+  }, [attachments, embeddedNotes, prompt])
 
   async function activateDraft() {
     if (!draft) return session
@@ -408,6 +419,7 @@ export function Composer({
   function providerPromptOverride(
     submittedPrompt: string,
     submittedAttachments: MessageAttachment[],
+    submittedNotes: EmbeddedNote[] = embeddedNotes,
   ): string | undefined {
     const expanded = expandedComposerSubmission(
       session.provider,
@@ -418,7 +430,8 @@ export function Composer({
     return [
       expanded,
       submittedAttachments.map((attachment) => `@${attachment.mention}`).join(' '),
-    ].filter(Boolean).join(' ')
+      ...submittedNotes.map((note) => `${note.title || 'Untitled note'}\n${note.content}`),
+    ].filter(Boolean).join('\n\n')
   }
 
   function executeLocalComposerCommand(submittedPrompt = prompt): boolean {
@@ -509,10 +522,11 @@ export function Composer({
   }
 
   async function submit() {
-    if (submitting || (!prompt.trim() && attachments.length === 0)) return
+    if (submitting || (!prompt.trim() && attachments.length === 0 && embeddedNotes.length === 0)) return
     if (executeLocalComposerCommand()) return
     const submittedPrompt = prompt
     const submittedAttachments = attachments
+    const submittedNotes = embeddedNotes
     let cleared = false
     setSubmitting(true)
     try {
@@ -521,13 +535,15 @@ export function Composer({
         target,
         submittedPrompt,
         submittedAttachments,
-        providerPromptOverride(submittedPrompt, submittedAttachments),
+        providerPromptOverride(submittedPrompt, submittedAttachments, submittedNotes),
+        submittedNotes,
       )
       onComposerDraftSubmitted?.()
       setPrompt('')
       setCursor(0)
       setDismissedAutocomplete(null)
       setAttachments([])
+      setEmbeddedNotes([])
       cleared = true
       if (draft) {
         const optimistic = config
@@ -540,6 +556,7 @@ export function Composer({
       if (cleared && mounted.current) {
         setPrompt((current) => current || submittedPrompt)
         setAttachments((current) => current.length ? current : submittedAttachments)
+        setEmbeddedNotes((current) => current.length ? current : submittedNotes)
       }
       toast.error(errorMessage(error))
     } finally {
@@ -552,6 +569,7 @@ export function Composer({
     if (executeLocalComposerCommand()) return
     const submittedPrompt = prompt
     const submittedAttachments = attachments
+    const submittedNotes = embeddedNotes
     let cleared = false
     setSubmitting(true)
     try {
@@ -559,19 +577,22 @@ export function Composer({
         session,
         submittedPrompt,
         submittedAttachments,
-        providerPromptOverride(submittedPrompt, submittedAttachments),
+        providerPromptOverride(submittedPrompt, submittedAttachments, submittedNotes),
+        submittedNotes,
       )
       onComposerDraftSubmitted?.()
       setPrompt('')
       setCursor(0)
       setDismissedAutocomplete(null)
       setAttachments([])
+      setEmbeddedNotes([])
       cleared = true
       await pending
     } catch (error) {
       if (cleared && mounted.current) {
         setPrompt((current) => current || submittedPrompt)
         setAttachments((current) => current.length ? current : submittedAttachments)
+        setEmbeddedNotes((current) => current.length ? current : submittedNotes)
       }
       toast.error(errorMessage(error))
     } finally {
@@ -768,6 +789,7 @@ export function Composer({
           onEdit={(message) => {
             setPrompt(message.display_content ?? message.content)
             setAttachments(message.attachments ?? [])
+            setEmbeddedNotes(message.embedded_notes ?? [])
             void removeQueuedMessage(session.id, message.id).catch((error) =>
               toast.error(errorMessage(error)),
             )
@@ -786,6 +808,7 @@ export function Composer({
               message.display_content ?? message.content,
               message.attachments ?? [],
               message.content,
+              message.embedded_notes ?? [],
             ).catch((error) => toast.error(errorMessage(error)))
           }}
         />
@@ -826,6 +849,23 @@ export function Composer({
                   t={t}
                   onRemove={() => setAttachments((current) => current.filter((_, item) => item !== index))}
                 />
+              ))}
+            </div>
+          )}
+          {embeddedNotes.length > 0 && (
+            <div className="flex flex-col gap-1.5 px-1 pb-2 pt-0.5">
+              {embeddedNotes.map((note, index) => (
+                <div key={`${note.id}-${note.revision}-${index}`} className="flex w-full items-start gap-2 rounded-lg border border-border bg-[var(--inset)] px-2.5 py-2">
+                  <PaduIcon name="file" className="mt-0.5 size-4 shrink-0 text-[var(--text-secondary)]" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[10px] font-medium text-[var(--text-tertiary)]">{t('notes.label')}{!projectless ? ` · ${projectName}` : ''}</div>
+                    <div className="truncate text-xs text-foreground">{note.title.trim() || t('notes.untitled')}</div>
+                    <div className="truncate text-[11px] text-[var(--text-secondary)]">{note.content.split(/\r?\n/u)[0]?.trim() || 'Empty note'}</div>
+                  </div>
+                  <button className="shrink-0 rounded p-1 outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring" type="button" aria-label={`Remove ${t('notes.label').toLocaleLowerCase()}`} onClick={() => setEmbeddedNotes((current) => current.filter((_, item) => item !== index))}>
+                    <PaduIcon name="x" className="size-3.5" />
+                  </button>
+                </div>
               ))}
             </div>
           )}

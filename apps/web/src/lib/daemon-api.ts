@@ -7,6 +7,7 @@ import type {
   ComposerDraftChange,
   ComposerDrafts,
   DaemonSettings,
+  EmbeddedNote,
   FileEntry,
   MessageAttachment,
   Note,
@@ -798,6 +799,7 @@ export function beginTurn(
   session: AgentSession,
   prompt: string,
   attachments: MessageAttachment[] = [],
+  embeddedNotes: EmbeddedNote[] = [],
 ): AgentSession {
   const now = unixTime()
   const turnId = crypto.randomUUID()
@@ -821,8 +823,9 @@ export function beginTurn(
         turn_id: turnId,
         role: 'user',
         content: providerPrompt,
-        display_content: attachments.length ? visiblePrompt : null,
+        display_content: attachments.length || embeddedNotes.length ? visiblePrompt : null,
         attachments,
+        embedded_notes: embeddedNotes,
         created_at: now,
         streaming: false,
       },

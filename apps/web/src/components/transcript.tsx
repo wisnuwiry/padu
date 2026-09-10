@@ -1,6 +1,7 @@
 import type {
   ActivityItem,
   AgentSession,
+  EmbeddedNote,
   MessageAttachment,
   ReviewDiffSource,
 } from '@padu/client'
@@ -1007,6 +1008,59 @@ function TranscriptRow({
   )
 }
 
+function EmbeddedNoteCard({
+  note,
+  t,
+}: {
+  note: EmbeddedNote
+  t: Translator
+}) {
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const title = note.title.trim() || t('notes.untitled')
+  const excerpt = note.content.split(/\r?\n/u)[0]?.trim() || 'Empty note'
+
+  return (
+    <>
+      <button
+        className="flex w-fit min-w-[180px] max-w-[540px] items-start gap-2 rounded-lg border border-border bg-[var(--inset)] px-2.5 py-2 text-left outline-none transition-colors hover:bg-card focus-visible:ring-2 focus-visible:ring-ring"
+        type="button"
+        onClick={() => setPreviewOpen(true)}
+      >
+        <PaduIcon name="file" className="mt-0.5 size-4 shrink-0 text-[var(--text-secondary)]" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[10px] font-medium text-[var(--text-tertiary)]">{t('notes.label')}</span>
+          <span className="block truncate text-xs text-foreground">{title}</span>
+          <span className="block truncate text-[11px] text-[var(--text-secondary)]">{excerpt}</span>
+        </span>
+      </button>
+      {previewOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-6" role="presentation">
+          <div
+            className="relative flex max-h-[min(620px,calc(100dvh-3rem))] w-full max-w-2xl flex-col gap-3 overflow-hidden rounded-xl border bg-card p-5 shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`note-preview-${note.id}`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              className="absolute right-3 top-3 rounded-full p-1.5 outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+              type="button"
+              aria-label="Close note preview"
+              onClick={() => setPreviewOpen(false)}
+            >
+              <PaduIcon name="x" className="size-4" />
+            </button>
+            <h2 id={`note-preview-${note.id}`} className="pr-8 text-base font-semibold">{title}</h2>
+            <div className="markdown min-h-0 overflow-y-auto text-sm leading-6">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{note.content}</ReactMarkdown>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
 function MessageRow({
   message,
   locale,
@@ -1057,10 +1111,7 @@ function MessageRow({
             </div>
           ) : null}
           {message.embedded_notes?.map((note) => (
-            <article key={`${note.id}-${note.revision}`} className="w-full rounded-xl border border-border bg-[var(--inset)] p-4 text-left">
-              <div className="mb-2 flex items-center gap-2 text-xs font-medium text-[var(--text-tertiary)]"><PaduIcon name="compose" /> Attached note · {note.title}</div>
-              <div className="markdown max-h-72 overflow-y-auto text-[14px] leading-6"><Markdown text={note.content} compact /></div>
-            </article>
+            <EmbeddedNoteCard key={`${note.id}-${note.revision}`} note={note} t={t} />
           ))}
           {editing && onCancelEdit && onSubmitEdit ? (
             <MessageEditBubble

@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import type {
   AgentSession,
   DaemonSettings,
+  EmbeddedNote,
   GoalOperation,
   MessageAttachment,
   PlanUsage,
@@ -117,12 +118,14 @@ interface RuntimeContextValue {
     prompt: string,
     attachments?: MessageAttachment[],
     providerPromptOverride?: string,
+    embeddedNotes?: EmbeddedNote[],
   ) => Promise<void>
   steerPrompt: (
     session: AgentSession,
     prompt: string,
     attachments?: MessageAttachment[],
     providerPromptOverride?: string,
+    embeddedNotes?: EmbeddedNote[],
   ) => Promise<void>
   sendGoalOperation: (session: AgentSession, operation: GoalOperation) => Promise<void>
   cancel: (sessionId: string) => Promise<void>
@@ -171,6 +174,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         providerPrompt: string
         displayContent: string
         attachments: MessageAttachment[]
+        embeddedNotes: EmbeddedNote[]
       }>
     >(),
   )
@@ -422,6 +426,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             nextQueued.display_content ?? nextQueued.content,
             nextQueued.attachments ?? [],
             nextQueued.content,
+            nextQueued.embedded_notes ?? [],
           )
         })
         .catch((error) => toast.error(errorMessage(error)))
@@ -490,6 +495,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
                       ? pending.displayContent
                       : null,
                   attachments: pending.attachments,
+                  embedded_notes: pending.embeddedNotes,
                   created_at: Math.floor(Date.now() / 1_000),
                   streaming: false,
                 },
@@ -504,6 +510,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
               pending.displayContent,
               pending.providerPrompt,
               pending.attachments,
+              pending.embeddedNotes,
             )
             cacheSession(current)
             void persistOrdered(current).catch((error) => toast.error(errorMessage(error)))
@@ -614,12 +621,13 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       rawPrompt: string,
       attachments: MessageAttachment[] = [],
       providerPromptOverride?: string,
+      embeddedNotes: EmbeddedNote[] = [],
     ) => {
       if (!client || !config || phase !== 'connected') {
         throw new Error(translate(localeRef.current, 'errors.daemon_disconnected'))
       }
       const prompt = rawPrompt.trim()
-      if (!prompt && attachments.length === 0) return
+      if (!prompt && attachments.length === 0 && embeddedNotes.length === 0) return
       const providerPrompt = providerPromptOverride === undefined
         ? [
             prompt,
@@ -637,7 +645,13 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         currentSession.status === 'waiting' ||
         checkpointCaptures.current.has(currentSession.id)
       ) {
-        const queued = queueSubmission(currentSession, prompt, providerPrompt, attachments)
+        const queued = queueSubmission(
+          currentSession,
+          prompt,
+          providerPrompt,
+          attachments,
+          embeddedNotes,
+        )
         cacheSession(queued)
         await persistOrdered(queued)
         return
@@ -647,7 +661,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         await attachSession(currentSession)
       }
 
-      let session = beginTurn(currentSession, prompt, attachments)
+      let session = beginTurn(currentSession, prompt, attachments, embeddedNotes)
       cacheSession(session)
 
       let project: Project
@@ -998,12 +1012,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   sendPromptRef.current = sendPrompt
 
   const steerPrompt = useCallback<RuntimeContextValue['steerPrompt']>(
-    async (session, rawPrompt, attachments = [], providerPromptOverride) => {
+    async (session, rawPrompt, attachments = [], providerPromptOverride, embeddedNotes = []) => {
       if (!client || phase !== 'connected') {
         throw new Error(translate(localeRef.current, 'errors.daemon_disconnected'))
       }
       const prompt = rawPrompt.trim()
-      if (!prompt && attachments.length === 0) return
+      if (!prompt && attachments.length === 0 && embeddedNotes.length === 0) return
       const providerPrompt = providerPromptOverride === undefined
         ? [
             prompt,
@@ -1018,11 +1032,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         session.status === 'idle' ||
         session.status === 'failed'
       ) {
-        await sendPrompt(session, prompt, attachments, providerPrompt)
+        await sendPrompt(session, prompt, attachments, providerPrompt, embeddedNotes)
         return
       }
       const pending = pendingSteers.current.get(session.id) ?? []
-      pending.push({ providerPrompt, displayContent: prompt, attachments })
+      pending.push({ providerPrompt, displayContent: prompt, attachments, embeddedNotes })
       pendingSteers.current.set(session.id, pending)
       await client.request({ type: 'steer', prompt: providerPrompt }, session.id, runtime.runtimeId)
     },
@@ -1351,6 +1365,7 @@ function queueSubmission(
   displayContent: string,
   providerPrompt: string,
   attachments: MessageAttachment[],
+  embeddedNotes: EmbeddedNote[] = [],
 ): AgentSession {
   return {
     ...session,
@@ -1364,6 +1379,7 @@ function queueSubmission(
           ? displayContent
           : null,
         attachments,
+        embedded_notes: embeddedNotes,
         created_at: Math.floor(Date.now() / 1_000),
       },
     ],

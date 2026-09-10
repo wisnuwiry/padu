@@ -220,6 +220,17 @@ export function NotesPage() {
                 <div className="flex items-center gap-2">
                   <label className="sr-only" htmlFor="note-title">Note title</label>
                   <input id="note-title" className="min-w-0 flex-1 border-0 bg-transparent px-0 text-3xl font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring" value={selected.title} onChange={(event) => setSelected({ ...selected, title: event.target.value })} />
+                  {typeof window !== 'undefined' && window.sessionStorage.getItem('padu.note-target-session') && (
+                    <button className="shrink-0 rounded-md border px-2.5 py-1.5 text-xs outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring" type="button" onClick={() => {
+                      const targetSession = window.sessionStorage.getItem('padu.note-target-session')
+                      if (!targetSession) return
+                      window.sessionStorage.setItem('padu.pending-composer-note', `${targetSession}:${selected.projectId}:${selected.id}`)
+                      window.sessionStorage.removeItem('padu.note-target-session')
+                      void navigate({ to: '/', search: { session: targetSession === 'new' ? undefined : targetSession } })
+                    }}>
+                      <PaduIcon name="compose" /> Add to composer
+                    </button>
+                  )}
                 </div>
                 <div className="flex items-center justify-between gap-3 text-xs text-[var(--text-tertiary)]"><span className="min-w-0 truncate">Created {formatNoteTimeAgo(selected.createdAt, t)} · {saving ? 'Saving…' : `Updated ${formatNoteTimeAgo(selected.updatedAt, t)}`}</span><div className="flex items-center gap-1 rounded-md bg-muted p-1"><button className={`rounded px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring ${!preview ? 'bg-background shadow-sm' : 'hover:bg-accent'}`} type="button" aria-label="Edit mode" aria-pressed={!preview} onClick={() => setPreview(false)}><PaduIcon name="pencil" /></button><button className={`rounded px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring ${preview ? 'bg-background shadow-sm' : 'hover:bg-accent'}`} type="button" aria-label="Preview mode" aria-pressed={preview} onClick={() => setPreview(true)}><PaduIcon name="eye" /></button><button className="rounded px-2 py-1 text-destructive outline-none hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-ring" type="button" aria-label="Delete note" onClick={() => void removeNote()}><PaduIcon name="trash" /></button></div></div>
                 {preview ? (
