@@ -150,6 +150,29 @@ impl Padu {
         cx.notify();
     }
 
+    fn select_adjacent_note(&mut self, direction: isize, cx: &mut Context<Self>) {
+        let filtered = self.notes_filtered.borrow();
+        if filtered.is_empty() {
+            return;
+        }
+
+        let current_position = filtered
+            .iter()
+            .position(|&index| index == self.notes_selected);
+        let next_position = match current_position {
+            Some(position) => (position as isize + direction)
+                .clamp(0, filtered.len().saturating_sub(1) as isize)
+                as usize,
+            None if direction < 0 => filtered.len() - 1,
+            None => 0,
+        };
+        let Some(index) = filtered.get(next_position).copied() else {
+            return;
+        };
+        drop(filtered);
+        self.select_note(index, cx);
+    }
+
     fn create_note(&mut self, cx: &mut Context<Self>) {
         self.save_note_edit(cx);
         self.notes_layout = NotesLayout::Edit;
@@ -554,6 +577,8 @@ impl Padu {
         let plain_primary = !modifiers.shift && !modifiers.alt;
         match key {
             "n" if modifiers.alt && !modifiers.shift => self.create_note(cx),
+            "up" if plain_primary => self.select_adjacent_note(-1, cx),
+            "down" if plain_primary => self.select_adjacent_note(1, cx),
             "1" if plain_primary => {
                 self.notes_layout = NotesLayout::Edit;
                 cx.notify();

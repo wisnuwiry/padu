@@ -1719,6 +1719,7 @@ pub struct Padu {
     sidebar_pane: Entity<PaduPane>,
     transcript_pane: Entity<PaduPane>,
     right_panel_pane: Entity<PaduPane>,
+    notes_pane: Entity<PaduPane>,
     /// The unix second the pending time-label wake-up targets, or `None` when
     /// none is armed. See `schedule_time_label_wake`.
     time_label_wake: Cell<Option<u64>>,
@@ -2377,6 +2378,7 @@ impl Padu {
         let sidebar_pane = PaduPane::new(Padu::sidebar_pane_content, cx);
         let transcript_pane = PaduPane::new(Padu::transcript_pane_content, cx);
         let right_panel_pane = PaduPane::new(Padu::right_panel_pane_content, cx);
+        let notes_pane = PaduPane::new(Padu::notes_pane_content, cx);
         let workspace_client = padu_client::WorkspaceClient::new(daemon.client());
         let (projectless_migrated, projectless_migration_error) =
             migrate_legacy_projectless_projects(&mut state, &workspace_client);
@@ -3459,6 +3461,7 @@ impl Padu {
                 sidebar_pane: sidebar_pane.clone(),
                 transcript_pane: transcript_pane.clone(),
                 right_panel_pane: right_panel_pane.clone(),
+                notes_pane: notes_pane.clone(),
                 time_label_wake: Cell::new(None),
                 time_label_wake_generation: Cell::new(0),
                 fps_last_frame: Instant::now(),
@@ -3467,7 +3470,12 @@ impl Padu {
             }
         });
         navigation_rail.update(cx, |rail, _| rail.set_padu(entity.downgrade()));
-        for pane in [&sidebar_pane, &transcript_pane, &right_panel_pane] {
+        for pane in [
+            &sidebar_pane,
+            &transcript_pane,
+            &right_panel_pane,
+            &notes_pane,
+        ] {
             pane.update(cx, |pane, cx| pane.bind(&entity, cx));
         }
         let initial_row_count = entity.read(cx).transcript_row_count();

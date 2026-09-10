@@ -214,6 +214,15 @@ impl Padu {
             .into_any_element()
     }
 
+    /// [`PaduPane`] delegate for the Notes island.
+    pub(super) fn notes_pane_content(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.render_notes_page(window, cx)
+    }
+
     /// [`PaduPane`] delegate for the right-panel island.
     pub(super) fn right_panel_pane_content(
         &mut self,
@@ -474,7 +483,10 @@ impl Render for Padu {
                         element.child(self.render_header(window, cx))
                     })
                     .child(if notes_page {
-                        self.render_notes_page(window, cx)
+                        self.notes_pane
+                            .clone()
+                            .cached(StyleRefinement::default().flex_1().min_h(px(0.0)).w_full())
+                            .into_any_element()
                     } else if empty {
                         self.render_empty_state(cx).into_any_element()
                     } else {
