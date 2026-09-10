@@ -916,7 +916,7 @@ impl Padu {
             let preview_pane = if matches!(layout, NotesLayout::Preview | NotesLayout::Split) {
                 let palette = MarkdownPalette::from_theme(&theme);
                 let cache_key = format!("note:{}", note.id);
-                let mut cache = self.file_preview_markdown.borrow_mut();
+                let mut cache = self.notes_preview_markdown.borrow_mut();
                 if !matches!(cache.as_ref(), Some((key, _)) if key == &cache_key) {
                     *cache = Some((cache_key.clone(), MarkdownView::new()));
                 }
@@ -926,12 +926,12 @@ impl Padu {
                     format!("note-preview-{}", note.id),
                     &palette,
                     self.scaled_markdown_metrics(MarkdownMetrics::BODY),
-                    self.file_preview_selection.clone(),
+                    self.notes_preview_selection.clone(),
                 );
                 let document = md::render::markdown(view, &ctx);
                 drop(cache);
                 let selection_input = canvas(|_, _, _| (), {
-                    let selection = self.file_preview_selection.clone();
+                    let selection = self.notes_preview_selection.clone();
                     move |_, _, window, _| md::render::install_selection_input(window, &selection)
                 })
                 .absolute()
@@ -941,27 +941,34 @@ impl Padu {
                     div()
                         .id("note-preview-pane")
                         .flex_1()
-                        .min_h_full()
+                        .min_h_0()
                         .min_w_0()
                         .relative()
-                        .overflow_y_scroll()
-                        .track_scroll(&self.file_preview_scroll_handle)
-                        .p(px(14.0))
                         .rounded(px(8.0))
                         .bg(theme.inset)
-                        .child(md::render::frame_reset(self.file_preview_selection.clone()))
                         .child(
                             div()
-                                .w_full()
-                                .min_w_0()
-                                .overflow_hidden()
-                                .whitespace_normal()
-                                .children(document),
+                                .id("note-preview-scroll")
+                                .size_full()
+                                .overflow_y_scroll()
+                                .track_scroll(&self.notes_preview_scroll_handle)
+                                .p(px(14.0))
+                                .child(md::render::frame_reset(
+                                    self.notes_preview_selection.clone(),
+                                ))
+                                .child(
+                                    div()
+                                        .w_full()
+                                        .min_w_0()
+                                        .overflow_hidden()
+                                        .whitespace_normal()
+                                        .children(document),
+                                )
+                                .child(selection_input),
                         )
-                        .child(selection_input)
                         .child(scrollbar::vertical(
-                            &self.file_preview_scroll_handle,
-                            &self.file_preview_scrollbar,
+                            &self.notes_preview_scroll_handle,
+                            &self.notes_preview_scrollbar,
                         )),
                 )
             } else {

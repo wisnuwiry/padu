@@ -104,7 +104,17 @@ impl Padu {
         let document = {
             let mut markdown = preview.markdown.borrow_mut();
             markdown.set_text(&note.content, false);
-            md::render::markdown(&mut markdown, &markdown_context)
+            md::render::markdown(&mut markdown, &markdown_context).or_else(|| {
+                (!note.content.is_empty()).then(|| {
+                    md::render::plain_text(
+                        note.content.clone(),
+                        md::render::SANS_FAMILY,
+                        FontWeight::NORMAL,
+                        theme.text,
+                        &markdown_context,
+                    )
+                })
+            })
         };
         let selection_input = canvas(|_, _, _| (), {
             let selection = selection.clone();
@@ -118,8 +128,14 @@ impl Padu {
             .id("note-preview-close")
             .track_focus(&close_focus)
             .tab_index(0)
-            .size(px(30.0))
-            .rounded_full()
+            .absolute()
+            .top(px(14.0))
+            .right(px(14.0))
+            .h(px(30.0))
+            .min_w(px(58.0))
+            .px(px(6.0))
+            .gap(px(5.0))
+            .rounded(px(8.0))
             .flex()
             .items_center()
             .justify_center()
@@ -128,6 +144,7 @@ impl Padu {
             .focus_visible(|style| style.border_1().border_color(theme.accent))
             .hover(|style| style.bg(theme.overlay))
             .child(icon("icons/x.svg", 13.0, theme.text))
+            .child(crate::ui::kbd_badge("Esc", &theme))
             .on_click(cx.listener(|this, _, window, cx| {
                 this.close_note_preview(window, cx);
                 cx.stop_propagation();
@@ -146,6 +163,7 @@ impl Padu {
             .relative()
             .w(px(680.0))
             .max_w_full()
+            .h(px(620.0))
             .max_h(px(620.0))
             .rounded(px(12.0))
             .border_1()
@@ -166,15 +184,22 @@ impl Padu {
             .child(
                 div()
                     .id("note-preview-body")
+                    .flex_1()
                     .min_h_0()
                     .max_h(px(540.0))
-                    .overflow_y_scroll()
-                    .track_scroll(&preview.scroll_handle)
-                    .text_color(theme.text)
-                    .whitespace_normal()
-                    .child(md::render::frame_reset(selection.clone()))
-                    .children(document)
-                    .child(selection_input)
+                    .relative()
+                    .child(
+                        div()
+                            .id("note-preview-body-scroll")
+                            .size_full()
+                            .overflow_y_scroll()
+                            .track_scroll(&preview.scroll_handle)
+                            .text_color(theme.text)
+                            .whitespace_normal()
+                            .child(md::render::frame_reset(selection.clone()))
+                            .children(document)
+                            .child(selection_input),
+                    )
                     .child(scrollbar::vertical(
                         &preview.scroll_handle,
                         &preview.scrollbar,
