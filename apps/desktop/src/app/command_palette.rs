@@ -1032,7 +1032,7 @@ impl Padu {
         commands.push(CommandPaletteItem::command(
             PaletteSection::Commands,
             tr!("settings.notes"),
-            "icons/package.svg",
+            "icons/note.svg",
             Some(crate::platform::primary_shortcut("⌘⇧M", "Ctrl+Shift+M")),
             PaletteAction::OpenNotes,
             "notes markdown documents writing snippets memos",

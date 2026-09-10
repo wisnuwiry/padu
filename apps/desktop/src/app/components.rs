@@ -270,7 +270,7 @@ pub(super) fn render_message_footer(
         .justify_center()
         .cursor_pointer()
         .hover(|element| element.bg(theme.overlay_strong))
-        .child(icon("icons/package.svg", 14.0, footer_color))
+        .child(icon("icons/note-add.svg", 14.0, footer_color))
         .tooltip(Tooltip::text(tr!("notes.add_to_note")))
         .on_click(move |_, _, cx| {
             let _ = note_padu.update(cx, |this, cx| {
@@ -452,7 +452,7 @@ fn render_embedded_notes(
                 .on_mouse_down(MouseButton::Left, |_, _, cx| {
                     cx.stop_propagation();
                 })
-                .child(icon("icons/file.svg", 24.0, theme.text_secondary).flex_none())
+                .child(icon("icons/note.svg", 24.0, theme.text_secondary).flex_none())
                 .child(
                     div()
                         .min_w_0()

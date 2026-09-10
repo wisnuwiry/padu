@@ -16,6 +16,7 @@ macro_rules! icons {
 }
 
 const ICONS: &[(&str, &[u8])] = icons![
+    "add-to-chat",
     "alert",
     "appearance",
     "arrow-down",
@@ -35,6 +36,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "chevron-right",
     "chevron-up",
     "chevrons-up-down",
+    "collapse-2",
     "command",
     "compose",
     "copy",
@@ -46,12 +48,16 @@ const ICONS: &[(&str, &[u8])] = icons![
     "eye",
     "eye-off",
     "external-link",
+    "expand-2",
     "file",
+    "note",
+    "note-add",
     "folder",
     "folder-new",
     "folder-open",
     "file-bottom-left-arrow",
     "file-diff",
+    "split",
     "file-types/angular",
     "file-types/audio",
     "file-types/astro",

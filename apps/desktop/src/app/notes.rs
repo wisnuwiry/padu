@@ -683,7 +683,7 @@ impl Padu {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(icon("icons/file.svg", 13.0, theme.text_secondary)),
+                    .child(icon("icons/note.svg", 13.0, theme.text_secondary)),
             )
             .child(
                 div()
@@ -739,7 +739,7 @@ impl Padu {
                             this.add_note_to_chat(add_to_chat_id, window, cx);
                         });
                     })
-                    .icon("icons/compose.svg"),
+                    .icon("icons/add-to-chat.svg"),
                     MenuItem::new(tr!("notes.delete"), move |window, cx| {
                         let _ = delete_weak.update(cx, |this, cx| {
                             this.confirm_delete_note(note_id, window, cx);
@@ -775,7 +775,7 @@ impl Padu {
                 .items_center()
                 .gap(px(8.0))
                 .text_center()
-                .child(icon("icons/file.svg", 22.0, theme.text_tertiary))
+                .child(icon("icons/note.svg", 22.0, theme.text_tertiary))
                 .child(
                     div()
                         .text_size(sp(13.0))
@@ -1130,7 +1130,7 @@ impl Padu {
                             )
                             .child(self.render_sidebar_navigation_controls(true, cx))
                     })
-                    .child(icon("icons/file.svg", 16.0, theme.text_secondary))
+                    .child(icon("icons/note.svg", 16.0, theme.text_secondary))
                     .child(
                         div()
                             .text_size(sp(13.0))
@@ -1177,11 +1177,18 @@ impl Padu {
         let (icon_path, icon_only) = match id {
             "note-new" => ("icons/plus.svg", false),
             "note-toggle-preview" => ("icons/pencil.svg", true),
-            "note-split" => ("icons/panel-right.svg", true),
+            "note-split" => ("icons/split.svg", true),
             "note-preview" => ("icons/eye.svg", true),
             "note-delete" => ("icons/trash.svg", true),
-            "note-add-to-chat" => ("icons/compose.svg", false),
-            "note-toggle-list" => ("icons/list.svg", true),
+            "note-add-to-chat" => ("icons/add-to-chat.svg", false),
+            "note-toggle-list" => (
+                if self.notes_list_collapsed {
+                    "icons/expand-2.svg"
+                } else {
+                    "icons/collapse-2.svg"
+                },
+                true,
+            ),
             _ => ("icons/check.svg", false),
         };
         let foreground = if id == "note-add-to-chat" {

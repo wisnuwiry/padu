@@ -863,7 +863,7 @@ impl Padu {
     fn render_sidebar_notes(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         self.render_sidebar_action_row(
             "sidebar-notes",
-            "icons/file.svg",
+            "icons/note.svg",
             tr!("settings.notes"),
             Some(crate::platform::primary_shortcut("⌘⇧M", "Ctrl+Shift+M")),
             cx,

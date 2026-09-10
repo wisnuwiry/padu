@@ -2620,7 +2620,7 @@ impl Padu {
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .child(icon("icons/file.svg", 24.0, theme.text_secondary).flex_none())
+                    .child(icon("icons/note.svg", 24.0, theme.text_secondary).flex_none())
                     .child(
                         div()
                             .min_w_0()
