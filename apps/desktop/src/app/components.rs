@@ -3,6 +3,12 @@ use super::*;
 use chrono::{Datelike, Days};
 use std::path::Path;
 
+/// Embedded-note previews inside a transcript row are bounded so a note that
+/// grew through many "Add to note" captures never turns one row into a huge
+/// clone plus layout cost.
+const EMBEDDED_NOTE_PREVIEW_CHARS: usize = 1400;
+const EMBEDDED_NOTE_PREVIEW_HEIGHT: f32 = 160.0;
+
 pub(super) fn pulse_dot(size: f32, color: Hsla) -> AnyElement {
     motion::pulse(Duration::from_millis(1600), move |phase| {
         div()
@@ -416,6 +422,13 @@ fn render_embedded_notes(
         } else {
             note.title.clone()
         };
+        // Bounded preview: a note grows with every "Add to note" capture, so
+        // never clone or lay out the whole body inside a transcript row.
+        let preview = note
+            .content
+            .chars()
+            .take(EMBEDDED_NOTE_PREVIEW_CHARS)
+            .collect::<String>();
         column = column.child(
             div()
                 .w_full()
@@ -436,7 +449,9 @@ fn render_embedded_notes(
                     div()
                         .mt(px(5.0))
                         .text_color(theme.text)
-                        .child(note.content.clone()),
+                        .max_h(px(EMBEDDED_NOTE_PREVIEW_HEIGHT))
+                        .overflow_hidden()
+                        .child(preview),
                 ),
         );
     }

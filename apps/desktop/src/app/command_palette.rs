@@ -1418,6 +1418,13 @@ impl Padu {
         let candidates = self.command_palette_note_candidates();
         let query = query.trim();
         let mut results = if query.is_empty() {
+            let mut candidates = candidates;
+            candidates.sort_by(|left, right| {
+                right
+                    .recency
+                    .cmp(&left.recency)
+                    .then(left.order.cmp(&right.order))
+            });
             candidates
         } else {
             let pattern = Pattern::parse(query, CaseMatching::Ignore, Normalization::Smart);
@@ -1433,20 +1440,18 @@ impl Padu {
                         .map(|score| ScoredPaletteItem { score, item })
                 })
                 .collect::<Vec<_>>();
+            // Score is the primary order; recency only breaks score ties so a
+            // strong older match is not pushed below a weak newer one.
             scored.sort_by(|left, right| {
                 right
                     .score
                     .cmp(&left.score)
+                    .then(right.item.recency.cmp(&left.item.recency))
                     .then(left.item.order.cmp(&right.item.order))
             });
             scored.into_iter().map(|scored| scored.item).collect()
         };
-        results.sort_by(|left, right| {
-            right
-                .recency
-                .cmp(&left.recency)
-                .then(left.order.cmp(&right.order))
-        });
+        results.truncate(MAX_NOTE_RESULTS);
         self.command_palette.results = results;
         self.command_palette.selected = selected_action
             .flatten()
