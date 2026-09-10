@@ -323,14 +323,18 @@ impl Padu {
             self.refresh_right_panel_working_tree(cx);
         }
         self.ensure_right_panel_terminals(cx);
-        self.retain_right_panel_browsers();
+        self.retain_right_panel_browsers(cx);
         if self.right_panel_visible {
             self.request_active_terminal_focus();
             self.request_active_browser_focus();
         }
     }
 
-    pub(crate) fn remove_right_panel_session_state(&mut self, session_id: Uuid) {
+    pub(crate) fn remove_right_panel_session_state(
+        &mut self,
+        session_id: Uuid,
+        cx: &mut Context<Self>,
+    ) {
         let state = if self.state.selected_session == Some(session_id) {
             let state = self.take_active_right_panel_state();
             self.replace_active_right_panel_state(RightPanelSessionState::empty(false));
@@ -344,7 +348,7 @@ impl Padu {
                     self.right_panel_terminals.remove(&terminal_id);
                 }
                 if let Some(browser_id) = surface.browser_id() {
-                    self.right_panel_browsers.remove(&browser_id);
+                    self.destroy_right_panel_browser(browser_id, cx);
                 }
             }
         }
@@ -1082,7 +1086,7 @@ impl Padu {
             self.right_panel_terminals.remove(&terminal_id);
         }
         if let Some(browser_id) = self.right_panel_surfaces[index].browser_id() {
-            self.right_panel_browsers.remove(&browser_id);
+            self.destroy_right_panel_browser(browser_id, cx);
         }
         self.right_panel_surfaces.remove(index);
         self.right_panel_active_surface = if self.right_panel_surfaces.is_empty() {
