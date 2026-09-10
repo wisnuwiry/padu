@@ -152,6 +152,7 @@ impl Padu {
 
     fn create_note(&mut self, cx: &mut Context<Self>) {
         self.save_note_edit(cx);
+        self.notes_layout = NotesLayout::Edit;
         let Some(project_id) = self.active_project().map(|project| project.id) else {
             return;
         };
@@ -814,7 +815,13 @@ impl Padu {
 
         let selected_note = self.notes.get(selected);
         let layout = self.notes_layout;
-        let mut editor = div().flex_1().min_w_0().flex().flex_col().gap(px(10.0));
+        let mut editor = div()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .gap(px(10.0));
         if let Some(note) = selected_note {
             let note_id = note.id;
             let created_ago = super::notes_utils::format_note_time_ago(
@@ -1016,6 +1023,9 @@ impl Padu {
                             .child(
                                 div()
                                     .relative()
+                                    .flex()
+                                    .flex_col()
+                                    .min_h_0()
                                     .ml(px(4.0))
                                     .pl(px(8.0))
                                     .w(px(0.0))
@@ -1128,10 +1138,6 @@ impl Padu {
                             .text_color(theme.text)
                             .child(tr!("settings.notes")),
                     )
-                    .child(self.window_drag_region(
-                        div().id("notes-page-drag-region").h_full().flex_1(),
-                        cx,
-                    ))
                     .child(self.notes_button(
                         "note-toggle-list",
                         if list_collapsed {
@@ -1144,6 +1150,10 @@ impl Padu {
                             this.notes_list_collapsed = !this.notes_list_collapsed;
                             cx.notify();
                         },
+                    ))
+                    .child(self.window_drag_region(
+                        div().id("notes-page-drag-region").h_full().flex_1(),
+                        cx,
                     )),
             )
             .child(body)
@@ -1171,7 +1181,7 @@ impl Padu {
             "note-preview" => ("icons/eye.svg", true),
             "note-delete" => ("icons/trash.svg", true),
             "note-add-to-chat" => ("icons/compose.svg", false),
-            "note-toggle-list" => ("icons/panel-left.svg", true),
+            "note-toggle-list" => ("icons/list.svg", true),
             _ => ("icons/check.svg", false),
         };
         let foreground = if id == "note-add-to-chat" {

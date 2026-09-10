@@ -107,6 +107,7 @@ export function NotesPage() {
 
   async function addNote() {
     if (!client || !projectId) return
+    setPreview(false)
     try {
       const note = await createNote(client, { projectId, title: 'Untitled note', content: '' })
       await refresh(note.id)
@@ -200,9 +201,9 @@ export function NotesPage() {
           <PaduIcon name="arrowLeft" />
         </button>
         <h1 className="text-sm font-semibold">Notes</h1>
+        <button className="rounded-md p-1.5 text-[var(--text-tertiary)] outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring" type="button" aria-label={listCollapsed ? 'Show notes list' : 'Hide notes list'} title={listCollapsed ? 'Show notes list' : 'Hide notes list'} onClick={() => setListCollapsed((value) => !value)}><PaduIcon name="list" /></button>
         <span className="text-xs text-[var(--text-tertiary)]">All projects</span>
         <div className="flex-1" />
-        <button className="rounded-md p-2 text-[var(--text-tertiary)] outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring" type="button" aria-label={listCollapsed ? 'Show notes list' : 'Hide notes list'} onClick={() => setListCollapsed((value) => !value)}><PaduIcon name="panelLeft" /></button>
       </header>
       <>
         <main className="flex min-h-0 flex-1">
