@@ -26,7 +26,7 @@ import { cn } from '@/lib/utils'
 type PaletteSection = 'suggested' | 'tasks' | 'notes' | 'sessions' | 'providers' | 'commands' | 'settings'
 const ALL_NOTES_PROJECT_ID = '00000000-0000-0000-0000-000000000000'
 const MAX_NOTE_RESULTS = 12
-export type CommandPaletteView = 'commands' | 'resume' | 'resumeProviders' | 'findFile'
+export type CommandPaletteView = 'commands' | 'notes' | 'resume' | 'resumeProviders' | 'findFile'
 type Translator = (key: string, params?: Record<string, string | number>) => string
 
 interface PaletteItem {
@@ -62,6 +62,7 @@ export interface CommandPaletteActions {
   resumeProviderSession: (summary: ProviderSessionSummary) => Promise<void>
   openFile: (path: string) => void
   openNotes: (query?: string, noteId?: string) => void
+  embedNote: (note: NoteSummary) => void
 }
 
 export function CommandPalette({
@@ -78,6 +79,7 @@ export function CommandPalette({
   files = [],
   filesLoading = false,
   initialView = 'commands',
+  initialQuery = '',
   actions,
   onOpenChange,
 }: {
@@ -94,6 +96,7 @@ export function CommandPalette({
   files?: FileEntry[]
   filesLoading?: boolean
   initialView?: CommandPaletteView
+  initialQuery?: string
   actions: CommandPaletteActions
   onOpenChange: (open: boolean) => void
 }) {
@@ -135,7 +138,7 @@ export function CommandPalette({
       : null
     setView(initialView)
     setResumeProvider(currentProvider)
-    setQuery('')
+    setQuery(initialQuery)
     setMatches([])
     setMatchesQuery(null)
     setSearchPending(false)
@@ -147,7 +150,7 @@ export function CommandPalette({
     setSelected(0)
     messageSearchCache.current.clear()
     requestAnimationFrame(() => input.current?.focus())
-  }, [currentProvider, initialView, open])
+  }, [currentProvider, initialQuery, initialView, open])
 
   useEffect(() => {
     if (!open || !client) {
@@ -318,7 +321,9 @@ export function CommandPalette({
         })
     : view === 'findFile'
     ? buildFileItems({ files, query, openFile: actions.openFile })
-    : buildItems({
+    : view === 'notes'
+      ? buildNoteItems(noteSummaries, query, actions.embedNote, true)
+      : buildItems({
         taskState,
         query,
         matches: matchesQuery === query.trim() ? matches : [],
@@ -336,7 +341,7 @@ export function CommandPalette({
         t,
       })
   const nextItems = view === 'commands'
-    ? [...baseItems, ...buildNoteItems(noteSummaries, query, actions.openNotes)]
+    ? [...baseItems, ...buildNoteItems(noteSummaries, query, (note) => actions.openNotes(undefined, note.id))]
     : baseItems
   const items = view === 'commands' && shouldKeepPreviousPaletteItems(
     nextItems.length,
@@ -380,7 +385,7 @@ export function CommandPalette({
       requestAnimationFrame(() => input.current?.focus())
       return
     }
-    if (view === 'findFile') {
+    if (view === 'findFile' || view === 'notes') {
       setView('commands')
       setQuery('')
       setSelected(0)
@@ -426,7 +431,9 @@ export function CommandPalette({
                 ? 'command_palette.resume_provider_placeholder'
                 : view === 'findFile'
                   ? 'command_palette.find_file_placeholder'
-                  : 'command_palette.placeholder')}
+                  : view === 'notes'
+                    ? 'command_palette.note_placeholder'
+                    : 'command_palette.placeholder')}
             autoComplete="off"
             className="h-full min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-[var(--text-ghost)]"
             placeholder={t(view === 'resume'
@@ -435,7 +442,9 @@ export function CommandPalette({
                 ? 'command_palette.resume_provider_placeholder'
                 : view === 'findFile'
                   ? 'command_palette.find_file_placeholder'
-                  : 'command_palette.placeholder')}
+                  : view === 'notes'
+                    ? 'command_palette.note_placeholder'
+                    : 'command_palette.placeholder')}
             ref={input}
             role="combobox"
             value={query}
@@ -659,14 +668,17 @@ function Highlighted({ text, query }: { text: string; query: string }) {
 function buildNoteItems(
   notes: NoteSummary[],
   query: string,
-  openNotes: (query?: string, noteId?: string) => void,
+  selectNote: (note: NoteSummary) => void,
+  showAll = false,
 ): PaletteItem[] {
   const normalized = query.trim()
-  if (!normalized) return []
+  if (!normalized && !showAll) return []
   return notes
     .map((note) => ({
       note,
-      score: fuzzyScore(normalized, `${note.title} ${note.preview} notes note`),
+      score: normalized
+        ? fuzzyScore(normalized, `${note.title} ${note.preview} notes note`)
+        : 0,
     }))
     .filter((entry): entry is { note: NoteSummary; score: number } => entry.score !== null)
     .sort((left, right) => right.score - left.score || right.note.updatedAt - left.note.updatedAt)
@@ -678,7 +690,7 @@ function buildNoteItems(
       detail: note.preview || 'Empty note',
       icon: 'file',
       keywords: `${note.title} ${note.preview} note notes`,
-      run: () => openNotes(undefined, note.id),
+      run: () => selectNote(note),
     }))
 }
 

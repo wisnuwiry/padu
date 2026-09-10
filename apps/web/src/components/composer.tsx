@@ -426,9 +426,9 @@ export function Composer({
       submittedPrompt.trim(),
       availableCommands,
     )
-    if (expanded === null) return undefined
+    if (expanded === null && !submittedAttachments.length && !submittedNotes.length) return undefined
     return [
-      expanded,
+      expanded ?? submittedPrompt.trim(),
       submittedAttachments.map((attachment) => `@${attachment.mention}`).join(' '),
       ...submittedNotes.map((note) => `${note.title || 'Untitled note'}\n${note.content}`),
     ].filter(Boolean).join('\n\n')
