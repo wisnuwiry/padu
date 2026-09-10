@@ -78,14 +78,14 @@ Adds project-scoped Notes backed by daemon persistence and exposes a full Notes 
 
 - Desktop and web Notes surfaces were updated together.
 - Protocol bindings were regenerated and checked.
-- Mobile UI was not changed; the new protocol fields default safely for existing clients.
+- `PaduClient` sends `PROTOCOL_VERSION` and rejects any daemon version that does not match exactly. Protocol version `8` therefore requires synchronized client and daemon releases; existing clients must be updated to complete the handshake rather than remaining compatible with the old version.
 
 ## Limitations & Follow-ups
 
 - The full structured `/note` composer picker and rich staged note attachment flow still needs to be completed across every desktop submission path. The protocol snapshot fields and transcript rendering are in place, but the current composer behavior remains partially wired.
 - Notes invalidation is refreshed through explicit list/detail loads; a dedicated `NotesChanged` broadcast event should be added for live multi-client cache invalidation.
 - Full workspace tests need an environment that permits the existing socket/process tests.
-- Add translated catalog entries for the new Notes strings before merging if the locale synchronization test is expected to remain green.
+- Translated catalog entries for the new Notes strings have been added to `zh-CN.yml`, `ja.yml`, and `id.yml`; the locale synchronization test stays green.
 
 ## Related Issues
 
