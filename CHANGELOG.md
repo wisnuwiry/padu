@@ -16,6 +16,23 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## 0.1.4 - 2026-09-10
+
+### Added
+
+- **Notes**: Introduced a new dedicated notes workspace with project-wide search, note capture from conversations, embedded note previews, and keyboard navigation.
+- **Antigravity Installation**: Added a cross-platform provider download manager with cancellable installation and direct Windows ACP launching.
+
+### Improved
+
+- **Notes Experience**: Refined note navigation, composer cards, markdown preview sizing, editing layout, and workspace integration.
+- **Desktop Reliability**: Added updater loading feedback, improved browser WebView lifecycle management, and cached notes-pane rendering for smoother performance.
+
+### Fixed
+
+- **Notes State and Navigation**: Fixed note persistence, stale updates, sidebar visibility, workspace navigation, and preview scrolling.
+- **Browser and Provider Lifecycle**: Fixed WebView cleanup and Antigravity provider startup behavior across platforms.
+
 ## 0.1.3 - 2026-09-08
 
 ### Added
@@ -55,9 +72,11 @@ the original feature bullet instead of adding separate entries for them.
 ## 0.1.0 - 2026-09-03
 
 ### Highlights
+
 Padu is a fast, GPU-accelerated native control plane for local coding agents. Built in Rust with GPUI, it keeps your projects, sessions, and transcripts local on your machine with seamless multi-platform support across macOS, Linux, and Windows.
 
 ### Key Features
+
 - **Local Agent Integrations**: First-class support for multiple coding agent CLIs, including Claude Code, Codex CLI, Cursor CLI, Amp, OpenCode, Grok Build, Pi, Kimi Code, and Fx.
 - **Native GPUI Desktop Client**: Sub-millisecond input response, smooth 120Hz scrolling, native macOS/Linux/Windows window styling, and customizable dark/light theme support.
 - **Standalone Daemon & Browser Client**: Run headlessly with `padu-daemon` and access your workspace remotely or locally using the companion `@padu/web` client.
