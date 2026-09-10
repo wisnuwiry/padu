@@ -216,8 +216,8 @@ export function NotesPage() {
               {loading ? <p className="px-2 py-6 text-center text-sm text-[var(--text-tertiary)]">Loading notes…</p> : visibleNotes.length ? visibleNotes.map((note) => (
                 <div key={note.id} className="relative">
                   <button className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring ${selected?.id === note.id ? 'bg-accent' : 'hover:bg-accent/70'}`} type="button" aria-current={selected?.id === note.id ? 'page' : undefined} onContextMenu={(event) => { event.preventDefault(); setContextMenu({ id: note.id, x: event.clientX, y: event.clientY }) }} onClick={() => void selectNote(note.id)}>
-                    <span className="grid size-6 shrink-0 place-items-center rounded-md bg-muted"><PaduIcon name="file" /></span>
-                    <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{note.title || 'Untitled note'}</span><span className="mt-0.5 block truncate text-xs text-[var(--text-tertiary)]">{noteExcerpt(note.preview) || 'Empty note'}</span><span className="mt-0.5 block truncate text-[11px] text-[var(--text-tertiary)]">{note.projectId ? 'Project note' : 'No project'} · Updated {formatNoteTimeAgo(note.updatedAt, t)}</span></span>
+                    <span className="grid size-[26px] shrink-0 place-items-center rounded-md bg-muted"><PaduIcon name="file" /></span>
+                    <span className="flex min-w-0 flex-1 flex-col gap-px"><span className="block truncate text-[12.5px]">{note.title || 'Untitled note'}</span>{noteExcerpt(note.preview) && <span className="block truncate text-[11px] text-[var(--text-tertiary)]">{noteExcerpt(note.preview)}</span>}<span className="block truncate text-[10px] text-[var(--text-tertiary)]">{note.projectId ? 'Project note' : 'No project'} · Updated {formatNoteTimeAgo(note.updatedAt, t)}</span></span>
                   </button>
                 </div>
               )) : <p className="px-2 py-6 text-center text-sm text-[var(--text-tertiary)]">{filter ? 'No matching notes' : 'No notes yet.'}</p>}

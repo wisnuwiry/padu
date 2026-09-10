@@ -659,16 +659,16 @@ impl Padu {
             .tab_index(0)
             .tab_stop(true)
             .w_full()
-            .min_h(px(56.0))
+            .min_h(px(48.0))
             .px(px(9.0))
-            .py(px(7.0))
+            .py(px(4.0))
+            .mb(px(4.0))
             .rounded(px(8.0))
             .cursor_pointer()
             .when(index == selected, |row| {
                 row.bg(theme.sidebar_item_background)
             })
             .hover(|row| row.bg(theme.overlay))
-            .focus_visible(|row| row.border_1().border_color(theme.accent))
             .flex()
             .items_center()
             .gap(px(8.0))
@@ -1034,7 +1034,7 @@ impl Padu {
             .min_h_0()
             .flex()
             .gap(px(16.0))
-            .px(px(16.0))
+            .px(px(8.0))
             .pb(px(24.0))
             .pt(px(0.0));
         if !list_collapsed {
