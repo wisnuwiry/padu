@@ -171,6 +171,7 @@ impl Padu {
             .into_iter()
             .map(ComposerAttachment::from)
             .collect();
+        self.composer_embedded_notes = draft.embedded_notes;
         self.composer
             .update(cx, |input, cx| input.set_content(draft.text, cx));
         cx.notify();

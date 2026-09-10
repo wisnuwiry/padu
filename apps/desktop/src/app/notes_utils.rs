@@ -1,7 +1,5 @@
 //! Presentation helpers specific to the Notes workspace.
 
-use super::*;
-
 pub(super) fn format_note_time_ago(seconds: u64) -> String {
     match seconds {
         0..=59 => tr!("sidebar.just_now"),

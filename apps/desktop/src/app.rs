@@ -863,6 +863,7 @@ struct MessageEdit {
     turn_count: usize,
     input: Entity<ComposerInput>,
     attachments: Vec<MessageAttachment>,
+    embedded_notes: Vec<padu_protocol::notes::EmbeddedNote>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1479,6 +1480,20 @@ pub struct Padu {
     notes_list_collapsed: bool,
     notes_split_ratio: f32,
     notes_save_generation: u64,
+    /// Bumped per daemon load; a completion from a superseded request is
+    /// discarded so a stale project's notes cannot replace the current set.
+    notes_load_generation: u64,
+    /// Bumped whenever the in-memory note set changes shape or content.
+    notes_data_generation: u64,
+    /// Filtered note indices for the Notes list, rebuilt only when the search
+    /// query or the note set changes instead of every frame.
+    notes_filtered: RefCell<Vec<usize>>,
+    notes_filtered_query: String,
+    notes_filtered_generation: u64,
+    /// Virtualized Notes list and its scrollbar, mirroring the sidebar pattern
+    /// so frame work stays proportional to the visible rows.
+    notes_list_state: ListState,
+    notes_scrollbar: Rc<ScrollbarState>,
     /// The Settings page's library snapshot, scanned off-thread. Frames read
     /// only this; `None` means the first scan has not landed yet.
     skills_catalog: Option<Rc<crate::skills::SkillsCatalog>>,
@@ -3245,6 +3260,13 @@ impl Padu {
                 notes_list_collapsed: false,
                 notes_split_ratio: 0.5,
                 notes_save_generation: 0,
+                notes_load_generation: 0,
+                notes_data_generation: 0,
+                notes_filtered: RefCell::new(Vec::new()),
+                notes_filtered_query: String::new(),
+                notes_filtered_generation: 0,
+                notes_list_state: ListState::new(0, ListAlignment::Top, px(480.0)),
+                notes_scrollbar: ScrollbarState::new(),
                 notification_permission:
                     crate::platform::NotificationPermissionStatus::NotDetermined,
 

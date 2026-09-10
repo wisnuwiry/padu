@@ -2040,7 +2040,7 @@ impl Padu {
             message_id,
             turn_count,
         } = action;
-        let Some((message_index, initial_message, attachments)) = self
+        let Some((message_index, initial_message, attachments, embedded_notes)) = self
             .state
             .sessions
             .iter()
@@ -2067,6 +2067,7 @@ impl Padu {
                                     index,
                                     message.visible_content().to_owned(),
                                     message.attachments.clone(),
+                                    message.embedded_notes.clone(),
                                 )
                             })
                     })
@@ -2103,6 +2104,7 @@ impl Padu {
             turn_count,
             input: input.clone(),
             attachments,
+            embedded_notes,
         });
         self.hide_toast();
         self.remeasure_transcript_message(message_index);
@@ -2175,7 +2177,7 @@ impl Padu {
                 prompt: provider_prompt,
                 display_content,
                 attachments: edit.attachments,
-                embedded_notes: Vec::new(),
+                embedded_notes: edit.embedded_notes,
             },
             cx,
         );

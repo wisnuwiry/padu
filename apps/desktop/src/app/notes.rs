@@ -16,6 +16,36 @@ pub(super) struct Note {
     pub revision: u64,
     pub created_at: u64,
     pub updated_at: u64,
+    /// Precomputed lowercase search key so per-frame filtering never
+    /// allocates a copy of every note body.
+    pub search_key: String,
+}
+
+impl Note {
+    fn search_key(title: &str, body: &str) -> String {
+        let mut key = title.to_lowercase();
+        key.push('\0');
+        key.push_str(&body.to_lowercase());
+        key
+    }
+
+    fn from_protocol(note: padu_client::notes::Note) -> Self {
+        let search_key = Self::search_key(&note.title, &note.content);
+        Self {
+            id: note.id,
+            project_id: note.project_id,
+            title: note.title,
+            body: note.content,
+            revision: note.revision,
+            created_at: note.created_at,
+            updated_at: note.updated_at,
+            search_key,
+        }
+    }
+
+    fn refresh_search_key(&mut self) {
+        self.search_key = Self::search_key(&self.title, &self.body);
+    }
 }
 
 impl Padu {
@@ -27,6 +57,8 @@ impl Padu {
     }
 
     pub(super) fn load_notes_from_daemon(&mut self, project_id: Uuid, cx: &mut Context<Self>) {
+        self.notes_load_generation = self.notes_load_generation.wrapping_add(1);
+        let generation = self.notes_load_generation;
         let daemon = self.daemon.clone();
         cx.spawn(async move |padu, cx| {
             let result = cx
@@ -60,19 +92,12 @@ impl Padu {
                 })
                 .await;
             let _ = padu.update(cx, |this, cx| {
+                if this.notes_load_generation != generation {
+                    return;
+                }
                 if let Ok(notes) = result {
-                    this.notes = notes
-                        .into_iter()
-                        .map(|note| Note {
-                            id: note.id,
-                            project_id: note.project_id,
-                            title: note.title,
-                            body: note.content,
-                            revision: note.revision,
-                            created_at: note.created_at,
-                            updated_at: note.updated_at,
-                        })
-                        .collect();
+                    this.notes = notes.into_iter().map(Note::from_protocol).collect();
+                    this.notes_data_generation = this.notes_data_generation.wrapping_add(1);
                     this.notes_selected =
                         this.notes_selected.min(this.notes.len().saturating_sub(1));
                     this.sync_note_editors(cx);
@@ -143,15 +168,8 @@ impl Padu {
                 .await;
             let _ = padu.update(cx, |this, cx| {
                 if let Ok(note) = result {
-                    this.notes.push(Note {
-                        id: note.id,
-                        project_id: note.project_id,
-                        title: note.title,
-                        body: note.content,
-                        revision: note.revision,
-                        created_at: note.created_at,
-                        updated_at: note.updated_at,
-                    });
+                    this.notes.push(Note::from_protocol(note));
+                    this.notes_data_generation = this.notes_data_generation.wrapping_add(1);
                     this.notes_selected = this.notes.len() - 1;
                     this.sync_note_editors(cx);
                     cx.notify();
@@ -208,8 +226,19 @@ impl Padu {
         }
         note.title = normalized_title;
         note.body = body;
+        note.refresh_search_key();
         note.updated_at = unix_time();
+        self.notes_data_generation = self.notes_data_generation.wrapping_add(1);
         let note_snapshot = note.clone();
+        self.persist_note_snapshot(note_snapshot, cx);
+    }
+
+    /// Sends an update for a note snapshot. On a revision conflict the pending
+    /// edit is reconciled against the daemon and retried instead of being
+    /// silently dropped.
+    fn persist_note_snapshot(&mut self, note: Note, cx: &mut Context<Self>) {
+        let note_snapshot = note;
+        let retry_snapshot = note_snapshot.clone();
         let daemon = self.daemon.clone();
         cx.spawn(async move |padu, cx| {
             let result = cx
@@ -234,13 +263,61 @@ impl Padu {
                     Ok::<_, anyhow::Error>(note)
                 })
                 .await;
-            let _ = padu.update(cx, |this, cx| {
-                if let Ok(note) = result
-                    && let Some(current) =
+            let _ = padu.update(cx, |this, cx| match result {
+                Ok(note) => {
+                    if let Some(current) =
                         this.notes.iter_mut().find(|current| current.id == note.id)
-                {
-                    current.revision = note.revision;
-                    current.updated_at = note.updated_at;
+                    {
+                        current.revision = note.revision;
+                        current.updated_at = note.updated_at;
+                    }
+                    cx.notify();
+                }
+                Err(error) => this.reconcile_note_save(retry_snapshot, error, cx),
+            });
+        })
+        .detach();
+    }
+
+    /// A revision conflict means the daemon accepted a different write. Fetch
+    /// the current revision and retry the still-pending content against it so
+    /// the editor's newer text is not silently abandoned.
+    fn reconcile_note_save(&mut self, pending: Note, error: anyhow::Error, cx: &mut Context<Self>) {
+        let daemon = self.daemon.clone();
+        let project_id = pending.project_id;
+        let note_id = pending.id;
+        cx.spawn(async move |padu, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let response = daemon.client().request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        padu_client::Command::GetNote {
+                            project_id,
+                            note_id,
+                        },
+                    )?;
+                    let padu_client::ResponsePayload::Note { note: Some(note) } = response else {
+                        anyhow::bail!("daemon returned an invalid Notes response");
+                    };
+                    Ok::<_, anyhow::Error>(note)
+                })
+                .await;
+            let _ = padu.update(cx, |this, cx| match result {
+                Ok(note) => {
+                    if let Some(current) =
+                        this.notes.iter_mut().find(|current| current.id == note.id)
+                    {
+                        current.revision = note.revision;
+                        current.updated_at = note.updated_at;
+                    }
+                    let mut retry = pending;
+                    retry.revision = note.revision;
+                    this.persist_note_snapshot(retry, cx);
+                }
+                Err(_) => {
+                    this.show_toast(tr!("notes.save_failed", error = error));
                     cx.notify();
                 }
             });
@@ -254,6 +331,7 @@ impl Padu {
         }
         self.notes_save_generation = self.notes_save_generation.wrapping_add(1);
         let note = self.notes.remove(index);
+        self.notes_data_generation = self.notes_data_generation.wrapping_add(1);
         let daemon = self.daemon.clone();
         cx.spawn(async move |_, cx| {
             let _ = cx
@@ -277,15 +355,19 @@ impl Padu {
         cx.notify();
     }
 
-    pub(super) fn add_content_to_selected_note(&mut self, content: &str, cx: &mut Context<Self>) {
+    pub(super) fn add_content_to_selected_note(
+        &mut self,
+        content: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let content = content.trim();
         if content.is_empty() {
-            return;
+            return false;
         }
         let Some(project_id) = self.active_project().map(|project| project.id) else {
             self.show_toast(tr!("notes.add_failed"));
             cx.notify();
-            return;
+            return false;
         };
 
         if self.notes.is_empty() {
@@ -319,15 +401,8 @@ impl Padu {
                     .await;
                 let _ = padu.update(cx, |this, cx| match result {
                     Ok(note) => {
-                        this.notes.push(Note {
-                            id: note.id,
-                            project_id: note.project_id,
-                            title: note.title,
-                            body: note.content,
-                            revision: note.revision,
-                            created_at: note.created_at,
-                            updated_at: note.updated_at,
-                        });
+                        this.notes.push(Note::from_protocol(note));
+                        this.notes_data_generation = this.notes_data_generation.wrapping_add(1);
                         this.notes_selected = this.notes.len() - 1;
                         this.sync_note_editors(cx);
                         this.show_success_toast(tr!("notes.added_to_note"));
@@ -340,14 +415,14 @@ impl Padu {
                 });
             })
             .detach();
-            return;
+            return true;
         }
 
         self.notes_save_generation = self.notes_save_generation.wrapping_add(1);
         let title = self.notes_title.read(cx).content().trim().to_owned();
         let body = self.notes_body.read(cx).content().to_owned();
         let Some(note) = self.notes.get_mut(self.notes_selected) else {
-            return;
+            return false;
         };
         note.title = if title.is_empty() {
             tr!("notes.untitled")
@@ -359,7 +434,9 @@ impl Padu {
             note.body.push_str("\n\n");
         }
         note.body.push_str(content);
+        note.refresh_search_key();
         note.updated_at = unix_time();
+        self.notes_data_generation = self.notes_data_generation.wrapping_add(1);
         let note_snapshot = note.clone();
         let daemon = self.daemon.clone();
         self.sync_note_editors(cx);
@@ -404,6 +481,7 @@ impl Padu {
             });
         })
         .detach();
+        true
     }
 
     fn notes_key_down(
@@ -446,166 +524,217 @@ impl Padu {
         cx.stop_propagation();
     }
 
+    /// Recompute the visible note indices only when the query or the note set
+    /// changed. Frame work therefore stays proportional to the viewport, and
+    /// the lowercase search keys are reused instead of reallocated.
+    fn refresh_notes_filtered(&mut self, query: &str) {
+        if self.notes_filtered_query == query
+            && self.notes_filtered_generation == self.notes_data_generation
+        {
+            return;
+        }
+        self.notes_filtered_query = query.to_owned();
+        self.notes_filtered_generation = self.notes_data_generation;
+        let filtered = if query.is_empty() {
+            (0..self.notes.len()).collect::<Vec<_>>()
+        } else {
+            self.notes
+                .iter()
+                .enumerate()
+                .filter(|(_, note)| note.search_key.contains(query))
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>()
+        };
+        *self.notes_filtered.borrow_mut() = filtered;
+    }
+
+    fn sync_notes_list(&self, count: usize) {
+        if self.notes_list_state.item_count() == count {
+            return;
+        }
+        if count == 0 {
+            self.notes_list_state.reset(0);
+        } else {
+            self.notes_list_state
+                .reset_with_uniform_height(count, px(56.0));
+        }
+    }
+
+    /// Virtualized row builder for the Notes list. Reads only cached note and
+    /// project state; nothing here touches I/O.
+    fn notes_row(&self, row_index: usize, selected: usize, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let Some(&index) = self.notes_filtered.borrow().get(row_index) else {
+            return div().into_any_element();
+        };
+        let Some(note) = self.notes.get(index) else {
+            return div().into_any_element();
+        };
+        let title = if note.title.is_empty() {
+            tr!("notes.untitled")
+        } else {
+            note.title.clone()
+        };
+        let preview = note.body.lines().next().unwrap_or("—").to_owned();
+        let project_name = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == note.project_id)
+            .map(Project::display_name)
+            .unwrap_or_else(|| tr!("notes.no_project"));
+        let created_ago =
+            super::notes_utils::format_note_time_ago(unix_time().saturating_sub(note.created_at));
+        let note_id = note.id;
+        let note_menu = self.menu_handle(SharedString::from(format!("note-menu-{note_id}")), cx);
+        let weak = cx.entity().downgrade();
+        let row = div()
+            .id(SharedString::from(format!("note-row-{note_id}")))
+            .tab_index(0)
+            .tab_stop(true)
+            .w_full()
+            .min_h(px(56.0))
+            .px(px(9.0))
+            .py(px(7.0))
+            .rounded(px(8.0))
+            .cursor_pointer()
+            .when(index == selected, |row| {
+                row.bg(theme.sidebar_item_background)
+            })
+            .hover(|row| row.bg(theme.overlay))
+            .focus_visible(|row| row.border_1().border_color(theme.accent))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .w(px(26.0))
+                    .h(px(26.0))
+                    .flex_none()
+                    .rounded(px(6.0))
+                    .bg(theme.overlay)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(icon("icons/file.svg", 13.0, theme.text_secondary)),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text)
+                            .child(title),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_tertiary)
+                            .child(preview),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(sp(10.0))
+                            .text_color(theme.text_tertiary)
+                            .child(format!("{project_name} · {created_ago}")),
+                    ),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.select_note(index, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.select_note(index, cx);
+                    cx.stop_propagation();
+                }
+            }));
+        context_menu(
+            row,
+            SharedString::from(format!("note-row-menu-{note_id}")),
+            &note_menu,
+            move |_| {
+                let weak = weak.clone();
+                vec![
+                    MenuItem::new(tr!("notes.delete"), move |window, cx| {
+                        let _ = weak.update(cx, |this, cx| {
+                            this.confirm_delete_note(note_id, window, cx);
+                        });
+                    })
+                    .icon("icons/trash.svg")
+                    .destructive(true),
+                ]
+            },
+        )
+        .into_any_element()
+    }
+
     pub(super) fn render_notes_page(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
-        let notes = self.notes.clone();
         let selected = self.notes_selected;
         let query = self.notes_search.read(cx).content().trim().to_lowercase();
-        let visible_notes = notes
-            .iter()
-            .enumerate()
-            .filter(|(_, note)| {
-                query.is_empty()
-                    || note.title.to_lowercase().contains(&query)
-                    || note.body.to_lowercase().contains(&query)
-            })
-            .map(|(index, note)| (index, note.clone()))
-            .collect::<Vec<_>>();
-        let mut list = div().flex().flex_col().gap(px(3.0));
-        if visible_notes.is_empty() {
-            list = list.child(
-                div()
-                    .w_full()
-                    .py(px(28.0))
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap(px(8.0))
-                    .text_center()
-                    .child(icon("icons/file.svg", 22.0, theme.text_tertiary))
-                    .child(
-                        div()
-                            .text_size(sp(13.0))
-                            .text_color(theme.text_secondary)
-                            .child(if notes.is_empty() {
-                                tr!("notes.empty_title")
-                            } else {
-                                tr!("notes.no_matches")
-                            }),
-                    )
-                    .child(
-                        div()
-                            .text_size(sp(11.0))
-                            .text_color(theme.text_tertiary)
-                            .child(if notes.is_empty() {
-                                tr!("notes.empty_message")
-                            } else {
-                                query.clone()
-                            }),
-                    ),
-            );
-        }
-        for (index, note) in visible_notes.iter().cloned() {
-            let title = if note.title.is_empty() {
-                tr!("notes.untitled")
-            } else {
-                note.title.clone()
-            };
-            let preview = note.body.lines().next().unwrap_or("—").to_owned();
-            let project_name = self
-                .state
-                .projects
-                .iter()
-                .find(|project| project.id == note.project_id)
-                .map(Project::display_name)
-                .unwrap_or_else(|| tr!("notes.no_project"));
-            let created_ago = super::notes_utils::format_note_time_ago(
-                unix_time().saturating_sub(note.created_at),
-            );
-            let note_id = note.id;
-            let note_menu =
-                self.menu_handle(SharedString::from(format!("note-menu-{note_id}")), cx);
-            let weak = cx.entity().downgrade();
-            let row = div()
-                .id(SharedString::from(format!("note-row-{note_id}")))
-                .tab_index(0)
-                .tab_stop(true)
+        self.refresh_notes_filtered(&query);
+        let notes_empty = self.notes.is_empty();
+        let filtered_empty = self.notes_filtered.borrow().is_empty();
+        self.sync_notes_list(self.notes_filtered.borrow().len());
+        let entity = cx.entity().downgrade();
+        let list: AnyElement = if filtered_empty {
+            div()
                 .w_full()
-                .min_h(px(56.0))
-                .px(px(9.0))
-                .py(px(7.0))
-                .rounded(px(8.0))
-                .cursor_pointer()
-                .when(index == selected, |row| {
-                    row.bg(theme.sidebar_item_background)
-                })
-                .hover(|row| row.bg(theme.overlay))
-                .focus_visible(|row| row.border_1().border_color(theme.accent))
+                .py(px(28.0))
                 .flex()
+                .flex_col()
                 .items_center()
                 .gap(px(8.0))
+                .text_center()
+                .child(icon("icons/file.svg", 22.0, theme.text_tertiary))
                 .child(
                     div()
-                        .w(px(26.0))
-                        .h(px(26.0))
-                        .flex_none()
-                        .rounded(px(6.0))
-                        .bg(theme.overlay)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(icon("icons/file.svg", 13.0, theme.text_secondary)),
+                        .text_size(sp(13.0))
+                        .text_color(theme.text_secondary)
+                        .child(if notes_empty {
+                            tr!("notes.empty_title")
+                        } else {
+                            tr!("notes.no_matches")
+                        }),
                 )
                 .child(
                     div()
-                        .min_w_0()
-                        .flex_1()
-                        .flex()
-                        .flex_col()
-                        .gap(px(2.0))
-                        .child(
-                            div()
-                                .truncate()
-                                .text_size(sp(12.5))
-                                .text_color(theme.text)
-                                .child(title),
-                        )
-                        .child(
-                            div()
-                                .truncate()
-                                .text_size(sp(11.0))
-                                .text_color(theme.text_tertiary)
-                                .child(preview),
-                        )
-                        .child(
-                            div()
-                                .truncate()
-                                .text_size(sp(10.0))
-                                .text_color(theme.text_tertiary)
-                                .child(format!("{project_name} · {created_ago}")),
-                        ),
+                        .text_size(sp(11.0))
+                        .text_color(theme.text_tertiary)
+                        .child(if notes_empty {
+                            tr!("notes.empty_message")
+                        } else {
+                            query.clone()
+                        }),
                 )
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.select_note(index, cx);
-                }))
-                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                        this.select_note(index, cx);
-                        cx.stop_propagation();
-                    }
-                }));
-            list = list.child(context_menu(
-                row,
-                SharedString::from(format!("note-row-menu-{note_id}")),
-                &note_menu,
-                move |_| {
-                    let weak = weak.clone();
-                    vec![
-                        MenuItem::new(tr!("notes.delete"), move |window, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.confirm_delete_note(note_id, window, cx);
-                            });
+                .into_any_element()
+        } else {
+            list(
+                self.notes_list_state.clone(),
+                move |row_index, _window, cx| {
+                    entity
+                        .upgrade()
+                        .map(|entity| {
+                            entity.update(cx, |this, cx| this.notes_row(row_index, selected, cx))
                         })
-                        .icon("icons/trash.svg")
-                        .destructive(true),
-                    ]
+                        .unwrap_or_else(|| div().into_any_element())
                 },
-            ));
-        }
+            )
+            .size_full()
+            .into_any_element()
+        };
 
         let selected_note = self.notes.get(selected);
         let layout = self.notes_layout;
@@ -811,8 +940,12 @@ impl Padu {
                             .id("notes-list-scroll")
                             .flex_1()
                             .min_h_0()
-                            .overflow_y_scroll()
-                            .child(list),
+                            .relative()
+                            .child(list)
+                            .child(scrollbar::vertical(
+                                &self.notes_list_state,
+                                &self.notes_scrollbar,
+                            )),
                     ),
             );
         }

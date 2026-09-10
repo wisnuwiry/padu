@@ -2238,16 +2238,19 @@ impl Padu {
     }
 
     fn execute_note_composer_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
-        let Some(content) = prompt.strip_prefix("/note").map(str::trim) else {
+        let Some(rest) = prompt.strip_prefix("/note") else {
             return false;
         };
+        if !rest.is_empty() && !rest.starts_with(char::is_whitespace) {
+            return false;
+        }
+        let content = rest.trim();
         if content.is_empty() {
             // Match `/resume`: the composer command opens a focused picker and
             // does not start a provider turn.
             self.composer.update(cx, |input, cx| input.clear(cx));
             cx.defer(|cx| cx.dispatch_action(&OpenNotePicker));
-        } else {
-            self.add_content_to_selected_note(content, cx);
+        } else if self.add_content_to_selected_note(content, cx) {
             self.composer.update(cx, |input, cx| input.clear(cx));
         }
         true
