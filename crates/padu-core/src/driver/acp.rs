@@ -246,6 +246,7 @@ fn sdk_agent(
     let binary = binary
         .to_str()
         .ok_or_else(|| anyhow!("the ACP executable path is not valid UTF-8"))?;
+    #[cfg(not(windows))]
     let cwd = cwd
         .to_str()
         .ok_or_else(|| anyhow!("the ACP working directory is not valid UTF-8"))?;
@@ -264,14 +265,25 @@ fn sdk_agent(
     environment.append(&mut launch.env);
     environment.extend(computer_env);
 
-    // `AcpAgentConfig` deliberately contains only argv and environment. macOS
+    // `AcpAgentConfig` deliberately contains only argv and environment. Unix
     // `env -C` supplies the session cwd without a shell, preserving exact
     // argument boundaries and the SDK's process-group lifecycle management.
-    let mut args = vec!["-C".to_owned(), cwd.to_owned(), binary.to_owned()];
-    args.extend(launch.args);
-    let config = AcpAgentConfig::new("/usr/bin/env")
-        .args(args)
+    // Windows does not provide `/usr/bin/env`, so launch the downloaded .exe
+    // directly. Antigravity authentication and its persisted credentials do
+    // not require a shell wrapper or a working-directory mutation.
+    #[cfg(windows)]
+    let config = AcpAgentConfig::new(binary)
+        .args(launch.args)
         .envs(environment);
+
+    #[cfg(not(windows))]
+    let config = {
+        let mut args = vec!["-C".to_owned(), cwd.to_owned(), binary.to_owned()];
+        args.extend(launch.args);
+        AcpAgentConfig::new("/usr/bin/env")
+            .args(args)
+            .envs(environment)
+    };
     Ok(AcpAgent::new(config).with_debug(move |line, direction| {
         if direction != LineDirection::Stderr || line.trim().is_empty() {
             return;

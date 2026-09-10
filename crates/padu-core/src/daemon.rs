@@ -36,6 +36,7 @@ pub struct PaduBackend {
     composer_drafts: ComposerDraftStore,
     attachments: AttachmentStore,
     usage_scan_cache: Mutex<crate::usage_history::ScanCache>,
+    agy_install_cancellation: Mutex<Option<crate::download_manager::DownloadCancellation>>,
     checkpoint_capture_locks: Mutex<HashMap<(PathBuf, Uuid, usize), Arc<Mutex<()>>>>,
     usage_rates_dir: std::path::PathBuf,
     default_cwd: std::path::PathBuf,
@@ -70,6 +71,7 @@ impl PaduBackend {
             composer_drafts,
             attachments,
             usage_scan_cache: Mutex::new(HashMap::new()),
+            agy_install_cancellation: Mutex::new(None),
             checkpoint_capture_locks: Mutex::new(HashMap::new()),
             usage_rates_dir,
             default_cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
@@ -201,14 +203,25 @@ impl Backend for PaduBackend {
                 Ok(ResponsePayload::Ack)
             }
             Command::InstallAgyAcp | Command::ReinstallAgyAcp => {
+                let cancellation = crate::download_manager::DownloadCancellation::new();
+                {
+                    let mut active = self.agy_install_cancellation.lock();
+                    if active.is_some() {
+                        bail!("an Antigravity ACP installation is already running");
+                    }
+                    *active = Some(cancellation.clone());
+                }
                 let progress_events = events.clone();
-                let path = crate::agy_install::install(|percent, phase| {
-                    progress_events.send_provider_install_progress(
-                        ProviderKind::Agy,
-                        phase,
-                        percent,
-                    );
-                })?;
+                let install_result =
+                    crate::agy_install::install(&cancellation, |percent, phase| {
+                        progress_events.send_provider_install_progress(
+                            ProviderKind::Agy,
+                            phase,
+                            percent,
+                        );
+                    });
+                self.agy_install_cancellation.lock().take();
+                let path = install_result?;
                 let mut settings = self.settings.get();
                 settings
                     .provider_binary_overrides
@@ -218,6 +231,12 @@ impl Backend for PaduBackend {
                     provider: ProviderKind::Agy,
                     path,
                 })
+            }
+            Command::CancelAgyAcpInstall => {
+                if let Some(cancellation) = self.agy_install_cancellation.lock().as_ref() {
+                    cancellation.cancel();
+                }
+                Ok(ResponsePayload::Ack)
             }
             Command::CheckAgyAuth => {
                 let settings = self.settings.get();
@@ -1868,6 +1887,7 @@ fn handle_driver_command(
         | Command::GetSettings
         | Command::UpdateSettings { .. }
         | Command::InstallAgyAcp
+        | Command::CancelAgyAcpInstall
         | Command::AuthenticateAgy
         | Command::LogoutAgy
         | Command::CheckAgyAuth

@@ -388,6 +388,7 @@ providers.checked_minutes_ago: Diperiksa %{count}m yang lalu
 providers.checked_hours_ago: Diperiksa %{count}j yang lalu
 providers.agy_install_acp: Pasang server ACP
 providers.agy_downloading: Mengunduh… %{percent}%
+
 providers.agy_working: Memproses…
 providers.agy_sign_in: Masuk dengan Google
 providers.agy_sign_out: Keluar

@@ -39,7 +39,7 @@ use crate::ui::icon;
 use crate::ui::text_field::TextField;
 use crate::ui::tooltip::Tooltip;
 use crate::{
-    BrowserBack, BrowserDevtools, BrowserForward, BrowserHardReload, BrowserReload, BrowserStop,
+    BrowserBack, BrowserForward, BrowserHardReload, BrowserReload, BrowserStop,
     FocusBrowserAddress, WebviewCopy, WebviewCut, WebviewPaste, WebviewSelectAll,
 };
 
@@ -325,6 +325,10 @@ mod host {
                     .is_some_and(|responder| responder.isDescendantOf(view))
             })
         }
+
+        /// Wry's macOS background-throttling policy is configured at creation
+        /// time. Hiding the native view activates WebKit's inactive policy.
+        pub fn set_backgrounded(&self, _backgrounded: bool) {}
     }
 
     /// GPUI's scene-overlay view — the transparent plane its menus and
@@ -418,7 +422,8 @@ mod host {
         CreateCoreWebView2EnvironmentCompletedHandler, CursorChangedEventHandler,
         DocumentTitleChangedEventHandler, FocusChangedEventHandler, MoveFocusRequestedEventHandler,
         NavigationCompletedEventHandler, NavigationStartingEventHandler,
-        NewWindowRequestedEventHandler, SourceChangedEventHandler, take_pwstr,
+        NewWindowRequestedEventHandler, SourceChangedEventHandler, TrySuspendCompletedHandler,
+        take_pwstr,
     };
     use windows::Win32::Foundation::{E_FAIL, E_NOINTERFACE, HWND, POINT, RECT};
     use windows::core::{BOOL, HSTRING, IUnknown, Interface, PCWSTR, PWSTR};
@@ -582,12 +587,6 @@ mod host {
         pub fn evaluate_script(&self, script: &str) -> windows::core::Result<()> {
             unsafe { self.0.ExecuteScript(&HSTRING::from(script), None) }
         }
-
-        /// WebView2 has no "close" or "is open" counterpart — the devtools
-        /// window is the user's from here on.
-        pub fn open_devtools(&self) -> windows::core::Result<()> {
-            unsafe { self.0.OpenDevToolsWindow() }
-        }
     }
 
     pub(super) struct WebviewHost {
@@ -720,6 +719,20 @@ mod host {
         /// ours to descend from, and the events are the documented signal.
         pub fn native_focus_within(&self) -> bool {
             self.focused.get()
+        }
+
+        /// Ask WebView2 to stop page activity while this surface is not the
+        /// selected browser. Visibility alone still permits background work.
+        pub fn set_backgrounded(&self, backgrounded: bool) {
+            let Ok(webview) = self.webview.0.cast::<ICoreWebView2_3>() else {
+                return;
+            };
+            if backgrounded {
+                let handler = TrySuspendCompletedHandler::create(Box::new(|_, _| Ok(())));
+                let _ = unsafe { webview.TrySuspend(&handler) };
+            } else {
+                let _ = unsafe { webview.Resume() };
+            }
         }
 
         pub fn focus_page(&self) {
@@ -932,13 +945,11 @@ mod host {
         }
 
         let webview = unsafe { controller.CoreWebView2() }?;
-        // The toolbar has a devtools button, so make sure the runtime agrees
-        // they are available. Everything else stays at WebView2's defaults,
-        // including the status bar: it draws inside the page raster, so the
-        // portal clips it along with everything else, and a link preview on
-        // hover is worth having.
+        // Browser pages are intentionally not an inspection/debugging surface.
+        // Disabling this at the WebView2 level also removes Inspect Element from
+        // the native page context menu.
         if let Ok(settings) = unsafe { webview.Settings() } {
-            let _ = unsafe { settings.SetAreDevToolsEnabled(true) };
+            let _ = unsafe { settings.SetAreDevToolsEnabled(false) };
         }
 
         let Callbacks {
@@ -1121,6 +1132,7 @@ mod host {
         pub fn native_focus_within(&self) -> bool {
             false
         }
+        pub fn set_backgrounded(&self, _backgrounded: bool) {}
     }
 }
 
@@ -1150,8 +1162,17 @@ impl Deferred {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BrowserLifecycle {
+    Active,
+    Backgrounded,
+    Closing,
+    Closed,
+}
+
 pub struct BrowserView {
     focus_handle: FocusHandle,
+    lifecycle: BrowserLifecycle,
     address: Entity<TextInput>,
     host: Option<Rc<WebviewHost>>,
     /// Why the webview could not be created, shown in place of the page.
@@ -1266,6 +1287,7 @@ impl BrowserView {
 
         let mut this = Self {
             focus_handle,
+            lifecycle: BrowserLifecycle::Active,
             address,
             host: None,
             host_error: None,
@@ -1350,8 +1372,9 @@ impl BrowserView {
             })
             .with_visible(false)
             .with_focused(false)
+            .with_background_throttling(wry::BackgroundThrottlingPolicy::Suspend)
             .with_accept_first_mouse(true)
-            .with_devtools(true)
+            .with_devtools(false)
             .with_user_agent(USER_AGENT)
             .with_navigation_handler(|_| true)
             .with_on_page_load_handler(move |event, url| {
@@ -1493,8 +1516,21 @@ impl BrowserView {
     #[cfg(target_os = "windows")]
     fn webview_ready(&mut self, outcome: Result<Rc<WebviewHost>, String>, cx: &mut Context<Self>) {
         match outcome {
+            Ok(host)
+                if matches!(
+                    self.lifecycle,
+                    BrowserLifecycle::Closing | BrowserLifecycle::Closed
+                ) =>
+            {
+                host.set_visible(false);
+                drop(host);
+            }
             Ok(host) => {
+                let backgrounded = self.lifecycle == BrowserLifecycle::Backgrounded;
                 self.host = Some(host);
+                if backgrounded && let Some(host) = &self.host {
+                    host.set_backgrounded(true);
+                }
                 // A URL typed before the page existed waits here rather than
                 // being dropped on the floor.
                 if let Some(url) = self.pending_url.take() {
@@ -1510,7 +1546,12 @@ impl BrowserView {
     /// Unlike a page load this must not touch `loading` or the title.
     #[cfg(target_os = "windows")]
     fn source_changed(&mut self, url: String, cx: &mut Context<Self>) {
-        if url.is_empty() || self.current_url.as_deref() == Some(url.as_str()) {
+        if matches!(
+            self.lifecycle,
+            BrowserLifecycle::Closing | BrowserLifecycle::Closed
+        ) || url.is_empty()
+            || self.current_url.as_deref() == Some(url.as_str())
+        {
             return;
         }
         self.current_url = Some(url);
@@ -1526,6 +1567,12 @@ impl BrowserView {
 
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     fn page_load_changed(&mut self, event: PageLoad, url: String, cx: &mut Context<Self>) {
+        if matches!(
+            self.lifecycle,
+            BrowserLifecycle::Closing | BrowserLifecycle::Closed
+        ) {
+            return;
+        }
         match event {
             PageLoad::Started => {
                 self.loading = true;
@@ -1547,6 +1594,12 @@ impl BrowserView {
 
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     fn title_changed(&mut self, title: String, cx: &mut Context<Self>) {
+        if matches!(
+            self.lifecycle,
+            BrowserLifecycle::Closing | BrowserLifecycle::Closed
+        ) {
+            return;
+        }
         let title = (!title.trim().is_empty()).then_some(title);
         if self.page_title != title {
             self.page_title = title;
@@ -1667,15 +1720,37 @@ impl BrowserView {
         cx.notify();
     }
 
-    /// Per-frame push from the app: whether this surface is the visible right
-    /// panel tab, and whether a GPUI overlay is open above it. Deduplicated
-    /// down to real AppKit calls by the host.
+    /// Per-frame push from the app. Logical activity controls page execution;
+    /// surface visibility only controls native compositing. Keeping those
+    /// separate prevents a short panel animation or overlay from suspending a
+    /// page, while switching tabs or sessions still backgrounds it.
     pub fn sync_native_state(
         &mut self,
+        logically_active: bool,
         surface_visible: bool,
         occluded: bool,
         cx: &mut Context<Self>,
     ) {
+        if matches!(
+            self.lifecycle,
+            BrowserLifecycle::Closing | BrowserLifecycle::Closed
+        ) {
+            return;
+        }
+        if logically_active {
+            if self.lifecycle == BrowserLifecycle::Backgrounded {
+                if let Some(host) = &self.host {
+                    host.set_backgrounded(false);
+                }
+                self.lifecycle = BrowserLifecycle::Active;
+            }
+        } else if self.lifecycle == BrowserLifecycle::Active {
+            if let Some(host) = &self.host {
+                host.set_backgrounded(true);
+            }
+            self.lifecycle = BrowserLifecycle::Backgrounded;
+        }
+
         let occlusion_started = occluded && !self.occluded;
         self.occluded = occluded;
 
@@ -1705,13 +1780,42 @@ impl BrowserView {
         // completion clears the pending flag and this hides the view anyway —
         // a blank page area beats a menu nobody can see.
         let covered_by_snapshot = occluded && !self.snapshot_pending;
-        let show = surface_visible && has_page && !covered_by_snapshot;
+        let show = logically_active && surface_visible && has_page && !covered_by_snapshot;
         // AppKit leaves a hidden view as first responder, so a page focused at
         // the moment its tab is switched away would keep eating the keyboard.
         if !show && host.native_focus_within() {
             self.reclaim_native_keyboard(cx);
         }
         host.set_visible(show);
+    }
+
+    /// Tear down the native page before the owning right-panel tab is
+    /// discarded. This is intentionally separate from `Drop`: GPUI entities
+    /// and deferred native callbacks can outlive the map entry briefly.
+    pub fn shutdown(&mut self, cx: &mut Context<Self>) {
+        if matches!(
+            self.lifecycle,
+            BrowserLifecycle::Closing | BrowserLifecycle::Closed
+        ) {
+            return;
+        }
+        self.lifecycle = BrowserLifecycle::Closing;
+        self.snapshot_epoch = self.snapshot_epoch.wrapping_add(1);
+        self.snapshot = None;
+        self.snapshot_pending = false;
+        self.loading = false;
+        #[cfg(target_os = "windows")]
+        {
+            self.pending_url = None;
+        }
+        if let Some(host) = self.host.take() {
+            if host.native_focus_within() {
+                self.reclaim_native_keyboard(cx);
+            }
+            host.set_visible(false);
+            drop(host);
+        }
+        self.lifecycle = BrowserLifecycle::Closed;
     }
 
     #[cfg(target_os = "macos")]
@@ -1888,24 +1992,6 @@ impl BrowserView {
             self.loading = false;
             self.refresh_navigation_state();
             _cx.notify();
-        }
-    }
-
-    fn toggle_devtools(&mut self) {
-        #[cfg(target_os = "macos")]
-        if let Some(host) = &self.host {
-            if host.webview.is_devtools_open() {
-                host.webview.close_devtools();
-            } else {
-                host.webview.open_devtools();
-            }
-        }
-        // WebView2's devtools are a separate top-level window that the user
-        // closes; there is no API to ask whether it is open, let alone shut
-        // it, so this opens and re-focuses instead of toggling.
-        #[cfg(target_os = "windows")]
-        if let Some(host) = &self.host {
-            let _ = host.webview.open_devtools();
         }
     }
 
@@ -2482,7 +2568,7 @@ impl Render for BrowserView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::current(cx);
         self.reconcile_focus(window, cx);
-        if self.loading {
+        if self.loading && self.lifecycle == BrowserLifecycle::Active {
             // `estimatedProgress` moves without any observable notification;
             // while a load is in flight the toolbar redraws with the frames.
             window.request_animation_frame();
@@ -2506,7 +2592,6 @@ impl Render for BrowserView {
             .on_action(cx.listener(|this, _: &BrowserReload, _, cx| this.reload(cx)))
             .on_action(cx.listener(|this, _: &BrowserHardReload, _, cx| this.hard_reload(cx)))
             .on_action(cx.listener(|this, _: &BrowserStop, _, cx| this.stop_loading(cx)))
-            .on_action(cx.listener(|this, _: &BrowserDevtools, _, _| this.toggle_devtools()))
             .on_action(cx.listener(|this, _: &FocusBrowserAddress, window, cx| {
                 this.focus_address(window, cx);
             }))

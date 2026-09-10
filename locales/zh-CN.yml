@@ -389,6 +389,7 @@ providers.checked_minutes_ago: "%{count} 分钟前检查过"
 providers.checked_hours_ago: "%{count} 小时前检查过"
 providers.agy_install_acp: 安装 ACP 服务
 providers.agy_downloading: 下载中… %{percent}%
+
 providers.agy_working: 处理中…
 providers.agy_sign_in: 使用 Google 登录
 providers.agy_sign_out: 退出登录

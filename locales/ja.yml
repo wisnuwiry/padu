@@ -397,6 +397,7 @@ providers.checked_minutes_ago: "%{count} 分前に確認済み"
 providers.checked_hours_ago: "%{count} 時間前に確認済み"
 providers.agy_install_acp: ACP サーバーをインストール
 providers.agy_downloading: ダウンロード中… %{percent}%
+
 providers.agy_working: 処理中…
 providers.agy_sign_in: Google でログイン
 providers.agy_sign_out: ログアウト

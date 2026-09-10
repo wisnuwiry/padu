@@ -1164,6 +1164,7 @@ impl Padu {
 
     fn render_sidebar_footer(&self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
+        let checking_updates = self.updater_checking;
         div()
             .flex_none()
             .h(px(40.0))
@@ -1245,15 +1246,33 @@ impl Padu {
                     .items_center()
                     .justify_center()
                     .cursor_pointer()
+                    .when(checking_updates, |button| button.cursor_default())
                     .hover(|element| element.bg(theme.overlay))
                     .active(|element| element.bg(theme.overlay_strong))
-                    .tooltip(Tooltip::text(tr!("menu.check_for_updates")))
-                    .child(icon("icons/rotate-cw.svg", 14.0, theme.text_tertiary))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.check_for_updates(cx);
+                    .tooltip(Tooltip::text(if checking_updates {
+                        tr!("about.checking_for_updates")
+                    } else {
+                        tr!("menu.check_for_updates")
                     }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    .child(if checking_updates {
+                        motion::spin_slow(icon(
+                            "icons/loader-circle.svg",
+                            14.0,
+                            theme.text_tertiary,
+                        ))
+                        .into_any_element()
+                    } else {
+                        icon("icons/rotate-cw.svg", 14.0, theme.text_tertiary).into_any_element()
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if !checking_updates {
+                            this.check_for_updates(cx);
+                        }
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                        if !checking_updates
+                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                        {
                             this.check_for_updates(cx);
                             cx.stop_propagation();
                         }

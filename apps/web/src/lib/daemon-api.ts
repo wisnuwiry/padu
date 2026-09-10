@@ -191,6 +191,10 @@ export async function installAgyAcp(client: PaduClient): Promise<string> {
   return response.path
 }
 
+export async function cancelAgyInstall(client: PaduClient): Promise<void> {
+  expectResponse(await client.request({ type: 'cancelAgyAcpInstall' }), 'ack')
+}
+
 export async function authenticateAgy(client: PaduClient): Promise<void> {
   expectResponse(await client.requestWithTimeout({ type: 'authenticateAgy' }, 10 * 60 * 1000), 'ack')
 }
