@@ -193,11 +193,6 @@ impl Padu {
                         "keybindings.browser_forward_desc",
                         crate::platform::primary_shortcut("⌘]", "Ctrl+]"),
                     ),
-                    (
-                        "keybindings.browser_devtools",
-                        "keybindings.browser_devtools_desc",
-                        crate::platform::primary_shortcut("⌥⌘I", "Ctrl+Alt+I"),
-                    ),
                 ],
             ),
         ];

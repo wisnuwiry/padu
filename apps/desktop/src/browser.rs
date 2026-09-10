@@ -39,7 +39,7 @@ use crate::ui::icon;
 use crate::ui::text_field::TextField;
 use crate::ui::tooltip::Tooltip;
 use crate::{
-    BrowserBack, BrowserDevtools, BrowserForward, BrowserHardReload, BrowserReload, BrowserStop,
+    BrowserBack, BrowserForward, BrowserHardReload, BrowserReload, BrowserStop,
     FocusBrowserAddress, WebviewCopy, WebviewCut, WebviewPaste, WebviewSelectAll,
 };
 
@@ -587,12 +587,6 @@ mod host {
         pub fn evaluate_script(&self, script: &str) -> windows::core::Result<()> {
             unsafe { self.0.ExecuteScript(&HSTRING::from(script), None) }
         }
-
-        /// WebView2 has no "close" or "is open" counterpart — the devtools
-        /// window is the user's from here on.
-        pub fn open_devtools(&self) -> windows::core::Result<()> {
-            unsafe { self.0.OpenDevToolsWindow() }
-        }
     }
 
     pub(super) struct WebviewHost {
@@ -951,13 +945,11 @@ mod host {
         }
 
         let webview = unsafe { controller.CoreWebView2() }?;
-        // The toolbar has a devtools button, so make sure the runtime agrees
-        // they are available. Everything else stays at WebView2's defaults,
-        // including the status bar: it draws inside the page raster, so the
-        // portal clips it along with everything else, and a link preview on
-        // hover is worth having.
+        // Browser pages are intentionally not an inspection/debugging surface.
+        // Disabling this at the WebView2 level also removes Inspect Element from
+        // the native page context menu.
         if let Ok(settings) = unsafe { webview.Settings() } {
-            let _ = unsafe { settings.SetAreDevToolsEnabled(true) };
+            let _ = unsafe { settings.SetAreDevToolsEnabled(false) };
         }
 
         let Callbacks {
@@ -1382,7 +1374,7 @@ impl BrowserView {
             .with_focused(false)
             .with_background_throttling(wry::BackgroundThrottlingPolicy::Suspend)
             .with_accept_first_mouse(true)
-            .with_devtools(true)
+            .with_devtools(false)
             .with_user_agent(USER_AGENT)
             .with_navigation_handler(|_| true)
             .with_on_page_load_handler(move |event, url| {
@@ -2003,24 +1995,6 @@ impl BrowserView {
         }
     }
 
-    fn toggle_devtools(&mut self) {
-        #[cfg(target_os = "macos")]
-        if let Some(host) = &self.host {
-            if host.webview.is_devtools_open() {
-                host.webview.close_devtools();
-            } else {
-                host.webview.open_devtools();
-            }
-        }
-        // WebView2's devtools are a separate top-level window that the user
-        // closes; there is no API to ask whether it is open, let alone shut
-        // it, so this opens and re-focuses instead of toggling.
-        #[cfg(target_os = "windows")]
-        if let Some(host) = &self.host {
-            let _ = host.webview.open_devtools();
-        }
-    }
-
     fn open_external(&self, cx: &mut Context<Self>) {
         if let Some(url) = &self.current_url {
             cx.open_url(url);
@@ -2618,7 +2592,6 @@ impl Render for BrowserView {
             .on_action(cx.listener(|this, _: &BrowserReload, _, cx| this.reload(cx)))
             .on_action(cx.listener(|this, _: &BrowserHardReload, _, cx| this.hard_reload(cx)))
             .on_action(cx.listener(|this, _: &BrowserStop, _, cx| this.stop_loading(cx)))
-            .on_action(cx.listener(|this, _: &BrowserDevtools, _, _| this.toggle_devtools()))
             .on_action(cx.listener(|this, _: &FocusBrowserAddress, window, cx| {
                 this.focus_address(window, cx);
             }))
