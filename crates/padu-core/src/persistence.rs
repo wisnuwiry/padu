@@ -1041,6 +1041,24 @@ impl StateStore {
         Ok(connection)
     }
 
+    /// The daemon's long-lived connection. Opening a fresh connection and
+    /// re-running the migration scan per operation is expensive, so the note
+    /// CRUD paths reuse the cached one like every other storage operation.
+    fn storage_guard(&self) -> io::Result<parking_lot::MutexGuard<'_, Option<Storage>>> {
+        let mut guard = self.storage.lock();
+        if guard.is_none() {
+            *guard = Some(Storage {
+                connection: self.open()?,
+                persisted_sessions: HashSet::new(),
+                written_messages: HashMap::new(),
+                saved_projects: 0,
+                saved_app_settings: 0,
+                saved_app_state: 0,
+            });
+        }
+        Ok(guard)
+    }
+
     pub fn load_or_fresh(&self, cwd: PathBuf) -> PersistedState {
         let mut state = self.load().unwrap_or_else(|_| {
             if cwd.parent().is_none() {
@@ -1493,7 +1511,8 @@ impl StateStore {
     }
 
     pub fn list_notes(&self, project_id: Uuid) -> io::Result<Vec<NoteSummary>> {
-        let connection = self.open()?;
+        let guard = self.storage_guard()?;
+        let connection = &guard.as_ref().expect("storage opened above").connection;
         let mut statement = if project_id.is_nil() {
             connection
                 .prepare(
@@ -1519,7 +1538,8 @@ impl StateStore {
     }
 
     pub fn get_note(&self, project_id: Uuid, note_id: Uuid) -> io::Result<Option<Note>> {
-        let connection = self.open()?;
+        let guard = self.storage_guard()?;
+        let connection = &guard.as_ref().expect("storage opened above").connection;
         connection
             .query_row(
                 "SELECT id, project_id, title, content, revision, created_at, updated_at
@@ -1532,7 +1552,8 @@ impl StateStore {
     }
 
     pub fn create_note(&self, input: CreateNote) -> io::Result<Note> {
-        let connection = self.open()?;
+        let guard = self.storage_guard()?;
+        let connection = &guard.as_ref().expect("storage opened above").connection;
         let project_id = input.project_id.to_string();
         let project_exists: bool = connection
             .query_row(
@@ -1573,9 +1594,13 @@ impl StateStore {
     }
 
     pub fn update_note(&self, input: UpdateNote) -> io::Result<Note> {
-        let connection = self.open()?;
+        let mut guard = self.storage_guard()?;
+        let connection = &mut guard.as_mut().expect("storage opened above").connection;
+        // One transaction keeps the UPDATE and its returned row atomic, so the
+        // caller can never observe another writer's values mid-commit.
+        let transaction = connection.transaction().map_err(to_io_error)?;
         let now = crate::model::unix_time();
-        let changed = connection
+        let changed = transaction
             .execute(
                 "UPDATE notes
                     SET title = ?1, content = ?2, revision = revision + 1, updated_at = ?3
@@ -1592,14 +1617,26 @@ impl StateStore {
             .map_err(to_io_error)?;
         if changed == 0 {
             return Err(note_revision_error(
-                &connection,
+                &transaction,
                 input.project_id,
                 input.note_id,
                 input.expected_revision,
             ));
         }
-        self.get_note(input.project_id, input.note_id)?
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "note not found after update"))
+        let note = transaction
+            .query_row(
+                "SELECT id, project_id, title, content, revision, created_at, updated_at
+                 FROM notes WHERE project_id = ?1 AND id = ?2",
+                params![input.project_id.to_string(), input.note_id.to_string()],
+                note_from_row,
+            )
+            .optional()
+            .map_err(to_io_error)?
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::NotFound, "note not found after update")
+            })?;
+        transaction.commit().map_err(to_io_error)?;
+        Ok(note)
     }
 
     pub fn delete_note(
@@ -1608,7 +1645,8 @@ impl StateStore {
         note_id: Uuid,
         expected_revision: u64,
     ) -> io::Result<u64> {
-        let connection = self.open()?;
+        let guard = self.storage_guard()?;
+        let connection = &guard.as_ref().expect("storage opened above").connection;
         let changed = connection
             .execute(
                 "DELETE FROM notes WHERE project_id = ?1 AND id = ?2 AND revision = ?3",
@@ -1621,7 +1659,7 @@ impl StateStore {
             .map_err(to_io_error)?;
         if changed == 0 {
             return Err(note_revision_error(
-                &connection,
+                connection,
                 project_id,
                 note_id,
                 expected_revision,
