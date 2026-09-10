@@ -2618,13 +2618,9 @@ impl Padu {
                     .px(px(11.0))
                     .py(px(8.0))
                     .flex()
-                    .items_start()
+                    .items_center()
                     .gap(px(8.0))
-                    .child(
-                        icon("icons/file.svg", 16.0, theme.text_secondary)
-                            .mt(px(2.0))
-                            .flex_none(),
-                    )
+                    .child(icon("icons/file.svg", 24.0, theme.text_secondary).flex_none())
                     .child(
                         div()
                             .min_w_0()
@@ -2634,15 +2630,8 @@ impl Padu {
                             .gap(px(2.0))
                             .child(
                                 div()
-                                    .text_size(sp(10.5))
-                                    .text_color(theme.text_tertiary)
-                                    .whitespace_nowrap()
-                                    .truncate()
-                                    .child(note_label),
-                            )
-                            .child(
-                                div()
                                     .text_size(sp(12.0))
+                                    .font_weight(FontWeight::NORMAL)
                                     .text_color(theme.text)
                                     .whitespace_nowrap()
                                     .truncate()
@@ -2651,6 +2640,7 @@ impl Padu {
                             .child(
                                 div()
                                     .text_size(sp(11.5))
+                                    .font_weight(FontWeight::NORMAL)
                                     .text_color(theme.text_secondary)
                                     .truncate()
                                     .child(if preview.is_empty() {
@@ -2658,6 +2648,15 @@ impl Padu {
                                     } else {
                                         preview
                                     }),
+                            )
+                            .child(
+                                div()
+                                    .text_size(sp(10.5))
+                                    .font_weight(FontWeight::NORMAL)
+                                    .text_color(theme.text_tertiary)
+                                    .whitespace_nowrap()
+                                    .truncate()
+                                    .child(note_label),
                             ),
                     )
                     .child(

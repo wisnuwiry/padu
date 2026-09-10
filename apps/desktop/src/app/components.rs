@@ -441,7 +441,7 @@ fn render_embedded_notes(
                 .px(px(10.0))
                 .py(px(7.0))
                 .flex()
-                .items_start()
+                .items_center()
                 .gap(px(8.0))
                 .cursor_pointer()
                 .track_focus(&preview_focus)
@@ -452,11 +452,7 @@ fn render_embedded_notes(
                 .on_mouse_down(MouseButton::Left, |_, _, cx| {
                     cx.stop_propagation();
                 })
-                .child(
-                    icon("icons/file.svg", 16.0, theme.text_secondary)
-                        .mt(px(2.0))
-                        .flex_none(),
-                )
+                .child(icon("icons/file.svg", 24.0, theme.text_secondary).flex_none())
                 .child(
                     div()
                         .min_w_0()
@@ -466,15 +462,8 @@ fn render_embedded_notes(
                         .gap(px(2.0))
                         .child(
                             div()
-                                .text_size(sp(10.0))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text_tertiary)
-                                .child(tr!("notes.label")),
-                        )
-                        .child(
-                            div()
                                 .text_size(sp(14.0))
-                                .font_weight(FontWeight::SEMIBOLD)
+                                .font_weight(FontWeight::NORMAL)
                                 .text_color(theme.text)
                                 .whitespace_nowrap()
                                 .truncate()
@@ -483,6 +472,7 @@ fn render_embedded_notes(
                         .child(
                             div()
                                 .text_size(sp(11.5))
+                                .font_weight(FontWeight::NORMAL)
                                 .text_color(theme.text_secondary)
                                 .whitespace_nowrap()
                                 .truncate()
@@ -491,6 +481,13 @@ fn render_embedded_notes(
                                 } else {
                                     excerpt
                                 }),
+                        )
+                        .child(
+                            div()
+                                .text_size(sp(10.0))
+                                .font_weight(FontWeight::NORMAL)
+                                .text_color(theme.text_tertiary)
+                                .child(tr!("notes.label")),
                         ),
                 )
                 .on_click(move |_, window, cx| {

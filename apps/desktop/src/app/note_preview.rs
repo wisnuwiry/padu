@@ -175,7 +175,7 @@ impl Padu {
             .gap(px(12.0))
             .child(
                 div()
-                    .pr(px(36.0))
+                    .pr(px(84.0))
                     .text_size(sp(16.0))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme.text)
