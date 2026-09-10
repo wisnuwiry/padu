@@ -1059,6 +1059,16 @@ notes.add_failed_error:
   en: "Could not add to note: %{error}"
 notes.command_description:
   en: Search and embed a note in chat
+notes.save_failed:
+  en: "Could not save note: %{error}"
+notes.time_just_now:
+  en: just now
+notes.time_minutes_ago:
+  en: "%{count}m ago"
+notes.time_hours_ago:
+  en: "%{count}h ago"
+notes.time_days_ago:
+  en: "%{count}d ago"
 
 session.fork_task:
   en: Fork task

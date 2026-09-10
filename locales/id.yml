@@ -41,9 +41,11 @@ updater.up_to_date: Padu sudah menggunakan versi terbaru
 updater.failed: "Pembaruan gagal: %{error}"
 command_palette.placeholder: Cari tugas atau jalankan perintah…
 command_palette.resume_placeholder: Cari sesi terminal…
+command_palette.note_placeholder: Cari catatan…
 command_palette.resume_provider_placeholder: Pilih penyedia…
 command_palette.suggested: Disarankan
 command_palette.tasks: Tugas
+command_palette.notes: Catatan
 command_palette.sessions: Sesi terminal
 command_palette.providers: Penyedia
 command_palette.commands: Perintah
@@ -113,6 +115,8 @@ settings.daemon_keywords: host jarak jauh remote server devbox cloud daemon web 
 settings.computer_use_keywords: penggunaan komputer perekaman layar aksesibilitas aplikasi kontrol codex
 settings.notifications_keywords: notifikasi pemberitahuan suara izin sistem audio uji tes spanduk tugas selesai
 settings.about_keywords: tentang info versi pembaruan perbarui host terhubung github repositori sponsor donasi berkontribusi
+settings.notes: Catatan
+settings.notes_keywords: catatan dokumen menulis kutipan memo
 notifications.system_permission: Izin Sistem
 notifications.system_permission_desc: Status pengiriman notifikasi sistem operasi untuk peringatan tugas
 notifications.permission_granted: Diizinkan
@@ -479,6 +483,36 @@ common.copy_code: Salin Kode
 common.cancel: Batal
 common.edit: Edit
 common.send: Kirim
+notes.new: Catatan Baru
+notes.save: Simpan
+notes.edit: Edit
+notes.side_by_side: Berdampingan
+notes.preview: Pratinjau
+notes.delete: Hapus
+notes.delete_title: Hapus catatan?
+notes.delete_message: "Yakin ingin menghapus “%{title}”? Tindakan ini tidak dapat dibatalkan."
+notes.empty_title: Belum ada catatan
+notes.empty_message: Buat catatan untuk menyimpan ide, cuplikan, dan pengingat.
+notes.search_placeholder: Cari catatan
+notes.no_matches: Tidak ada catatan yang cocok
+notes.collapse: Ciutkan catatan
+notes.expand: Perluas catatan
+notes.details: Detail catatan
+notes.created: Dibuat %{time}
+notes.updated: Diperbarui %{time}
+notes.untitled: Catatan Tanpa Judul
+notes.title_placeholder: Judul catatan
+notes.body_placeholder: Tulis dalam Markdown…
+notes.add_to_note: Tambahkan ke Catatan
+notes.added_to_note: Ditambahkan ke catatan
+notes.add_failed: Tidak dapat menambahkan ke catatan
+notes.add_failed_error: "Tidak dapat menambahkan ke catatan: %{error}"
+notes.command_description: Cari dan sematkan catatan dalam obrolan
+notes.save_failed: "Tidak dapat menyimpan catatan: %{error}"
+notes.time_just_now: baru saja
+notes.time_minutes_ago: "%{count} mnt lalu"
+notes.time_hours_ago: "%{count} jam lalu"
+notes.time_days_ago: "%{count} hari lalu"
 session.fork_task: Cabangkan tugas
 session.fork_task_title: Cabangkan Tugas
 session.forking_task: Mencabangkan tugas…
