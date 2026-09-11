@@ -171,6 +171,14 @@ diffs, file editing, and the terminal run natively on Linux and Windows.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and checks.
 Release maintainers should also read [RELEASING.md](RELEASING.md).
 
+## Contributors
+
+Thanks to everyone who helps make Padu better.
+
+<a href="https://github.com/wisnuwiry/padu/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=wisnuwiry/padu" alt="Padu contributors" width="80" />
+</a>
+
 ## Sponsorship
 
 You can support the project development via
