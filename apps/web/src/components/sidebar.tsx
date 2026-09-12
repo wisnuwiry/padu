@@ -277,7 +277,7 @@ export function Sidebar({
                 return (
                   <div className="h-8 px-2.5">
                     <SidebarAction
-                      icon={<PaduIcon name="file" />}
+                      icon={<PaduIcon name="note" />}
                       label={t('settings.notes')}
                       shortcut={notesShortcut}
                       onClick={() => {

@@ -261,7 +261,7 @@ settings.notes_keywords:
 notifications.system_permission:
   en: System Permission
 notifications.system_permission_desc:
-  en: macOS notification delivery status for task alerts
+  en: System notification delivery status for task alerts
 notifications.permission_granted:
   en: Allowed
 notifications.permission_denied:

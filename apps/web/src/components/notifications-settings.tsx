@@ -1,9 +1,14 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { PaduIcon } from '@/components/padu-icon'
 import { useI18n } from '@/lib/i18n'
-import { cn } from '@/lib/utils'
+import {
+  SettingText,
+  Toggle,
+  useStoredBoolean,
+} from '@/components/settings/shared'
 
 function playChime() {
   try {
@@ -60,16 +65,16 @@ export function NotificationsSettings() {
 
   const handleRequestPermission = async () => {
     if (typeof window === 'undefined' || !('Notification' in window)) {
-      toast.error('Notifications are not supported in this browser.')
+      toast.error(t('notifications.permission_unsupported'))
       return
     }
     try {
       const res = await Notification.requestPermission()
       setPermission(res)
       if (res === 'granted') {
-        toast.success(t('settings.notification_permission_status_allowed'))
+        toast.success(t('notifications.permission_granted'))
       } else if (res === 'denied') {
-        toast.error(t('settings.notification_permission_status_denied'))
+        toast.error(t('notifications.permission_denied'))
       }
     } catch (err) {
       console.error('Error requesting notification permission:', err)
@@ -87,8 +92,8 @@ export function NotificationsSettings() {
 
     if (permission === 'granted') {
       try {
-        new Notification(t('settings.test_notification_title'), {
-          body: t('settings.test_notification_body'),
+        new Notification(t('notifications.test_notification_title'), {
+          body: t('notifications.test_notification_body'),
           icon: '/favicon.ico',
         })
       } catch (err) {
@@ -96,171 +101,122 @@ export function NotificationsSettings() {
       }
     }
 
-    toast.info(t('settings.test_notification_title'), {
-      description: t('settings.test_notification_body'),
+    toast.info(t('notifications.test_notification_title'), {
+      description: t('notifications.test_notification_body'),
     })
   }
 
   return (
-    <div className="flex flex-col gap-3 pt-2">
-      {/* Permission Status Card */}
-      <SettingsCard>
-        <div className="flex items-center justify-between gap-4">
-          <div className="min-w-0 flex-1">
-            <div className="text-[13.5px] font-medium">
-              {t('settings.notification_permission_title')}
-            </div>
-            <p className="mt-1 text-[12.5px] leading-[18px] text-[var(--text-secondary)]">
-              {permission === 'granted' && t('settings.notification_permission_status_allowed')}
-              {permission === 'denied' && t('settings.notification_permission_status_denied')}
-              {permission === 'default' && t('settings.notification_permission_status_prompt')}
-              {permission === 'unsupported' && 'Web notifications are not supported in this browser.'}
-            </p>
+    <div className="mt-[15px] w-full overflow-hidden rounded-[13px] bg-[var(--raised)]">
+      {/* Permission status */}
+      <div className="flex items-center gap-3 px-4 py-3">
+        <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-[var(--border)] bg-background text-[var(--text-secondary)]">
+          <PaduIcon className="size-4" name="bell" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-medium">
+            {t('notifications.system_permission')}
           </div>
-
-          <div className="flex shrink-0 items-center gap-2">
-            {permission === 'granted' && (
-              <span className="inline-flex items-center gap-1.5 rounded-md bg-[var(--success-soft)] px-2.5 py-1 text-[12px] font-medium text-[var(--success)]">
-                <PaduIcon className="size-3.5" name="check" />
-                {t('settings.notification_permission_allowed')}
-              </span>
-            )}
-
-            {permission === 'denied' && (
-              <span className="inline-flex items-center gap-1.5 rounded-md bg-[var(--danger-soft)] px-2.5 py-1 text-[12px] font-medium text-[var(--danger)]">
-                <PaduIcon className="size-3.5" name="alert" />
-                {t('settings.notification_permission_denied')}
-              </span>
-            )}
-
-            {permission === 'default' && (
+          <p className="mt-0.5 text-[12px] leading-[17px] text-[var(--text-secondary)]">
+            {t('notifications.system_permission_desc')}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {permission === 'granted' && (
+            <Badge variant="success" className="h-5 gap-1 px-2 text-[11px]">
+              <PaduIcon className="size-3" name="check" />
+              {t('notifications.permission_granted')}
+            </Badge>
+          )}
+          {permission === 'denied' && (
+            <Badge variant="destructive" className="h-5 gap-1 px-2 text-[11px]">
+              <PaduIcon className="size-3" name="alert" />
+              {t('notifications.permission_denied')}
+            </Badge>
+          )}
+          {permission === 'default' && (
+            <>
+              <Badge variant="warning" className="h-5 gap-1 px-2 text-[11px]">
+                <PaduIcon className="size-3" name="bell" />
+                {t('notifications.permission_not_determined')}
+              </Badge>
               <Button
                 size="sm"
                 variant="default"
-                className="gap-1.5 text-[12px]"
+                className="h-7 gap-1.5 text-[12px]"
                 onClick={handleRequestPermission}
               >
-                <PaduIcon className="size-3.5" name="bell" />
-                {t('settings.request_permission')}
+                {t('notifications.request_permission')}
               </Button>
-            )}
-          </div>
+            </>
+          )}
+          {permission === 'unsupported' && (
+            <Badge variant="secondary" className="h-5 px-2 text-[11px]">
+              {t('notifications.permission_unsupported')}
+            </Badge>
+          )}
         </div>
-      </SettingsCard>
+      </div>
 
-      {/* Preferences Card */}
-      <SettingsCard>
-        <div className="flex flex-col divide-y divide-border">
-          {/* Notifications Toggle */}
-          <div className="flex items-center justify-between gap-6 pb-3 pt-1">
-            <SettingText
-              title={t('settings.task_completion_notifications')}
-              description={t('settings.task_completion_notifications_description')}
-            />
-            <Toggle
-              checked={notificationsEnabled}
-              label={t('settings.task_completion_notifications')}
-              onChange={setNotificationsEnabled}
-            />
-          </div>
+      <div className="mx-4 border-t border-[var(--border)]" />
 
-          {/* Sound Toggle */}
-          <div className="flex items-center justify-between gap-6 py-3">
-            <SettingText
-              title={t('settings.notification_sound')}
-              description={t('settings.notification_sound_description')}
-            />
-            <Toggle
-              checked={soundEnabled}
-              label={t('settings.notification_sound')}
-              onChange={setSoundEnabled}
-            />
-          </div>
-
-          {/* Sound Preview Row */}
-          <div className="flex items-center justify-between gap-6 pt-3">
-            <SettingText
-              title={t('settings.preview_sound')}
-              description="Play a preview of the audio alert that chimes upon task completion."
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1.5 text-[12px] text-[var(--text-secondary)] hover:text-foreground"
-              onClick={handlePreviewSound}
-            >
-              <PaduIcon className="size-3.5" name="gauge" />
-              {t('settings.preview_sound')}
-            </Button>
-          </div>
-        </div>
-      </SettingsCard>
-
-      {/* Test Card */}
-      <SettingsCard row>
+      {/* Task completion toggle */}
+      <div className="flex items-center justify-between gap-4 px-4 py-2.5">
         <SettingText
-          title={t('settings.send_test_notification')}
-          description={t('settings.test_notification_subtitle')}
+          title={t('notifications.task_completion')}
+          description={t('notifications.task_completion_desc')}
+        />
+        <Toggle
+          checked={notificationsEnabled}
+          label={t('notifications.task_completion')}
+          onChange={setNotificationsEnabled}
+        />
+      </div>
+
+      <div className="mx-4 border-t border-[var(--border)]" />
+
+      {/* Sound toggle + preview */}
+      <div className="flex items-center justify-between gap-4 px-4 py-2.5">
+        <SettingText
+          title={t('notifications.sound')}
+          description={t('notifications.sound_desc')}
+        />
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1.5 border-[var(--border)] bg-background text-[12px] text-[var(--text-secondary)] hover:text-foreground"
+            onClick={handlePreviewSound}
+          >
+            <PaduIcon className="size-3" name="gauge" />
+            {t('notifications.preview_sound')}
+          </Button>
+          <Toggle
+            checked={soundEnabled}
+            label={t('notifications.sound')}
+            onChange={setSoundEnabled}
+          />
+        </div>
+      </div>
+
+      <div className="mx-4 border-t border-[var(--border)]" />
+
+      {/* Test notification */}
+      <div className="flex items-center justify-between gap-4 px-4 py-2.5">
+        <SettingText
+          title={t('notifications.test_title')}
+          description={t('notifications.test_desc')}
         />
         <Button
           size="sm"
           variant="outline"
-          className="gap-1.5 text-[12px] text-[var(--text-secondary)] hover:text-foreground"
+          className="h-7 shrink-0 gap-1.5 border-[var(--border)] bg-background text-[12px] text-[var(--text-secondary)] hover:text-foreground"
           onClick={handleSendTest}
         >
-          <PaduIcon className="size-3.5" name="bell" />
-          {t('settings.send_test_notification')}
+          <PaduIcon className="size-3" name="bell" />
+          {t('notifications.send_test')}
         </Button>
-      </SettingsCard>
+      </div>
     </div>
   )
-}
-
-function SettingsCard({ children, row = false }: { children: ReactNode; row?: boolean }) {
-  return (
-    <section className={cn('w-full rounded-[13px] bg-[var(--raised)] px-5 py-[14px]', row && 'flex items-center gap-6')}>
-      {children}
-    </section>
-  )
-}
-
-function SettingText({ title, description }: { title: string; description: string }) {
-  return (
-    <div className="min-w-0 flex-1">
-      <div className="text-[13.5px] font-medium">{title}</div>
-      <p className="mt-[5px] text-[12.5px] leading-[18px] text-[var(--text-secondary)]">{description}</p>
-    </div>
-  )
-}
-
-function Toggle({ checked, label, onChange }: { checked: boolean; label: string; onChange: (checked: boolean) => void }) {
-  return (
-    <button
-      aria-checked={checked}
-      aria-label={label}
-      className={cn(
-        'flex h-5 w-9 shrink-0 items-center rounded-full border p-0.5 outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring',
-        checked ? 'justify-end border-foreground bg-foreground' : 'justify-start border-input bg-[var(--inset)]',
-      )}
-      role="switch"
-      type="button"
-      onClick={() => onChange(!checked)}
-    >
-      <span className={cn('size-3.5 rounded-full', checked ? 'bg-background' : 'bg-[var(--text-tertiary)]')} />
-    </button>
-  )
-}
-
-function useStoredBoolean(key: string, fallback: boolean) {
-  const [value, setValue] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return fallback
-    const raw = window.localStorage.getItem(key)
-    return raw === null ? fallback : raw === 'true'
-  })
-
-  useEffect(() => {
-    window.localStorage.setItem(key, String(value))
-  }, [key, value])
-
-  return [value, setValue] as const
 }

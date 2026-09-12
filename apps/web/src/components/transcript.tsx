@@ -7,15 +7,18 @@ import type {
 } from '@padu/client'
 import { ContextMenu } from '@base-ui/react/context-menu'
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
 import { Virtuoso, type ListItem, type VirtuosoHandle } from 'react-virtuoso'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { PreviewableImage } from '@/components/image-preview'
 import { FileTypeIcon, PaduIcon, type PaduIconName } from '@/components/padu-icon'
+import { Kbd } from '@/components/ui/kbd'
 import { readAttachmentImage } from '@/lib/attachments'
 import { useDaemon } from '@/lib/daemon-context'
 import { activitiesForBlock } from '@/lib/event-reducer'
 import { useI18n, type AppLocale } from '@/lib/i18n'
+import { rehypeMentionChips } from '@/lib/markdown-mentions'
 import {
   advanceMarkdownVeil,
   createMarkdownVeilState,
@@ -1016,25 +1019,54 @@ function EmbeddedNoteCard({
   t: Translator
 }) {
   const [previewOpen, setPreviewOpen] = useState(false)
+  const closeRef = useRef<HTMLButtonElement>(null)
+  const previousFocus = useRef<HTMLElement | null>(null)
   const title = note.title.trim() || t('notes.untitled')
   const excerpt = note.content.split(/\r?\n/u)[0]?.trim() || 'Empty note'
+
+  // Desktop parity (note_preview.rs): the modal takes focus on open, Escape
+  // or backdrop click dismisses it, and focus returns to the opener on close.
+  useEffect(() => {
+    if (!previewOpen) return
+    previousFocus.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
+    closeRef.current?.focus()
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      setPreviewOpen(false)
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true)
+      previousFocus.current?.focus()
+      previousFocus.current = null
+    }
+  }, [previewOpen])
 
   return (
     <>
       <button
         className="flex w-fit min-w-[180px] max-w-[540px] items-start gap-2 rounded-lg border border-border bg-[var(--inset)] px-2.5 py-2 text-left outline-none transition-colors hover:bg-card focus-visible:ring-2 focus-visible:ring-ring"
         type="button"
+        aria-haspopup="dialog"
         onClick={() => setPreviewOpen(true)}
       >
-        <PaduIcon name="file" className="mt-0.5 size-4 shrink-0 text-[var(--text-secondary)]" />
+        <PaduIcon name="note" className="mt-0.5 size-4 shrink-0 text-[var(--text-secondary)]" />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[10px] font-medium text-[var(--text-tertiary)]">{t('notes.label')}</span>
           <span className="block truncate text-xs text-foreground">{title}</span>
           <span className="block truncate text-[11px] text-[var(--text-secondary)]">{excerpt}</span>
         </span>
       </button>
-      {previewOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-6" role="presentation">
+      {previewOpen && createPortal(
+        <div
+          className="fixed inset-0 z-[200] grid place-items-center bg-black/50 p-6"
+          role="presentation"
+          onClick={() => setPreviewOpen(false)}
+        >
           <div
             className="relative flex max-h-[min(620px,calc(100dvh-3rem))] w-full max-w-2xl flex-col gap-3 overflow-hidden rounded-xl border bg-card p-5 shadow-2xl"
             role="dialog"
@@ -1043,19 +1075,22 @@ function EmbeddedNoteCard({
             onClick={(event) => event.stopPropagation()}
           >
             <button
-              className="absolute right-3 top-3 rounded-full p-1.5 outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+              ref={closeRef}
+              className="absolute right-3 top-3 flex h-[30px] min-w-[58px] items-center justify-center gap-1.5 rounded-lg bg-accent px-1.5 outline-none hover:bg-accent/70 focus-visible:ring-2 focus-visible:ring-ring"
               type="button"
-              aria-label="Close note preview"
+              aria-label={t('common.close')}
               onClick={() => setPreviewOpen(false)}
             >
               <PaduIcon name="x" className="size-4" />
+              <Kbd size="xs">Esc</Kbd>
             </button>
-            <h2 id={`note-preview-${note.id}`} className="pr-8 text-base font-semibold">{title}</h2>
+            <h2 id={`note-preview-${note.id}`} className="pr-24 text-base font-semibold">{title}</h2>
             <div className="markdown min-h-0 overflow-y-auto text-sm leading-6">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{note.content}</ReactMarkdown>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   )
@@ -1280,6 +1315,8 @@ function MessageFooter({
 }) {
   const [copied, setCopied] = useState(false)
   const copiedTimeout = useRef<number | null>(null)
+  // Attachment/note-only messages carry no text, so there is nothing to copy.
+  const canCopy = content.trim().length > 0
   useEffect(() => () => {
     if (copiedTimeout.current !== null) window.clearTimeout(copiedTimeout.current)
   }, [])
@@ -1290,6 +1327,7 @@ function MessageFooter({
       !alignRight && '-ml-[7px]',
     )}>
       {alignRight && <span className="flex h-[27px] items-center px-1">{formatMessageTime(timestamp, undefined, locale)}</span>}
+      {canCopy && (
       <button
         aria-label={t(copied ? 'common.copied' : 'common.copy_message')}
         className="grid size-[27px] place-items-center rounded-lg outline-none hover:bg-accent hover:text-[var(--text-secondary)] focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring"
@@ -1307,6 +1345,7 @@ function MessageFooter({
       >
         <PaduIcon className="size-3.5" name={copied ? 'check' : 'copy'} />
       </button>
+      )}
       {alignRight && rewindAction && (
         <button
           aria-label={t(rewindAction.pending ? 'session.reverting_message' : 'session.revert_to_here')}
@@ -1330,7 +1369,7 @@ function MessageFooter({
           type="button"
           onClick={() => onAddToNote(content)}
         >
-          <PaduIcon className="size-3.5" name="compose" />
+          <PaduIcon className="size-3.5" name="noteAdd" />
         </button>
       )}
       {!alignRight && forkAction && (
@@ -1450,55 +1489,6 @@ function MessageContextMenu({
       </ContextMenu.Portal>
     </ContextMenu.Root>
   )
-}
-
-function rehypeMentionChips() {
-  return () => (tree: any) => {
-    const regex = /(?:^|\s)@([a-zA-Z0-9_.\-\\/]+)/g
-    const visit = (node: any) => {
-      if (!node.children || node.tagName === 'code' || node.tagName === 'pre' || node.tagName === 'a') return
-      node.children = node.children.flatMap((child: any) => {
-        if (child.type === 'text') {
-          const value: string = child.value || ''
-          if (!value.includes('@')) return [child]
-          const result: any[] = []
-          let lastIndex = 0
-          let match: RegExpExecArray | null
-          regex.lastIndex = 0
-          while ((match = regex.exec(value)) !== null) {
-            const fullMatch = match[0]
-            const atOffset = fullMatch.indexOf('@')
-            const start = match.index + atOffset
-            const end = match.index + fullMatch.length
-            const trimmedEnd = value.slice(start, end).replace(/[,;!?:)\]}"']+$/, '').length + start
-            if (trimmedEnd <= start + 1) continue
-
-            if (start > lastIndex) {
-              result.push({ type: 'text', value: value.slice(lastIndex, start) })
-            }
-            result.push({
-              type: 'element',
-              tagName: 'span',
-              properties: {
-                className: ['mention-chip'],
-                'data-mention': value.slice(start, trimmedEnd).replace(/^@/, ''),
-              },
-              children: [{ type: 'text', value: value.slice(start, trimmedEnd) }],
-            })
-            lastIndex = trimmedEnd
-            regex.lastIndex = trimmedEnd
-          }
-          if (lastIndex < value.length) {
-            result.push({ type: 'text', value: value.slice(lastIndex) })
-          }
-          return result.length ? result : [child]
-        }
-        visit(child)
-        return [child]
-      })
-    }
-    visit(tree)
-  }
 }
 
 function Markdown({

@@ -114,6 +114,39 @@ export function sortSidebarSessions(
   })
 }
 
+export function readSidebarGrouping(): SidebarGrouping {
+  if (typeof window === 'undefined') return 'project'
+  return window.localStorage.getItem('padu:sidebar_grouping') === 'updated'
+    ? 'updated'
+    : 'project'
+}
+
+export function readSidebarOrdering(): SidebarOrdering {
+  if (typeof window === 'undefined') return 'newest'
+  return window.localStorage.getItem('padu:sidebar_ordering') === 'oldest'
+    ? 'oldest'
+    : 'newest'
+}
+
+/**
+ * Sessions in the order the sidebar renders them: grouped (pinned, then
+ * per-project or per-date groups) with the user's grouping/ordering applied.
+ * Adjacent-session stepping must follow this sequence — a flat newest-first
+ * list diverges from it whenever projects interleave by recency (or the user
+ * picks oldest-first), making ↑/↓ land on visually wrong rows.
+ */
+export function sidebarVisualSessions(
+  projects: Project[],
+  sessions: AgentSession[],
+  grouping: SidebarGrouping,
+  ordering: SidebarOrdering,
+  unknownProject: string,
+  projectlessName: string,
+): AgentSession[] {
+  return groupSessions(projects, sessions, new Date(), unknownProject, projectlessName, grouping, ordering)
+    .flatMap((group) => group.sessions.map((item) => item.session))
+}
+
 export function groupSessions(
   projects: Project[],
   sessions: AgentSession[],

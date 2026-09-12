@@ -131,6 +131,7 @@ export function Composer({
   embeddedNote,
   onComposerDraftChange,
   onComposerDraftSubmitted,
+  onRemoveEmbeddedNote,
   attachmentSignal,
   pendingAttachmentPaths,
   onAttachmentSignalHandled,
@@ -160,6 +161,7 @@ export function Composer({
   embeddedNote?: EmbeddedNote
   onComposerDraftChange?: (draft: ComposerDraft) => void
   onComposerDraftSubmitted?: () => void
+  onRemoveEmbeddedNote?: (noteId: string) => void
   attachmentSignal?: number
   pendingAttachmentPaths?: string[]
   onAttachmentSignalHandled?: () => void
@@ -856,13 +858,16 @@ export function Composer({
             <div className="flex flex-col gap-1.5 px-1 pb-2 pt-0.5">
               {embeddedNotes.map((note, index) => (
                 <div key={`${note.id}-${note.revision}-${index}`} className="flex w-full items-start gap-2 rounded-lg border border-border bg-[var(--inset)] px-2.5 py-2">
-                  <PaduIcon name="file" className="mt-0.5 size-4 shrink-0 text-[var(--text-secondary)]" />
+                  <PaduIcon name="note" className="mt-0.5 size-4 shrink-0 text-[var(--text-secondary)]" />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[10px] font-medium text-[var(--text-tertiary)]">{t('notes.label')}{!projectless ? ` · ${projectName}` : ''}</div>
                     <div className="truncate text-xs text-foreground">{note.title.trim() || t('notes.untitled')}</div>
                     <div className="truncate text-[11px] text-[var(--text-secondary)]">{note.content.split(/\r?\n/u)[0]?.trim() || 'Empty note'}</div>
                   </div>
-                  <button className="shrink-0 rounded p-1 outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring" type="button" aria-label={`Remove ${t('notes.label').toLocaleLowerCase()}`} onClick={() => setEmbeddedNotes((current) => current.filter((_, item) => item !== index))}>
+                  <button className="shrink-0 rounded p-1 outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring" type="button" aria-label={`Remove ${t('notes.label').toLocaleLowerCase()}`} onClick={() => {
+                    setEmbeddedNotes((current) => current.filter((_, item) => item !== index))
+                    onRemoveEmbeddedNote?.(note.id)
+                  }}>
                     <PaduIcon name="x" className="size-3.5" />
                   </button>
                 </div>

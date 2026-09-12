@@ -97,7 +97,7 @@ import {
   type RememberedNavigation,
 } from '@/lib/navigation-memory'
 import { transcriptLinkRoute } from '@/lib/transcript-links'
-import { sessionHasStarted, sortSidebarSessions } from '@/lib/sidebar-presentation'
+import { readSidebarGrouping, readSidebarOrdering, sidebarVisualSessions } from '@/lib/sidebar-presentation'
 import { shouldShowInitialDestination } from '@/lib/workspace-presentation'
 import { usePrimaryShortcut } from '@/lib/platform'
 import { agentPresetIdLabel } from '@/lib/agent-preset-presentation'
@@ -565,9 +565,9 @@ export function PaduApp() {
           return
         }
       }
-      if (event.shiftKey && (event.key === '[' || event.key === ']')) {
+      if (event.shiftKey && (event.code === 'BracketLeft' || event.code === 'BracketRight')) {
         event.preventDefault()
-        selectAdjacentSession(event.key === ']' ? 1 : -1)
+        selectAdjacentSession(event.code === 'BracketRight' ? 1 : -1)
         return
       }
       if (key === 'b' && event.shiftKey) {
@@ -899,9 +899,13 @@ export function PaduApp() {
 
   function selectAdjacentSession(delta: number) {
     if (!taskState.data) return
-    const started = sortSidebarSessions(
-      taskState.data.sessions.filter((session) => !session.archived_at && sessionHasStarted(session)),
-      'newest',
+    const started = sidebarVisualSessions(
+      taskState.data.projects,
+      taskState.data.sessions,
+      readSidebarGrouping(),
+      readSidebarOrdering(),
+      t('sidebar.unknown_project'),
+      t('project.no_project_name'),
     )
     if (!started.length) return
     const currentId = search.session
@@ -1418,6 +1422,8 @@ export function PaduApp() {
                   projectId: activeProject.id,
                 })}
                 embeddedNote={composerEmbeddedNote?.sessionId === 'new' ? composerEmbeddedNote.note : undefined}
+                onRemoveEmbeddedNote={(noteId) => setComposerEmbeddedNote((value) =>
+                  value?.sessionId === 'new' && value.note.id === noteId ? null : value)}
                 key={composerDraftId({
                   type: 'newSession',
                   projectId: activeProject.id,
@@ -1518,6 +1524,8 @@ export function PaduApp() {
                     sessionId: current.id,
                   })}
                   embeddedNote={composerEmbeddedNote?.sessionId === current.id ? composerEmbeddedNote.note : undefined}
+                  onRemoveEmbeddedNote={(noteId) => setComposerEmbeddedNote((value) =>
+                    value?.sessionId === current.id && value.note.id === noteId ? null : value)}
                   key={composerDraftId({ type: 'session', sessionId: current.id })}
                   modelPickerSignal={modelPickerSignal}
                   prefillSignal={composerPrefill?.sessionId === current.id ? composerPrefill.signal : 0}
