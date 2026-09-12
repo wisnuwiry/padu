@@ -16,10 +16,7 @@ import { ContextMenu } from '@base-ui/react/context-menu'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { toast } from 'sonner'
 import { PanelResizeHandle } from '@/components/panel-resize-handle'
-import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import { Input } from '@/components/ui/input'
 import { Tooltip } from '@/components/ui/tooltip'
 import { FileTypeIcon, PaduIcon } from '@/components/padu-icon'
 import { useDaemon } from '@/lib/daemon-context'
@@ -37,8 +34,8 @@ import {
   writeWorkspaceTextFile,
 } from '@/lib/daemon-api'
 import { treeNavigationAction } from '@/lib/right-panel-state'
+import { usePrimaryShortcut } from '@/lib/platform'
 import { cn } from '@/lib/utils'
-import { Kbd } from '../ui/kbd'
 import { absoluteParentPaths, clamp, errorMessage, focusVirtualTreeRow, isTreeNavigationKey, PanelMessage, readStoredWidth, requireClient, workingTreeRowId } from './shared'
 import type { Translator } from '@/lib/transcript-presentation'
 
@@ -133,12 +130,19 @@ export function FilesPanel({
   onFindFile?: () => void
 }) {
   const { t } = useI18n()
+  const findShortcut = usePrimaryShortcut('⌘P', 'Ctrl+P')
   const { client, config, phase } = useDaemon()
   const queryClient = useQueryClient()
   const [expanded, setExpanded] = useState<string[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [focusedTreeEntry, setFocusedTreeEntry] = useState<string | null>(null)
   const [showHidden, setShowHidden] = useState(false)
+  const [inlineOp, setInlineOp] = useState<
+    | { kind: 'createFile'; parent: string; depth: number; value: string }
+    | { kind: 'createDirectory'; parent: string; depth: number; value: string }
+    | { kind: 'rename'; absolutePath: string; relativePath: string; name: string; value: string }
+    | null
+  >(null)
   const treeList = useRef<VirtuosoHandle>(null)
   const buffersRef = useRef(buffers)
   buffersRef.current = buffers
@@ -156,6 +160,7 @@ export function FilesPanel({
     setExpanded([])
     setSelected(requestedFile)
     setFocusedTreeEntry(null)
+    setInlineOp(null)
   }, [requestedFile, root])
 
   useEffect(() => {
@@ -286,23 +291,30 @@ export function FilesPanel({
     focusVirtualTreeRow(treeList, index, workingTreeRowId(entry.absolutePath))
   }, [workingTreeEntries])
 
-  const [fileOperationDialog, setFileOperationDialog] = useState<
-    | { kind: 'createFile'; parent: string }
-    | { kind: 'createDirectory'; parent: string }
-    | { kind: 'rename'; entry: WorkingTreeEntry }
-    | null
-  >(null)
-  const [operationName, setOperationName] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<WorkingTreeEntry | null>(null)
 
-  const createEntry = useCallback((directory: boolean, parent: string) => {
-    setFileOperationDialog({ kind: directory ? 'createDirectory' : 'createFile', parent })
-    setOperationName('')
-  }, [])
+  const beginInlineCreate = useCallback((directory: boolean, parent: string, depth: number) => {
+    setExpanded((current) => {
+      if (!parent || !root) return current
+      const separator = root.includes('\\') ? '\\' : '/'
+      const normalizedRoot = root.replace(/[\\/]+$/, '')
+      const parentAbsolute = `${normalizedRoot}${separator}${parent.split('/').join(separator)}`
+      if (current.includes(parentAbsolute)) return current
+      return [...current, ...absoluteParentPaths(root, `${parent}/x`), parentAbsolute]
+    })
+    setInlineOp({ kind: directory ? 'createDirectory' : 'createFile', parent, depth, value: '' })
+  }, [root])
+
+  const createEntry = useCallback((directory: boolean, parent: string, depth: number) => {
+    beginInlineCreate(directory, parent, depth)
+  }, [beginInlineCreate])
 
   const renameEntry = useCallback((entry: WorkingTreeEntry) => {
-    setFileOperationDialog({ kind: 'rename', entry })
-    setOperationName(entry.name)
+    setInlineOp({ kind: 'rename', absolutePath: entry.absolutePath, relativePath: entry.relativePath, name: entry.name, value: entry.name })
+  }, [])
+
+  const cancelInlineOp = useCallback(() => {
+    setInlineOp(null)
   }, [])
 
   const deleteEntry = useCallback((entry: WorkingTreeEntry) => {
@@ -314,6 +326,11 @@ export function FilesPanel({
     entry: WorkingTreeEntry,
     index: number,
   ) => {
+    if (event.key === 'Escape' && inlineOp) {
+      event.preventDefault()
+      cancelInlineOp()
+      return
+    }
     if (event.key === 'F2') {
       event.preventDefault()
       renameEntry(entry)
@@ -348,7 +365,7 @@ export function FilesPanel({
     } else {
       focusWorkingTreeIndex(action.index)
     }
-  }, [activateTreeEntry, deleteEntry, expanded, focusWorkingTreeIndex, renameEntry, workingTreeEntries])
+  }, [activateTreeEntry, cancelInlineOp, deleteEntry, expanded, focusWorkingTreeIndex, inlineOp, renameEntry, workingTreeEntries])
 
   const updateSelectedBuffer = useCallback((content: string) => {
     if (!selected) return
@@ -380,33 +397,48 @@ export function FilesPanel({
     void queryClient.invalidateQueries({ queryKey: daemonKeys.workspaceTree(config?.address ?? 'disconnected', root ?? 'none', expanded, showHidden) })
   }, [config?.address, expanded, queryClient, root, showHidden])
 
-  const submitFileOperation = useCallback(async (e?: React.FormEvent) => {
-    e?.preventDefault()
-    if (!client || !root || !fileOperationDialog) return
-    const name = operationName.trim()
-    if (!name || name.includes('/') || name.includes('\\')) {
+  const submitInlineOp = useCallback(async () => {
+    if (!client || !root || !inlineOp) return
+    const name = inlineOp.value.trim()
+    if (!name) {
+      setInlineOp(null)
+      return
+    }
+    if (name.includes('/') || name.includes('\\')) {
       toast.error(t('files.invalid_name'))
       return
     }
     try {
-      if (fileOperationDialog.kind === 'createFile') {
-        const parent = fileOperationDialog.parent
-        await createWorkspaceFile(client, root, `${parent ? `${parent}/` : ''}${name}`)
-      } else if (fileOperationDialog.kind === 'createDirectory') {
-        const parent = fileOperationDialog.parent
-        await createWorkspaceDirectory(client, root, `${parent ? `${parent}/` : ''}${name}`)
+      if (inlineOp.kind === 'createFile' || inlineOp.kind === 'createDirectory') {
+        const parent = inlineOp.parent
+        const relativePath = `${parent ? `${parent}/` : ''}${name}`
+        if (inlineOp.kind === 'createFile') {
+          await createWorkspaceFile(client, root, relativePath)
+        } else {
+          await createWorkspaceDirectory(client, root, relativePath)
+        }
+        setInlineOp(null)
+        refreshTree()
+        if (inlineOp.kind === 'createFile') {
+          setSelected(relativePath)
+          onOpenFile(tabId, relativePath, treeWidthRef.current)
+        }
       } else {
-        const entry = fileOperationDialog.entry
-        const parent = entry.relativePath.split('/').slice(0, -1).join('/')
-        await renameWorkspacePath(client, root, entry.relativePath, `${parent ? `${parent}/` : ''}${name}`)
-        if (selected === entry.relativePath) setSelected(`${parent ? `${parent}/` : ''}${name}`)
+        if (name === inlineOp.name) {
+          setInlineOp(null)
+          return
+        }
+        const parent = inlineOp.relativePath.split('/').slice(0, -1).join('/')
+        const nextRelative = `${parent ? `${parent}/` : ''}${name}`
+        await renameWorkspacePath(client, root, inlineOp.relativePath, nextRelative)
+        if (selected === inlineOp.relativePath) setSelected(nextRelative)
+        setInlineOp(null)
+        refreshTree()
       }
-      setFileOperationDialog(null)
-      refreshTree()
     } catch (error) {
       toast.error(errorMessage(error))
     }
-  }, [client, fileOperationDialog, operationName, refreshTree, root, selected, t])
+  }, [client, inlineOp, onOpenFile, refreshTree, root, selected, t, tabId])
 
   const confirmDelete = useCallback(async () => {
     if (!client || !root || !deleteTarget) return
@@ -428,10 +460,65 @@ export function FilesPanel({
 
   if (!root) return <PanelMessage title={t('files.no_project_open')} detail={t('files.no_project_open_description')} />
 
+  const focusedEntry = workingTreeEntries.find((entry) => entry.absolutePath === focusedTreeEntry)
+    ?? workingTreeEntries.find((entry) => entry.relativePath === selected)
+  const createAtFocus = (directory: boolean) => {
+    const parent = createParentPath(focusedEntry)
+    const depth = !focusedEntry ? 0 : focusedEntry.isDir ? focusedEntry.depth + 1 : focusedEntry.depth
+    createEntry(directory, parent, depth)
+  }
+  const createAtEntry = (entry: WorkingTreeEntry, directory: boolean) => {
+    const parent = entry.isDir
+      ? entry.relativePath
+      : entry.relativePath.split('/').slice(0, -1).join('/')
+    const depth = entry.isDir ? entry.depth + 1 : entry.depth
+    createEntry(directory, parent, depth)
+  }
+  type TreeListItem =
+    | { kind: 'entry'; entry: WorkingTreeEntry }
+    | { kind: 'create'; parent: string; depth: number; isDir: boolean }
+  const treeListItems: TreeListItem[] = (() => {
+    const items = workingTreeEntries.map((entry): TreeListItem => ({ kind: 'entry', entry }))
+    if (!inlineOp || (inlineOp.kind !== 'createFile' && inlineOp.kind !== 'createDirectory')) return items
+    const createItem: TreeListItem = {
+      kind: 'create',
+      parent: inlineOp.parent,
+      depth: inlineOp.depth,
+      isDir: inlineOp.kind === 'createDirectory',
+    }
+    if (!inlineOp.parent) return [createItem, ...items]
+    const parentIndex = items.findIndex(
+      (item) => item.kind === 'entry' && item.entry.relativePath === inlineOp.parent,
+    )
+    if (parentIndex === -1) return [...items, createItem]
+    return [...items.slice(0, parentIndex + 1), createItem, ...items.slice(parentIndex + 1)]
+  })()
+  const handleFilesPanelKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape' && inlineOp) {
+      event.preventDefault()
+      cancelInlineOp()
+      return
+    }
+    const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement
+    if (typing || event.metaKey || event.ctrlKey || event.altKey) return
+    const key = event.key.toLowerCase()
+    if (key === 'n') {
+      event.preventDefault()
+      createAtFocus(event.shiftKey)
+    } else if (key === 'r') {
+      event.preventDefault()
+      refreshTree()
+    } else if (key === 'h') {
+      event.preventDefault()
+      setShowHidden((value) => !value)
+    }
+  }
   const fileTree = (
     <div
-      className={cn('relative flex min-h-0 flex-col', selected ? 'shrink-0 border-l' : 'flex-1')}
+      className={cn('relative flex min-h-0 flex-col outline-none', selected ? 'shrink-0 border-l' : 'flex-1')}
       style={selected ? { width: fittedTreeWidth } : undefined}
+      tabIndex={0}
+      onKeyDown={handleFilesPanelKeyDown}
     >
       {selected && (
         <PanelResizeHandle
@@ -453,36 +540,46 @@ export function FilesPanel({
           </>}
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <button
-            aria-label={t('command_palette.find_file')}
-            className="grid size-6 place-items-center rounded hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            type="button"
-            onClick={onFindFile}
-          >
-            <PaduIcon className="size-3.5 text-[var(--text-tertiary)]" name="search" />
-          </button>
-          <button
-            aria-label={t('files.new_file')}
-            className="grid size-6 place-items-center rounded hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            type="button"
-            onClick={() => void createEntry(false, '')}
-          >
-            <PaduIcon className="size-3.5 text-[var(--text-tertiary)]" name="file" />
-          </button>
-          <button
-            aria-label={t('files.new_folder')}
-            className="grid size-6 place-items-center rounded hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            type="button"
-            onClick={() => void createEntry(true, '')}
-          >
-            <PaduIcon className="size-3.5 text-[var(--text-tertiary)]" name="folderNew" />
-          </button>
-          <button aria-label={t('files.refresh')} className="grid size-6 place-items-center rounded hover:bg-accent" type="button" onClick={refreshTree}>
-            <PaduIcon className="size-3.5 text-[var(--text-tertiary)]" name="rotateCw" />
-          </button>
-          <button aria-label={showHidden ? t('files.hide_hidden') : t('files.show_hidden')} className="grid size-6 place-items-center rounded hover:bg-accent" type="button" onClick={() => setShowHidden((value) => !value)}>
-            <PaduIcon className="size-3.5 text-[var(--text-tertiary)]" name={showHidden ? 'eye' : 'eyeOff'} />
-          </button>
+          <Tooltip content={t('command_palette.find_file')} shortcut={findShortcut}>
+            <button
+              aria-label={t('command_palette.find_file')}
+              className="grid size-6 cursor-pointer place-items-center rounded hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              type="button"
+              onClick={onFindFile}
+            >
+              <PaduIcon className="size-3.5 text-[var(--text-tertiary)]" name="search" />
+            </button>
+          </Tooltip>
+          <Tooltip content={t('files.new_file')} shortcut="N">
+            <button
+              aria-label={t('files.new_file')}
+              className="grid size-6 cursor-pointer place-items-center rounded hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              type="button"
+              onClick={() => createAtFocus(false)}
+            >
+              <PaduIcon className="size-3.5 text-[var(--text-tertiary)]" name="fileAdd" />
+            </button>
+          </Tooltip>
+          <Tooltip content={t('files.new_folder')} shortcut="⇧N">
+            <button
+              aria-label={t('files.new_folder')}
+              className="grid size-6 cursor-pointer place-items-center rounded hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              type="button"
+              onClick={() => createAtFocus(true)}
+            >
+              <PaduIcon className="size-3.5 text-[var(--text-tertiary)]" name="folderNew" />
+            </button>
+          </Tooltip>
+          <Tooltip content={t('files.refresh')} shortcut="R">
+            <button aria-label={t('files.refresh')} className="grid size-6 cursor-pointer place-items-center rounded hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" type="button" onClick={refreshTree}>
+              <PaduIcon className="size-3.5 text-[var(--text-tertiary)]" name="rotateCw" />
+            </button>
+          </Tooltip>
+          <Tooltip content={showHidden ? t('files.hide_hidden') : t('files.show_hidden')} shortcut="H">
+            <button aria-label={showHidden ? t('files.hide_hidden') : t('files.show_hidden')} className="grid size-6 cursor-pointer place-items-center rounded hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" type="button" onClick={() => setShowHidden((value) => !value)}>
+              <PaduIcon className="size-3.5 text-[var(--text-tertiary)]" name={showHidden ? 'eye' : 'eyeOff'} />
+            </button>
+          </Tooltip>
         </div>
       </div>
       <ContextMenu.Root>
@@ -502,31 +599,46 @@ export function FilesPanel({
             <Virtuoso
               aria-label={t('files.workspace_files')}
               className="size-full py-1 outline-none"
-              computeItemKey={(_, entry) => entry.absolutePath}
-              data={tree.data ?? []}
+              computeItemKey={(_, item) => item.kind === 'create'
+                ? `inline-create:${item.parent}:${item.isDir ? 'dir' : 'file'}`
+                : item.entry.absolutePath}
+              data={treeListItems}
               fixedItemHeight={30}
               increaseViewportBy={180}
-              itemContent={(index, entry) => (
+              itemContent={(index, item) => {
+                if (item.kind === 'create') {
+                  return (
+                    <InlineCreateRow
+                      depth={item.depth}
+                      isDir={item.isDir}
+                      value={inlineOp?.kind === 'createFile' || inlineOp?.kind === 'createDirectory' ? inlineOp.value : ''}
+                      onChange={(value) => setInlineOp((current) => current && (current.kind === 'createFile' || current.kind === 'createDirectory')
+                        ? { ...current, value }
+                        : current)}
+                      onCancel={cancelInlineOp}
+                      onSubmit={() => void submitInlineOp()}
+                      t={t}
+                    />
+                  )
+                }
+                const entry = item.entry
+                const entryIndex = workingTreeEntries.findIndex((candidate) => candidate.absolutePath === entry.absolutePath)
+                return (
                 <TreeRow
                   entry={entry}
                   expanded={entry.isDir && expanded.includes(entry.absolutePath)}
                   id={workingTreeRowId(entry.absolutePath)}
                   selected={selected === entry.relativePath}
                   tabIndex={treeTabStop === entry.absolutePath ? 0 : -1}
+                  renaming={inlineOp?.kind === 'rename' && inlineOp.absolutePath === entry.absolutePath}
+                  renameValue={inlineOp?.kind === 'rename' && inlineOp.absolutePath === entry.absolutePath ? inlineOp.value : ''}
+                  onRenameChange={(value) => setInlineOp((current) => current?.kind === 'rename' ? { ...current, value } : current)}
+                  onRenameCancel={cancelInlineOp}
+                  onRenameSubmit={() => void submitInlineOp()}
                   onActivate={activateTreeEntry}
                   onAddToChat={onAddToChat}
-                  onCreateFile={() => {
-                    const parent = entry.isDir
-                      ? entry.relativePath
-                      : entry.relativePath.split('/').slice(0, -1).join('/')
-                    void createEntry(false, parent)
-                  }}
-                  onCreateFolder={() => {
-                    const parent = entry.isDir
-                      ? entry.relativePath
-                      : entry.relativePath.split('/').slice(0, -1).join('/')
-                    void createEntry(true, parent)
-                  }}
+                  onCreateFile={() => createAtEntry(entry, false)}
+                  onCreateFolder={() => createAtEntry(entry, true)}
                   onCopyPath={() => {
                     void navigator.clipboard.writeText(entry.absolutePath)
                     toast.success(t('files.copied_path', { path: entry.name }))
@@ -538,10 +650,11 @@ export function FilesPanel({
                   onDelete={() => void deleteEntry(entry)}
                   onFocus={() => setFocusedTreeEntry(entry.absolutePath)}
                   t={t}
-                  onKeyDown={(event) => handleWorkingTreeKeyDown(event, entry, index)}
+                  onKeyDown={(event) => handleWorkingTreeKeyDown(event, entry, entryIndex === -1 ? index : entryIndex)}
                   onRename={() => void renameEntry(entry)}
                 />
-              )}
+                )
+              }}
               ref={treeList}
               role="tree"
             />
@@ -552,13 +665,13 @@ export function FilesPanel({
             <ContextMenu.Popup className="padu-menu-surface">
               <ContextMenu.Item
                 className="padu-menu-item"
-                onClick={() => void createEntry(false, '')}
+                onClick={() => void createEntry(false, '', 0)}
               >
-                <PaduIcon className="size-3" name="file" /> {t('files.new_file')}
+                <PaduIcon className="size-3" name="fileAdd" /> {t('files.new_file')}
               </ContextMenu.Item>
               <ContextMenu.Item
                 className="padu-menu-item"
-                onClick={() => void createEntry(true, '')}
+                onClick={() => void createEntry(true, '', 0)}
               >
                 <PaduIcon className="size-3" name="folderNew" /> {t('files.new_folder')}
               </ContextMenu.Item>
@@ -569,76 +682,26 @@ export function FilesPanel({
     </div>
   )
 
-  const dialogs = (
-    <>
-      <Dialog open={fileOperationDialog !== null} onOpenChange={(open) => !open && setFileOperationDialog(null)}>
-        <DialogContent className="max-w-[420px] overflow-hidden rounded-[14px] bg-[var(--raised)] p-5">
-          <DialogTitle className="flex items-center justify-between text-[15px] font-semibold text-foreground">
-            <span>
-              {fileOperationDialog?.kind === 'createFile'
-                ? t('files.new_file')
-                : fileOperationDialog?.kind === 'createDirectory'
-                  ? t('files.new_folder')
-                  : t('common.rename')}
-            </span>
-          </DialogTitle>
-          <form className="mt-4 flex flex-col gap-4" onSubmit={(e) => void submitFileOperation(e)}>
-            <label className="flex flex-col gap-1.5 text-[12.5px] font-medium text-[var(--text-secondary)]">
-              <span>{t('files.name_placeholder')}</span>
-              <Input
-                autoFocus
-                className="h-8 bg-card"
-                placeholder={t('files.name_placeholder')}
-                value={operationName}
-                onChange={(e) => setOperationName(e.target.value)}
-              />
-            </label>
-            <div className="flex items-center justify-end gap-2 pt-1">
-              <Button
-                className="gap-1.5"
-                size="sm"
-                type="button"
-                variant="outline"
-                onClick={() => setFileOperationDialog(null)}
-              >
-                <span>{t('common.cancel')}</span>
-                <Kbd size="xs" variant="outline">Esc</Kbd>
-              </Button>
-              <Button className="gap-1.5" size="sm" type="submit">
-                <span>
-                  {fileOperationDialog?.kind === 'rename'
-                    ? t('common.rename')
-                    : t('files.confirm')}
-                </span>
-                <Kbd size="xs" variant="onPrimary" className="px-1">
-                  <PaduIcon name="cornerDownLeft" className="size-2.5" />
-                </Kbd>
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      <ConfirmDialog
-        open={deleteTarget !== null}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
-        title={t('files.delete')}
-        description={t('files.delete_confirm', { name: deleteTarget?.name ?? '' })}
-        confirmLabel={t('files.delete')}
-        cancelLabel={t('common.cancel')}
-        variant="danger"
-        icon="trash"
-        onConfirm={confirmDelete}
-        onCancel={() => setDeleteTarget(null)}
-      />
-    </>
+  const deleteDialog = (
+    <ConfirmDialog
+      open={deleteTarget !== null}
+      onOpenChange={(open) => !open && setDeleteTarget(null)}
+      title={t('files.delete')}
+      description={t('files.delete_confirm', { name: deleteTarget?.name ?? '' })}
+      confirmLabel={t('files.delete')}
+      cancelLabel={t('common.cancel')}
+      variant="danger"
+      icon="trash"
+      onConfirm={confirmDelete}
+      onCancel={() => setDeleteTarget(null)}
+    />
   )
 
   if (!selected) {
     return (
       <>
         {fileTree}
-        {dialogs}
+        {deleteDialog}
       </>
     )
   }
@@ -675,7 +738,7 @@ export function FilesPanel({
               )}
       </div>
       {fileTree}
-      {dialogs}
+      {deleteDialog}
     </div>
   )
 }
@@ -686,6 +749,11 @@ interface TreeRowProps {
   id: string
   selected: boolean
   tabIndex: number
+  renaming?: boolean
+  renameValue?: string
+  onRenameChange?: (value: string) => void
+  onRenameCancel?: () => void
+  onRenameSubmit?: () => void
   onActivate: (entry: WorkingTreeEntry) => void
   onAddToChat?: (name: string, isDir?: boolean) => void
   onCreateFile: () => void
@@ -705,6 +773,11 @@ function TreeRow({
   id,
   selected,
   tabIndex,
+  renaming,
+  renameValue,
+  onRenameChange,
+  onRenameCancel,
+  onRenameSubmit,
   onActivate,
   onAddToChat,
   onCreateFile,
@@ -717,13 +790,46 @@ function TreeRow({
   onRename,
   t,
 }: TreeRowProps) {
+  if (renaming) {
+    return (
+      <div
+        className={cn(
+          'mx-2 flex h-[30px] min-h-[30px] min-w-0 shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-accent pr-1.5 text-left text-[11.5px] outline-none',
+          entry.isIgnored && 'opacity-55 text-[var(--text-ghost)]',
+        )}
+        id={id}
+        role="treeitem"
+        aria-level={entry.depth + 1}
+        style={{ paddingLeft: `${8 + entry.depth * 16}px`, width: 'calc(100% - 16px)' }}
+        onClick={(event) => event.stopPropagation()}
+        onContextMenu={(event) => event.stopPropagation()}
+      >
+        {entry.isDir
+          ? expanded
+            ? <PaduIcon className="size-2.5 shrink-0 text-[var(--text-ghost)]" name="chevronDown" />
+            : <PaduIcon className="size-2.5 shrink-0 text-[var(--text-ghost)]" name="chevronRight" />
+          : <span className="size-2.5 shrink-0" />}
+        {entry.isDir
+          ? <PaduIcon className="size-3.5 shrink-0 text-[var(--text-tertiary)]" name={expanded ? 'folderOpen' : 'folder'} />
+          : <FileTypeIcon className="size-3.5 shrink-0" path={entry.name} />}
+        <InlineNameField
+          autoSelectStem={!entry.isDir}
+          initialValue={renameValue ?? entry.name}
+          placeholder={t('files.name_placeholder')}
+          onCancel={() => onRenameCancel?.()}
+          onChange={onRenameChange}
+          onSubmit={() => onRenameSubmit?.()}
+        />
+      </div>
+    )
+  }
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger
         aria-expanded={entry.isDir ? expanded : undefined}
         aria-level={entry.depth + 1}
         className={cn(
-          'mx-2 flex h-[30px] min-h-[30px] shrink-0 min-w-0 items-center gap-1.5 rounded-md pr-2 text-left text-[11.5px] outline-none hover:bg-accent focus-visible:bg-accent',
+          'mx-2 flex h-[30px] min-h-[30px] shrink-0 min-w-0 cursor-pointer items-center gap-1.5 rounded-md pr-2 text-left text-[11.5px] outline-none hover:bg-accent focus-visible:bg-accent',
           selected && 'bg-accent',
           entry.isIgnored && 'opacity-55 text-[var(--text-ghost)]',
         )}
@@ -766,7 +872,7 @@ function TreeRow({
                 <ContextMenu.Separator className="padu-menu-separator" />
               </>
             )}
-            <ContextMenu.Item className="padu-menu-item" onClick={onCreateFile}><PaduIcon className="size-3" name="file" /> {t('files.new_file')}</ContextMenu.Item>
+            <ContextMenu.Item className="padu-menu-item" onClick={onCreateFile}><PaduIcon className="size-3" name="fileAdd" /> {t('files.new_file')}</ContextMenu.Item>
             <ContextMenu.Item className="padu-menu-item" onClick={onCreateFolder}><PaduIcon className="size-3" name="folderNew" /> {t('files.new_folder')}</ContextMenu.Item>
             <ContextMenu.Separator className="padu-menu-separator" />
             <ContextMenu.Item className="padu-menu-item" onClick={onCopyPath}><PaduIcon className="size-3" name="copy" /> {t('files.copy_path')}</ContextMenu.Item>
@@ -779,4 +885,138 @@ function TreeRow({
       </ContextMenu.Portal>
     </ContextMenu.Root>
   )
+}
+
+function InlineCreateRow({
+  depth,
+  isDir,
+  value,
+  onChange,
+  onCancel,
+  onSubmit,
+  t,
+}: {
+  depth: number
+  isDir: boolean
+  value: string
+  onChange: (value: string) => void
+  onCancel: () => void
+  onSubmit: () => void
+  t: Translator
+}) {
+  return (
+    <div
+      className="mx-2 flex h-[30px] min-h-[30px] min-w-0 shrink-0 cursor-pointer items-center gap-1.5 rounded-md bg-accent py-0 pr-1.5 text-left text-[11.5px] outline-none"
+      role="treeitem"
+      aria-level={depth + 1}
+      style={{ paddingLeft: `${8 + depth * 16}px`, width: 'calc(100% - 16px)' }}
+      onClick={(event) => event.stopPropagation()}
+      onContextMenu={(event) => event.stopPropagation()}
+    >
+      <span className="size-2.5 shrink-0" />
+      <PaduIcon className="size-3.5 shrink-0 text-[var(--text-tertiary)]" name={isDir ? 'folder' : 'file'} />
+      <InlineNameField
+        initialValue={value}
+        placeholder={isDir ? t('files.new_folder') : t('files.name_placeholder')}
+        onCancel={onCancel}
+        onChange={onChange}
+        onSubmit={onSubmit}
+      />
+    </div>
+  )
+}
+
+function InlineNameField({
+  initialValue,
+  placeholder,
+  autoSelectStem,
+  onCancel,
+  onChange,
+  onSubmit,
+}: {
+  initialValue: string
+  placeholder: string
+  autoSelectStem?: boolean
+  onCancel: () => void
+  onChange?: (value: string) => void
+  onSubmit: () => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [value, setValue] = useState(initialValue)
+  const mountedRef = useRef(false)
+
+  // Focus once on mount. Deliberately not re-running when the parent mirrors
+  // the typed value back through `initialValue` — that would steal selection
+  // on every keystroke.
+  useEffect(() => {
+    if (mountedRef.current) return
+    mountedRef.current = true
+    const input = inputRef.current
+    if (!input) return
+    input.focus()
+    if (autoSelectStem && initialValue) {
+      const dot = initialValue.lastIndexOf('.')
+      const end = dot > 0 ? dot : initialValue.length
+      input.setSelectionRange(0, end)
+    } else {
+      input.select()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return (
+    <span className="flex min-w-0 flex-1 items-center gap-1">
+      <input
+        ref={inputRef}
+        aria-label={placeholder}
+        className="h-6 min-w-0 flex-1 rounded-[5px] border border-ring bg-card px-1.5 text-[11.5px] text-foreground outline-none placeholder:text-[var(--text-ghost)]"
+        placeholder={placeholder}
+        value={value}
+        onChange={(event) => {
+          setValue(event.target.value)
+          onChange?.(event.target.value)
+        }}
+        onKeyDown={(event) => {
+          event.stopPropagation()
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            onSubmit()
+          } else if (event.key === 'Escape') {
+            event.preventDefault()
+            onCancel()
+          }
+        }}
+        onClick={(event) => event.stopPropagation()}
+      />
+      <button
+        type="button"
+        aria-label="Confirm"
+        className="grid size-5 shrink-0 cursor-pointer place-items-center rounded hover:bg-accent"
+        onClick={(event) => {
+          event.stopPropagation()
+          onSubmit()
+        }}
+      >
+        <PaduIcon className="size-3 text-[var(--accent)]" name="check" />
+      </button>
+      <button
+        type="button"
+        aria-label="Cancel"
+        className="grid size-5 shrink-0 cursor-pointer place-items-center rounded hover:bg-accent"
+        onClick={(event) => {
+          event.stopPropagation()
+          onCancel()
+        }}
+      >
+        <PaduIcon className="size-3 text-[var(--text-tertiary)]" name="x" />
+      </button>
+    </span>
+  )
+}
+
+function createParentPath(entry?: WorkingTreeEntry) {
+  if (!entry) return ''
+  if (entry.isDir) return entry.relativePath
+  const slash = entry.relativePath.lastIndexOf('/')
+  return slash === -1 ? '' : entry.relativePath.slice(0, slash)
 }

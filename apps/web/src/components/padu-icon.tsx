@@ -29,6 +29,7 @@ export const PADU_ICONS = {
   eye: 'i-padu-eye',
   eyeOff: 'i-padu-eye-off',
   file: 'i-padu-file',
+  fileAdd: 'i-padu-file-add',
   fileDiff: 'i-padu-file-diff',
   folder: 'i-padu-folder',
   folderNew: 'i-padu-folder-new',

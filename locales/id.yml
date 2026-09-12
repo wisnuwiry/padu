@@ -161,6 +161,7 @@ keybindings.section_navigation: Navigasi & Panel
 keybindings.section_chat: Obrolan & Komposer
 keybindings.section_editor: Editor & Pencarian
 keybindings.section_browser: Browser Bawaan
+keybindings.section_files: Berkas
 keybindings.section_review: Tinjauan
 keybindings.new_task: Tugas Baru
 keybindings.new_task_desc: Buat percakapan atau tugas baru
@@ -240,6 +241,16 @@ keybindings.toggle_review_collapse: Ciutkan atau Perluas File Tinjauan
 keybindings.toggle_review_collapse_desc: Ciutkan atau perluas setiap diff file di tinjauan
 keybindings.toggle_review_file: Ciutkan atau Perluas File
 keybindings.toggle_review_file_desc: Ciutkan atau perluas file yang dipilih di tinjauan
+keybindings.files_find: Cari Berkas
+keybindings.files_find_desc: Cari berkas di ruang kerja
+keybindings.files_new_file: Berkas Baru
+keybindings.files_new_file_desc: Buat berkas di panel berkas
+keybindings.files_new_folder: Folder Baru
+keybindings.files_new_folder_desc: Buat folder di panel berkas
+keybindings.files_refresh: Segarkan Berkas
+keybindings.files_refresh_desc: Muat ulang pohon kerja
+keybindings.files_hidden: Alihkan Berkas Tersembunyi
+keybindings.files_hidden_desc: Tampilkan atau sembunyikan berkas tersembunyi di panel berkas
 keybindings.focus_review_filter: Fokuskan Pencarian File Tinjauan
 keybindings.focus_review_filter_desc: Fokuskan kolom pencarian file yang berubah
 keybindings.toggle_review_tree: Perluas atau Ciutkan Folder

@@ -166,6 +166,7 @@ keybindings.section_navigation: ナビゲーションとパネル
 keybindings.section_chat: チャットと入力
 keybindings.section_editor: エディタと検索
 keybindings.section_browser: 内蔵ブラウザ
+keybindings.section_files: ファイル
 keybindings.section_review: レビュー
 keybindings.new_task: 新規タスク
 keybindings.new_task_desc: 新しい会話またはタスクを作成
@@ -245,6 +246,16 @@ keybindings.toggle_review_collapse: レビューファイルを折りたたむ/�
 keybindings.toggle_review_collapse_desc: レビュー内のすべてのファイル差分を折りたたむか展開する
 keybindings.toggle_review_file: ファイルを折りたたむ/展開
 keybindings.toggle_review_file_desc: 選択中のレビューファイルを折りたたむか展開する
+keybindings.files_find: ファイルを検索
+keybindings.files_find_desc: ワークスペース内のファイルを検索
+keybindings.files_new_file: 新規ファイル
+keybindings.files_new_file_desc: ファイルパネルでファイルを作成
+keybindings.files_new_folder: 新規フォルダ
+keybindings.files_new_folder_desc: ファイルパネルでフォルダを作成
+keybindings.files_refresh: ファイルを更新
+keybindings.files_refresh_desc: 作業ツリーを再読み込み
+keybindings.files_hidden: 隠しファイルの表示切替
+keybindings.files_hidden_desc: ファイルパネルで隠しファイルの表示を切り替える
 keybindings.focus_review_filter: レビューのファイル検索にフォーカス
 keybindings.focus_review_filter_desc: 変更ファイルの検索フィールドにフォーカスする
 keybindings.toggle_review_tree: フォルダを展開/折りたたむ

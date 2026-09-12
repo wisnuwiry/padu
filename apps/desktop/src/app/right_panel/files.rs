@@ -285,7 +285,7 @@ impl Padu {
                                     );
                                 });
                             })
-                            .icon("icons/file.svg"),
+                            .icon("icons/file-add.svg"),
                         );
                         let parent = menu_path.clone();
                         items.push(

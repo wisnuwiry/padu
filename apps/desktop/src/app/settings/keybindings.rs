@@ -196,6 +196,36 @@ impl Padu {
                 ],
             ),
             (
+                "keybindings.section_files",
+                &[
+                    (
+                        "keybindings.files_find",
+                        "keybindings.files_find_desc",
+                        crate::platform::primary_shortcut("⌘P", "Ctrl+P"),
+                    ),
+                    (
+                        "keybindings.files_new_file",
+                        "keybindings.files_new_file_desc",
+                        "N",
+                    ),
+                    (
+                        "keybindings.files_new_folder",
+                        "keybindings.files_new_folder_desc",
+                        "⇧N",
+                    ),
+                    (
+                        "keybindings.files_refresh",
+                        "keybindings.files_refresh_desc",
+                        "R",
+                    ),
+                    (
+                        "keybindings.files_hidden",
+                        "keybindings.files_hidden_desc",
+                        "H",
+                    ),
+                ],
+            ),
+            (
                 "keybindings.section_review",
                 &[
                     (
