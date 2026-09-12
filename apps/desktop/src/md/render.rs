@@ -19,15 +19,16 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ops::Range;
+use std::path::Path;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    AnyElement, BorderStyle, Bounds, ClipboardItem, CursorStyle, DispatchPhase, Font, FontStyle,
-    FontWeight, Hsla, InteractiveText, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, SharedString, StrikethroughStyle,
-    StyledText, TextLayout, TextRun, TransformationMatrix, UnderlineStyle, Window, canvas, div,
-    font, img, point, prelude::*, px, quad, relative, size,
+    AnyElement, App, BorderStyle, Bounds, ClipboardItem, CursorStyle, DispatchPhase, Font,
+    FontStyle, FontWeight, Hsla, InteractiveText, IntoElement, KeyDownEvent, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, SharedString,
+    StrikethroughStyle, StyledText, TextLayout, TextRun, TransformationMatrix, UnderlineStyle,
+    Window, canvas, div, font, img, point, prelude::*, px, quad, relative, size,
 };
 use regex::Regex;
 
@@ -35,7 +36,7 @@ use super::highlight::{self, Lang, TokenClass};
 use super::mend::PENDING_LINK_URL;
 use super::parser::{Block, IncrementalParser, InlineRun, ListItem, TableAlign, TopBlock};
 use super::selection::{
-    RegisteredText, SelectionRegistry, SelectionState, TextKey, line_range, word_range,
+    RegisteredText, SelectionRegistry, SelectionState, Span, TextKey, line_range, word_range,
 };
 use super::veil::{RowVeil, apply_veil};
 use crate::theme::Theme;
@@ -311,6 +312,51 @@ pub fn flatten(
             continue;
         }
 
+        if run.style.code && is_inline_code_file_path(&run.text) {
+            let target = run.text.trim();
+            let display_start = text.len();
+            // Keep a visible horizontal margin from adjacent prose. This
+            // em-space remains transparent and outside the painted chip.
+            text.push('\u{2003}');
+            let chip_start = text.len();
+            text.push('\u{2003}');
+            text.push('\u{2009}');
+            let label_start = text.len();
+            text.push_str(target);
+            let chip_end = text.len();
+            text.push('\u{2003}');
+            let display_end = text.len();
+
+            let mut chip_font = font(SANS_FAMILY);
+            chip_font.weight = FontWeight::MEDIUM;
+            out.push(TextRun {
+                len: label_start - display_start,
+                font: chip_font.clone(),
+                color: gpui::transparent_black(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            });
+            out.push(TextRun {
+                len: chip_end - label_start,
+                font: chip_font.clone(),
+                color: base_color,
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            });
+            out.push(TextRun {
+                len: display_end - chip_end,
+                font: chip_font,
+                color: gpui::transparent_black(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            });
+            file_link_ranges.push((chip_start..chip_end, target.to_owned()));
+            continue;
+        }
+
         if let Some(target) = run
             .style
             .link
@@ -319,14 +365,16 @@ pub fn flatten(
         {
             let basename = crate::inline_file::target_basename(target);
             let display_start = text.len();
-            text.push(' ');
+            // Keep the link chip separated from adjacent prose without
+            // expanding the painted chip bounds.
+            text.push('\u{2003}');
             let chip_start = text.len();
             text.push('\u{2003}');
             text.push('\u{2009}');
             let label_start = text.len();
             text.push_str(&basename);
             let chip_end = text.len();
-            text.push(' ');
+            text.push('\u{2003}');
             let display_end = text.len();
 
             let mut chip_font = font(SANS_FAMILY);
@@ -478,6 +526,23 @@ pub fn flatten(
 
 fn is_local_file_link(url: &str) -> bool {
     crate::inline_file::is_local_file_target(url)
+}
+
+/// Inline code commonly carries a file path from a tool result. Keep ordinary
+/// identifiers in the normal code wash, but give path-like values the same
+/// full-label chip treatment as an explicit local-file markdown link.
+fn is_inline_code_file_path(value: &str) -> bool {
+    let value = value.trim();
+    if value.is_empty() || !is_local_file_link(value) {
+        return false;
+    }
+    let basename = crate::inline_file::target_basename(value);
+    value.starts_with(['/', '~'])
+        || value.starts_with("./")
+        || value.starts_with("../")
+        || value.contains(['/', '\\'])
+        || Path::new(value).extension().is_some()
+        || crate::app::right_panel::file_icon_for_path(&basename) != "icons/file-types/file.svg"
 }
 
 /// A flat string with uniform styling, for non-markdown transcript text.
@@ -808,6 +873,7 @@ fn text_element_with_selection(
         let code_ranges = flat.code_ranges.clone();
         let mention_ranges = flat.mention_ranges.clone();
         let file_link_ranges = flat.file_link_ranges.clone();
+        let copy_file_links = flat.file_link_ranges.clone();
         let layout = layout.clone();
         let key = key.clone();
         move |_, _, window, cx| {
@@ -942,6 +1008,15 @@ fn text_element_with_selection(
             selection.registry.borrow_mut().push(RegisteredText {
                 key: key.clone(),
                 text: Rc::from(text.as_ref()),
+                file_links: copy_file_links
+                    .iter()
+                    .map(|(range, target)| {
+                        (
+                            range.clone(),
+                            crate::inline_file::markdown_file_reference(target),
+                        )
+                    })
+                    .collect(),
                 block_break,
                 geometry: layout.clone(),
             });
@@ -1201,6 +1276,21 @@ fn registry_point(
 /// so three closures replace three-per-element and a mouse move costs one
 /// registry scan instead of one dispatch per visible paragraph.
 pub fn install_selection_input(window: &mut Window, state: &TranscriptSelection) {
+    window.on_key_event({
+        let state = state.clone();
+        move |event: &KeyDownEvent, phase, _, cx| {
+            if phase != DispatchPhase::Bubble
+                || event.keystroke.key != "c"
+                || !(event.keystroke.modifiers.platform || event.keystroke.modifiers.control)
+            {
+                return;
+            }
+            if let Some(selected) = state.selection.borrow().selected_text() {
+                cx.write_to_clipboard(ClipboardItem::new_string(selected));
+            }
+        }
+    });
+
     window.on_mouse_event({
         let state = state.clone();
         move |event: &MouseDownEvent, phase, window, _| {
@@ -1291,6 +1381,28 @@ pub fn install_selection_input(window: &mut Window, state: &TranscriptSelection)
             }
         }
     });
+}
+
+/// Select every text element currently registered by the markdown frame.
+///
+/// The preview renders its document in one surface, so this produces the same
+/// document-order copy behavior as a drag selection without manufacturing a
+/// second text model.
+pub fn select_all(selection: &TranscriptSelection) {
+    let spans = selection
+        .registry
+        .borrow()
+        .entries()
+        .iter()
+        .map(|entry| Span {
+            key: entry.key.clone(),
+            range: 0..entry.text.len(),
+            text: entry.text.clone(),
+            file_links: entry.file_links.clone(),
+            block_break: entry.block_break,
+        })
+        .collect();
+    selection.selection.borrow_mut().set_spans(spans);
 }
 
 // ── Blocks ─────────────────────────────────────────────────────────────────
@@ -1742,6 +1854,44 @@ pub fn decode_data_url(url: &str) -> Option<std::sync::Arc<gpui::Image>> {
     (!bytes.is_empty()).then(|| std::sync::Arc::new(gpui::Image::from_bytes(format, bytes)))
 }
 
+fn code_file_icon(language: Option<&str>) -> &'static str {
+    let Some(language) = language else {
+        return "icons/file-types/file.svg";
+    };
+    let normalized = language.trim().to_ascii_lowercase();
+    let filename = match normalized.as_str() {
+        "dockerfile" | "docker" => "Dockerfile",
+        "makefile" | "make" => "Makefile",
+        "ex" | "exs" | "elixir" => "snippet.ex",
+        "kt" | "kotlin" => "snippet.kt",
+        "scala" => "snippet.scala",
+        "cs" | "csharp" | "c#" => "snippet.cs",
+        "objc" | "objective-c" => "snippet.m",
+        "ini" | "cfg" | "conf" | "config" => "snippet.ini",
+        _ => match highlight::lang_for_tag(language) {
+            Some(Lang::Rust) => "snippet.rs",
+            Some(Lang::Script) => "snippet.ts",
+            Some(Lang::Python) => "snippet.py",
+            Some(Lang::Go) => "snippet.go",
+            Some(Lang::C) => "snippet.cpp",
+            Some(Lang::Java) => "snippet.java",
+            Some(Lang::Ruby) => "snippet.rb",
+            Some(Lang::Swift) => "snippet.swift",
+            Some(Lang::Json) => "snippet.json",
+            Some(Lang::Yaml) => "snippet.yaml",
+            Some(Lang::Toml) => "snippet.toml",
+            Some(Lang::Shell) => "snippet.sh",
+            Some(Lang::Css) => "snippet.css",
+            Some(Lang::Html) => "snippet.html",
+            Some(Lang::Sql) => "snippet.sql",
+            Some(Lang::Markdown) => "snippet.md",
+            Some(Lang::Diff) => "snippet.diff",
+            None => return "icons/file-types/file.svg",
+        },
+    };
+    crate::app::right_panel::file_icon_for_name(filename)
+}
+
 fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElement {
     let key = ctx.next_key();
     // Tokenizing is the most expensive flatten in the document, so a settled
@@ -1762,6 +1912,46 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
     let label = language
         .filter(|language| !language.is_empty())
         .map(|language| language.to_ascii_lowercase());
+    // Reuse the same file-type catalog as the file preview. Fenced blocks do
+    // not have a path, so the info string acts as a synthetic extension.
+    let file_icon = code_file_icon(language);
+    let file_icon_color = crate::app::right_panel::file_icon_color(file_icon);
+    let line_count = code.split('\n').count().max(1);
+    let line_height = ctx.metrics.code_line_height;
+    let code_text_size = ctx.metrics.code_text_size;
+    let gutter_width = 22.0 + (line_count.to_string().len() as f32 * code_text_size * 0.6).ceil();
+    let code_height = px(line_height * line_count as f32);
+    let number_color = ctx.palette.ghost;
+    let line_numbers = canvas(
+        |_, _, _| (),
+        move |bounds: gpui::Bounds<Pixels>, _, window: &mut Window, cx: &mut App| {
+            let mut y = bounds.origin.y;
+            for number in 1..=line_count {
+                let text = SharedString::from(number.to_string());
+                let run = gpui::TextRun {
+                    len: text.len(),
+                    font: font(MONO_FAMILY),
+                    color: number_color,
+                    ..Default::default()
+                };
+                let line = window
+                    .text_system()
+                    .shape_line(text, px(code_text_size), &[run], None);
+                let _ = line.paint(
+                    point(bounds.right() - line.width - px(8.0), y),
+                    px(line_height),
+                    gpui::TextAlign::Left,
+                    None,
+                    window,
+                    cx,
+                );
+                y += px(line_height);
+            }
+        },
+    )
+    .flex_none()
+    .w(px(gutter_width))
+    .h(code_height);
     // Reuse the cached shaped string. Settled code blocks render every frame,
     // so cloning the whole source here would turn the copy affordance into a
     // permanent O(code length) render cost; allocate only when it is invoked.
@@ -1830,7 +2020,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
         .rounded(px(8.0))
         .border_1()
         .border_color(ctx.palette.border)
-        .bg(ctx.palette.inset)
+        .bg(ctx.palette.code_wash)
         .overflow_hidden()
         .child(
             div()
@@ -1842,6 +2032,8 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
                 .items_center()
                 .border_b_1()
                 .border_color(ctx.palette.border)
+                .gap(px(6.0))
+                .child(crate::ui::icon(file_icon, 13.0, file_icon_color))
                 .child(
                     div()
                         .min_w_0()
@@ -1867,10 +2059,14 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
                 .min_w_0()
                 .px(px(10.0))
                 .py(px(8.0))
+                .flex()
+                .items_start()
+                .child(line_numbers)
                 .child(
                     div()
-                        .w_full()
+                        .flex_1()
                         .min_w_0()
+                        .pl(px(10.0))
                         .whitespace_normal()
                         .text_size(px(ctx.metrics.code_text_size))
                         .line_height(px(ctx.metrics.code_line_height))
@@ -2134,6 +2330,30 @@ mod tests {
                 .any(|run| run.strikethrough.is_some() && run.len == 4)
         );
         assert!(flat.runs.iter().any(|run| run.underline.is_some()));
+    }
+
+    #[test]
+    fn inline_code_file_paths_use_full_path_chip_labels() {
+        let flat = flatten(
+            &runs_of("inspect `apps/desktop/src/app/right_panel/files.rs` now"),
+            &palette(),
+            FontWeight::NORMAL,
+            palette().text,
+        );
+        assert_runs_tile(&flat);
+        assert!(
+            flat.text
+                .contains("apps/desktop/src/app/right_panel/files.rs")
+        );
+        assert_eq!(flat.file_link_ranges.len(), 1);
+        assert_eq!(
+            flat.file_link_ranges[0].1,
+            "apps/desktop/src/app/right_panel/files.rs"
+        );
+        assert!(
+            flat.links.is_empty(),
+            "backtick paths are styled, not links"
+        );
     }
 
     #[test]

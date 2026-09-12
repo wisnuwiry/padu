@@ -135,13 +135,15 @@ pub fn lang_for_tag(tag: &str) -> Option<Lang> {
         | "typescript" => Lang::Script,
         "py" | "python" | "python3" => Lang::Python,
         "go" | "golang" => Lang::Go,
-        "c" | "h" | "cc" | "cpp" | "c++" | "cxx" | "hpp" | "objc" | "m" => Lang::C,
+        "c" | "h" | "cc" | "cpp" | "c++" | "cxx" | "hpp" | "objc" | "objective-c" | "m" | "mm" => {
+            Lang::C
+        }
         "java" | "kt" | "kotlin" | "scala" | "cs" | "csharp" | "c#" => Lang::Java,
-        "rb" | "ruby" | "gemfile" | "rake" => Lang::Ruby,
+        "rb" | "ruby" | "gemfile" | "rake" | "ex" | "exs" | "elixir" => Lang::Ruby,
         "swift" => Lang::Swift,
         "json" | "jsonc" | "json5" => Lang::Json,
         "yaml" | "yml" => Lang::Yaml,
-        "toml" | "ini" | "cfg" => Lang::Toml,
+        "toml" | "ini" | "cfg" | "conf" | "config" => Lang::Toml,
         "sh" | "bash" | "zsh" | "shell" | "shellscript" | "console" | "fish" | "dockerfile"
         | "docker" | "makefile" | "make" => Lang::Shell,
         "css" | "scss" | "sass" | "less" => Lang::Css,
