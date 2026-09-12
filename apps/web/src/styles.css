@@ -388,7 +388,18 @@
     @apply rounded px-1 py-0.5 font-mono text-[0.9em];
   }
   .markdown .mention-chip {
-    @apply inline-flex items-center gap-1.5 rounded-[8px] border border-border bg-[var(--inset)] px-2 py-0.5 font-mono text-[12px] font-medium text-foreground;
+    @apply inline-flex items-center gap-2 rounded-[6px] border border-border bg-[var(--inset)] px-2.5 py-1.5 font-mono text-[12px] font-medium leading-4 text-foreground;
+  }
+  .composer-rich-input:empty::before {
+    color: var(--text-ghost);
+    content: attr(data-placeholder);
+    pointer-events: none;
+  }
+  .composer-inline-file-chip {
+    @apply mx-0.5 inline-flex max-w-[240px] items-center gap-2 whitespace-nowrap rounded-[6px] border border-border bg-[var(--inset)] px-2 py-1 align-baseline font-mono text-[12px] font-medium leading-4 text-foreground;
+  }
+  .composer-rich-input ::selection {
+    background: color-mix(in srgb, var(--primary) 20%, transparent);
   }
   .markdown pre {
     @apply max-w-full overflow-x-auto rounded-xl border bg-muted/45 p-4 font-mono text-[13px] leading-6;

@@ -150,7 +150,10 @@ const CODE_WASH_RADIUS: f32 = 4.0;
 const CODE_WASH_PAD_X: f32 = 2.5;
 const CODE_WASH_INSET_Y: f32 = 1.5;
 const MENTION_CHIP_RADIUS: f32 = 7.0;
-const MENTION_CHIP_PAD_X: f32 = 6.0;
+const MENTION_CHIP_PAD_X: f32 = 9.0;
+// Negative here expands the chip beyond the text line so the rounded
+// background includes the requested vertical padding instead of shrinking.
+const MENTION_CHIP_INSET_Y: f32 = -3.0;
 
 /// Heading scale relative to body text, by level.
 fn heading_metrics(level: u8, metrics: &Metrics) -> (f32, f32, FontWeight) {
@@ -266,6 +269,7 @@ pub struct FlatText {
     pub links: Vec<(Range<usize>, String)>,
     pub code_ranges: Vec<Range<usize>>,
     pub mention_ranges: Vec<Range<usize>>,
+    pub file_link_ranges: Vec<(Range<usize>, String)>,
 }
 
 /// One literal find-in-page hit inside a shaped markdown text element.
@@ -300,11 +304,62 @@ pub fn flatten(
     let mut links: Vec<(Range<usize>, String)> = Vec::new();
     let mut code_ranges: Vec<Range<usize>> = Vec::new();
     let mut mention_ranges: Vec<Range<usize>> = Vec::new();
+    let mut file_link_ranges: Vec<(Range<usize>, String)> = Vec::new();
 
     for run in runs {
         if run.text.is_empty() {
             continue;
         }
+
+        if let Some(target) = run
+            .style
+            .link
+            .as_deref()
+            .filter(|target| is_local_file_link(target))
+        {
+            let basename = crate::inline_file::target_basename(target);
+            let display_start = text.len();
+            text.push(' ');
+            let chip_start = text.len();
+            text.push('\u{2003}');
+            text.push('\u{2009}');
+            let label_start = text.len();
+            text.push_str(&basename);
+            let chip_end = text.len();
+            text.push(' ');
+            let display_end = text.len();
+
+            let mut chip_font = font(SANS_FAMILY);
+            chip_font.weight = FontWeight::MEDIUM;
+            out.push(TextRun {
+                len: label_start - display_start,
+                font: chip_font.clone(),
+                color: gpui::transparent_black(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            });
+            out.push(TextRun {
+                len: chip_end - label_start,
+                font: chip_font.clone(),
+                color: base_color,
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            });
+            out.push(TextRun {
+                len: display_end - chip_end,
+                font: chip_font,
+                color: gpui::transparent_black(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            });
+            links.push((chip_start..chip_end, target.to_owned()));
+            file_link_ranges.push((chip_start..chip_end, target.to_owned()));
+            continue;
+        }
+
         let start = text.len();
         text.push_str(&run.text);
         let end = text.len();
@@ -368,6 +423,9 @@ pub fn flatten(
             }
         }
         if let Some(url) = &run.style.link {
+            if is_local_file_link(url) {
+                file_link_ranges.push((start..end, url.clone()));
+            }
             // A still-streaming link keeps link styling — so the URL settling
             // changes nothing visually — but must not become clickable.
             if url != PENDING_LINK_URL {
@@ -391,11 +449,16 @@ pub fn flatten(
             // Inline code's wash is painted as *rounded* quads by the canvas
             // underlay; a run background could only ever be a square box.
             background_color: None,
-            underline: run.style.link.is_some().then_some(UnderlineStyle {
-                color: Some(palette.tertiary),
-                thickness: px(1.0),
-                wavy: false,
-            }),
+            underline: run
+                .style
+                .link
+                .as_deref()
+                .filter(|url| !is_local_file_link(url))
+                .map(|_| UnderlineStyle {
+                    color: Some(palette.tertiary),
+                    thickness: px(1.0),
+                    wavy: false,
+                }),
             strikethrough: run.style.strikethrough.then_some(StrikethroughStyle {
                 thickness: px(1.0),
                 color: Some(palette.tertiary),
@@ -409,7 +472,12 @@ pub fn flatten(
         links,
         code_ranges,
         mention_ranges,
+        file_link_ranges,
     }
+}
+
+fn is_local_file_link(url: &str) -> bool {
+    crate::inline_file::is_local_file_target(url)
 }
 
 /// A flat string with uniform styling, for non-markdown transcript text.
@@ -440,6 +508,7 @@ pub fn flatten_plain(
         links: Vec::new(),
         code_ranges: Vec::new(),
         mention_ranges: Vec::new(),
+        file_link_ranges: Vec::new(),
     }
 }
 
@@ -738,6 +807,7 @@ fn text_element_with_selection(
         let text = flat.text.clone();
         let code_ranges = flat.code_ranges.clone();
         let mention_ranges = flat.mention_ranges.clone();
+        let file_link_ranges = flat.file_link_ranges.clone();
         let layout = layout.clone();
         let key = key.clone();
         move |_, _, window, cx| {
@@ -753,8 +823,46 @@ fn text_element_with_selection(
                     ));
                 }
             }
+            for (range, target) in &file_link_ranges {
+                let rects = range_rects(&layout, range, MENTION_CHIP_PAD_X, MENTION_CHIP_INSET_Y);
+                for rect in &rects {
+                    window.paint_quad(quad(
+                        *rect,
+                        px(MENTION_CHIP_RADIUS),
+                        mention_wash,
+                        px(1.0),
+                        mention_border,
+                        BorderStyle::default(),
+                    ));
+                }
+                if let Some(first_rect) = rects.first() {
+                    let icon_path = if target.ends_with(['/', '\\']) {
+                        "icons/folder.svg"
+                    } else {
+                        crate::app::right_panel::file_icon_for_path(
+                            &crate::inline_file::target_basename(target),
+                        )
+                    };
+                    let icon_size = 14.0;
+                    let icon_bounds = Bounds::new(
+                        point(
+                            first_rect.left() + px(3.0),
+                            first_rect.top() + (first_rect.size.height - px(icon_size)) / 2.0,
+                        ),
+                        size(px(icon_size), px(icon_size)),
+                    );
+                    let _ = window.paint_svg(
+                        icon_bounds,
+                        icon_path.into(),
+                        None,
+                        TransformationMatrix::unit(),
+                        crate::app::right_panel::file_icon_color(icon_path),
+                        cx,
+                    );
+                }
+            }
             for range in &mention_ranges {
-                let rects = range_rects(&layout, range, MENTION_CHIP_PAD_X, CODE_WASH_INSET_Y);
+                let rects = range_rects(&layout, range, MENTION_CHIP_PAD_X, MENTION_CHIP_INSET_Y);
                 for rect in &rects {
                     window.paint_quad(quad(
                         *rect,
@@ -777,7 +885,7 @@ fn text_element_with_selection(
                     let icon_size = 14.0;
                     let icon_bounds = Bounds::new(
                         point(
-                            first_rect.left() + px(2.0),
+                            first_rect.left() + px(3.0),
                             first_rect.top() + (first_rect.size.height - px(icon_size)) / 2.0,
                         ),
                         size(px(icon_size), px(icon_size)),
@@ -842,11 +950,30 @@ fn text_element_with_selection(
     .absolute()
     .size_full();
 
+    let tooltip_layout = layout;
+    let tooltip_files = flat.file_link_ranges.clone();
+    let tooltip_id = SharedString::from(format!("{}-t{}-file-tooltip", key.row, key.index));
     div()
+        .id(tooltip_id)
         .relative()
         .w_full()
         .min_w_0()
         .cursor(CursorStyle::IBeam)
+        .when(!tooltip_files.is_empty(), move |element| {
+            element.tooltip(move |window, cx| {
+                let target = tooltip_layout
+                    .index_for_position(window.mouse_position())
+                    .ok()
+                    .and_then(|offset| {
+                        tooltip_files
+                            .iter()
+                            .find(|(range, _)| range.contains(&offset))
+                    })
+                    .map(|(_, target)| crate::inline_file::display_target(target))
+                    .unwrap_or_default();
+                Tooltip::new(target).build(window, cx)
+            })
+        })
         .child(underlay)
         .child(body)
         .into_any_element()
@@ -1629,6 +1756,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
             links: Vec::new(),
             code_ranges: Vec::new(),
             mention_ranges: Vec::new(),
+            file_link_ranges: Vec::new(),
         }
     });
     let label = language
@@ -2006,6 +2134,43 @@ mod tests {
                 .any(|run| run.strikethrough.is_some() && run.len == 4)
         );
         assert!(flat.runs.iter().any(|run| run.underline.is_some()));
+    }
+
+    #[test]
+    fn local_file_links_flatten_to_basename_icon_chips_and_stay_clickable() {
+        let flat = flatten(
+            &runs_of("open [not-the-label](apps/desktop/src/app/right_panel/files.rs) now"),
+            &palette(),
+            FontWeight::NORMAL,
+            palette().text,
+        );
+        assert_runs_tile(&flat);
+        assert!(flat.text.contains("files.rs"));
+        assert!(!flat.text.contains("not-the-label"));
+        assert_eq!(flat.file_link_ranges.len(), 1);
+        assert_eq!(flat.links.len(), 1);
+        assert_eq!(
+            flat.file_link_ranges[0].1,
+            "apps/desktop/src/app/right_panel/files.rs"
+        );
+        assert_eq!(flat.links[0], flat.file_link_ranges[0]);
+        assert_eq!(
+            &flat.text[flat.file_link_ranges[0].0.clone()],
+            "\u{2003}\u{2009}files.rs"
+        );
+    }
+
+    #[test]
+    fn local_folder_links_keep_folder_identity_when_flattened() {
+        let flat = flatten(
+            &runs_of("[anything](apps/desktop/src/app/right_panel/)"),
+            &palette(),
+            FontWeight::NORMAL,
+            palette().text,
+        );
+        assert_runs_tile(&flat);
+        assert!(flat.text.contains("right_panel"));
+        assert!(flat.file_link_ranges[0].1.ends_with('/'));
     }
 
     #[test]

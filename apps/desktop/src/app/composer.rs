@@ -2178,8 +2178,9 @@ impl Padu {
     }
 
     /// The text and attachment presentation accepted from the composer. The
-    /// stored prompt keeps its `@` mentions and visible command syntax, while
-    /// sent-message UI uses `display_content` and retained attachment metadata.
+    /// provider-facing prompt keeps Markdown file references and visible
+    /// command syntax, while sent-message UI uses `display_content` and
+    /// retained attachment metadata.
     pub(super) fn submission_with_attachments(
         &mut self,
         prompt: &str,
@@ -2423,7 +2424,12 @@ impl Padu {
     /// is visible and can be undone before sending.
     fn render_composer_attachments(&self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
-        let mut attachment_row = div().flex().flex_wrap().items_center().gap(px(6.0));
+        let mut attachment_row = div()
+            .px(px(4.0))
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(8.0));
         for (index, attachment) in self.composer_attachments.iter().enumerate() {
             let menu = self.menu_handle(format!("composer-attachment-{index}-menu"), cx);
             let icon_path = if attachment.is_dir {
@@ -2443,9 +2449,9 @@ impl Padu {
                 .rounded(px(6.0))
                 .border_1()
                 .border_color(theme.border)
-                .bg(theme.surface)
+                .bg(theme.inset)
                 .pl(px(7.0))
-                .pr(px(5.0))
+                .pr(px(7.0))
                 .flex()
                 .items_center()
                 .gap(px(5.0))
@@ -3967,13 +3973,17 @@ fn is_image_attachment_path(path: &Path) -> bool {
         })
 }
 
-/// The prompt a submission sends: the typed text plus one `@` mention per
-/// staged attachment, appended at the end the way T3 Code appends dropped
-/// files. `None` means there is nothing to send.
+/// Build the compact Markdown reference used in the provider-facing prompt.
+/// The label is intentionally short, while the destination retains the full
+/// project-relative or absolute path so the provider can resolve the file.
+pub(super) use crate::inline_file::markdown_file_reference;
+
+/// The prompt a submission sends: the typed text plus one Markdown file
+/// reference per staged attachment. `None` means there is nothing to send.
 pub(super) fn merged_submission(prompt: &str, mentions: &[String]) -> Option<String> {
     let mentions = mentions
         .iter()
-        .map(|mention| format!("@{mention}"))
+        .map(|mention| markdown_file_reference(mention))
         .collect::<Vec<_>>()
         .join(" ");
     let prompt = prompt.trim();

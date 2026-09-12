@@ -122,7 +122,20 @@ pub(crate) fn workspace_relative_file_path(workspace: &Path, target: &Path) -> O
 }
 
 pub(crate) fn transcript_link_route(target: &str, workspace: Option<&Path>) -> TranscriptLinkRoute {
-    let Some(path) = markdown_file_link_path(target) else {
+    let target = strip_file_location(target.trim());
+    let path = markdown_file_link_path(target).or_else(|| {
+        let workspace = workspace?;
+        let decoded = percent_decode_file_path(target);
+        let path = Path::new(&decoded);
+        (!path.is_absolute()
+            && !decoded.is_empty()
+            && !target.contains("://")
+            && !target
+                .get(..7)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("mailto:")))
+        .then(|| workspace.join(path))
+    });
+    let Some(path) = path else {
         return TranscriptLinkRoute::External;
     };
     let path = normalized_path(&path);
@@ -130,7 +143,41 @@ pub(crate) fn transcript_link_route(target: &str, workspace: Option<&Path>) -> T
         workspace.and_then(|workspace| workspace_relative_file_path(workspace, &path))
     {
         TranscriptLinkRoute::ProjectFile(relative_path)
+    } else if workspace.is_some()
+        && !target.starts_with('/')
+        && !target.starts_with("file:")
+        && !target.contains("://")
+    {
+        // A relative Markdown reference must stay inside the active workspace;
+        // never reinterpret an escaping relative target as a Finder path.
+        TranscriptLinkRoute::External
     } else {
         TranscriptLinkRoute::Finder(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relative_markdown_links_route_to_workspace_files() {
+        assert_eq!(
+            transcript_link_route(
+                "apps/desktop/src/app/right_panel/files.rs",
+                Some(Path::new("/work/repo")),
+            ),
+            TranscriptLinkRoute::ProjectFile(
+                "apps/desktop/src/app/right_panel/files.rs".to_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn relative_links_cannot_escape_the_workspace() {
+        assert_eq!(
+            transcript_link_route("../outside.rs", Some(Path::new("/work/repo"))),
+            TranscriptLinkRoute::External
+        );
     }
 }

@@ -244,24 +244,18 @@ impl Padu {
                     let chat_weak = row_weak.clone();
                     let mut items = Vec::new();
 
-                    // Add to Chat (for files and folders)
-                    let chat_relative = menu_relative.clone();
-                    let chat_is_dir = is_dir;
+                    // Add to Chat inserts a textual inline reference. It must not
+                    // stage or upload the file as an attachment.
+                    let chat_relative = if is_dir {
+                        format!("{menu_relative}/")
+                    } else {
+                        menu_relative.clone()
+                    };
                     items.push(
                         MenuItem::new(tr!("files.add_to_chat"), move |window, cx| {
                             let _ = chat_weak.update(cx, |this, cx| {
-                                let file_name = Path::new(&chat_relative)
-                                    .file_name()
-                                    .and_then(|n| n.to_str())
-                                    .unwrap_or(&chat_relative)
-                                    .to_owned();
-                                let mention_name = if chat_is_dir {
-                                    format!("{file_name}/")
-                                } else {
-                                    file_name.clone()
-                                };
                                 this.composer.update(cx, |composer, cx| {
-                                    composer.insert_mention(&mention_name, cx);
+                                    composer.insert_file_reference(&chat_relative, cx);
                                 });
                                 let focus = this.composer.read(cx).focus();
                                 window.focus(&focus, cx);
@@ -320,7 +314,7 @@ impl Padu {
                                     );
                                 });
                             })
-                            .icon("icons/file.svg"),
+                            .icon("icons/file-add.svg"),
                         );
                         let parent = menu_path
                             .parent()
@@ -510,7 +504,7 @@ impl Padu {
                                     })
                             })
                             .child(
-                                icon_button("right-panel-new-file", "icons/file.svg", theme)
+                                icon_button("right-panel-new-file", "icons/file-add.svg", theme)
                                     .tooltip(|window, cx| {
                                         Tooltip::new(tr!("files.new_file")).build(window, cx)
                                     })
@@ -633,7 +627,7 @@ impl Padu {
                                         );
                                     });
                                 })
-                                .icon("icons/file.svg"),
+                                .icon("icons/file-add.svg"),
                             );
                             items.push(
                                 MenuItem::new(tr!("files.new_folder"), move |window, cx| {
@@ -1552,9 +1546,9 @@ impl Padu {
             }))
             .child(div().w(px(10.0)).h(px(10.0)).flex_none())
             .child(if is_dir {
-                icon("icons/folder.svg", 14.0, theme.text_tertiary).into_any_element()
+                icon("icons/folder-new.svg", 14.0, theme.text_tertiary).into_any_element()
             } else {
-                icon("icons/file.svg", 14.0, theme.text_tertiary).into_any_element()
+                icon("icons/file-add.svg", 14.0, theme.text_tertiary).into_any_element()
             })
             .child(
                 div()

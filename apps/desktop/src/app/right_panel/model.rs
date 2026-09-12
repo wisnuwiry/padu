@@ -492,6 +492,7 @@ pub(crate) fn review_diff_flat_text(
         links: Vec::new(),
         code_ranges: Vec::new(),
         mention_ranges: Vec::new(),
+        file_link_ranges: Vec::new(),
     }
 }
 

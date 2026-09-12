@@ -30,8 +30,12 @@ import { DaemonFilePicker } from '@/components/daemon-file-picker'
 import { PreviewableImage } from '@/components/image-preview'
 import { ModelPicker } from '@/components/model-picker'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
 import { FileTypeIcon, PaduIcon } from '@/components/padu-icon'
+import {
+  composerEditorSelection,
+  RichComposerInput,
+  setComposerEditorSelection,
+} from '@/components/rich-composer-input'
 import {
   useComposerCommands,
   useComposerFiles,
@@ -76,6 +80,11 @@ import {
 } from '@/lib/escape-stop'
 import { usePrimaryShortcut } from '@/lib/platform'
 import { agentPresetDescription, agentPresetLabel } from '@/lib/agent-preset-presentation'
+import {
+  atomicReferenceDeletion,
+  insertInlineFileReference,
+  markdownFileReference,
+} from '@/lib/inline-file-references'
 import { isProjectlessProject, projectDisplayName } from '@/lib/project-presentation'
 import type { PendingUserInput } from '@/lib/event-reducer'
 import { useRuntime } from '@/lib/runtime-context'
@@ -217,8 +226,7 @@ export function Composer({
   const [autocompleteSelection, setAutocompleteSelection] = useState({ key: '', index: 0 })
   const [dismissedAutocomplete, setDismissedAutocomplete] = useState<string | null>(null)
   const [escapeStopArm, setEscapeStopArm] = useState<EscapeStopArm | null>(null)
-  const composerInput = useRef<HTMLTextAreaElement>(null)
-  const backdropRef = useRef<HTMLDivElement>(null)
+  const composerInput = useRef<HTMLDivElement>(null)
   const autocompleteList = useRef<VirtuosoHandle>(null)
   const pendingCursor = useRef<number | null>(null)
   const escapeStopTimer = useRef<number | null>(null)
@@ -360,27 +368,26 @@ export function Composer({
   useEffect(() => {
     if (!mentionSignal?.signal) return
     setPrompt((prev) => {
-      const pos = composerInput.current ? (composerInput.current.selectionStart ?? prev.length) : prev.length
-      const before = prev.slice(0, pos)
-      const after = prev.slice(pos)
-      const prefix = before.length && !/\s$/.test(before) ? ' ' : ''
-      const suffix = after.length && !/^\s/.test(after) ? ' ' : ''
-      const mentionText = `${prefix}@${mentionSignal.mention}${suffix}`
-      const next = before + mentionText + after
-      const existingSeparator = suffix ? 0 : (after.match(/^\s/u)?.[0].length ?? 0)
-      pendingCursor.current = before.length + mentionText.length + existingSeparator
-      return next
+      // A right-panel action can arrive while the composer is unfocused. In
+      // that case the browser selection may still point at the beginning of
+      // the contenteditable, so append rather than inserting at a stale 0.
+      const input = composerInput.current
+      const selection = input && document.activeElement === input
+        ? composerEditorSelection(input)
+        : { start: prev.length, end: prev.length }
+      const insertion = insertInlineFileReference(
+        prev,
+        selection.start,
+        selection.end,
+        mentionSignal.mention,
+      )
+      pendingCursor.current = insertion.cursor
+      return insertion.text
     })
     composerInput.current?.focus()
     onMentionSignalHandled?.()
   }, [mentionSignal, onMentionSignalHandled])
 
-  useEffect(() => {
-    if (composerInput.current && backdropRef.current) {
-      backdropRef.current.scrollTop = composerInput.current.scrollTop
-      backdropRef.current.scrollLeft = composerInput.current.scrollLeft
-    }
-  }, [prompt])
 
   useEffect(() => {
     setFilePickerOpen(false)
@@ -393,7 +400,7 @@ export function Composer({
     if (nextCursor === null) return
     pendingCursor.current = null
     composerInput.current?.focus()
-    composerInput.current?.setSelectionRange(nextCursor, nextCursor)
+    setComposerEditorSelection(composerInput.current, nextCursor)
     setCursor(nextCursor)
   }, [prompt])
 
@@ -431,7 +438,7 @@ export function Composer({
     if (expanded === null && !submittedAttachments.length && !submittedNotes.length) return undefined
     return [
       expanded ?? submittedPrompt.trim(),
-      submittedAttachments.map((attachment) => `@${attachment.mention}`).join(' '),
+      submittedAttachments.map((attachment) => markdownFileReference(attachment.mention)).join(' '),
       ...submittedNotes.map((note) => `${note.title || 'Untitled note'}\n${note.content}`),
     ].filter(Boolean).join('\n\n')
   }
@@ -679,23 +686,21 @@ export function Composer({
     autocompleteList.current?.scrollToIndex({ index: next, align: 'center' })
   }
 
-  function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === 'Backspace' && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
-      const input = composerInput.current
-      const start = input?.selectionStart ?? prompt.length
-      const end = input?.selectionEnd ?? start
-      if (start === end) {
-        const before = prompt.slice(0, start)
-        const match = before.match(/(?:^|\s)(@[a-zA-Z0-9_.\-\\/]+) ?$/)
-        if (match) {
-          event.preventDefault()
-          const tokenStart = start - match[0].length + match[0].indexOf('@')
-          const removeStart = tokenStart - (tokenStart > 0 && /\s/.test(prompt[tokenStart - 1] ?? '') ? 1 : 0)
-          const next = prompt.slice(0, removeStart) + prompt.slice(start)
-          pendingCursor.current = removeStart
-          setPrompt(next)
-          return
-        }
+  function keyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const plainDelete = !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey
+    if (plainDelete && (event.key === 'Backspace' || event.key === 'Delete')) {
+      const selection = composerEditorSelection(composerInput.current)
+      const deletion = atomicReferenceDeletion(
+        prompt,
+        selection.start,
+        selection.end,
+        event.key === 'Backspace' ? 'backward' : 'forward',
+      )
+      if (deletion) {
+        event.preventDefault()
+        pendingCursor.current = deletion.cursor
+        setPrompt(deletion.text)
+        return
       }
     }
     if (autocompleteVisible && event.key === 'Escape') {
@@ -718,7 +723,12 @@ export function Composer({
         return
       }
     }
-    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
+    if (event.shiftKey) {
+      event.preventDefault()
+      document.execCommand('insertText', false, '\n')
+      return
+    }
     event.preventDefault()
     if ((event.metaKey || event.ctrlKey) && canSteer) void steer()
     else void submit()
@@ -874,44 +884,25 @@ export function Composer({
               ))}
             </div>
           )}
-          <div className="relative w-full">
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words border-0 px-1 pb-1 pt-0 font-sans text-[14px] leading-5 text-foreground select-none"
-              ref={backdropRef}
-            >
-              {renderPromptMentionsBackdrop(prompt)}
-            </div>
-            <Textarea
-              aria-controls={autocompleteVisible ? 'composer-autocomplete' : undefined}
-              aria-expanded={autocompleteVisible}
-              aria-label={t('composer.message')}
-              aria-activedescendant={autocompleteOpen
-                ? `composer-autocomplete-${autocompleteHighlight}`
-                : undefined}
-              aria-autocomplete="list"
-              className="max-h-48 min-h-[46px] resize-none border-0 bg-transparent px-1 pb-1 pt-0 text-[14px] leading-5 text-transparent caret-foreground selection:bg-primary/20 selection:text-transparent shadow-none focus-visible:ring-0"
-              placeholder={t(busy ? 'composer.queue_placeholder' : 'composer.prompt_placeholder')}
-              ref={composerInput}
-              role="combobox"
-              value={prompt}
-              onBlur={() => setInputFocused(false)}
-              onChange={(event) => {
-                setPrompt(event.target.value)
-                setCursor(event.target.selectionStart)
-              }}
-              onClick={(event) => setCursor(event.currentTarget.selectionStart)}
-              onFocus={() => setInputFocused(true)}
-              onKeyDown={keyDown}
-              onScroll={(event) => {
-                if (backdropRef.current) {
-                  backdropRef.current.scrollTop = event.currentTarget.scrollTop
-                  backdropRef.current.scrollLeft = event.currentTarget.scrollLeft
-                }
-              }}
-              onSelect={(event) => setCursor(event.currentTarget.selectionStart)}
-            />
-          </div>
+          <RichComposerInput
+            ariaActiveDescendant={autocompleteOpen
+              ? `composer-autocomplete-${autocompleteHighlight}`
+              : undefined}
+            ariaControls={autocompleteVisible ? 'composer-autocomplete' : undefined}
+            ariaExpanded={autocompleteVisible}
+            ariaLabel={t('composer.message')}
+            placeholder={t(busy ? 'composer.queue_placeholder' : 'composer.prompt_placeholder')}
+            ref={composerInput}
+            value={prompt}
+            onBlur={() => setInputFocused(false)}
+            onChange={(value, selection) => {
+              setPrompt(value)
+              setCursor(selection.start)
+            }}
+            onFocus={() => setInputFocused(true)}
+            onKeyDown={keyDown}
+            onSelectionChange={(selection) => setCursor(selection.start)}
+          />
           <div
             className="mt-2 flex min-w-0 items-center gap-1 pb-px text-[11.5px] leading-[14px]"
             onMouseDown={preserveComposerFocusOnMouseDown}
@@ -1412,7 +1403,7 @@ function trimToFilename(path: string): string {
   const isDir = path.endsWith('/') || path.endsWith('\\')
   const clean = path.replace(/[/\\]+$/, '')
   const name = clean.split(/[/\\]/).pop() || clean
-  return name
+  return isDir ? `${name}/` : name
 }
 
 function ComposerAttachmentTile({
@@ -2324,48 +2315,4 @@ function formatTokens(tokens: number) {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error)
-}
-
-function renderPromptMentionsBackdrop(text: string): ReactNode {
-  if (!text) return null
-  const regex = /(?:^|\s)@([a-zA-Z0-9_.\-\\/]+)/g
-  const parts: ReactNode[] = []
-  let lastIndex = 0
-  let match: RegExpExecArray | null
-  while ((match = regex.exec(text)) !== null) {
-    const fullMatch = match[0]
-    const atOffset = fullMatch.indexOf('@')
-    const start = match.index + atOffset
-    const end = match.index + fullMatch.length
-    const trimmedEnd = text.slice(start, end).replace(/[,;!?:)\]}"']+$/, '').length + start
-    if (trimmedEnd <= start + 1) continue
-
-    if (start > lastIndex) {
-      parts.push(text.slice(lastIndex, start))
-    }
-    const mention = text.slice(start, trimmedEnd)
-    // TODO(web): Replace the overlay placeholder with a range-aware rich input;
-    // the chip's visual width can still diverge from the native textarea caret
-    // and overlap adjacent text in some cursor/wrap positions.
-    parts.push(
-      <span key={`${start}-${trimmedEnd}`} className="relative inline-block align-baseline">
-        <span className="invisible">{mention}</span>
-        <span className="absolute inset-y-0 left-0 inline-flex items-center gap-1 whitespace-nowrap rounded-[7px] border border-border bg-[var(--inset)] px-1.5 py-0.5 text-foreground">
-          {mention.endsWith('/')
-            ? <PaduIcon className="size-3.5 shrink-0 text-[var(--text-secondary)]" name="folder" />
-            : <FileTypeIcon className="size-3.5 shrink-0" path={mention.replace(/^@/, '')} />}
-          <span className="font-medium text-foreground">{mention.replace(/^@/, '').replace(/\/$/, '')}</span>
-        </span>
-      </span>,
-    )
-    lastIndex = trimmedEnd
-    regex.lastIndex = trimmedEnd
-  }
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex))
-  }
-  if (text.endsWith('\n')) {
-    parts.push('\u200b')
-  }
-  return parts
 }
