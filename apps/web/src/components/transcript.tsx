@@ -7,11 +7,13 @@ import type {
 } from '@padu/client'
 import { ContextMenu } from '@base-ui/react/context-menu'
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
 import { Virtuoso, type ListItem, type VirtuosoHandle } from 'react-virtuoso'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { PreviewableImage } from '@/components/image-preview'
 import { FileTypeIcon, PaduIcon, type PaduIconName } from '@/components/padu-icon'
+import { Kbd } from '@/components/ui/kbd'
 import { readAttachmentImage } from '@/lib/attachments'
 import { useDaemon } from '@/lib/daemon-context'
 import { activitiesForBlock } from '@/lib/event-reducer'
@@ -1016,14 +1018,39 @@ function EmbeddedNoteCard({
   t: Translator
 }) {
   const [previewOpen, setPreviewOpen] = useState(false)
+  const closeRef = useRef<HTMLButtonElement>(null)
+  const previousFocus = useRef<HTMLElement | null>(null)
   const title = note.title.trim() || t('notes.untitled')
   const excerpt = note.content.split(/\r?\n/u)[0]?.trim() || 'Empty note'
+
+  // Desktop parity (note_preview.rs): the modal takes focus on open, Escape
+  // or backdrop click dismisses it, and focus returns to the opener on close.
+  useEffect(() => {
+    if (!previewOpen) return
+    previousFocus.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
+    closeRef.current?.focus()
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      setPreviewOpen(false)
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true)
+      previousFocus.current?.focus()
+      previousFocus.current = null
+    }
+  }, [previewOpen])
 
   return (
     <>
       <button
         className="flex w-fit min-w-[180px] max-w-[540px] items-start gap-2 rounded-lg border border-border bg-[var(--inset)] px-2.5 py-2 text-left outline-none transition-colors hover:bg-card focus-visible:ring-2 focus-visible:ring-ring"
         type="button"
+        aria-haspopup="dialog"
         onClick={() => setPreviewOpen(true)}
       >
         <PaduIcon name="note" className="mt-0.5 size-4 shrink-0 text-[var(--text-secondary)]" />
@@ -1033,8 +1060,12 @@ function EmbeddedNoteCard({
           <span className="block truncate text-[11px] text-[var(--text-secondary)]">{excerpt}</span>
         </span>
       </button>
-      {previewOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-6" role="presentation">
+      {previewOpen && createPortal(
+        <div
+          className="fixed inset-0 z-[200] grid place-items-center bg-black/50 p-6"
+          role="presentation"
+          onClick={() => setPreviewOpen(false)}
+        >
           <div
             className="relative flex max-h-[min(620px,calc(100dvh-3rem))] w-full max-w-2xl flex-col gap-3 overflow-hidden rounded-xl border bg-card p-5 shadow-2xl"
             role="dialog"
@@ -1043,19 +1074,22 @@ function EmbeddedNoteCard({
             onClick={(event) => event.stopPropagation()}
           >
             <button
-              className="absolute right-3 top-3 rounded-full p-1.5 outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+              ref={closeRef}
+              className="absolute right-3 top-3 flex h-[30px] min-w-[58px] items-center justify-center gap-1.5 rounded-lg bg-accent px-1.5 outline-none hover:bg-accent/70 focus-visible:ring-2 focus-visible:ring-ring"
               type="button"
-              aria-label="Close note preview"
+              aria-label={t('common.close')}
               onClick={() => setPreviewOpen(false)}
             >
               <PaduIcon name="x" className="size-4" />
+              <Kbd size="xs">Esc</Kbd>
             </button>
-            <h2 id={`note-preview-${note.id}`} className="pr-8 text-base font-semibold">{title}</h2>
+            <h2 id={`note-preview-${note.id}`} className="pr-24 text-base font-semibold">{title}</h2>
             <div className="markdown min-h-0 overflow-y-auto text-sm leading-6">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{note.content}</ReactMarkdown>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   )
