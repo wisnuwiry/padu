@@ -1457,6 +1457,7 @@ function providerName(provider: AgentSession['provider']) {
       codex: 'Codex',
       cursor: 'Cursor Agent',
       deepSeek: 'DeepSeek Harness',
+      elph: 'Elph',
       fx: 'Fx',
       openCode: 'OpenCode',
       grok: 'Grok',

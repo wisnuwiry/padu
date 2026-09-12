@@ -111,6 +111,18 @@ export const AGENT_PAGES = [
       "Open source app for xAI's Grok Build coding agent. Launch sessions on your machine, monitor progress, and ship code.",
   },
   {
+    slug: "elph",
+    name: "Elph",
+    category: "acp",
+    badge: "ACP",
+    title: "Open source desktop app for Elph",
+    subtitle:
+      "Run Elph's ACP coding agent on your machine with local session management, model discovery, and streamed tool activity.",
+    metaTitle: "Elph Desktop & Web App, Open Source",
+    metaDescription:
+      "Open source app for Elph. Launch ACP coding sessions on your machine, monitor progress, and review changes locally.",
+  },
+  {
     slug: "kimi",
     name: "Kimi Code CLI",
     category: "acp",

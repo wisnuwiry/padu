@@ -627,6 +627,7 @@ impl Backend for PaduBackend {
                     }
                     ProviderKind::Agy
                     | ProviderKind::Cursor
+                    | ProviderKind::Elph
                     | ProviderKind::Fx
                     | ProviderKind::OpenCode => {
                         crate::acp_session::list_provider_sessions(provider, &binary, &[], limit)?
@@ -690,6 +691,7 @@ impl Backend for PaduBackend {
                         )?
                     }
                     ProviderResumeCursor::Agy { session_id }
+                    | ProviderResumeCursor::Elph { session_id }
                     | ProviderResumeCursor::Cursor { session_id, .. }
                     | ProviderResumeCursor::Fx { session_id }
                     | ProviderResumeCursor::OpenCode { session_id }
@@ -1382,7 +1384,7 @@ impl PaduBackend {
             }
             // Unreachable through the UI, which hides branching for providers
             // that answer `supports_conversation_fork` with false.
-            ProviderKind::Agy | ProviderKind::Fx | ProviderKind::Kimi => {
+            ProviderKind::Agy | ProviderKind::Elph | ProviderKind::Fx | ProviderKind::Kimi => {
                 bail!(
                     "{} cannot branch a conversation at a turn",
                     source.provider.display_name()
@@ -1585,7 +1587,7 @@ impl PaduBackend {
             )),
             // Unreachable through the UI, which hides rewinding for providers
             // that answer `supports_conversation_rollback` with false.
-            ProviderKind::Agy | ProviderKind::Fx | ProviderKind::Kimi => {
+            ProviderKind::Agy | ProviderKind::Elph | ProviderKind::Fx | ProviderKind::Kimi => {
                 bail!(
                     "{} cannot rewind a conversation to a turn",
                     source.provider.display_name()
