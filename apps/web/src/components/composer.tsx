@@ -131,6 +131,7 @@ export function Composer({
   embeddedNote,
   onComposerDraftChange,
   onComposerDraftSubmitted,
+  onRemoveEmbeddedNote,
   attachmentSignal,
   pendingAttachmentPaths,
   onAttachmentSignalHandled,
@@ -160,6 +161,7 @@ export function Composer({
   embeddedNote?: EmbeddedNote
   onComposerDraftChange?: (draft: ComposerDraft) => void
   onComposerDraftSubmitted?: () => void
+  onRemoveEmbeddedNote?: (noteId: string) => void
   attachmentSignal?: number
   pendingAttachmentPaths?: string[]
   onAttachmentSignalHandled?: () => void
@@ -862,7 +864,10 @@ export function Composer({
                     <div className="truncate text-xs text-foreground">{note.title.trim() || t('notes.untitled')}</div>
                     <div className="truncate text-[11px] text-[var(--text-secondary)]">{note.content.split(/\r?\n/u)[0]?.trim() || 'Empty note'}</div>
                   </div>
-                  <button className="shrink-0 rounded p-1 outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring" type="button" aria-label={`Remove ${t('notes.label').toLocaleLowerCase()}`} onClick={() => setEmbeddedNotes((current) => current.filter((_, item) => item !== index))}>
+                  <button className="shrink-0 rounded p-1 outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring" type="button" aria-label={`Remove ${t('notes.label').toLocaleLowerCase()}`} onClick={() => {
+                    setEmbeddedNotes((current) => current.filter((_, item) => item !== index))
+                    onRemoveEmbeddedNote?.(note.id)
+                  }}>
                     <PaduIcon name="x" className="size-3.5" />
                   </button>
                 </div>

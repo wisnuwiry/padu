@@ -1418,6 +1418,8 @@ export function PaduApp() {
                   projectId: activeProject.id,
                 })}
                 embeddedNote={composerEmbeddedNote?.sessionId === 'new' ? composerEmbeddedNote.note : undefined}
+                onRemoveEmbeddedNote={(noteId) => setComposerEmbeddedNote((value) =>
+                  value?.sessionId === 'new' && value.note.id === noteId ? null : value)}
                 key={composerDraftId({
                   type: 'newSession',
                   projectId: activeProject.id,
@@ -1518,6 +1520,8 @@ export function PaduApp() {
                     sessionId: current.id,
                   })}
                   embeddedNote={composerEmbeddedNote?.sessionId === current.id ? composerEmbeddedNote.note : undefined}
+                  onRemoveEmbeddedNote={(noteId) => setComposerEmbeddedNote((value) =>
+                    value?.sessionId === current.id && value.note.id === noteId ? null : value)}
                   key={composerDraftId({ type: 'session', sessionId: current.id })}
                   modelPickerSignal={modelPickerSignal}
                   prefillSignal={composerPrefill?.sessionId === current.id ? composerPrefill.signal : 0}
