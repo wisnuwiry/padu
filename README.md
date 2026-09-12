@@ -113,17 +113,17 @@ structured protocol and session continuity.
 ## Architecture
 
 The native desktop is an RPC client of the standalone `padu-daemon` process.
-Provider sessions run in [`padu-core`](crates/padu-core), behind the
+Provider sessions run in [`padu-core`](crates/padu-core/), behind the
 authenticated, versioned WebSocket contract in
-[`padu-protocol`](crates/padu-protocol). Padu Desktop depends on
-[`padu-client`](crates/padu-client), not on the daemon implementation. The
+[`padu-protocol`](crates/padu-protocol/). Padu Desktop depends on
+[`padu-client`](crates/padu-client/), not on the daemon implementation. The
 daemon owns task SQLite data, uploaded attachments, provider-native session
 forks, and all workspace filesystem and Git operations; paths returned by it
 always refer to the daemon host. The desktop retains only presentation state
 and a disposable preview cache.
 
-The browser client lives at [`apps/web`](apps/web) and uses the generated
-browser transport in [`packages/padu-client`](packages/padu-client). Its
+The browser client lives at [`apps/web`](apps/web/) and uses the generated
+browser transport in [`packages/padu-client`](packages/padu-client/). Its
 checked-in types are generated directly from the Rust protocol, while its
 WebSocket client implements the same handshake, request IDs, subscriptions,
 sequence deduplication, and replay cursors as the Rust client. Run
