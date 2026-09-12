@@ -1026,7 +1026,7 @@ function EmbeddedNoteCard({
         type="button"
         onClick={() => setPreviewOpen(true)}
       >
-        <PaduIcon name="file" className="mt-0.5 size-4 shrink-0 text-[var(--text-secondary)]" />
+        <PaduIcon name="note" className="mt-0.5 size-4 shrink-0 text-[var(--text-secondary)]" />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[10px] font-medium text-[var(--text-tertiary)]">{t('notes.label')}</span>
           <span className="block truncate text-xs text-foreground">{title}</span>

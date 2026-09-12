@@ -86,6 +86,10 @@ function ConnectedSettings({
         params: { page: next },
         search: { session: sessionId },
       })}
+      onRestoreSession={(restoredId) => void navigate({
+        to: '/',
+        search: { session: restoredId },
+      })}
     />
   )
 }

@@ -856,7 +856,7 @@ export function Composer({
             <div className="flex flex-col gap-1.5 px-1 pb-2 pt-0.5">
               {embeddedNotes.map((note, index) => (
                 <div key={`${note.id}-${note.revision}-${index}`} className="flex w-full items-start gap-2 rounded-lg border border-border bg-[var(--inset)] px-2.5 py-2">
-                  <PaduIcon name="file" className="mt-0.5 size-4 shrink-0 text-[var(--text-secondary)]" />
+                  <PaduIcon name="note" className="mt-0.5 size-4 shrink-0 text-[var(--text-secondary)]" />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[10px] font-medium text-[var(--text-tertiary)]">{t('notes.label')}{!projectless ? ` · ${projectName}` : ''}</div>
                     <div className="truncate text-xs text-foreground">{note.title.trim() || t('notes.untitled')}</div>

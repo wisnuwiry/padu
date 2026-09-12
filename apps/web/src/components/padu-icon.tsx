@@ -3,6 +3,7 @@ import type { ProviderKind } from '@padu/client'
 export const PADU_ICONS = {
   alert: 'i-padu-alert',
   appearance: 'i-padu-appearance',
+  archive: 'i-padu-archive',
   arrowDown: 'i-padu-arrow-down',
   arrowLeft: 'i-padu-arrow-left',
   arrowRight: 'i-padu-arrow-right',
@@ -51,6 +52,7 @@ export const PADU_ICONS = {
   loaderCircle: 'i-padu-loader-circle',
   lock: 'i-padu-lock',
   lockOpen: 'i-padu-lock-open',
+  note: 'i-padu-note',
   package: 'i-padu-package',
   paperclip: 'i-padu-paperclip',
   panelLeft: 'i-padu-panel-left',
