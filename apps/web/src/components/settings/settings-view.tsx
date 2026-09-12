@@ -124,23 +124,32 @@ export function SettingsView({
       </aside>
       <main className={cn(
         'min-w-0 flex-1 border-l bg-background',
-        page === 'skills' ? 'overflow-hidden' : 'overflow-y-auto px-8 pb-12 pt-5',
+        page === 'skills' ? 'overflow-hidden' : 'overflow-y-auto pb-12',
       )}>
         {page === 'skills' ? (
           <SkillsSettings projects={projects} />
         ) : (
-          <div className={cn('mx-auto w-full', page === 'usage' ? 'max-w-[1024px]' : 'max-w-[760px]')}>
-            <h1 className="text-[18px] font-medium">{activePage?.localizedLabel}</h1>
-            {page === 'general' && <GeneralSettings onOpenOnboarding={onOpenOnboarding} />}
-            {page === 'appearance' && <AppearanceSettings />}
-            {page === 'keybindings' && <KeybindingsSettings />}
-            {page === 'notifications' && <NotificationsSettings />}
-            {page === 'providers' && <ProvidersSettings />}
-            {page === 'archived' && <ArchivedSettings projects={projects} onRestoreSession={onRestoreSession} />}
-            {page === 'usage' && <UsageSettings projects={projects} />}
-            {page === 'daemon' && <DaemonSettings />}
-            {page === 'about' && <AboutSettings onPageChange={onPageChange} />}
-          </div>
+          <>
+            <div className="sticky top-0 z-10 flex h-12 items-center bg-background px-6 text-sm">
+              <span className="text-[var(--text-tertiary)]">{t('common.settings')}</span>
+              <span className="mx-1.5 text-[var(--text-ghost)]">/</span>
+              <span className="text-[var(--text-secondary)]">{activePage?.localizedLabel}</span>
+            </div>
+            <div className="px-8 pt-5">
+              <div className={cn('mx-auto w-full', page === 'usage' ? 'max-w-[1024px]' : 'max-w-[760px]')}>
+                <h1 className="text-[18px] font-medium">{activePage?.localizedLabel}</h1>
+                {page === 'general' && <GeneralSettings onOpenOnboarding={onOpenOnboarding} />}
+                {page === 'appearance' && <AppearanceSettings />}
+                {page === 'keybindings' && <KeybindingsSettings />}
+                {page === 'notifications' && <NotificationsSettings />}
+                {page === 'providers' && <ProvidersSettings />}
+                {page === 'archived' && <ArchivedSettings projects={projects} onRestoreSession={onRestoreSession} />}
+                {page === 'usage' && <UsageSettings projects={projects} />}
+                {page === 'daemon' && <DaemonSettings />}
+                {page === 'about' && <AboutSettings onPageChange={onPageChange} />}
+              </div>
+            </div>
+          </>
         )}
       </main>
     </div>

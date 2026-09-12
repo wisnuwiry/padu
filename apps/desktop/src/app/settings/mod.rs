@@ -456,7 +456,6 @@ impl Padu {
             })
             .child(
                 div()
-                    .pt(px(2.0))
                     .flex_none()
                     .text_size(sp(18.0))
                     .font_weight(FontWeight::MEDIUM)
@@ -500,14 +499,48 @@ impl Padu {
             .border_color(theme.sidebar_border)
             .bg(theme.surface)
             .child(
-                self.render_settings_drag_region("settings-content-titlebar", cx)
+                div()
+                    .h(px(48.0))
+                    .flex_none()
                     .flex()
                     .items_center()
-                    .justify_end()
-                    .children(right_window_controls)
                     .when(content_scrolled, |element| {
                         element.border_b_1().border_color(theme.border)
-                    }),
+                    })
+                    .child(
+                        div()
+                            .pl(px(16.0))
+                            .pr(px(32.0))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .gap(px(5.0))
+                            .text_size(sp(12.0))
+                            .child(
+                                div()
+                                    .text_color(theme.text_tertiary)
+                                    .child(tr!("common.settings")),
+                            )
+                            .child(div().text_color(theme.text_ghost).child("/"))
+                            .child(div().text_color(theme.text_secondary).child(match page {
+                                SettingsPage::General => tr!("settings.general"),
+                                SettingsPage::Appearance => tr!("settings.appearance"),
+                                SettingsPage::Keybindings => tr!("settings.keybindings"),
+                                SettingsPage::Notifications => tr!("settings.notifications"),
+                                SettingsPage::Providers => tr!("settings.providers"),
+                                SettingsPage::Skills => tr!("settings.skills"),
+                                SettingsPage::Usage => tr!("settings.usage"),
+                                SettingsPage::Daemon => tr!("settings.daemon"),
+                                SettingsPage::ComputerUse => tr!("settings.computer_use"),
+                                SettingsPage::Archived => tr!("settings.archived"),
+                                SettingsPage::About => tr!("settings.about"),
+                            })),
+                    )
+                    .child(
+                        self.render_settings_drag_region("settings-content-titlebar", cx)
+                            .flex_1(),
+                    )
+                    .children(right_window_controls),
             )
             .child(
                 div()
