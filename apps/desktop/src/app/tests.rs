@@ -1,6 +1,6 @@
 use super::composer::{
-    ComposerSubmitAction, composer_submit_action, dropped_file_mention, merged_submission,
-    next_picker_highlight, trim_to_filename, visible_branch_entries,
+    ComposerSubmitAction, composer_submit_action, dropped_file_mention, markdown_file_reference,
+    merged_submission, next_picker_highlight, trim_to_filename, visible_branch_entries,
 };
 use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
 use super::settings::visible_settings_pages;
@@ -284,17 +284,21 @@ fn trim_to_filename_extracts_basename() {
 }
 
 #[test]
-fn submissions_append_attachment_mentions_after_the_prompt() {
+fn submissions_append_markdown_file_references_after_the_prompt() {
     let mentions = vec!["src/a.rs".to_owned(), "shot.png".to_owned()];
     assert_eq!(
         merged_submission("fix this", &mentions).as_deref(),
-        Some("fix this @src/a.rs @shot.png")
+        Some("fix this [a.rs](src/a.rs) [shot.png](shot.png)")
+    );
+    assert_eq!(
+        markdown_file_reference("apps/desktop/src/app/right_panel/files.rs"),
+        "[files.rs](apps/desktop/src/app/right_panel/files.rs)"
     );
     // Attachments alone are a valid submission; blank text contributes
     // nothing but whitespace-trimming.
     assert_eq!(
         merged_submission("  ", &mentions).as_deref(),
-        Some("@src/a.rs @shot.png")
+        Some("[a.rs](src/a.rs) [shot.png](shot.png)")
     );
     assert_eq!(merged_submission(" plain ", &[]).as_deref(), Some("plain"));
     assert_eq!(merged_submission("   ", &[]), None);

@@ -2,9 +2,14 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use crate::inline_file::{
+    InlineFileProjection, InlineFileReference, ProjectedInlineFile, file_backspace_range,
+    file_delete_range, inline_reference_insertion, parse_inline_file_references,
+};
 use crate::md::highlight::{self, Lang, TokenClass};
 use crate::ui::menu::{ContextMenuHandle, MenuItem, context_menu};
 use crate::ui::scrollbar::{self, ScrollbarState};
+use crate::ui::tooltip::Tooltip;
 use gpui::{
     App, BorderStyle, Bounds, ClipboardEntry, ClipboardItem, Context, CursorStyle, DispatchPhase,
     Element, ElementId, ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle,
@@ -570,6 +575,10 @@ pub struct TextInput {
     /// Cached token spans over `content`, as absolute byte ranges. Recomputed
     /// only when the content changes, so painting a large file is free.
     highlight: Vec<(Range<usize>, TokenClass)>,
+    /// Canonical Markdown file references in the source. The composer projects
+    /// these to basename chips, but editing and clipboard operations keep these
+    /// source ranges intact.
+    inline_files: Vec<InlineFileReference>,
     /// Find-in-file match ranges painted as washes under the text, sorted and
     /// non-overlapping. Owned by the find bar, which recomputes them whenever
     /// the content or the query changes; the field only paints them.
@@ -601,6 +610,10 @@ pub struct TextInput {
     /// caret itself next moves.
     caret_reconciled: Option<(usize, usize, Pixels)>,
     last_layout: Option<TextLayout>,
+    /// Source/display mapping paired with `last_layout`.
+    last_projection: Option<InlineFileProjection>,
+    /// Full target for the chip currently under the pointer.
+    hovered_inline_file: Option<SharedString>,
     /// Horizontal goal and soft-wrap affinity for consecutive Up/Down
     /// presses. A byte offset at a wrap boundary can mean either the end of
     /// one visual row or the start of the next, so the offset alone is not
@@ -661,6 +674,7 @@ impl TextInput {
             language: None,
             highlight_mentions: false,
             highlight: Vec::new(),
+            inline_files: Vec::new(),
             search_matches: Vec::new(),
             active_search_match: None,
             content: "".into(),
@@ -674,6 +688,8 @@ impl TextInput {
             padding_x: px(0.),
             caret_reconciled: None,
             last_layout: None,
+            last_projection: None,
+            hovered_inline_file: None,
             vertical_navigation: None,
             is_selecting: false,
             selected_word_range: None,
@@ -846,6 +862,7 @@ impl TextInput {
     /// Re-tokenize after a content change. Cheap for a composer (no language),
     /// one linear pass for a code editor or mention-highlighted field.
     fn refresh_highlight(&mut self) {
+        self.inline_files.clear();
         if let Some(language) = self.language {
             self.highlight.clear();
             let mut line_start = 0;
@@ -865,6 +882,7 @@ impl TextInput {
         } else if self.highlight_mentions {
             self.highlight.clear();
             let content = &self.content;
+            self.inline_files = parse_inline_file_references(content);
             let mut cursor = 0;
             while cursor < content.len() {
                 if let Some(at_rel) = content[cursor..].find('@') {
@@ -912,8 +930,10 @@ impl TextInput {
                     break;
                 }
             }
+            self.highlight.sort_by_key(|(range, _)| range.start);
         } else {
             self.highlight.clear();
+            self.inline_files.clear();
         }
     }
 
@@ -1012,7 +1032,13 @@ impl TextInput {
     /// field has painted once.
     pub fn position_for_offset(&self, offset: usize) -> Option<(Point<Pixels>, Pixels)> {
         let layout = self.last_layout.as_ref()?;
-        let position = layout.position_for_index(offset.min(self.content.len()))?;
+        let offset = self
+            .last_projection
+            .as_ref()
+            .map_or(offset.min(self.content.len()), |projection| {
+                projection.source_to_display(offset)
+            });
+        let position = layout.position_for_index(offset)?;
         Some((position, layout.line_height()))
     }
 
@@ -1041,6 +1067,9 @@ impl TextInput {
         self.marked_range = None;
         self.vertical_navigation = None;
         self.highlight.clear();
+        self.inline_files.clear();
+        self.last_projection = None;
+        self.hovered_inline_file = None;
         // A programmatic clear is a new baseline, not an edit to step back
         // over — a submitted prompt should not resurface via the undo shortcut.
         if changed {
@@ -1102,10 +1131,7 @@ impl TextInput {
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             let cursor = self.cursor_offset();
-            let mention_target = self.highlight.iter().find_map(|(range, class)| {
-                if *class != TokenClass::Mention {
-                    return None;
-                }
+            let mention_target = self.atomic_token_ranges().find_map(|range| {
                 if cursor == range.end {
                     Some(range.start)
                 } else if cursor == range.end + 1
@@ -1129,10 +1155,7 @@ impl TextInput {
     fn right(&mut self, _: &Right, _: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             let cursor = self.cursor_offset();
-            let mention_target = self.highlight.iter().find_map(|(range, class)| {
-                if *class != TokenClass::Mention {
-                    return None;
-                }
+            let mention_target = self.atomic_token_ranges().find_map(|range| {
                 if cursor == range.start {
                     let end = if self.content.as_bytes().get(range.end) == Some(&b' ') {
                         range.end + 1
@@ -1177,11 +1200,7 @@ impl TextInput {
         } else {
             self.selected_range.start
         };
-        let Some(layout) = self
-            .last_layout
-            .as_ref()
-            .filter(|layout| layout.len() == self.content.len())
-        else {
+        let Some(layout) = self.last_layout.as_ref() else {
             // The field normally has a current layout whenever it can receive
             // a key. If an edit and this action race the next paint, let an
             // enclosing surface handle the arrow rather than navigating with
@@ -1207,10 +1226,14 @@ impl TextInput {
         } else {
             None
         };
+        let anchor_display = self
+            .last_projection
+            .as_ref()
+            .map_or(anchor, |projection| projection.source_to_display(anchor));
         let (current_row, goal_x) = if let Some(navigation) = continuing {
             (navigation.visual_row, navigation.goal_x)
         } else {
-            let Some(position) = layout.position_for_index(anchor) else {
+            let Some(position) = layout.position_for_index(anchor_display) else {
                 self.vertical_navigation = None;
                 cx.propagate();
                 return;
@@ -1223,11 +1246,18 @@ impl TextInput {
         } else {
             current_row.saturating_sub(1)
         };
-        let Some((offset, cursor_x)) = visual_row_offset_for_x(layout, target_row, goal_x) else {
+        let Some((display_offset, cursor_x)) = visual_row_offset_for_x(layout, target_row, goal_x)
+        else {
             self.vertical_navigation = None;
             cx.propagate();
             return;
         };
+        let offset = self
+            .last_projection
+            .as_ref()
+            .map_or(display_offset, |projection| {
+                projection.display_to_source(display_offset)
+            });
 
         let previous_range = self.selected_range.clone();
         let previous_row = continuing.map(|navigation| navigation.visual_row);
@@ -1324,7 +1354,21 @@ impl TextInput {
         self.select_to(next_word_boundary(&self.content, self.cursor_offset()), cx);
     }
 
+    fn atomic_token_ranges(&self) -> impl Iterator<Item = &Range<usize>> {
+        self.inline_files
+            .iter()
+            .map(|file| &file.source_range)
+            .chain(
+                self.highlight
+                    .iter()
+                    .filter_map(|(range, class)| (*class == TokenClass::Mention).then_some(range)),
+            )
+    }
+
     fn mention_backspace_target(&self, cursor: usize) -> Option<Range<usize>> {
+        if let Some(range) = file_backspace_range(&self.content, cursor) {
+            return Some(range);
+        }
         self.highlight.iter().find_map(|(range, class)| {
             if *class != TokenClass::Mention {
                 return None;
@@ -1365,20 +1409,22 @@ impl TextInput {
     fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             let cursor = self.cursor_offset();
-            let mention_target = self.highlight.iter().find_map(|(range, class)| {
-                if *class != TokenClass::Mention {
-                    return None;
-                }
-                if cursor == range.start {
-                    let end = if self.content.as_bytes().get(range.end) == Some(&b' ') {
-                        range.end + 1
+            let mention_target = file_delete_range(&self.content, cursor).or_else(|| {
+                self.highlight.iter().find_map(|(range, class)| {
+                    if *class != TokenClass::Mention {
+                        return None;
+                    }
+                    if cursor == range.start {
+                        let end = if self.content.as_bytes().get(range.end) == Some(&b' ') {
+                            range.end + 1
+                        } else {
+                            range.end
+                        };
+                        Some(range.start..end)
                     } else {
-                        range.end
-                    };
-                    Some(range.start..end)
-                } else {
-                    None
-                }
+                        None
+                    }
+                })
             });
             if let Some(target) = mention_target {
                 self.selected_range = target;
@@ -1614,7 +1660,12 @@ impl TextInput {
         }
 
         if event.click_count == 2 {
-            let range = word_range_at(&self.content, offset);
+            let range = self
+                .inline_files
+                .iter()
+                .find(|file| file.source_range.contains(&offset) || offset == file.source_range.end)
+                .map(|file| file.source_range.clone())
+                .unwrap_or_else(|| word_range_at(&self.content, offset));
             self.selected_range = range.clone();
             self.selection_reversed = false;
             self.selected_word_range = (!range.is_empty()).then_some(range);
@@ -1649,6 +1700,7 @@ impl TextInput {
     }
 
     fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.update_hovered_inline_file(event.position, cx);
         if self.is_selecting {
             self.select_to(self.index_for_mouse_position(event.position), cx);
             // Growing a real drag-selection turns the focusing click into a
@@ -1656,6 +1708,23 @@ impl TextInput {
             if !self.selected_range.is_empty() {
                 self.focus_click_select_all = false;
             }
+        }
+    }
+
+    fn update_hovered_inline_file(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let hovered = self
+            .last_layout
+            .as_ref()
+            .and_then(|layout| layout.index_for_position(position).ok())
+            .and_then(|offset| {
+                self.last_projection
+                    .as_ref()?
+                    .file_at_display_offset(offset)
+            })
+            .map(|file| SharedString::from(file.target.clone()));
+        if self.hovered_inline_file != hovered {
+            self.hovered_inline_file = hovered;
+            cx.notify();
         }
     }
 
@@ -1682,10 +1751,14 @@ impl TextInput {
         let Some(layout) = self.last_layout.as_ref() else {
             return 0;
         };
-        layout
+        let display_offset = layout
             .index_for_position(position)
-            .unwrap_or_else(|index| index)
-            .min(self.content.len())
+            .unwrap_or_else(|index| index);
+        self.last_projection
+            .as_ref()
+            .map_or(display_offset.min(self.content.len()), |projection| {
+                projection.display_to_source(display_offset)
+            })
     }
 
     fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
@@ -1932,7 +2005,13 @@ impl EntityInputHandler for TextInput {
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
         let layout = self.last_layout.as_ref()?;
-        let range = self.range_from_utf16(&range_utf16);
+        let source_range = self.range_from_utf16(&range_utf16);
+        let range = self
+            .last_projection
+            .as_ref()
+            .map_or(source_range.clone(), |projection| {
+                projection.source_range_to_display(&source_range)
+            });
         let start = layout.position_for_index(range.start)?;
         let end = layout.position_for_index(range.end)?;
         let line_height = layout.line_height();
@@ -1956,11 +2035,16 @@ impl EntityInputHandler for TextInput {
         _: &mut Context<Self>,
     ) -> Option<usize> {
         let layout = self.last_layout.as_ref()?;
-        let utf8_index = layout
+        let display_index = layout
             .index_for_position(point)
-            .unwrap_or_else(|index| index)
-            .min(self.content.len());
-        Some(self.offset_to_utf16(utf8_index))
+            .unwrap_or_else(|index| index);
+        let source_index = self
+            .last_projection
+            .as_ref()
+            .map_or(display_index.min(self.content.len()), |projection| {
+                projection.display_to_source(display_index)
+            });
+        Some(self.offset_to_utf16(source_index))
     }
 }
 
@@ -2178,6 +2262,8 @@ impl InputElement {
 struct InputLayoutState {
     text: StyledText,
     text_layout_state: (),
+    projection: InlineFileProjection,
+    display_highlight: Vec<(Range<usize>, TokenClass)>,
 }
 
 struct PrepaintState {
@@ -2195,6 +2281,7 @@ struct SearchPaint<'a> {
     active_color: Hsla,
 }
 
+#[cfg(test)]
 impl SearchPaint<'static> {
     fn none() -> Self {
         Self {
@@ -2217,7 +2304,7 @@ fn input_text_runs(
     highlight: &[(Range<usize>, TokenClass)],
     token_color: impl Fn(TokenClass) -> Hsla,
     search: SearchPaint,
-    _mention_color: Hsla,
+    inline_files: &[ProjectedInlineFile],
 ) -> Vec<TextRun> {
     let mut boundaries = vec![0, display_len];
     for range in [selected_range, marked_range].into_iter().flatten() {
@@ -2237,6 +2324,16 @@ fn input_text_runs(
     for range in search.matches {
         boundaries.push(range.start.min(display_len));
         boundaries.push(range.end.min(display_len));
+    }
+    for file in inline_files {
+        boundaries.extend([
+            file.display_range.start,
+            file.chip_range.start,
+            file.label_range.start,
+            file.label_range.end,
+            file.chip_range.end,
+            file.display_range.end,
+        ]);
     }
     boundaries.sort_unstable();
     boundaries.dedup();
@@ -2272,13 +2369,19 @@ fn input_text_runs(
                     && start + 1 == end
                     && display_text.as_bytes().get(start) == Some(&b'/')
             });
-            let color = if is_mention_at || is_folder_suffix {
-                gpui::transparent_black()
-            } else {
-                matching_token.map_or(base_run.color, |(_, class)| token_color(*class))
-            };
+            let matching_file = inline_files
+                .iter()
+                .find(|file| file.display_range.start <= start && file.display_range.end >= end);
+            let is_file_label = matching_file
+                .is_some_and(|file| file.label_range.start <= start && file.label_range.end >= end);
+            let color =
+                if matching_file.is_some() && !is_file_label || is_mention_at || is_folder_suffix {
+                    gpui::transparent_black()
+                } else {
+                    matching_token.map_or(base_run.color, |(_, class)| token_color(*class))
+                };
             let mut run_font = base_run.font.clone();
-            if is_mention && !is_mention_at {
+            if is_file_label || is_mention && !is_mention_at {
                 run_font.weight = FontWeight::MEDIUM;
             }
             let background_color = if search
@@ -2343,16 +2446,46 @@ impl Element for InputElement {
         let style = window.text_style();
         let theme = Theme::current(cx);
         let content_is_empty = content.is_empty();
-        let (display_text, text_color, selected_range, marked_range) = if content_is_empty {
-            (input.placeholder.clone(), theme.text_ghost, None, None)
+        let projection = if content_is_empty {
+            InlineFileProjection::plain(input.placeholder.as_ref())
+        } else if input.highlight_mentions {
+            InlineFileProjection::new(content.as_ref())
         } else {
-            (
-                content,
-                style.color,
-                Some(&input.selected_range),
-                input.marked_range.as_ref(),
-            )
+            InlineFileProjection::plain(content.as_ref())
         };
+        let display_text: SharedString = projection.display.clone().into();
+        let text_color = if content_is_empty {
+            theme.text_ghost
+        } else {
+            style.color
+        };
+        let selected_range =
+            (!content_is_empty).then(|| projection.source_range_to_display(&input.selected_range));
+        let marked_range = (!content_is_empty)
+            .then(|| input.marked_range.as_ref())
+            .flatten()
+            .map(|range| projection.source_range_to_display(range));
+        let display_highlight = if content_is_empty {
+            Vec::new()
+        } else {
+            input
+                .highlight
+                .iter()
+                .map(|(range, class)| (projection.source_range_to_display(range), *class))
+                .collect()
+        };
+        let display_search_matches = if content_is_empty {
+            Vec::new()
+        } else {
+            input
+                .search_matches
+                .iter()
+                .map(|range| projection.source_range_to_display(range))
+                .collect::<Vec<_>>()
+        };
+        let active_search_match = input
+            .active_search_match
+            .and_then(|index| display_search_matches.get(index));
         let base_run = TextRun {
             len: display_text.len(),
             font: style.font(),
@@ -2362,36 +2495,26 @@ impl Element for InputElement {
             strikethrough: None,
         };
         let palette = crate::md::render::Palette::from_theme(&theme);
-        let search = if content_is_empty {
-            SearchPaint::none()
-        } else {
-            SearchPaint {
-                matches: &input.search_matches,
-                active: input
-                    .active_search_match
-                    .and_then(|index| input.search_matches.get(index)),
-                match_color: theme.warning.opacity(0.22),
-                active_color: theme.warning.opacity(0.5),
-            }
+        let search = SearchPaint {
+            matches: &display_search_matches,
+            active: active_search_match,
+            match_color: theme.warning.opacity(0.22),
+            active_color: theme.warning.opacity(0.5),
         };
         let runs = input_text_runs(
             display_text.as_ref(),
             display_text.len(),
             base_run,
-            selected_range,
-            marked_range,
+            selected_range.as_ref(),
+            marked_range.as_ref(),
             theme.inverse.opacity(0.18),
-            if content_is_empty {
-                &[]
-            } else {
-                &input.highlight
-            },
+            &display_highlight,
             |class| match class {
                 TokenClass::Mention => theme.text,
                 _ => palette.token(class),
             },
             search,
-            theme.accent.opacity(0.18),
+            &projection.files,
         );
         let mut text = StyledText::new(display_text).with_runs(runs);
         let (layout_id, text_layout_state) = text.request_layout(id, inspector_id, window, cx);
@@ -2400,6 +2523,8 @@ impl Element for InputElement {
             InputLayoutState {
                 text,
                 text_layout_state,
+                projection,
+                display_highlight,
             },
         )
     }
@@ -2429,6 +2554,7 @@ impl Element for InputElement {
         let (cursor_position, cursor, follow) = {
             let input = self.input.read(cx);
             let cursor = input.cursor_offset();
+            let display_cursor = layout_state.projection.source_to_display(cursor);
             let cursor_visible = cursor_should_be_visible(
                 window.is_window_active(),
                 input.focus_handle.is_focused(window),
@@ -2450,7 +2576,7 @@ impl Element for InputElement {
                         layout.bounds().top() + layout.line_height() * navigation.visual_row as f32,
                     )
                 })
-                .or_else(|| layout.position_for_index(cursor));
+                .or_else(|| layout.position_for_index(display_cursor));
             let quad = (input.selected_range.is_empty() && cursor_visible)
                 .then_some(cursor_position)
                 .flatten()
@@ -2515,7 +2641,43 @@ impl Element for InputElement {
         });
         let layout = layout_state.text.layout().clone();
         let theme = Theme::current(cx);
-        for (range, class) in &input.highlight {
+        for file in &layout_state.projection.files {
+            let rects = crate::md::render::range_rects(&layout, &file.chip_range, 7.0, -3.0);
+            for rect in &rects {
+                window.paint_quad(quad(
+                    *rect,
+                    px(7.0),
+                    theme.inset,
+                    px(1.0),
+                    theme.border,
+                    BorderStyle::default(),
+                ));
+            }
+            if let Some(first_rect) = rects.first() {
+                let icon_path = if file.is_dir {
+                    "icons/folder.svg"
+                } else {
+                    crate::app::right_panel::file_icon_for_path(&file.basename)
+                };
+                let icon_size = 14.0;
+                let icon_bounds = Bounds::new(
+                    point(
+                        first_rect.left() + px(4.0),
+                        first_rect.top() + (first_rect.size.height - px(icon_size)) / 2.0,
+                    ),
+                    size(px(icon_size), px(icon_size)),
+                );
+                let _ = window.paint_svg(
+                    icon_bounds,
+                    icon_path.into(),
+                    None,
+                    TransformationMatrix::unit(),
+                    crate::app::right_panel::file_icon_color(icon_path),
+                    cx,
+                );
+            }
+        }
+        for (range, class) in &layout_state.display_highlight {
             if *class != TokenClass::Mention {
                 continue;
             }
@@ -2531,7 +2693,7 @@ impl Element for InputElement {
                 ));
             }
             if let Some(first_rect) = rects.first() {
-                let mention_str = &input.content[range.clone()];
+                let mention_str = &layout_state.projection.display[range.clone()];
                 let is_folder = mention_str.ends_with('/');
                 let file_name = mention_str.trim_start_matches('@').trim_end_matches('/');
                 let icon_path = if is_folder {
@@ -2570,8 +2732,10 @@ impl Element for InputElement {
             window.paint_quad(cursor);
         }
         let text_layout = layout_state.text.layout().clone();
+        let projection = layout_state.projection.clone();
         self.input.update(cx, |input, _| {
             input.last_layout = Some(text_layout);
+            input.last_projection = Some(projection);
         });
     }
 }
@@ -2623,6 +2787,7 @@ impl Render for TextInput {
             .on_action(cx.listener(Self::clear_field))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_down(MouseButton::Right, cx.listener(Self::on_context_mouse_down))
+            .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .w_full()
@@ -2645,6 +2810,9 @@ impl Render for TextInput {
             // no scrollbar.
             .when(self.mode == FieldMode::SingleLine, |field| {
                 field.whitespace_nowrap().overflow_hidden()
+            })
+            .when_some(self.hovered_inline_file.clone(), |field, target| {
+                field.tooltip(Tooltip::text(target))
             })
             .child(InputElement { input });
 
@@ -2846,22 +3014,13 @@ impl ComposerInput {
             .update(cx, |input, cx| input.replace_range(range, text, cx));
     }
 
-    /// Splice a `@mention` at the caret offset, inserting surrounding whitespace
-    /// when needed, and advance the caret past it.
-    pub fn insert_mention(&mut self, mention: &str, cx: &mut Context<Self>) {
+    /// Insert a canonical Markdown file reference at the caret. The embedded
+    /// field projects it to a basename chip while retaining the full source.
+    pub fn insert_file_reference(&mut self, target: &str, cx: &mut Context<Self>) {
         self.input.update(cx, |input, cx| {
             let cursor = input.cursor();
-            let content = input.content();
-            let mut text = String::new();
-            if cursor > 0 && !content[..cursor].ends_with(char::is_whitespace) {
-                text.push(' ');
-            }
-            text.push('@');
-            text.push_str(mention);
-            if !content[cursor..].starts_with(char::is_whitespace) {
-                text.push(' ');
-            }
-            input.replace_range(cursor..cursor, &text, cx);
+            let insertion = inline_reference_insertion(input.content(), cursor, target);
+            input.replace_range(cursor..cursor, &insertion, cx);
         });
     }
 
@@ -3548,7 +3707,7 @@ mod tests {
                 _ => plain,
             },
             SearchPaint::none(),
-            hsla(0.0, 0.0, 0.0, 0.0),
+            &[],
         );
 
         assert_eq!(
@@ -3590,7 +3749,7 @@ mod tests {
             &[],
             |_| hsla(0.0, 0.0, 1.0, 1.0),
             SearchPaint::none(),
-            hsla(0.0, 0.0, 0.0, 0.0),
+            &[],
         );
 
         assert_eq!(
@@ -3647,7 +3806,7 @@ mod tests {
                 match_color,
                 active_color,
             },
-            hsla(0.0, 0.0, 0.0, 0.0),
+            &[],
         );
 
         assert_eq!(runs.iter().map(|run| run.len).sum::<usize>(), 20);
