@@ -1,4 +1,5 @@
 import * as React from "react";
+import type { MouseEvent } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { motion, AnimatePresence } from "framer-motion";
 import { Menu, X } from "lucide-react";
@@ -22,10 +23,35 @@ export function SiteHeader() {
     setMobileMenuOpen((open) => !open);
   }, []);
 
+  // Clicking a link to the current route makes the router re-run the root
+  // loader, which re-invokes the release/stars server functions. On the static
+  // (prerendered) host those endpoints return the SPA HTML, so the loader data
+  // degrades and components that destructure `release.version` crash. Skip the
+  // navigation entirely when the target route is already active.
+  const skipSameRoute = React.useCallback(
+    (to: string) => (event: MouseEvent<HTMLAnchorElement>) => {
+      if (
+        pathname === to &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.button === 0
+      ) {
+        event.preventDefault();
+      }
+    },
+    [pathname],
+  );
+
   return (
     <header className="relative z-50 flex items-center justify-between w-full py-1">
       {/* Brand logo & name */}
-      <Link to="/" className="flex items-center gap-2.5 group">
+      <Link
+        to="/"
+        onClick={skipSameRoute("/")}
+        className="flex items-center gap-2.5 group"
+      >
         <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-white/[0.06] border border-white/10 group-hover:border-white/20 transition-all shadow-sm">
           <img
             src="/padu.svg"
@@ -43,6 +69,7 @@ export function SiteHeader() {
       >
         <Link
           to="/docs"
+          onClick={skipSameRoute("/docs")}
           className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all ${
             pathname.startsWith("/docs")
               ? "bg-white/10 text-white shadow-sm"
@@ -53,6 +80,7 @@ export function SiteHeader() {
         </Link>
         <Link
           to="/agents"
+          onClick={skipSameRoute("/agents")}
           className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all ${
             pathname === "/agents"
               ? "bg-white/10 text-white shadow-sm"
@@ -63,6 +91,7 @@ export function SiteHeader() {
         </Link>
         <Link
           to="/changelog"
+          onClick={skipSameRoute("/changelog")}
           className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all ${
             pathname === "/changelog"
               ? "bg-white/10 text-white shadow-sm"
@@ -83,6 +112,7 @@ export function SiteHeader() {
         </a>
         <Link
           to="/download"
+          onClick={skipSameRoute("/download")}
           className={`ml-1 inline-flex items-center justify-center rounded-full px-4 py-1.5 text-xs font-medium transition-all ${
             pathname === "/download"
               ? "bg-white text-black font-semibold"
@@ -97,6 +127,7 @@ export function SiteHeader() {
       <div className="flex sm:hidden items-center gap-2">
         <Link
           to="/download"
+          onClick={skipSameRoute("/download")}
           className="inline-flex items-center justify-center rounded-full px-3.5 py-1.5 text-xs font-semibold bg-white text-black hover:bg-zinc-200 active:scale-95 transition-all"
         >
           Download
@@ -124,6 +155,7 @@ export function SiteHeader() {
           >
             <Link
               to="/docs"
+              onClick={skipSameRoute("/docs")}
               className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
                 pathname.startsWith("/docs")
                   ? "bg-white/10 text-white"
@@ -134,6 +166,7 @@ export function SiteHeader() {
             </Link>
             <Link
               to="/agents"
+              onClick={skipSameRoute("/agents")}
               className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
                 pathname === "/agents"
                   ? "bg-white/10 text-white"
@@ -144,6 +177,7 @@ export function SiteHeader() {
             </Link>
             <Link
               to="/changelog"
+              onClick={skipSameRoute("/changelog")}
               className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
                 pathname === "/changelog"
                   ? "bg-white/10 text-white"
