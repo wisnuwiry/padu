@@ -92,7 +92,7 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 11] = [
     (
         SettingsPage::Archived,
         "settings.archived",
-        "icons/package.svg",
+        "icons/archive.svg",
         "settings.archived_keywords",
     ),
     (

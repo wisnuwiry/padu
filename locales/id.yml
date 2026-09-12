@@ -161,6 +161,7 @@ keybindings.section_navigation: Navigasi & Panel
 keybindings.section_chat: Obrolan & Komposer
 keybindings.section_editor: Editor & Pencarian
 keybindings.section_browser: Browser Bawaan
+keybindings.section_review: Tinjauan
 keybindings.new_task: Tugas Baru
 keybindings.new_task_desc: Buat percakapan atau tugas baru
 keybindings.open_project: Buka Proyek
@@ -229,6 +230,20 @@ keybindings.browser_forward: Browser Maju
 keybindings.browser_forward_desc: Maju ke riwayat browser
 keybindings.browser_devtools: Alat Pengembang
 keybindings.browser_devtools_desc: Alihkan alat pengembang web
+keybindings.refresh_review: Segarkan Tinjauan
+keybindings.refresh_review_desc: Muat ulang diff tinjauan saat ini
+keybindings.toggle_review_layout: Alihkan Tata Letak Daftar File
+keybindings.toggle_review_layout_desc: Ganti daftar file yang berubah antara pohon dan datar
+keybindings.toggle_review_files: Alihkan File yang Berubah
+keybindings.toggle_review_files_desc: Tampilkan atau sembunyikan daftar file yang berubah
+keybindings.toggle_review_collapse: Ciutkan atau Perluas File Tinjauan
+keybindings.toggle_review_collapse_desc: Ciutkan atau perluas setiap diff file di tinjauan
+keybindings.toggle_review_file: Ciutkan atau Perluas File
+keybindings.toggle_review_file_desc: Ciutkan atau perluas file yang dipilih di tinjauan
+keybindings.focus_review_filter: Fokuskan Pencarian File Tinjauan
+keybindings.focus_review_filter_desc: Fokuskan kolom pencarian file yang berubah
+keybindings.toggle_review_tree: Perluas atau Ciutkan Folder
+keybindings.toggle_review_tree_desc: Perluas atau ciutkan folder pada pohon file yang berubah
 keybindings.search: Cari pintasan tombol...
 keybindings.no_results: Pintasan tombol tidak ditemukan
 settings.back: Kembali
@@ -1118,6 +1133,10 @@ diff.expand_all_files: Perluas semua file
 diff.collapse_all_files: Ciutkan semua file
 diff.layout_tree: Tata letak pohon
 diff.layout_flat: Tata letak datar
+diff.expand_file: Perluas file
+diff.collapse_file: Ciutkan file
+diff.expand_tree: Perluas folder
+diff.collapse_tree: Ciutkan folder
 diff.show_files: Tampilkan file yang berubah
 diff.hide_files: Sembunyikan file yang berubah
 diff.refresh_failed: "Tidak dapat menyegarkan perubahan: %{error}"

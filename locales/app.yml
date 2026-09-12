@@ -346,6 +346,8 @@ keybindings.section_editor:
   en: Editor & Search
 keybindings.section_browser:
   en: In-App Browser
+keybindings.section_review:
+  en: Review
 keybindings.new_task:
   en: New Task
 keybindings.new_task_desc:
@@ -482,6 +484,34 @@ keybindings.browser_devtools:
   en: Developer Tools
 keybindings.browser_devtools_desc:
   en: Toggle web developer tools
+keybindings.refresh_review:
+  en: Refresh Review
+keybindings.refresh_review_desc:
+  en: Reload the current review diff
+keybindings.toggle_review_layout:
+  en: Toggle File List Layout
+keybindings.toggle_review_layout_desc:
+  en: Switch the changed-file list between tree and flat
+keybindings.toggle_review_files:
+  en: Toggle Changed Files
+keybindings.toggle_review_files_desc:
+  en: Show or hide the changed-file list
+keybindings.toggle_review_collapse:
+  en: Collapse or Expand Review Files
+keybindings.toggle_review_collapse_desc:
+  en: Collapse or expand every file diff in the review
+keybindings.toggle_review_file:
+  en: Collapse or Expand File
+keybindings.toggle_review_file_desc:
+  en: Collapse or expand the selected file in the review
+keybindings.focus_review_filter:
+  en: Focus Review File Search
+keybindings.focus_review_filter_desc:
+  en: Focus the changed-file search field
+keybindings.toggle_review_tree:
+  en: Expand or Collapse Folders
+keybindings.toggle_review_tree_desc:
+  en: Expand or collapse folders in the changed-file tree
 keybindings.search:
   en: Search keybindings...
 keybindings.no_results:
@@ -2316,6 +2346,14 @@ diff.layout_tree:
   en: Tree layout
 diff.layout_flat:
   en: Flat layout
+diff.expand_file:
+  en: Expand file
+diff.collapse_file:
+  en: Collapse file
+diff.expand_tree:
+  en: Expand folders
+diff.collapse_tree:
+  en: Collapse folders
 diff.show_files:
   en: Show changed files
 diff.hide_files:

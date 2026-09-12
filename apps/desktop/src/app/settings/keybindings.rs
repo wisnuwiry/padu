@@ -195,6 +195,46 @@ impl Padu {
                     ),
                 ],
             ),
+            (
+                "keybindings.section_review",
+                &[
+                    (
+                        "keybindings.refresh_review",
+                        "keybindings.refresh_review_desc",
+                        crate::platform::primary_shortcut("⌘R", "Ctrl+R"),
+                    ),
+                    (
+                        "keybindings.toggle_review_layout",
+                        "keybindings.toggle_review_layout_desc",
+                        crate::platform::primary_shortcut("⇧⌘T", "Ctrl+Shift+T"),
+                    ),
+                    (
+                        "keybindings.toggle_review_files",
+                        "keybindings.toggle_review_files_desc",
+                        crate::platform::primary_shortcut("⌘\\", "Ctrl+\\"),
+                    ),
+                    (
+                        "keybindings.toggle_review_collapse",
+                        "keybindings.toggle_review_collapse_desc",
+                        crate::platform::primary_shortcut("⇧⌘C", "Ctrl+Shift+C"),
+                    ),
+                    (
+                        "keybindings.toggle_review_file",
+                        "keybindings.toggle_review_file_desc",
+                        crate::platform::primary_shortcut("⇧⌘K", "Ctrl+Shift+K"),
+                    ),
+                    (
+                        "keybindings.focus_review_filter",
+                        "keybindings.focus_review_filter_desc",
+                        "/",
+                    ),
+                    (
+                        "keybindings.toggle_review_tree",
+                        "keybindings.toggle_review_tree_desc",
+                        crate::platform::primary_shortcut("⇧⌘O", "Ctrl+Shift+O"),
+                    ),
+                ],
+            ),
         ];
 
         let query = self

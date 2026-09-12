@@ -1,4 +1,113 @@
+use gpui::{KeyBinding, actions};
+
 use super::*;
+
+actions!(
+    padu_review_diff,
+    [
+        RefreshReviewDiff,
+        ToggleReviewDiffLayout,
+        ToggleReviewDiffFiles,
+        ToggleReviewDiffFileCollapse,
+        ToggleReviewDiffAllFiles,
+        FocusReviewDiffFilter,
+        ToggleReviewDiffTree
+    ]
+);
+
+const REVIEW_DIFF_CONTEXT: &str = "ReviewDiff";
+const REVIEW_DIFF_TREE_CONTEXT: &str = "ReviewDiffTree";
+
+pub fn init_keys(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new("secondary-r", RefreshReviewDiff, Some(REVIEW_DIFF_CONTEXT)),
+        KeyBinding::new(
+            "secondary-r",
+            RefreshReviewDiff,
+            Some(REVIEW_DIFF_TREE_CONTEXT),
+        ),
+        KeyBinding::new(
+            "secondary-shift-t",
+            ToggleReviewDiffLayout,
+            Some(REVIEW_DIFF_CONTEXT),
+        ),
+        KeyBinding::new(
+            "secondary-shift-t",
+            ToggleReviewDiffLayout,
+            Some(REVIEW_DIFF_TREE_CONTEXT),
+        ),
+        KeyBinding::new(
+            "secondary-\\",
+            ToggleReviewDiffFiles,
+            Some(REVIEW_DIFF_CONTEXT),
+        ),
+        KeyBinding::new(
+            "secondary-\\",
+            ToggleReviewDiffFiles,
+            Some(REVIEW_DIFF_TREE_CONTEXT),
+        ),
+        KeyBinding::new(
+            "secondary-shift-c",
+            ToggleReviewDiffAllFiles,
+            Some(REVIEW_DIFF_CONTEXT),
+        ),
+        KeyBinding::new(
+            "secondary-shift-c",
+            ToggleReviewDiffAllFiles,
+            Some(REVIEW_DIFF_TREE_CONTEXT),
+        ),
+        KeyBinding::new(
+            "secondary-shift-k",
+            ToggleReviewDiffFileCollapse,
+            Some(REVIEW_DIFF_CONTEXT),
+        ),
+        KeyBinding::new(
+            "secondary-shift-k",
+            ToggleReviewDiffFileCollapse,
+            Some(REVIEW_DIFF_TREE_CONTEXT),
+        ),
+        KeyBinding::new("/", FocusReviewDiffFilter, Some(REVIEW_DIFF_CONTEXT)),
+        KeyBinding::new("/", FocusReviewDiffFilter, Some(REVIEW_DIFF_TREE_CONTEXT)),
+        KeyBinding::new(
+            "secondary-shift-o",
+            ToggleReviewDiffTree,
+            Some(REVIEW_DIFF_CONTEXT),
+        ),
+        KeyBinding::new(
+            "secondary-shift-o",
+            ToggleReviewDiffTree,
+            Some(REVIEW_DIFF_TREE_CONTEXT),
+        ),
+    ]);
+}
+
+fn review_refresh_shortcut() -> &'static str {
+    crate::platform::primary_shortcut("⌘R", "Ctrl+R")
+}
+
+fn review_layout_shortcut() -> &'static str {
+    crate::platform::primary_shortcut("⇧⌘T", "Ctrl+Shift+T")
+}
+
+fn review_files_shortcut() -> &'static str {
+    crate::platform::primary_shortcut("⌘\\", "Ctrl+\\")
+}
+
+fn review_collapse_all_shortcut() -> &'static str {
+    crate::platform::primary_shortcut("⇧⌘C", "Ctrl+Shift+C")
+}
+
+fn review_file_shortcut() -> &'static str {
+    crate::platform::primary_shortcut("⇧⌘K", "Ctrl+Shift+K")
+}
+
+fn review_filter_shortcut() -> &'static str {
+    "/"
+}
+
+fn review_tree_shortcut() -> &'static str {
+    crate::platform::primary_shortcut("⇧⌘O", "Ctrl+Shift+O")
+}
 
 impl Padu {
     pub(crate) fn render_right_panel_diff(
@@ -70,7 +179,30 @@ impl Padu {
             .id("right-panel-diff")
             .track_focus(&focus)
             .tab_index(0)
-            .key_context("ReviewDiff")
+            .key_context(REVIEW_DIFF_CONTEXT)
+            .on_action(cx.listener(|this, _: &RefreshReviewDiff, _, cx| {
+                this.refresh_right_panel_diff(cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleReviewDiffLayout, _, cx| {
+                this.toggle_right_panel_diff_file_layout(cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleReviewDiffFiles, _, cx| {
+                this.toggle_right_panel_diff_files(cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleReviewDiffAllFiles, _, cx| {
+                this.toggle_right_panel_diff_all_files(cx);
+            }))
+            .on_action(
+                cx.listener(|this, _: &ToggleReviewDiffFileCollapse, _, cx| {
+                    this.toggle_selected_right_panel_diff_file(cx);
+                }),
+            )
+            .on_action(cx.listener(|this, _: &FocusReviewDiffFilter, window, cx| {
+                this.focus_right_panel_diff_filter(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleReviewDiffTree, _, cx| {
+                this.toggle_right_panel_diff_directories(cx);
+            }))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| {
@@ -165,159 +297,65 @@ impl Padu {
             .map_or((0, 0, false), |snapshot| {
                 (snapshot.additions, snapshot.deletions, snapshot.truncated)
             });
-        let refresh_focus = self.transcript_control_focus("right-panel-diff-refresh", cx);
-        let refresh_icon: AnyElement = if self.right_panel_diff_loading {
-            motion::spin(icon("icons/loader-circle.svg", 12.0, theme.text_tertiary))
-        } else {
-            icon("icons/rotate-cw.svg", 12.0, theme.text_tertiary).into_any_element()
-        };
-        let expand_all = self
-            .right_panel_diff_snapshot
-            .as_ref()
-            .is_some_and(|snapshot| {
-                !snapshot.files.is_empty()
-                    && self.right_panel_diff_file_layout == DiffFileLayout::Tree
-                    && !review_diff_directory_paths(&snapshot.files)
-                        .is_subset(&self.right_panel_diff_expanded_paths)
-            });
-        let expand_icon = "icons/chevrons-up-down.svg";
-        let expand_tooltip = if expand_all {
-            tr!("diff.expand_all_files")
-        } else {
-            tr!("diff.collapse_all_files")
-        };
-        let expand_focus = self.transcript_control_focus("right-panel-diff-expand-all", cx);
-        let expand_control = div()
-            .id("right-panel-diff-expand-all")
-            .track_focus(&expand_focus)
-            .tab_index(0)
-            .size(px(28.0))
-            .rounded(px(7.0))
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_pointer()
-            .when(!expand_all, |control| control.bg(theme.overlay))
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
-            .hover(|style| style.bg(theme.overlay))
-            .child(icon(expand_icon, 13.0, theme.text_tertiary))
-            .tooltip(move |window, cx| Tooltip::new(expand_tooltip.clone()).build(window, cx))
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.toggle_right_panel_diff_directories(cx);
-            }))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.toggle_right_panel_diff_directories(cx);
-                    cx.stop_propagation();
-                }
-            }));
-        let layout_handle = self.menu_handle("right-panel-diff-layout", cx);
-        let current_layout = self.right_panel_diff_file_layout;
-        let layout_icon = match self.right_panel_diff_file_layout {
-            DiffFileLayout::Tree => "icons/folder.svg",
-            DiffFileLayout::Flat => "icons/list.svg",
-        };
-        let layout = dropdown_menu(
-            MenuChip::new("right-panel-diff-layout")
-                .icon(layout_icon, theme.text_tertiary)
-                .label(match self.right_panel_diff_file_layout {
-                    DiffFileLayout::Tree => tr!("diff.layout_tree"),
-                    DiffFileLayout::Flat => tr!("diff.layout_flat"),
-                })
-                .height(px(28.0))
-                .background(theme.surface)
-                .selected(layout_handle.is_open()),
-            "right-panel-diff-layout-menu",
-            &layout_handle,
-            MenuAlign::BelowRight,
-            {
-                let weak = cx.entity().downgrade();
-                move |_| {
-                    [
-                        (
-                            DiffFileLayout::Tree,
-                            tr!("diff.layout_tree"),
-                            "icons/folder.svg",
-                        ),
-                        (
-                            DiffFileLayout::Flat,
-                            tr!("diff.layout_flat"),
-                            "icons/list.svg",
-                        ),
-                    ]
-                    .into_iter()
-                    .map(|(choice, label, icon_path)| {
-                        let weak = weak.clone();
-                        MenuItem::new(label, move |_, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.set_right_panel_diff_file_layout(choice, cx)
-                            });
-                        })
-                        .icon(icon_path)
-                        .selected(choice == current_layout)
-                    })
-                    .collect()
-                }
-            },
-        );
-        let files_focus = self.transcript_control_focus("right-panel-diff-files-visible", cx);
+        let expand_all = self.right_panel_diff_all_files_collapsed();
         let files_visible = self.right_panel_diff_files_visible;
-        let files_control = div()
-            .id("right-panel-diff-files-visible")
-            .track_focus(&files_focus)
-            .tab_index(0)
-            .size(px(28.0))
-            .rounded(px(7.0))
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_pointer()
-            .when(!files_visible, |control| control.bg(theme.overlay))
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
-            .hover(|style| style.bg(theme.overlay))
-            .child(icon("icons/list.svg", 13.0, theme.text_tertiary))
-            .tooltip(move |window, cx| {
-                Tooltip::new(if files_visible {
-                    tr!("diff.hide_files")
-                } else {
-                    tr!("diff.show_files")
-                })
-                .build(window, cx)
-            })
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.toggle_right_panel_diff_files(cx);
-            }))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.toggle_right_panel_diff_files(cx);
-                    cx.stop_propagation();
-                }
-            }));
-
-        let refresh = div()
-            .id("right-panel-diff-refresh")
-            .track_focus(&refresh_focus)
-            .tab_index(0)
-            .size(px(28.0))
-            .rounded(px(7.0))
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_pointer()
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
-            .hover(|style| style.bg(theme.overlay))
-            .child(refresh_icon)
-            .tooltip(|window, cx| Tooltip::new(tr!("diff.refresh")).build(window, cx))
-            .on_click(cx.listener(|this, _, _, cx| this.refresh_right_panel_diff(cx)))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.refresh_right_panel_diff(cx);
-                    cx.stop_propagation();
-                }
-            }));
+        let layout = self.right_panel_diff_file_layout;
+        let expand_control = self.review_diff_toolbar_button(
+            "right-panel-diff-expand-all",
+            if expand_all {
+                "icons/chevrons-up-down.svg"
+            } else {
+                "icons/chevrons-down-up.svg"
+            },
+            if expand_all {
+                tr!("diff.expand_all_files")
+            } else {
+                tr!("diff.collapse_all_files")
+            },
+            review_collapse_all_shortcut(),
+            false,
+            false,
+            cx,
+            |this, cx| this.toggle_right_panel_diff_all_files(cx),
+        );
+        let layout_control = self.review_diff_toolbar_button(
+            "right-panel-diff-layout",
+            layout.icon(),
+            layout.toggle().label(),
+            review_layout_shortcut(),
+            false,
+            false,
+            cx,
+            |this, cx| this.toggle_right_panel_diff_file_layout(cx),
+        );
+        let refresh = self.review_diff_toolbar_button(
+            "right-panel-diff-refresh",
+            if self.right_panel_diff_loading {
+                "icons/loader-circle.svg"
+            } else {
+                "icons/rotate-cw.svg"
+            },
+            tr!("diff.refresh"),
+            review_refresh_shortcut(),
+            false,
+            self.right_panel_diff_loading,
+            cx,
+            |this, cx| this.refresh_right_panel_diff(cx),
+        );
+        let files_control = self.review_diff_toolbar_button(
+            "right-panel-diff-files-visible",
+            "icons/list.svg",
+            if files_visible {
+                tr!("diff.hide_files")
+            } else {
+                tr!("diff.show_files")
+            },
+            review_files_shortcut(),
+            !files_visible,
+            false,
+            cx,
+            |this, cx| this.toggle_right_panel_diff_files(cx),
+        );
 
         div()
             .h(px(44.0))
@@ -352,12 +390,64 @@ impl Padu {
                 )
             })
             .child(div().flex_1())
-            .when(self.right_panel_diff_files_visible, |toolbar| {
-                toolbar.child(expand_control).child(layout)
-            })
-            .child(files_control)
+            .when(
+                self.right_panel_diff_snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| !snapshot.files.is_empty()),
+                |toolbar| toolbar.child(expand_control),
+            )
+            .when(files_visible, |toolbar| toolbar.child(layout_control))
             .child(refresh)
+            .child(files_control)
             .into_any_element()
+    }
+
+    fn review_diff_toolbar_button(
+        &self,
+        id: &'static str,
+        icon_path: &'static str,
+        tooltip: String,
+        shortcut: &'static str,
+        selected: bool,
+        spinning: bool,
+        cx: &mut Context<Self>,
+        action: impl Fn(&mut Padu, &mut Context<Self>) + 'static,
+    ) -> Stateful<Div> {
+        let theme = Theme::current(cx);
+        let focus = self.transcript_control_focus(id, cx);
+        let glyph = icon(icon_path, 13.0, theme.text_tertiary);
+        let glyph: AnyElement = if spinning {
+            motion::spin(glyph)
+        } else {
+            glyph.into_any_element()
+        };
+        let action = Rc::new(action);
+        let click_action = action.clone();
+        div()
+            .id(id)
+            .track_focus(&focus)
+            .tab_index(0)
+            .size(px(28.0))
+            .rounded(px(7.0))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .when(selected, |button| button.bg(theme.overlay))
+            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .hover(|style| style.bg(theme.overlay))
+            .child(glyph)
+            .tooltip(Tooltip::with_shortcut(tooltip, shortcut))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                click_action(this, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    action(this, cx);
+                    cx.stop_propagation();
+                }
+            }))
     }
 
     pub(crate) fn render_right_panel_unified_diff(
@@ -419,7 +509,12 @@ impl Padu {
         let Some(snapshot) = self.right_panel_diff_snapshot.as_ref() else {
             return div().into_any_element();
         };
-        let Some(line) = snapshot.lines.get(index) else {
+        let line_index = self
+            .right_panel_diff_visible_lines
+            .get(index)
+            .copied()
+            .unwrap_or(index);
+        let Some(line) = snapshot.lines.get(line_index) else {
             return div().into_any_element();
         };
         let Some(file) = snapshot.files.get(line.file_index) else {
@@ -431,44 +526,9 @@ impl Padu {
         let gutter_width = style.gutter_width();
 
         match &line.kind {
-            crate::review_diff::LineKind::FileHeader => div()
-                .id(SharedString::from(format!("review-diff-file-{index}")))
-                .w_full()
-                .min_w_0()
-                .h(px(36.0))
-                .px(px(12.0))
-                .flex()
-                .items_center()
-                .gap(px(8.0))
-                .border_b_1()
-                .border_color(theme.border)
-                .bg(theme.surface)
-                .child(file_icon(file_icon_for_path(&file.path), 14.0))
-                .child(
-                    div()
-                        .id(SharedString::from(format!("review-diff-file-path-{index}")))
-                        .min_w_0()
-                        .flex_1()
-                        .truncate()
-                        .text_size(px(12.5))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text_secondary)
-                        .tooltip(Tooltip::text(file.path.clone()))
-                        .child(file.path.clone()),
-                )
-                .child(
-                    div()
-                        .text_size(px(12.5))
-                        .text_color(theme.success)
-                        .child(format!("+{}", file.additions)),
-                )
-                .child(
-                    div()
-                        .text_size(px(12.5))
-                        .text_color(theme.danger)
-                        .child(format!("-{}", file.deletions)),
-                )
-                .into_any_element(),
+            crate::review_diff::LineKind::FileHeader => {
+                self.render_right_panel_diff_file_header(line.file_index, file, cx)
+            }
             crate::review_diff::LineKind::Gap(gap) => {
                 let expandable = gap.is_expandable();
                 let chunked = gap.count() > crate::review_diff::DEFAULT_EXPANSION_LINE_COUNT as u32;
@@ -627,13 +687,138 @@ impl Padu {
             | crate::review_diff::LineKind::Addition
             | crate::review_diff::LineKind::Deletion => render_diff_code_row(
                 line,
-                index,
+                line_index,
                 "review-diff",
                 &self.right_panel_diff_selection,
                 style,
                 &theme,
             ),
         }
+    }
+
+    fn render_right_panel_diff_file_header(
+        &self,
+        file_index: usize,
+        file: &crate::review_diff::File,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(cx);
+        let collapsed = self.right_panel_diff_collapsed_files.contains(&file_index);
+        let collapsible = file.diff_line.is_some_and(|start| {
+            self.right_panel_diff_snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.lines.get(start + 1))
+                .is_some_and(|line| line.file_index == file_index)
+        });
+        let header_id = SharedString::from(format!("review-diff-file-{file_index}"));
+        let focus = self.transcript_control_focus(header_id.clone(), cx);
+        let collapse_tooltip = if collapsed {
+            tr!("diff.expand_file")
+        } else {
+            tr!("diff.collapse_file")
+        };
+        div()
+            .id(header_id)
+            .track_focus(&focus)
+            .tab_index(0)
+            .w_full()
+            .min_w_0()
+            .h(px(36.0))
+            .px(px(12.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .border_b_1()
+            .border_color(theme.border)
+            .bg(theme.surface)
+            .cursor_pointer()
+            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .hover(|style| style.bg(theme.overlay))
+            .tooltip(Tooltip::with_shortcut(
+                collapse_tooltip.clone(),
+                review_file_shortcut(),
+            ))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.toggle_right_panel_diff_file(file_index, cx);
+                cx.stop_propagation();
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.toggle_right_panel_diff_file(file_index, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .child(file_icon(file_icon_for_path(&file.path), 14.0))
+            .child(
+                div()
+                    .id(SharedString::from(format!(
+                        "review-diff-file-path-{file_index}"
+                    )))
+                    .min_w_0()
+                    .flex_1()
+                    .truncate()
+                    .text_size(px(12.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_secondary)
+                    .tooltip(Tooltip::text(file.path.clone()))
+                    .child(file.path.clone()),
+            )
+            .child(
+                div()
+                    .text_size(px(12.5))
+                    .text_color(theme.success)
+                    .child(format!("+{}", file.additions)),
+            )
+            .child(
+                div()
+                    .text_size(px(12.5))
+                    .text_color(theme.danger)
+                    .child(format!("-{}", file.deletions)),
+            )
+            .when(collapsible, |header| {
+                let button_id =
+                    SharedString::from(format!("review-diff-file-collapse-{file_index}"));
+                let button_focus = self.transcript_control_focus(button_id.clone(), cx);
+                header.child(
+                    div()
+                        .id(button_id)
+                        .track_focus(&button_focus)
+                        .tab_index(0)
+                        .size(px(22.0))
+                        .rounded(px(6.0))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_pointer()
+                        .focus_visible(|style| style.border_1().border_color(theme.accent))
+                        .hover(|style| style.bg(theme.overlay_strong))
+                        .tooltip(Tooltip::with_shortcut(
+                            collapse_tooltip,
+                            review_file_shortcut(),
+                        ))
+                        .child(icon(
+                            if collapsed {
+                                "icons/chevron-right.svg"
+                            } else {
+                                "icons/chevron-down.svg"
+                            },
+                            12.0,
+                            theme.text_tertiary,
+                        ))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_right_panel_diff_file(file_index, cx);
+                            cx.stop_propagation();
+                        }))
+                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                this.toggle_right_panel_diff_file(file_index, cx);
+                                cx.stop_propagation();
+                            }
+                        })),
+                )
+            })
+            .into_any_element()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -706,19 +891,24 @@ impl Padu {
 
     pub(crate) fn expand_right_panel_diff_gap(
         &mut self,
-        line_index: usize,
+        list_index: usize,
         direction: crate::review_diff::ExpansionDirection,
         cx: &mut Context<Self>,
     ) {
+        let Some(snapshot_index) = self.right_panel_diff_visible_lines.get(list_index).copied()
+        else {
+            return;
+        };
         let expansion = self
             .right_panel_diff_snapshot
             .as_mut()
-            .and_then(|snapshot| Arc::make_mut(snapshot).expand_gap(line_index, direction));
+            .and_then(|snapshot| Arc::make_mut(snapshot).expand_gap(snapshot_index, direction));
         let Some(expansion) = expansion else {
             return;
         };
         self.right_panel_diff_list_state
-            .splice(line_index..line_index + 1, expansion.replacement_count);
+            .splice(list_index..list_index + 1, expansion.replacement_count);
+        self.rebuild_right_panel_diff_visible_lines();
         cx.notify();
     }
 
@@ -756,6 +946,7 @@ impl Padu {
                     .px(px(8.0))
                     .flex()
                     .items_center()
+                    .gap(px(4.0))
                     .border_b_1()
                     .border_color(theme.border)
                     .child(
@@ -764,7 +955,10 @@ impl Padu {
                             self.right_panel_diff_filter.clone(),
                         )
                         .icon("icons/search.svg", 13.0)
+                        .suffix(kbd_badge(review_filter_shortcut(), &theme))
                         .w_full()
+                        .min_w_0()
+                        .flex_1()
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(|this, _, window, cx| {
@@ -773,6 +967,30 @@ impl Padu {
                                 cx.stop_propagation();
                             }),
                         ),
+                    )
+                    .when(
+                        self.right_panel_diff_file_layout == DiffFileLayout::Tree,
+                        |header| {
+                            let expand_tree = self.right_panel_diff_tree_needs_expand();
+                            header.child(self.review_diff_toolbar_button(
+                                "right-panel-diff-expand-tree",
+                                if expand_tree {
+                                    "icons/chevrons-up-down.svg"
+                                } else {
+                                    "icons/chevrons-down-up.svg"
+                                },
+                                if expand_tree {
+                                    tr!("diff.expand_tree")
+                                } else {
+                                    tr!("diff.collapse_tree")
+                                },
+                                review_tree_shortcut(),
+                                false,
+                                false,
+                                cx,
+                                |this, cx| this.toggle_right_panel_diff_directories(cx),
+                            ))
+                        },
                     ),
             )
             .child(
@@ -780,7 +998,30 @@ impl Padu {
                     .id("right-panel-diff-tree")
                     .track_focus(&focus)
                     .tab_index(0)
-                    .key_context("ReviewDiffTree")
+                    .key_context(REVIEW_DIFF_TREE_CONTEXT)
+                    .on_action(cx.listener(|this, _: &RefreshReviewDiff, _, cx| {
+                        this.refresh_right_panel_diff(cx);
+                    }))
+                    .on_action(cx.listener(|this, _: &ToggleReviewDiffLayout, _, cx| {
+                        this.toggle_right_panel_diff_file_layout(cx);
+                    }))
+                    .on_action(cx.listener(|this, _: &ToggleReviewDiffFiles, _, cx| {
+                        this.toggle_right_panel_diff_files(cx);
+                    }))
+                    .on_action(cx.listener(|this, _: &ToggleReviewDiffAllFiles, _, cx| {
+                        this.toggle_right_panel_diff_all_files(cx);
+                    }))
+                    .on_action(
+                        cx.listener(|this, _: &ToggleReviewDiffFileCollapse, _, cx| {
+                            this.toggle_selected_right_panel_diff_file(cx);
+                        }),
+                    )
+                    .on_action(cx.listener(|this, _: &FocusReviewDiffFilter, window, cx| {
+                        this.focus_right_panel_diff_filter(window, cx);
+                    }))
+                    .on_action(cx.listener(|this, _: &ToggleReviewDiffTree, _, cx| {
+                        this.toggle_right_panel_diff_directories(cx);
+                    }))
                     .flex_1()
                     .min_h_0()
                     .relative()
@@ -1040,6 +1281,8 @@ impl Padu {
             self.right_panel_diff_error = None;
             self.right_panel_diff_selected_file = None;
             self.right_panel_diff_expanded_paths.clear();
+            self.right_panel_diff_collapsed_files.clear();
+            self.right_panel_diff_visible_lines.clear();
             self.right_panel_diff_tree_cursor = None;
             self.right_panel_diff_tree_rows.borrow_mut().clear();
             self.right_panel_diff_tree_list_state.reset(0);
@@ -1086,6 +1329,16 @@ impl Padu {
                 .and_then(|snapshot| snapshot.files.get(index))
                 .map(|file| file.path.clone())
         });
+        let collapsed_paths = self
+            .right_panel_diff_collapsed_files
+            .iter()
+            .filter_map(|index| {
+                self.right_panel_diff_snapshot
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.files.get(*index))
+                    .map(|file| file.path.clone())
+            })
+            .collect::<HashSet<_>>();
         self.right_panel_diff_loading = true;
         self.right_panel_diff_error = None;
         cx.notify();
@@ -1146,10 +1399,16 @@ impl Padu {
                                 snapshot.files.iter().position(|file| file.path == path)
                             })
                             .or_else(|| (!snapshot.files.is_empty()).then_some(0));
-                        let line_count = snapshot.lines.len();
+                        padu.right_panel_diff_collapsed_files = snapshot
+                            .files
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, file)| collapsed_paths.contains(&file.path))
+                            .map(|(index, _)| index)
+                            .collect();
                         padu.right_panel_diff_snapshot = Some(Arc::new(snapshot));
                         padu.right_panel_diff_error = None;
-                        padu.right_panel_diff_list_state.reset(line_count);
+                        padu.sync_right_panel_diff_visible_lines(true);
                         padu.sync_right_panel_diff_tree_rows(cx);
                     }
                     Err(error) => {
@@ -1236,9 +1495,122 @@ impl Padu {
         }
     }
 
+    pub(crate) fn toggle_right_panel_diff_file_layout(&mut self, cx: &mut Context<Self>) {
+        self.set_right_panel_diff_file_layout(self.right_panel_diff_file_layout.toggle(), cx);
+    }
+
     pub(crate) fn toggle_right_panel_diff_files(&mut self, cx: &mut Context<Self>) {
         self.right_panel_diff_files_visible = !self.right_panel_diff_files_visible;
         cx.notify();
+    }
+
+    fn rebuild_right_panel_diff_visible_lines(&mut self) {
+        self.right_panel_diff_visible_lines =
+            self.right_panel_diff_snapshot
+                .as_ref()
+                .map_or_else(Vec::new, |snapshot| {
+                    review_diff_visible_line_indices(
+                        &snapshot.lines,
+                        &self.right_panel_diff_collapsed_files,
+                    )
+                });
+    }
+
+    pub(crate) fn sync_right_panel_diff_visible_lines(&mut self, reset: bool) {
+        let next = self
+            .right_panel_diff_snapshot
+            .as_ref()
+            .map_or_else(Vec::new, |snapshot| {
+                review_diff_visible_line_indices(
+                    &snapshot.lines,
+                    &self.right_panel_diff_collapsed_files,
+                )
+            });
+        if reset {
+            self.right_panel_diff_list_state.reset(next.len());
+        } else if let Some((range, count)) =
+            review_diff_list_splice(&self.right_panel_diff_visible_lines, &next)
+        {
+            self.right_panel_diff_list_state.splice(range, count);
+        }
+        self.right_panel_diff_visible_lines = next;
+    }
+
+    fn right_panel_diff_all_files_collapsed(&self) -> bool {
+        let Some(snapshot) = self.right_panel_diff_snapshot.as_ref() else {
+            return true;
+        };
+        let mut any = false;
+        for file_index in review_diff_collapsible_files(snapshot) {
+            any = true;
+            if !self.right_panel_diff_collapsed_files.contains(&file_index) {
+                return false;
+            }
+        }
+        any
+    }
+
+    pub(crate) fn toggle_right_panel_diff_all_files(&mut self, cx: &mut Context<Self>) {
+        let Some(snapshot) = self.right_panel_diff_snapshot.clone() else {
+            return;
+        };
+        let collapsible = review_diff_collapsible_files(&snapshot).collect::<Vec<_>>();
+        if collapsible.is_empty() {
+            return;
+        }
+        if collapsible
+            .iter()
+            .all(|index| self.right_panel_diff_collapsed_files.contains(index))
+        {
+            self.right_panel_diff_collapsed_files.clear();
+        } else {
+            self.right_panel_diff_collapsed_files.extend(collapsible);
+        }
+        self.sync_right_panel_diff_visible_lines(false);
+        cx.notify();
+    }
+
+    pub(crate) fn toggle_right_panel_diff_file(
+        &mut self,
+        file_index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.right_panel_diff_collapsed_files.remove(&file_index) {
+            self.right_panel_diff_collapsed_files.insert(file_index);
+        }
+        self.right_panel_diff_selected_file = Some(file_index);
+        self.sync_right_panel_diff_visible_lines(false);
+        cx.notify();
+    }
+
+    pub(crate) fn toggle_selected_right_panel_diff_file(&mut self, cx: &mut Context<Self>) {
+        if let Some(file_index) = self.right_panel_diff_selected_file {
+            self.toggle_right_panel_diff_file(file_index, cx);
+        }
+    }
+
+    pub(crate) fn focus_right_panel_diff_filter(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.right_panel_diff_files_visible {
+            self.right_panel_diff_files_visible = true;
+            cx.notify();
+        }
+        let focus = self.right_panel_diff_filter.read(cx).focus();
+        window.focus(&focus, cx);
+    }
+
+    fn right_panel_diff_tree_needs_expand(&self) -> bool {
+        let Some(snapshot) = self.right_panel_diff_snapshot.as_ref() else {
+            return false;
+        };
+        if self.right_panel_diff_file_layout != DiffFileLayout::Tree {
+            return false;
+        }
+        let directories = review_diff_directory_paths(&snapshot.files);
+        !directories.is_empty() && !directories.is_subset(&self.right_panel_diff_expanded_paths)
     }
 
     pub(crate) fn toggle_right_panel_diff_directories(&mut self, cx: &mut Context<Self>) {
@@ -1276,6 +1648,9 @@ impl Padu {
         cx: &mut Context<Self>,
     ) {
         self.right_panel_diff_selected_file = Some(file_index);
+        if self.right_panel_diff_collapsed_files.remove(&file_index) {
+            self.sync_right_panel_diff_visible_lines(false);
+        }
         if let Some(line) = self
             .right_panel_diff_snapshot
             .as_ref()
@@ -1286,9 +1661,14 @@ impl Padu {
             // which can reveal only the file header and leave its diff body
             // off-screen. A tree selection is an explicit jump, so top-anchor
             // the header and expose the content immediately below it.
+            let item_ix = self
+                .right_panel_diff_visible_lines
+                .iter()
+                .position(|visible| *visible == line)
+                .unwrap_or(line);
             self.right_panel_diff_list_state
                 .scroll_to(gpui::ListOffset {
-                    item_ix: line,
+                    item_ix,
                     offset_in_item: px(0.0),
                 });
         }

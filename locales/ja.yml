@@ -166,6 +166,7 @@ keybindings.section_navigation: ナビゲーションとパネル
 keybindings.section_chat: チャットと入力
 keybindings.section_editor: エディタと検索
 keybindings.section_browser: 内蔵ブラウザ
+keybindings.section_review: レビュー
 keybindings.new_task: 新規タスク
 keybindings.new_task_desc: 新しい会話またはタスクを作成
 keybindings.open_project: プロジェクトを開く
@@ -234,6 +235,20 @@ keybindings.browser_forward: 履歴を進む
 keybindings.browser_forward_desc: ブラウザ履歴を進む
 keybindings.browser_devtools: 開発者ツール
 keybindings.browser_devtools_desc: Web 開発者ツールを開く/閉じる
+keybindings.refresh_review: レビューを更新
+keybindings.refresh_review_desc: 現在のレビュー差分を再読み込み
+keybindings.toggle_review_layout: ファイル一覧レイアウトの切り替え
+keybindings.toggle_review_layout_desc: 変更ファイル一覧をツリーとフラットで切り替える
+keybindings.toggle_review_files: 変更ファイル一覧の切り替え
+keybindings.toggle_review_files_desc: 変更ファイル一覧を表示/非表示
+keybindings.toggle_review_collapse: レビューファイルを折りたたむ/展開
+keybindings.toggle_review_collapse_desc: レビュー内のすべてのファイル差分を折りたたむか展開する
+keybindings.toggle_review_file: ファイルを折りたたむ/展開
+keybindings.toggle_review_file_desc: 選択中のレビューファイルを折りたたむか展開する
+keybindings.focus_review_filter: レビューのファイル検索にフォーカス
+keybindings.focus_review_filter_desc: 変更ファイルの検索フィールドにフォーカスする
+keybindings.toggle_review_tree: フォルダを展開/折りたたむ
+keybindings.toggle_review_tree_desc: 変更ファイルツリーのフォルダを展開または折りたたむ
 keybindings.search: ショートカットを検索...
 keybindings.no_results: ショートカットが見つかりません
 settings.back: 戻る
@@ -1162,6 +1177,10 @@ diff.expand_all_files: すべてのファイルを展開
 diff.collapse_all_files: すべてのファイルを折りたたむ
 diff.layout_tree: ツリーレイアウト
 diff.layout_flat: フラットレイアウト
+diff.expand_file: ファイルを展開
+diff.collapse_file: ファイルを折りたたむ
+diff.expand_tree: フォルダを展開
+diff.collapse_tree: フォルダを折りたたむ
 diff.show_files: 変更したファイルを表示
 diff.hide_files: 変更したファイルを非表示
 diff.refresh_failed: "変更を更新できませんでした：%{error}"
