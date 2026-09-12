@@ -1,5 +1,9 @@
+use gpui::actions;
+
 use super::composer::next_picker_highlight;
 use super::*;
+
+actions!(padu_settings, [FocusSettingsSearch]);
 
 mod about;
 mod appearance;
@@ -24,6 +28,13 @@ const SETTINGS_USAGE_MAX_WIDTH: f32 = 1024.0;
 
 /// Key context the settings sidebar declares around its search field.
 const SETTINGS_SIDEBAR_CONTEXT: &str = "SettingsSidebar";
+
+/// Key context the settings content column declares. Lets window-wide
+/// settings shortcuts (like focusing the search) fire from the content
+/// side too — the sidebar on its own is never focused, so a
+/// sidebar-scoped binding would be dead everywhere except the search
+/// field itself.
+const SETTINGS_CONTENT_CONTEXT: &str = "SettingsContent";
 
 /// The search field while focused inside the sidebar. The field holds real
 /// focus the whole time — the sidebar's selection is only drawn — so `up` and
@@ -109,7 +120,23 @@ pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("down", SelectNextEntry, Some(SETTINGS_SEARCH_CONTEXT)),
         KeyBinding::new("up", SelectPreviousEntry, Some(SETTINGS_SEARCH_CONTEXT)),
+        // Action bindings consume the keystroke before the focused field
+        // sees it, so a plain sidebar/content `/` binding would swallow
+        // the character while typing in a content-page text field
+        // (provider paths, API keys, daemon address). The `!TextInput`
+        // arm keeps the shortcut for buttons and rows while leaving
+        // typing alone; refocusing the already-focused search field is
+        // harmless, same as the review filter.
+        KeyBinding::new(
+            "/",
+            FocusSettingsSearch,
+            Some("SettingsSidebar || (SettingsContent && !TextInput)"),
+        ),
     ]);
+}
+
+fn settings_search_shortcut() -> &'static str {
+    "/"
 }
 
 /// The sidebar rows the query leaves visible, in display order. `query` must
@@ -155,6 +182,9 @@ impl Padu {
             .on_action(cx.listener(Self::navigate_forward_action))
             .on_action(cx.listener(Self::focus_composer_action))
             .on_action(cx.listener(Self::cancel_turn_action))
+            .on_action(cx.listener(|this, _: &FocusSettingsSearch, window, cx| {
+                this.focus_settings_search(window, cx);
+            }))
             .capture_any_mouse_down(cx.listener(Self::navigation_mouse_down))
             .size_full()
             .flex()
@@ -230,34 +260,10 @@ impl Padu {
             .bg(theme.sidebar)
             .child(self.render_settings_sidebar_titlebar(window, cx))
             .child(
-                div().px(px(12.0)).child(
-                    div()
-                        .id("settings-back")
-                        .h(px(34.0))
-                        .px(px(9.0))
-                        .rounded(px(8.0))
-                        .flex()
-                        .items_center()
-                        .gap(px(9.0))
-                        .cursor_pointer()
-                        .text_size(sp(13.0))
-                        .text_color(theme.text_secondary)
-                        .hover(|element| element.bg(theme.overlay))
-                        .active(|element| element.bg(theme.overlay_strong))
-                        .child(icon("icons/arrow-left.svg", 15.0, theme.text_tertiary))
-                        .child(tr!("settings.back"))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.settings_page = None;
-                            let focus_handle = this.composer_focus(cx);
-                            window.focus(&focus_handle, cx);
-                            cx.notify();
-                        })),
-                ),
-            )
-            .child(
                 div().px(px(12.0)).pt(px(8.0)).child(
                     TextField::new("settings-search-field", self.settings_search.clone())
-                        .icon("icons/search.svg", 13.0),
+                        .icon("icons/search.svg", 13.0)
+                        .suffix(kbd_badge(settings_search_shortcut(), &theme)),
                 ),
             )
             .child(div().h(px(18.0)))
@@ -291,6 +297,58 @@ impl Padu {
         self.open_settings_page(pages[next], cx);
     }
 
+    /// Focus the sidebar search field, mirroring the review diff filter's
+    /// `/` shortcut. Idempotent when the field already holds focus.
+    fn focus_settings_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let focus = self.settings_search.read(cx).focus();
+        window.focus(&focus, cx);
+    }
+
+    fn render_settings_back_button(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        let theme = Theme::current(cx);
+        div()
+            .id("settings-back")
+            .tab_index(0)
+            .h(px(26.0))
+            .px(px(6.0))
+            .flex_none()
+            .rounded(px(6.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .cursor_pointer()
+            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .hover(|element| element.bg(theme.overlay))
+            .active(|element| element.bg(theme.overlay_strong))
+            .tooltip(Tooltip::text(tr!("settings.back")))
+            .child(icon("icons/arrow-left.svg", 14.0, theme.text_tertiary))
+            .child(
+                div()
+                    .text_size(sp(13.0))
+                    .text_color(theme.text_secondary)
+                    .child(tr!("settings.back")),
+            )
+            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                cx.stop_propagation();
+            })
+            .on_click(cx.listener(|this, _, window, cx| {
+                cx.stop_propagation();
+                this.settings_page = None;
+                let focus_handle = this.composer_focus(cx);
+                window.focus(&focus_handle, cx);
+                cx.notify();
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.settings_page = None;
+                    let focus_handle = this.composer_focus(cx);
+                    window.focus(&focus_handle, cx);
+                    cx.notify();
+                    cx.stop_propagation();
+                }
+            }))
+    }
+
     fn render_settings_sidebar_titlebar(
         &self,
         window: &Window,
@@ -301,21 +359,14 @@ impl Padu {
             window,
             cx,
         );
-        // Only as tall as whatever actually sits in it: macOS's native
-        // traffic lights, or the client-side buttons a Linux desktop puts on
-        // this side. Windows keeps all three on the far side, and a desktop
-        // like GNOME keeps none here, so there is nothing to clear and the
-        // strip is only somewhere to drag the window by — the content
-        // column's own titlebar carries the rest of that job.
-        let height = if cfg!(target_os = "macos") || left_window_controls.is_some() {
-            48.0
-        } else {
-            12.0
-        };
-
+        // Mirrors the main sidebar titlebar: fixed 48px so the back button
+        // sits in the same row as the window controls, after the
+        // traffic-light clearance that keeps it clear of macOS's native
+        // lights — the same safe area `render_sidebar_navigation_controls`
+        // gets from `TRAFFIC_LIGHT_CLEARANCE`.
         div()
             .id("settings-sidebar-titlebar")
-            .h(px(height))
+            .h(px(48.0))
             .flex_none()
             .flex()
             .items_center()
@@ -331,8 +382,15 @@ impl Padu {
                 ),
             )
             .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(self.render_settings_back_button(cx)),
+            )
+            .child(
                 self.render_settings_drag_region("settings-sidebar-titlebar-drag-region", cx)
-                    .h(px(height))
+                    .h(px(48.0))
                     .flex_1(),
             )
     }
@@ -355,6 +413,7 @@ impl Padu {
                 .min_w_0()
                 .flex()
                 .flex_col()
+                .key_context(SETTINGS_CONTENT_CONTEXT)
                 .border_l_1()
                 .border_color(theme.sidebar_border)
                 .bg(theme.surface)
@@ -436,6 +495,7 @@ impl Padu {
             .min_w_0()
             .flex()
             .flex_col()
+            .key_context(SETTINGS_CONTENT_CONTEXT)
             .border_l_1()
             .border_color(theme.sidebar_border)
             .bg(theme.surface)
@@ -518,5 +578,18 @@ impl Padu {
                     crate::platform::start_window_move(window);
                 }
             }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::TestAppContext;
+
+    /// `KeyBinding::new` panics on a context-predicate parse error, which
+    /// would otherwise surface as a crash at startup. Exercise `init` so
+    /// the `/`-to-focus-search predicate stays valid.
+    #[gpui::test]
+    fn settings_key_bindings_register(cx: &mut TestAppContext) {
+        cx.update(super::init);
     }
 }

@@ -254,11 +254,6 @@ impl Padu {
                         crate::platform::primary_shortcut("⇧⌘K", "Ctrl+Shift+K"),
                     ),
                     (
-                        "keybindings.focus_review_filter",
-                        "keybindings.focus_review_filter_desc",
-                        "/",
-                    ),
-                    (
                         "keybindings.toggle_review_tree",
                         "keybindings.toggle_review_tree_desc",
                         crate::platform::primary_shortcut("⇧⌘O", "Ctrl+Shift+O"),
