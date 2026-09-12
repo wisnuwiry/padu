@@ -1,6 +1,8 @@
 import { createContext, isValidElement, useContext, useRef, type CSSProperties } from 'react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
+import rehypeRaw from 'rehype-raw'
+import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import 'katex/dist/katex.min.css'
@@ -10,6 +12,7 @@ import { MarkdownCodeBlock } from '@/components/markdown-code-block'
 import { MermaidDiagram } from '@/components/mermaid-diagram'
 import { isLocalFileTarget } from '@/lib/inline-file-references'
 import { KATEX_MACROS, renderKatex } from '@/lib/katex-math'
+import { markdownHtmlSchema } from '@/lib/markdown-html'
 import {
   advanceMarkdownVeil,
   createMarkdownVeilState,
@@ -48,7 +51,20 @@ export function MarkdownView({
     <div className={cn('markdown min-w-0', compact && '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0', className)} style={style}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
+        // react-markdown applies its own URL guard on top of the sanitizer,
+        // and its default transform rejects `data:` sources entirely. Data
+        // URIs are common in agent transcripts, so keep them for `src` while
+        // delegating everything else (including `href`) to the default.
+        urlTransform={(url, key) =>
+          key === 'src' && url.startsWith('data:') ? url : defaultUrlTransform(url)
+        }
         rehypePlugins={[
+          // Raw HTML is parsed then constrained to the GitHub-style subset in
+          // lib/markdown-html before anything else runs on the tree. The
+          // sanitize pass must precede rehype-katex so the remark-math class
+          // markers survive to be rendered (see markdownHtmlSchema).
+          rehypeRaw,
+          [rehypeSanitize, markdownHtmlSchema],
           // `throwOnError: false` keeps a half-typed `$...$` from tearing the
           // whole document down while a response streams; KaTeX renders the
           // invalid source inline instead of throwing.

@@ -74,3 +74,58 @@ describe('MarkdownView math and diagrams', () => {
     expect(html).not.toContain('language-latex')
   })
 })
+
+describe('MarkdownView raw HTML (GitHub-style constraints)', () => {
+  test('safe inline HTML renders', () => {
+    const html = render('Press <kbd>⌘K</kbd> to save and <b>bold</b> works.')
+    expect(html).toContain('<kbd>⌘K</kbd>')
+    expect(html).toContain('<b>bold</b>')
+  })
+
+  test('details and summary render as a collapsible block', () => {
+    const html = render('<details>\n<summary>More</summary>\nHidden body\n</details>')
+    expect(html).toContain('<details>')
+    expect(html).toContain('<summary>More</summary>')
+    expect(html).toContain('Hidden body')
+  })
+
+  test('scripts and event handlers are stripped', () => {
+    const html = render('Hello <script>alert(1)</script> <img src="x" onerror="alert(2)">')
+    expect(html).not.toContain('script')
+    expect(html).not.toContain('onerror')
+    expect(html).toContain('Hello')
+  })
+
+  test('javascript: URLs are dropped from links', () => {
+    const html = render('[click me](javascript:alert(1))')
+    expect(html).not.toContain('javascript:')
+    expect(html).toContain('click me')
+  })
+
+  test('data URI images survive the src policy', () => {
+    const html = render('![diagram](data:image/png;base64,AAAA)')
+    expect(html).toContain('data:image/png')
+  })
+
+  test('math still renders alongside raw HTML', () => {
+    const html = render('The limit is $\\lim_{x \\to 0} x$ and <kbd>y</kbd>.')
+    expect(html).toContain('katex')
+    expect(html).toContain('<kbd>y</kbd>')
+  })
+
+  test('raw HTML inside a fenced code block stays literal text', () => {
+    // The code surface is a client-side web component, so its content is not
+    // present in SSR output. What matters is that the fence is not parsed:
+    // the raw `<div>` must not leak out as a real element.
+    const html = render('```html\n<div>not html</div>\n```')
+    expect(html).toContain('padu-code-surface')
+    expect(html).not.toContain('<div>not html</div>')
+  })
+
+  test('a half-typed raw tag degrades instead of crashing', () => {
+    // Streaming responses can cut off inside a tag; parse5 absorbs it and the
+    // sanitizer drops whatever remains, so the prose still renders.
+    const html = render('Hello <di')
+    expect(html).toContain('Hello')
+  })
+})
