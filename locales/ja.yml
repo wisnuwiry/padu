@@ -123,7 +123,7 @@ settings.about_keywords: 情報 バージョン アップデート 更新 ホス
 settings.notes: ノート
 settings.notes_keywords: ノート メモ ドキュメント 文章 スニペット メモ書き
 notifications.system_permission: システム権限
-notifications.system_permission_desc: タスク通知のOS配信ステータス
+notifications.system_permission_desc: タスク通知のシステム配信ステータス
 notifications.permission_granted: 許可
 notifications.permission_denied: ブロック
 notifications.permission_not_determined: 未要求

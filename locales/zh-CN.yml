@@ -119,7 +119,7 @@ settings.about_keywords: 关于 信息 版本 更新 检查更新 主机 已连�
 settings.notes: 笔记
 settings.notes_keywords: 笔记 文档 书写 片段 备忘录
 notifications.system_permission: 系统权限
-notifications.system_permission_desc: 操作系统任务通知发送状态
+notifications.system_permission_desc: 系统任务通知发送状态
 notifications.permission_granted: 已允许
 notifications.permission_denied: 已阻止
 notifications.permission_not_determined: 未请求

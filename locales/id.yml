@@ -118,7 +118,7 @@ settings.about_keywords: tentang info versi pembaruan perbarui host terhubung gi
 settings.notes: Catatan
 settings.notes_keywords: catatan dokumen menulis kutipan memo
 notifications.system_permission: Izin Sistem
-notifications.system_permission_desc: Status pengiriman notifikasi sistem operasi untuk peringatan tugas
+notifications.system_permission_desc: Status pengiriman notifikasi sistem untuk peringatan tugas
 notifications.permission_granted: Diizinkan
 notifications.permission_denied: Diblokir
 notifications.permission_not_determined: Belum Diminta

@@ -73,7 +73,20 @@ function RootDocument({ children }: { children: ReactNode }) {
         <DaemonProvider>
           <RuntimeProvider>{children}</RuntimeProvider>
         </DaemonProvider>
-        <Toaster position="top-center" richColors closeButton />
+        <Toaster
+          className="padu-toaster"
+          closeButton
+          gap={8}
+          position="top-center"
+          toastOptions={{
+            className: 'padu-toast',
+            style: {
+              background: 'var(--popover)',
+              border: '1px solid var(--input)',
+              color: 'var(--popover-foreground)',
+            },
+          }}
+        />
         <Scripts />
       </body>
     </html>
