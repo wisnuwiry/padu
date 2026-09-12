@@ -148,7 +148,7 @@ raw-window-handle = "0.6"
 # instead of a child HWND — see `browser::host` for why, and note that only
 # the environment can create one, so it cannot be reached from wry's
 # `WebViewExtWindows` after the fact.
-webview2-com = "0.38"
+webview2-com = "0.39"
 # Same version GPUI is built against, so the portal's `IDCompositionVisual`
 # hands straight to `SetRootVisualTarget` with no ABI bridging. `windows-sys`
 # stays for the plain Win32 calls that do not need COM.
