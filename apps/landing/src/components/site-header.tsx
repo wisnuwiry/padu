@@ -30,7 +30,16 @@ export function SiteHeader() {
   // navigation entirely when the target route is already active.
   const skipSameRoute = React.useCallback(
     (to: string) => (event: MouseEvent<HTMLAnchorElement>) => {
-      if (pathname === to) event.preventDefault();
+      if (
+        pathname === to &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.button === 0
+      ) {
+        event.preventDefault();
+      }
     },
     [pathname],
   );
