@@ -19,6 +19,7 @@ import { PanelResizeHandle } from '@/components/panel-resize-handle'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Tooltip } from '@/components/ui/tooltip'
 import { FileTypeIcon, PaduIcon } from '@/components/padu-icon'
+import { MarkdownView } from '@/components/markdown-view'
 import { useDaemon } from '@/lib/daemon-context'
 import { useI18n } from '@/lib/i18n'
 import { projectDisplayName } from '@/lib/project-presentation'
@@ -50,12 +51,25 @@ export interface FileBuffer {
   editor?: Editor<undefined>
 }
 
+/// The files whose contents are rendered (view mode) rather than only edited.
+/// Mirrors the desktop client's `file_highlighter_language(...) == "markdown"`.
+function isMarkdownFile(path: string): boolean {
+  const extension = path.split('/').at(-1)?.split('.').at(-1)?.toLowerCase()
+  return extension === 'md' || extension === 'markdown' || extension === 'mdx'
+}
+
 function FileBreadcrumbs({
   path,
   dirty,
+  markdown = false,
+  preview = false,
+  onTogglePreview,
 }: {
   path: string
   dirty?: boolean
+  markdown?: boolean
+  preview?: boolean
+  onTogglePreview?: () => void
 }) {
   const { t } = useI18n()
   const [copied, setCopied] = useState(false)
@@ -88,6 +102,19 @@ function FileBreadcrumbs({
           />
         )}
       </div>
+      {markdown && (
+        <Tooltip content={preview ? t('files.edit_markdown_source') : t('files.preview_markdown')}>
+          <button
+            type="button"
+            aria-label={preview ? t('files.edit_markdown_source') : t('files.preview_markdown')}
+            aria-pressed={preview}
+            className="grid size-6 shrink-0 cursor-pointer place-items-center rounded hover:bg-accent text-[var(--text-tertiary)] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
+            onClick={onTogglePreview}
+          >
+            <PaduIcon className="size-3.5" name={preview ? 'pencil' : 'eye'} />
+          </button>
+        </Tooltip>
+      )}
       <Tooltip content={copied ? t('common.copied') : t('files.copy_path')}>
         <button
           type="button"
@@ -149,6 +176,11 @@ export function FilesPanel({
   const [treeWidth, setTreeWidth] = useState(() => readStoredWidth('padu.fileTreeWidth', 184, 140, 360))
   const treeWidthRef = useRef(treeWidth)
   treeWidthRef.current = treeWidth
+  // Global markdown source/preview toggle, mirroring the desktop client's
+  // persisted choice so the mode follows the user across files and sessions.
+  const [markdownPreview, setMarkdownPreview] = useState(
+    () => typeof window !== 'undefined' && window.localStorage.getItem('padu.markdownPreview') === '1',
+  )
   const root = session && project ? sessionCwd(session, project) : undefined
   const maxTreeWidth = Math.max(140, Math.min(360, panelWidth - 140))
   const fittedTreeWidth = clamp(treeWidth, 140, maxTreeWidth)
@@ -179,6 +211,10 @@ export function FilesPanel({
     }, 150)
     return () => window.clearTimeout(timer)
   }, [treeWidth])
+
+  useEffect(() => {
+    window.localStorage.setItem('padu.markdownPreview', markdownPreview ? '1' : '0')
+  }, [markdownPreview])
 
   const tree = useQuery({
     queryKey: daemonKeys.workspaceTree(config?.address ?? 'disconnected', root ?? 'none', expanded, showHidden),
@@ -714,15 +750,31 @@ export function FilesPanel({
         saving: false,
       })
   const isDirty = Boolean(buffer && buffer.content !== buffer.diskContent)
+  const selectedIsMarkdown = isMarkdownFile(selected)
+  const preview = selectedIsMarkdown && markdownPreview
   return (
     <div className="flex min-h-0 flex-1">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <FileBreadcrumbs path={selected} dirty={isDirty} />
+        <FileBreadcrumbs
+          path={selected}
+          dirty={isDirty}
+          markdown={selectedIsMarkdown}
+          preview={preview}
+          onTogglePreview={() => setMarkdownPreview((value) => !value)}
+        />
         {!buffer && file.isPending
           ? <PanelMessage title={t('files.loading_file')} detail={t('files.reading_from_daemon')} />
           : !buffer && file.error
             ? <PanelMessage title={t('files.file_unavailable')} detail={errorMessage(file.error)} danger />
-            : buffer && (
+            : buffer && preview
+              ? (
+                <div className="h-full min-h-0 min-w-0 flex-1 overflow-auto bg-card">
+                  <div className="min-w-0 px-4 pt-3.5 pb-6">
+                    <MarkdownView text={buffer.content} />
+                  </div>
+                </div>
+              )
+              : buffer && (
                 <Suspense fallback={<PanelMessage title={t('files.loading_editor')} detail={t('files.preparing_syntax')} />}>
                   <CodeFileSurface
                     cacheKey={`editor:${selected}:${buffer.revision}`}
