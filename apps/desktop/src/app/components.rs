@@ -736,6 +736,13 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         .unwrap_or_else(|| SharedString::from(content.clone()));
     let message_id = message.id;
     let role = message.role;
+    // User bubbles normally shrink to their content, but a fenced code block
+    // needs a stable surface wide enough for its gutter and header. Keep
+    // ordinary short prompts compact and widen only code-bearing bubbles.
+    let has_fenced_code = content.lines().any(|line| {
+        let line = line.trim_start();
+        line.starts_with("```") || line.starts_with("~~~")
+    });
     let element = match role {
         MessageRole::User => {
             let group_name = SharedString::from(format!("user-message-{message_id}"));
@@ -851,6 +858,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                         div()
                             .max_w(px(540.0))
                             .min_w_0()
+                            .when(has_fenced_code, |bubble| bubble.min_w(px(320.0)))
                             .rounded(px(12.0))
                             .bg(theme.raised)
                             .px(px(12.0))

@@ -1312,6 +1312,11 @@ impl Padu {
     ) -> Div {
         let theme = Theme::current(cx);
         let palette = MarkdownPalette::from_theme(&theme);
+        let preview_menu = self.menu_handle(
+            SharedString::from(format!("file-preview-{relative_path}-context-menu")),
+            cx,
+        );
+        let preview_selection = self.file_preview_selection.clone();
         let mut cache = self.file_preview_markdown.borrow_mut();
         if !matches!(cache.as_ref(), Some((cached, _)) if cached == relative_path) {
             *cache = Some((relative_path.to_owned(), MarkdownView::new()));
@@ -1338,34 +1343,59 @@ impl Padu {
             .h(px(0.0))
         };
 
-        div()
-            .flex_1()
-            .min_h_0()
-            .relative()
-            .bg(theme.surface)
+        let preview_surface = div()
+            .id(SharedString::from(format!("file-preview-{relative_path}")))
+            .size_full()
+            .overflow_y_scroll()
+            .track_scroll(&self.file_preview_scroll_handle)
+            // Painted before the document, so the frame's selection
+            // registry holds exactly this frame's text elements.
+            .child(md::render::frame_reset(self.file_preview_selection.clone()))
             .child(
                 div()
-                    .id(SharedString::from(format!("file-preview-{relative_path}")))
-                    .size_full()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.file_preview_scroll_handle)
-                    // Painted before the document, so the frame's selection
-                    // registry holds exactly this frame's text elements.
-                    .child(md::render::frame_reset(self.file_preview_selection.clone()))
-                    .child(
-                        div()
-                            .px(px(16.0))
-                            .pt(px(14.0))
-                            .pb(px(24.0))
-                            .text_color(theme.text)
-                            .children(document),
-                    ),
+                    .px(px(16.0))
+                    .pt(px(14.0))
+                    .pb(px(24.0))
+                    .text_color(theme.text)
+                    .children(document),
             )
             .child(selection_input)
             .child(scrollbar::vertical(
                 &self.file_preview_scroll_handle,
                 &self.file_preview_scrollbar,
-            ))
+            ));
+        let menu_selection = preview_selection.clone();
+        let preview_surface = context_menu(
+            preview_surface,
+            SharedString::from(format!("file-preview-{relative_path}-context")),
+            &preview_menu,
+            move |_| {
+                let mut items = Vec::new();
+                let selected = menu_selection.selection.borrow().selected_text();
+                let copy_selection = selected.clone();
+                items.push(
+                    MenuItem::new(tr!("menu.copy"), move |_, cx| {
+                        if let Some(selected) = copy_selection.clone() {
+                            cx.write_to_clipboard(ClipboardItem::new_string(selected));
+                        }
+                    })
+                    .disabled(selected.is_none()),
+                );
+                let select_selection = menu_selection.clone();
+                items.push(MenuItem::new(tr!("menu.select_all"), move |_, cx| {
+                    md::render::select_all(&select_selection);
+                    cx.refresh_windows();
+                }));
+                items
+            },
+        );
+
+        div()
+            .flex_1()
+            .min_h_0()
+            .relative()
+            .bg(theme.surface)
+            .child(preview_surface)
     }
 
     /// Picks up an external edit to a file the user has not modified here.

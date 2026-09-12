@@ -34,6 +34,8 @@ actions!(
         Down,
         SelectLeft,
         SelectRight,
+        SelectUp,
+        SelectDown,
         SelectAll,
         Home,
         End,
@@ -72,6 +74,8 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("right", Right, Some("TextInput")),
         KeyBinding::new("up", Up, Some("TextInput")),
         KeyBinding::new("down", Down, Some("TextInput")),
+        KeyBinding::new("shift-up", SelectUp, Some("TextInput")),
+        KeyBinding::new("shift-down", SelectDown, Some("TextInput")),
         KeyBinding::new("shift-left", SelectLeft, Some("TextInput")),
         KeyBinding::new("shift-right", SelectRight, Some("TextInput")),
         KeyBinding::new("home", Home, Some("TextInput")),
@@ -1178,24 +1182,34 @@ impl TextInput {
     }
 
     fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_vertically(false, cx);
+        self.move_vertically(false, false, cx);
     }
 
     fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_vertically(true, cx);
+        self.move_vertically(true, false, cx);
+    }
+
+    fn select_up(&mut self, _: &SelectUp, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_vertically(false, true, cx);
+    }
+
+    fn select_down(&mut self, _: &SelectDown, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_vertically(true, true, cx);
     }
 
     /// Move by one rendered row, not merely one newline-delimited line. This
     /// is the textarea convention: soft wraps count, and the original x goal
     /// survives a shorter row between two longer ones.
-    fn move_vertically(&mut self, down: bool, cx: &mut Context<Self>) {
+    fn move_vertically(&mut self, down: bool, selecting: bool, cx: &mut Context<Self>) {
         if self.mode == FieldMode::SingleLine {
             self.vertical_navigation = None;
             cx.propagate();
             return;
         }
 
-        let anchor = if down {
+        let anchor = if selecting {
+            self.cursor_offset()
+        } else if down {
             self.selected_range.end
         } else {
             self.selected_range.start
@@ -1217,7 +1231,7 @@ impl TextInput {
 
         let bounds = layout.bounds();
         let layout_width = bounds.size.width;
-        let continuing = if self.selected_range.is_empty() {
+        let continuing = if self.selected_range.is_empty() || selecting {
             self.vertical_navigation.filter(|navigation| {
                 navigation.cursor_offset == anchor
                     && navigation.layout_width == layout_width
@@ -1261,8 +1275,14 @@ impl TextInput {
 
         let previous_range = self.selected_range.clone();
         let previous_row = continuing.map(|navigation| navigation.visual_row);
-        self.selected_range = offset..offset;
-        self.selection_reversed = false;
+        if selecting {
+            self.select_to(offset, cx);
+        } else {
+            self.selected_range = offset..offset;
+            self.selection_reversed = false;
+            self.pause_blink_cursor(cx);
+            cx.notify();
+        }
         self.vertical_navigation = Some(VerticalNavigation {
             goal_x,
             visual_row: target_row,
@@ -1270,9 +1290,6 @@ impl TextInput {
             cursor_offset: offset,
             layout_width,
         });
-        self.pause_blink_cursor(cx);
-        cx.notify();
-
         // Match Zed/native controls at the boundary: if neither the text
         // selection nor its soft-wrap affinity moved, an enclosing surface
         // gets a chance to use the arrow.
@@ -2761,6 +2778,8 @@ impl Render for TextInput {
             .on_action(cx.listener(Self::right))
             .on_action(cx.listener(Self::up))
             .on_action(cx.listener(Self::down))
+            .on_action(cx.listener(Self::select_up))
+            .on_action(cx.listener(Self::select_down))
             .on_action(cx.listener(Self::select_left))
             .on_action(cx.listener(Self::select_right))
             .on_action(cx.listener(Self::select_all))

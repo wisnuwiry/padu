@@ -649,6 +649,18 @@ fn push_mentioned_run(run: InlineRun, pieces: &mut Vec<InlinePiece>) {
         if trimmed_mention.len() <= 1 {
             continue;
         }
+        // File references such as `@src/app.rs` should remain ordinary text;
+        // only conversational mentions receive the chip treatment.
+        let file_like = trimmed_mention
+            .trim_start_matches('@')
+            .contains(['/', '\\'])
+            || trimmed_mention
+                .trim_start_matches('@')
+                .rsplit_once('.')
+                .is_some_and(|(_, extension)| !extension.is_empty());
+        if file_like {
+            continue;
+        }
         let end = at_start + trimmed_mention.len();
         if cursor < at_start {
             pieces.push(InlinePiece::Run(InlineRun {
@@ -954,6 +966,21 @@ mod tests {
         // Ranges point back into the source and are ascending.
         assert!(tree.blocks[0].range.start < tree.blocks[1].range.start);
         assert_eq!(&source[tree.blocks[1].range.clone()].trim(), &"Body text.");
+    }
+
+    #[test]
+    fn file_mentions_remain_plain_text() {
+        let tree = parse("See @src/app.rs and @alice");
+        let Block::Paragraph { runs } = &tree.blocks[0].block else {
+            panic!("expected a paragraph");
+        };
+        let file = runs
+            .iter()
+            .find(|run| run.text.contains("@src/app.rs"))
+            .unwrap();
+        assert!(!file.style.mention);
+        let person = runs.iter().find(|run| run.text == "@alice").unwrap();
+        assert!(person.style.mention);
     }
 
     #[test]

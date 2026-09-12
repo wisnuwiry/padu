@@ -45,6 +45,8 @@ pub struct Span {
     /// The element's full flat text. Snapshotted when the drag resolves, so
     /// copy still works after the element scrolls out of the registry.
     pub text: Rc<str>,
+    /// Display ranges that should be restored to markdown links when copied.
+    pub file_links: Vec<(Range<usize>, String)>,
     /// True when this element starts a new block, so joined copy inserts a
     /// paragraph break rather than a single newline.
     pub block_break: bool,
@@ -84,6 +86,7 @@ impl Selection {
             key,
             range,
             text,
+            file_links: Vec::new(),
             block_break: false,
         }];
     }
@@ -150,7 +153,16 @@ impl Selection {
                     out.push('\n');
                 }
             }
-            out.push_str(&span.text[span.range.clone()]);
+            let mut cursor = span.range.start;
+            for (file_range, markdown) in &span.file_links {
+                if file_range.start < span.range.start || file_range.end > span.range.end {
+                    continue;
+                }
+                out.push_str(&span.text[cursor..file_range.start]);
+                out.push_str(markdown);
+                cursor = file_range.end;
+            }
+            out.push_str(&span.text[cursor..span.range.end]);
             has_span = true;
         }
         out
@@ -164,8 +176,10 @@ impl Selection {
 pub struct RegisteredText<G = ()> {
     pub key: TextKey,
     pub text: Rc<str>,
-    /// True when this element begins a markdown block, for copy spacing.
+    /// True when this element begins a new block, for copy spacing.
     pub block_break: bool,
+    /// Display ranges that should be restored to markdown links when copied.
+    pub file_links: Vec<(Range<usize>, String)>,
     pub geometry: G,
 }
 
@@ -235,6 +249,7 @@ impl<G> SelectionRegistry<G> {
                     key: entry.key.clone(),
                     range: from..to,
                     text: entry.text.clone(),
+                    file_links: entry.file_links.clone(),
                     block_break: entry.block_break && !spans.is_empty(),
                 });
             }
@@ -334,6 +349,7 @@ mod tests {
             registry.push(RegisteredText {
                 key: TextKey::new(*row, index),
                 text: Rc::from(*text),
+                file_links: Vec::new(),
                 block_break: index > 0,
                 geometry: (),
             });
@@ -492,6 +508,7 @@ mod tests {
         registry.push(RegisteredText {
             key: TextKey::new("row-a", 0),
             text: Rc::from("a"),
+            file_links: Vec::new(),
             block_break: false,
             geometry: (),
         });
