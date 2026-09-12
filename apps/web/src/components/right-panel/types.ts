@@ -48,6 +48,6 @@ export interface RightPanelProps {
   onShowConversationChange?: (show: boolean) => void
   onExpandableChange?: (expandable: boolean) => void
   onTabsReport?: (tabs: PanelTab[], activeId: string | null) => void
-  onAddToChat?: (name: string, isDir?: boolean) => void
+  onAddToChat?: (path: string, isDir?: boolean) => void
   onFindFile?: () => void
 }

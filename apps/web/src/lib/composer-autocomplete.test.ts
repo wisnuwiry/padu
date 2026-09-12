@@ -40,7 +40,7 @@ describe('composer autocomplete', () => {
     expect(replaceComposerTrigger('read @app then', trigger, {
       kind: 'file',
       file: { path: 'src/app.ts', is_dir: false },
-    })).toEqual({ text: 'read @app.ts then', cursor: 13 })
+    })).toEqual({ text: 'read [app.ts](src/app.ts) then', cursor: 26 })
   })
 
   test('merges live provider commands without losing discovered templates', () => {

@@ -1655,15 +1655,15 @@ export function PaduApp() {
               }
             }}
             onPanelWidthChange={setRightPanelWidth}
-            onAddToChat={(name, isDir) => {
-              const mention = isDir ? `${name}/` : name
+            onAddToChat={(path, isDir) => {
+              const mention = isDir && !/[/\\]$/u.test(path) ? `${path}/` : path
               setComposerMention({
                 sessionId: panelSession.id,
                 mention,
                 signal: Date.now(),
               })
               setFocusComposerSignal((value) => value + 1)
-              toast.success(t('files.added_to_chat', { path: name }))
+              toast.success(t('files.added_to_chat', { path }))
             }}
           />
         )

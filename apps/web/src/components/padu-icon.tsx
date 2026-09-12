@@ -237,6 +237,10 @@ export function FileTypeIcon({
   )
 }
 
+export function fileTypeIconClass(path: string): string {
+  return FILE_TYPE_ICONS[fileTypeIconName(path)]
+}
+
 function fileTypeIconName(path: string): FileTypeIconName {
   const name = path.split(/[\\/]/).at(-1)?.toLocaleLowerCase() ?? path.toLocaleLowerCase()
   if (name.startsWith('readme')) return 'readme'

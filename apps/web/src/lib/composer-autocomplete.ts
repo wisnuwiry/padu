@@ -5,6 +5,7 @@ import type {
   ReportedCommand,
   SlashCommand,
 } from '@padu/client'
+import { markdownFileReference } from './inline-file-references'
 import { fuzzyScore } from './palette-search'
 
 export const COMPOSER_AUTOCOMPLETE_CAP = 64
@@ -169,12 +170,6 @@ export function composerAutocompleteRows(
     .map(({ row }) => row)
 }
 
-export function trimToFilename(path: string): string {
-  const isDir = path.endsWith('/') || path.endsWith('\\')
-  const clean = path.replace(/[/\\]+$/, '')
-  const name = clean.split(/[/\\]/).pop() || clean
-  return isDir ? `${name}/` : name
-}
 
 export function replaceComposerTrigger(
   text: string,
@@ -185,7 +180,7 @@ export function replaceComposerTrigger(
   const after = text.slice(trigger.end)
   const value = row.kind === 'command'
     ? `/${row.command.name}`
-    : `@${trimToFilename(row.file.path)}`
+    : markdownFileReference(row.file.path)
   const prefix = before.length && !/\s$/u.test(before) ? ' ' : ''
   const suffix = after.length && !/^\s/u.test(after) ? ' ' : ''
   const insert = `${prefix}${value}${suffix}`

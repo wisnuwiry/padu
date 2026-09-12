@@ -12,12 +12,14 @@ import { Virtuoso, type ListItem, type VirtuosoHandle } from 'react-virtuoso'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { PreviewableImage } from '@/components/image-preview'
+import { InlineFileChip } from '@/components/inline-file-chip'
 import { FileTypeIcon, PaduIcon, type PaduIconName } from '@/components/padu-icon'
 import { Kbd } from '@/components/ui/kbd'
 import { readAttachmentImage } from '@/lib/attachments'
 import { useDaemon } from '@/lib/daemon-context'
 import { activitiesForBlock } from '@/lib/event-reducer'
 import { useI18n, type AppLocale } from '@/lib/i18n'
+import { isLocalFileTarget } from '@/lib/inline-file-references'
 import { rehypeMentionChips } from '@/lib/markdown-mentions'
 import {
   advanceMarkdownVeil,
@@ -1512,19 +1514,31 @@ function Markdown({
         remarkPlugins={[remarkGfm]}
         rehypePlugins={chunks.length ? [markdownVeilPlugin(chunks, now), rehypeMentionChips] : [rehypeMentionChips]}
         components={{
-          a: ({ children, href, ...props }) => (
-            <a
-              {...props}
-              href={href}
-              target="_blank"
-              rel="noreferrer noopener"
-              onClick={(event) => {
-                if (href && onOpenLink(href)) event.preventDefault()
-              }}
-            >
-              {children}
-            </a>
-          ),
+          a: ({ children, href, ...props }) => {
+            if (typeof href === 'string' && isLocalFileTarget(href)) {
+              return (
+                <InlineFileChip
+                  className={props.className}
+                  href={href}
+                  target={href}
+                  onOpen={onOpenLink}
+                />
+              )
+            }
+            return (
+              <a
+                {...props}
+                href={href}
+                target="_blank"
+                rel="noreferrer noopener"
+                onClick={(event) => {
+                  if (href && onOpenLink(href)) event.preventDefault()
+                }}
+              >
+                {children}
+              </a>
+            )
+          },
           img: ({ alt, src }) => typeof src === 'string' ? (
             <PreviewableImage
               buttonClassName="max-w-full rounded-[9px] border bg-[var(--inset)]"
@@ -1533,23 +1547,13 @@ function Markdown({
               source={src}
             />
           ) : null,
-          // TODO(web): Make mention chips in rendered message bubbles use the
-          // same stable inline renderer as attachments; provider/markdown
-          // payload variations can still leave the chip unrendered.
           span: ({ children, className, ...props }) => {
             const mentionProps = props as { 'data-mention'?: string; dataMention?: string }
             const mention = mentionProps['data-mention'] ?? mentionProps.dataMention
             if (!mention || !className?.toString().includes('mention-chip')) {
               return <span className={className} {...props}>{children}</span>
             }
-            return (
-              <span className="mention-chip" {...props}>
-                {mention.endsWith('/')
-                  ? <PaduIcon className="size-3.5 shrink-0 text-[var(--text-secondary)]" name="folder" />
-                  : <FileTypeIcon className="size-3.5 shrink-0" path={mention} />}
-                <span className="truncate">{mention.replace(/\/$/, '')}</span>
-              </span>
-            )
+            return <InlineFileChip legacy target={mention} />
           },
         }}
       >
