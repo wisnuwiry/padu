@@ -953,7 +953,12 @@ impl Padu {
                     *cache = Some((cache_key.clone(), MarkdownView::new()));
                 }
                 let (_, view) = cache.as_mut().expect("note preview cache entry ensured");
-                view.set_text(&note.body, false);
+                // Render the live editor draft, not the last persisted snapshot.
+                // The body editor subscription already notifies this view on
+                // edits; MarkdownView only reparses when the content changes,
+                // while schedule_note_save keeps daemon writes debounced.
+                let live_body = self.notes_body.read(cx).content();
+                view.set_text(live_body, false);
                 let ctx = MarkdownCtx::new(
                     format!("note-preview-{}", note.id),
                     &palette,
