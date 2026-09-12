@@ -2535,7 +2535,7 @@ impl Padu {
                                 });
                             }
                         })
-                        .icon("icons/folder.svg")
+                        .icon("icons/archive.svg")
                         .disabled(is_busy),
                         MenuItem::Separator,
                         MenuItem::new(tr!("common.rename"), move |window, cx| {

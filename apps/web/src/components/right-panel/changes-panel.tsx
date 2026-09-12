@@ -14,6 +14,7 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { ControlMenu } from '@/components/control-menu'
 import { PanelResizeHandle } from '@/components/panel-resize-handle'
 import { FileTypeIcon, PaduIcon } from '@/components/padu-icon'
+import { Kbd } from '@/components/ui/kbd'
 import type { CodeDiffSurfaceHandle, DiffSurfaceFile } from '@/components/code-surfaces'
 import { collectWorkspaceDiff, daemonKeys, sessionCwd } from '@/lib/daemon-api'
 import { useDaemon } from '@/lib/daemon-context'
@@ -21,6 +22,7 @@ import { useI18n } from '@/lib/i18n'
 import { latestReviewTurnSource, reviewDiffSourceLabel, sameReviewDiffSource } from '@/lib/review-diff'
 import { mergeReviewDiffFiles, treeNavigationAction } from '@/lib/right-panel-state'
 import { cn } from '@/lib/utils'
+import { usePrimaryShortcut } from '@/lib/platform'
 import { clamp, diffTreeRowId, errorMessage, focusVirtualTreeRow, isTreeNavigationKey, PanelMessage, parseNumstat, readStoredWidth, requireClient } from './shared'
 
 const CodeDiffSurface = lazy(() => import('@/components/code-surfaces').then((module) => ({ default: module.CodeDiffSurface })))
@@ -42,6 +44,7 @@ export function ChangesPanel({
   const { client, config, phase } = useDaemon()
   const diffView = useRef<CodeDiffSurfaceHandle>(null)
   const diffTreeList = useRef<VirtuosoHandle>(null)
+  const filterInput = useRef<HTMLInputElement>(null)
   const [files, setFiles] = useState<DiffSurfaceFile[]>([])
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [focusedDiffRow, setFocusedDiffRow] = useState<string | null>(null)
@@ -49,6 +52,12 @@ export function ChangesPanel({
   const [filter, setFilter] = useState('')
   const [layout, setLayout] = useState<'tree' | 'flat'>('tree')
   const [showNavigator, setShowNavigator] = useState(true)
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set())
+  const refreshShortcut = usePrimaryShortcut('⌘R', 'Ctrl+R')
+  const layoutShortcut = usePrimaryShortcut('⇧⌘T', 'Ctrl+Shift+T')
+  const filesShortcut = usePrimaryShortcut('⌘\\', 'Ctrl+\\')
+  const collapseAllShortcut = usePrimaryShortcut('⇧⌘C', 'Ctrl+Shift+C')
+  const treeShortcut = usePrimaryShortcut('⇧⌘O', 'Ctrl+Shift+O')
   const [treeWidth, setTreeWidth] = useState(() => readStoredWidth('padu.diffTreeWidth', 184, 140, 360))
   const root = session && project ? sessionCwd(session, project) : undefined
   const maxTreeWidth = Math.max(140, Math.min(360, panelWidth - 140))
@@ -74,6 +83,7 @@ export function ChangesPanel({
     setFiles([])
     setSelectedFile(null)
     setExpandedPaths(new Set())
+    setCollapsedIds(new Set())
     setFilter('')
   }, [diffSource])
 
@@ -136,6 +146,59 @@ export function ChangesPanel({
     }
   }, [focusDiffTreeIndex, layout, navigatorRows, toggleDiffDirectory])
 
+  const fileIds = reviewFiles.map((file) => file.id)
+  const allReviewFilesCollapsed = fileIds.length > 0 && fileIds.every((id) => collapsedIds.has(id))
+  const toggleAllReviewFiles = () => {
+    setCollapsedIds(allReviewFilesCollapsed ? new Set() : new Set(fileIds))
+  }
+  const toggleSelectedReviewFile = () => {
+    if (!selectedFile) return
+    setCollapsedIds((current) => {
+      const next = new Set(current)
+      if (next.has(selectedFile)) next.delete(selectedFile)
+      else next.add(selectedFile)
+      return next
+    })
+  }
+  const directoryPaths = diffDirectoryPaths(reviewFiles)
+  const expandTree = layout === 'tree'
+    && directoryPaths.size > 0
+    && ![...directoryPaths].every((path) => expandedPaths.has(path))
+  const toggleTreeFolders = () => {
+    setExpandedPaths(expandTree ? directoryPaths : new Set())
+  }
+  const handleReviewShortcut = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement
+    if (!event.metaKey && !event.ctrlKey && event.key === '/' && !event.shiftKey && !typing) {
+      event.preventDefault()
+      setShowNavigator(true)
+      filterInput.current?.focus()
+      return
+    }
+    const mod = event.metaKey || event.ctrlKey
+    if (!mod) return
+    const key = event.key.toLowerCase()
+    if (key === 'r' && !event.shiftKey) {
+      event.preventDefault()
+      void diff.refetch()
+    } else if (key === 't' && event.shiftKey) {
+      event.preventDefault()
+      setLayout((current) => current === 'tree' ? 'flat' : 'tree')
+    } else if (key === '\\' && !event.shiftKey) {
+      event.preventDefault()
+      setShowNavigator((visible) => !visible)
+    } else if (key === 'c' && event.shiftKey) {
+      event.preventDefault()
+      toggleAllReviewFiles()
+    } else if (key === 'k' && event.shiftKey) {
+      event.preventDefault()
+      toggleSelectedReviewFile()
+    } else if (key === 'o' && event.shiftKey) {
+      event.preventDefault()
+      toggleTreeFolders()
+    }
+  }
+
   if (!root) return <PanelMessage title={t('files.no_project_open')} detail={t('files.no_project_open_description')} />
   const stats = parseNumstat(diff.data?.numstat ?? '')
   const selectSource = (source: ReviewDiffSource) => {
@@ -197,8 +260,17 @@ export function ChangesPanel({
         <div className="flex min-w-0 flex-1">
           <Suspense fallback={<PanelMessage title={t('diff.loading')} detail={t('files.preparing_syntax')} />}>
             <CodeDiffSurface
+              collapsedIds={collapsedIds}
               completeContext={data.completeContext}
               onFiles={setFiles}
+              onToggleFile={(id) => {
+                setCollapsedIds((current) => {
+                  const next = new Set(current)
+                  if (next.has(id)) next.delete(id)
+                  else next.add(id)
+                  return next
+                })
+              }}
               patch={data.patch}
               ref={diffView}
             />
@@ -216,16 +288,31 @@ export function ChangesPanel({
             value={fittedTreeWidth}
             onChange={setTreeWidth}
           />
-          <label className="flex h-11 shrink-0 items-center gap-2 border-b px-2">
-            <PaduIcon className="size-[13px] shrink-0 text-[var(--text-tertiary)]" name="search" />
-            <input
-              aria-label={t('diff.filter_files')}
-              className="min-w-0 flex-1 bg-transparent text-[11px] outline-none placeholder:text-[var(--text-ghost)]"
-              placeholder={t('diff.filter_files')}
-              value={filter}
-              onChange={(event) => setFilter(event.target.value)}
-            />
-          </label>
+          <div className="flex h-11 shrink-0 items-center gap-1 border-b px-2">
+            <label className="flex min-w-0 flex-1 items-center gap-2">
+              <PaduIcon className="size-[13px] shrink-0 text-[var(--text-tertiary)]" name="search" />
+              <input
+                aria-label={t('diff.filter_files')}
+                className="min-w-0 flex-1 bg-transparent text-[11px] outline-none placeholder:text-[var(--text-ghost)]"
+                placeholder={t('diff.filter_files')}
+                ref={filterInput}
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+              />
+              <Kbd size="xs">/</Kbd>
+            </label>
+            {layout === 'tree' && (
+              <button
+                aria-label={expandTree ? t('diff.expand_tree') : t('diff.collapse_tree')}
+                className="rounded p-1 text-[var(--text-tertiary)] hover:bg-accent hover:text-foreground"
+                title={`${expandTree ? t('diff.expand_tree') : t('diff.collapse_tree')} (${treeShortcut})`}
+                type="button"
+                onClick={toggleTreeFolders}
+              >
+                <PaduIcon className="size-3.5" name={expandTree ? 'chevronsUpDown' : 'chevronsDownUp'} />
+              </button>
+            )}
+          </div>
           <Virtuoso
             aria-label={t('diff.changed_files')}
             className="min-h-0 flex-1 py-1"
@@ -269,6 +356,12 @@ export function ChangesPanel({
                 type="button"
                 onClick={() => {
                   setSelectedFile(row.file.id)
+                  setCollapsedIds((current) => {
+                    if (!current.has(row.file.id)) return current
+                    const next = new Set(current)
+                    next.delete(row.file.id)
+                    return next
+                  })
                   diffView.current?.scrollToFile(row.file.id)
                 }}
                 onFocus={() => setFocusedDiffRow(diffTreeRowKey(row))}
@@ -288,7 +381,7 @@ export function ChangesPanel({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col outline-none" tabIndex={0} onKeyDown={handleReviewShortcut}>
       <div className="flex min-h-10 items-center gap-2 border-b px-3 text-[11px]">
         <ControlMenu
           items={sourceItems}
@@ -308,63 +401,48 @@ export function ChangesPanel({
         )}
         <div className="flex-1" />
         {diff.data && (
-          <>
-            <div className="flex items-center rounded-md border p-0.5" role="group" aria-label="Changed-file layout">
-              <button
-                aria-label="Tree layout"
-                aria-pressed={layout === 'tree'}
-                className={cn('rounded px-1.5 py-1 text-[10px] hover:bg-accent', layout === 'tree' && 'bg-accent text-foreground')}
-                type="button"
-                onClick={() => setLayout('tree')}
-              >
-                <PaduIcon className="size-3.5" name="folder" />
-              </button>
-              <button
-                aria-label="Flat layout"
-                aria-pressed={layout === 'flat'}
-                className={cn('rounded px-1.5 py-1 text-[10px] hover:bg-accent', layout === 'flat' && 'bg-accent text-foreground')}
-                type="button"
-                onClick={() => setLayout('flat')}
-              >
-                <PaduIcon className="size-3.5" name="list" />
-              </button>
-            </div>
-            {layout === 'tree' && (
-              <>
-                <button
-                  aria-label="Expand all changed-file folders"
-                  className="rounded p-1 text-[var(--text-tertiary)] hover:bg-accent hover:text-foreground"
-                  title="Expand all"
-                  type="button"
-                  onClick={() => setExpandedPaths(diffDirectoryPaths(reviewFiles))}
-                >
-                  <PaduIcon className="size-3.5" name="chevronDown" />
-                </button>
-                <button
-                  aria-label="Collapse all changed-file folders"
-                  className="rounded p-1 text-[var(--text-tertiary)] hover:bg-accent hover:text-foreground"
-                  title="Collapse all"
-                  type="button"
-                  onClick={() => setExpandedPaths(new Set())}
-                >
-                  <PaduIcon className="size-3.5" name="chevronUp" />
-                </button>
-              </>
-            )}
-            <button
-              aria-pressed={showNavigator}
-              aria-label={showNavigator ? 'Hide changed-file navigator' : 'Show changed-file navigator'}
-              className="rounded p-1 text-[var(--text-tertiary)] hover:bg-accent hover:text-foreground"
-              title={showNavigator ? 'Hide changed-file navigator' : 'Show changed-file navigator'}
-              type="button"
-              onClick={() => setShowNavigator((visible) => !visible)}
-            >
-              <PaduIcon className="size-3.5" name="panelRight" />
-            </button>
-          </>
+          <button
+            aria-label={allReviewFilesCollapsed ? t('diff.expand_all_files') : t('diff.collapse_all_files')}
+            className="rounded p-1 text-[var(--text-tertiary)] hover:bg-accent hover:text-foreground"
+            title={`${allReviewFilesCollapsed ? t('diff.expand_all_files') : t('diff.collapse_all_files')} (${collapseAllShortcut})`}
+            type="button"
+            onClick={toggleAllReviewFiles}
+          >
+            <PaduIcon className="size-3.5" name={allReviewFilesCollapsed ? 'chevronsUpDown' : 'chevronsDownUp'} />
+          </button>
         )}
-        <button aria-label={t('diff.refresh')} className="rounded p-1 hover:bg-accent" type="button" onClick={() => void diff.refetch()}>
+        {showNavigator && (
+          <button
+            aria-label={layout === 'tree' ? t('diff.layout_flat') : t('diff.layout_tree')}
+            className="rounded p-1 text-[var(--text-tertiary)] hover:bg-accent hover:text-foreground"
+            title={`${layout === 'tree' ? t('diff.layout_flat') : t('diff.layout_tree')} (${layoutShortcut})`}
+            type="button"
+            onClick={() => setLayout((current) => current === 'tree' ? 'flat' : 'tree')}
+          >
+            <PaduIcon className="size-3.5" name={layout === 'tree' ? 'hierarchyFiles' : 'listFiles'} />
+          </button>
+        )}
+        <button
+          aria-label={t('diff.refresh')}
+          className="rounded p-1 hover:bg-accent"
+          title={`${t('diff.refresh')} (${refreshShortcut})`}
+          type="button"
+          onClick={() => void diff.refetch()}
+        >
           <PaduIcon className={cn('size-3.5', diff.isFetching && 'motion-safe:animate-spin')} name="rotateCw" />
+        </button>
+        <button
+          aria-pressed={showNavigator}
+          aria-label={showNavigator ? t('diff.hide_files') : t('diff.show_files')}
+          className={cn(
+            'rounded p-1 text-[var(--text-tertiary)] hover:bg-accent hover:text-foreground',
+            !showNavigator && 'bg-accent/60',
+          )}
+          title={`${showNavigator ? t('diff.hide_files') : t('diff.show_files')} (${filesShortcut})`}
+          type="button"
+          onClick={() => setShowNavigator((visible) => !visible)}
+        >
+          <PaduIcon className="size-3.5" name="list" />
         </button>
       </div>
       {reviewContent}

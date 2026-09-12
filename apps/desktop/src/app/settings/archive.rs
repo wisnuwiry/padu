@@ -70,7 +70,7 @@ impl Padu {
                         .items_center()
                         .gap(px(10.0))
                         .hover(|element| element.bg(theme.sidebar_item_background))
-                        .child(icon("icons/package.svg", 14.0, theme.text_tertiary))
+                        .child(icon("icons/archive.svg", 14.0, theme.text_tertiary))
                         .child(
                             div()
                                 .flex_1()

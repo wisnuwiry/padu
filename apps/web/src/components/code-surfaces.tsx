@@ -26,6 +26,8 @@ import {
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
+import { PaduIcon } from '@/components/padu-icon'
+import { usePrimaryShortcut } from '@/lib/platform'
 import { useI18n } from '../lib/i18n'
 import { compactReviewPatch, createReviewDiffLoader } from '../lib/review-diff'
 
@@ -196,7 +198,9 @@ export function CodeFileSurface({
 interface CodeDiffSurfaceProps {
   patch: string
   completeContext: boolean
+  collapsedIds?: ReadonlySet<string>
   onFiles?: (files: DiffSurfaceFile[]) => void
+  onToggleFile?: (id: string) => void
 }
 
 export const CodeDiffSurface = forwardRef<CodeDiffSurfaceHandle, CodeDiffSurfaceProps>(
@@ -224,14 +228,17 @@ export const CodeDiffSurface = forwardRef<CodeDiffSurfaceHandle, CodeDiffSurface
 function CodeDiffSurfaceContent({
   patch,
   completeContext,
+  collapsedIds,
   disableWorkerPool,
   onFiles,
+  onToggleFile,
   forwardedRef,
 }: CodeDiffSurfaceProps & {
   disableWorkerPool: boolean
   forwardedRef: ForwardedRef<CodeDiffSurfaceHandle>
 }) {
   const { t } = useI18n()
+  const fileShortcut = usePrimaryShortcut('⇧⌘K', 'Ctrl+Shift+K')
   const themeType = useResolvedTheme()
   const codeView = useRef<CodeViewHandle<undefined>>(null)
   const [renderReady, setRenderReady] = useState(false)
@@ -264,6 +271,12 @@ function CodeDiffSurfaceContent({
       loadDiffFiles: completeContext ? createReviewDiffLoader(patch, cacheKey) : undefined,
     }
   })
+  const collapsed = collapsedIds ?? new Set<string>()
+  const items = model.items.map((item) => ({
+    ...item,
+    collapsed: collapsed.has(item.id),
+    version: collapsed.has(item.id) ? 1 : 0,
+  }))
   const options = {
     ...sharedOptions,
     diffIndicators: 'bars' as const,
@@ -305,15 +318,50 @@ function CodeDiffSurfaceContent({
   }), [])
 
   return (
-    <div className="relative size-full min-h-0 min-w-0 bg-background">
+    <div
+      className="relative size-full min-h-0 min-w-0 bg-background"
+      onClick={(event) => {
+        if (!onToggleFile) return
+        const path = event.nativeEvent.composedPath()
+        if (path.some((node) => node instanceof HTMLElement && node.dataset.reviewFileToggle != null)) {
+          return
+        }
+        const title = path.find((node): node is HTMLElement => (
+          node instanceof HTMLElement && node.hasAttribute('data-title')
+        ))
+        const header = path.find((node): node is HTMLElement => (
+          node instanceof HTMLElement && node.hasAttribute('data-diffs-header')
+        ))
+        if (!title || !header) return
+        const file = model.files.find((candidate) => candidate.path === title.textContent)
+        if (file) onToggleFile(file.id)
+      }}
+    >
       {/* CodeView virtualizes both the multi-file item list and each file's
           rendered lines. Keep it as this surface's only scroll virtualizer. */}
       <CodeView
         className="padu-code-surface size-full overflow-auto bg-background"
         disableWorkerPool={disableWorkerPool}
-        items={model.items}
+        items={items}
         options={options}
         ref={codeView}
+        renderHeaderMetadata={(item) => {
+          const isCollapsed = collapsed.has(item.id)
+          return (
+            <button
+              className="ml-1 grid size-[22px] place-items-center rounded-md text-[var(--text-tertiary)] outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              data-review-file-toggle=""
+              title={`${isCollapsed ? t('diff.expand_file') : t('diff.collapse_file')} (${fileShortcut})`}
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation()
+                onToggleFile?.(item.id)
+              }}
+            >
+              <PaduIcon className="size-3" name={isCollapsed ? 'chevronRight' : 'chevronDown'} />
+            </button>
+          )
+        }}
       />
       {!renderReady && <CodeSurfaceLoading label={t('diff.preparing_review')} />}
     </div>

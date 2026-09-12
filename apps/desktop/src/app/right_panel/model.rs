@@ -31,6 +31,29 @@ pub(crate) enum DiffFileLayout {
     Flat,
 }
 
+impl DiffFileLayout {
+    pub(crate) fn toggle(self) -> Self {
+        match self {
+            Self::Tree => Self::Flat,
+            Self::Flat => Self::Tree,
+        }
+    }
+
+    pub(crate) fn icon(self) -> &'static str {
+        match self {
+            Self::Tree => "icons/hierarchy-files.svg",
+            Self::Flat => "icons/list-files.svg",
+        }
+    }
+
+    pub(crate) fn label(self) -> String {
+        match self {
+            Self::Tree => tr!("diff.layout_tree"),
+            Self::Flat => tr!("diff.layout_flat"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ReviewDiffTreeRow {
     Directory {
@@ -108,6 +131,58 @@ pub(crate) fn review_diff_gap_directions(
         (GapPosition::Between, false) => &[ExpansionDirection::Both],
         (GapPosition::Between, true) => &[ExpansionDirection::Start, ExpansionDirection::End],
     }
+}
+
+pub(crate) fn review_diff_visible_line_indices(
+    lines: &[crate::review_diff::Line],
+    collapsed_files: &HashSet<usize>,
+) -> Vec<usize> {
+    lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| {
+            matches!(line.kind, crate::review_diff::LineKind::FileHeader)
+                || !collapsed_files.contains(&line.file_index)
+        })
+        .map(|(index, _)| index)
+        .collect()
+}
+
+pub(crate) fn review_diff_collapsible_files(
+    snapshot: &crate::review_diff::Snapshot,
+) -> impl Iterator<Item = usize> + '_ {
+    snapshot
+        .files
+        .iter()
+        .enumerate()
+        .filter_map(|(index, file)| {
+            let start = file.diff_line?;
+            snapshot
+                .lines
+                .get(start + 1)
+                .is_some_and(|line| line.file_index == index)
+                .then_some(index)
+        })
+}
+
+pub(crate) fn review_diff_list_splice(
+    previous: &[usize],
+    next: &[usize],
+) -> Option<(std::ops::Range<usize>, usize)> {
+    let prefix = previous
+        .iter()
+        .zip(next)
+        .take_while(|(left, right)| left == right)
+        .count();
+    let suffix = previous[prefix..]
+        .iter()
+        .rev()
+        .zip(next[prefix..].iter().rev())
+        .take_while(|(left, right)| left == right)
+        .count();
+    let old_end = previous.len() - suffix;
+    let new_count = next.len() - prefix - suffix;
+    (prefix != old_end || new_count != 0).then_some((prefix..old_end, new_count))
 }
 
 pub(crate) fn review_diff_directory_paths(files: &[crate::review_diff::File]) -> HashSet<String> {

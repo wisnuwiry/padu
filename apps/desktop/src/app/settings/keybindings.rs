@@ -195,6 +195,71 @@ impl Padu {
                     ),
                 ],
             ),
+            (
+                "keybindings.section_files",
+                &[
+                    (
+                        "keybindings.files_find",
+                        "keybindings.files_find_desc",
+                        crate::platform::primary_shortcut("⌘P", "Ctrl+P"),
+                    ),
+                    (
+                        "keybindings.files_new_file",
+                        "keybindings.files_new_file_desc",
+                        "N",
+                    ),
+                    (
+                        "keybindings.files_new_folder",
+                        "keybindings.files_new_folder_desc",
+                        "⇧N",
+                    ),
+                    (
+                        "keybindings.files_refresh",
+                        "keybindings.files_refresh_desc",
+                        "R",
+                    ),
+                    (
+                        "keybindings.files_hidden",
+                        "keybindings.files_hidden_desc",
+                        "H",
+                    ),
+                ],
+            ),
+            (
+                "keybindings.section_review",
+                &[
+                    (
+                        "keybindings.refresh_review",
+                        "keybindings.refresh_review_desc",
+                        crate::platform::primary_shortcut("⌘R", "Ctrl+R"),
+                    ),
+                    (
+                        "keybindings.toggle_review_layout",
+                        "keybindings.toggle_review_layout_desc",
+                        crate::platform::primary_shortcut("⇧⌘T", "Ctrl+Shift+T"),
+                    ),
+                    (
+                        "keybindings.toggle_review_files",
+                        "keybindings.toggle_review_files_desc",
+                        crate::platform::primary_shortcut("⌘\\", "Ctrl+\\"),
+                    ),
+                    (
+                        "keybindings.toggle_review_collapse",
+                        "keybindings.toggle_review_collapse_desc",
+                        crate::platform::primary_shortcut("⇧⌘C", "Ctrl+Shift+C"),
+                    ),
+                    (
+                        "keybindings.toggle_review_file",
+                        "keybindings.toggle_review_file_desc",
+                        crate::platform::primary_shortcut("⇧⌘K", "Ctrl+Shift+K"),
+                    ),
+                    (
+                        "keybindings.toggle_review_tree",
+                        "keybindings.toggle_review_tree_desc",
+                        crate::platform::primary_shortcut("⇧⌘O", "Ctrl+Shift+O"),
+                    ),
+                ],
+            ),
         ];
 
         let query = self

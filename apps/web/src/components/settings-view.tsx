@@ -14,6 +14,7 @@ import { NotificationsSettings } from '@/components/notifications-settings'
 import { SkillsSettings } from '@/components/skills-settings'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Kbd } from '@/components/ui/kbd'
 import { UsageSettings } from '@/components/usage-settings'
 import { ProviderIcon, PROVIDERS, PaduIcon, type PaduIconName } from '@/components/padu-icon'
 import {
@@ -98,6 +99,7 @@ export function SettingsView({
 }) {
   const { t } = useI18n()
   const [query, setQuery] = useState('')
+  const searchRef = useRef<HTMLInputElement>(null)
   const localizedPages = SETTINGS_PAGES.map((candidate) => ({
     ...candidate,
     localizedLabel: t(candidate.labelKey),
@@ -116,23 +118,42 @@ export function SettingsView({
     return () => window.removeEventListener('keydown', escape)
   }, [query])
 
+  useEffect(() => {
+    const focusSearch = (event: KeyboardEvent) => {
+      if (event.key !== '/' || event.metaKey || event.ctrlKey || event.altKey) return
+      const target = event.target as HTMLElement | null
+      if (
+        target instanceof HTMLInputElement
+        || target instanceof HTMLTextAreaElement
+        || target instanceof HTMLSelectElement
+        || target?.isContentEditable
+      ) return
+      event.preventDefault()
+      searchRef.current?.focus()
+    }
+    window.addEventListener('keydown', focusSearch)
+    return () => window.removeEventListener('keydown', focusSearch)
+  }, [])
+
   return (
     <div className="flex h-dvh min-w-0 flex-1 bg-background">
-      <aside className="flex h-full w-[252px] shrink-0 flex-col bg-sidebar pt-3">
-        <div className="px-3">
+      <aside className="flex h-full w-[252px] shrink-0 flex-col bg-sidebar">
+        <div className="flex h-12 flex-none items-center px-3">
           <button
-            className="flex h-[34px] w-full items-center gap-[9px] rounded-lg px-[9px] text-[13px] text-[var(--text-secondary)] outline-none hover:bg-sidebar-accent active:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
+            className="flex h-[26px] flex-none items-center gap-1.5 rounded-md px-1.5 text-[13px] text-[var(--text-secondary)] outline-none hover:bg-sidebar-accent active:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
             type="button"
             onClick={onBack}
           >
-            <PaduIcon className="size-[15px] text-[var(--text-tertiary)]" name="arrowLeft" />
+            <PaduIcon className="size-[14px] text-[var(--text-tertiary)]" name="arrowLeft" />
             {t('settings.back')}
           </button>
+          <div className="min-w-0 flex-1" />
         </div>
         <div className="px-3 pt-2">
-          <label className="flex h-8 items-center gap-2 rounded-lg border bg-[var(--inset)] px-2.5 focus-within:border-ring">
+          <label className="group flex h-8 items-center gap-2 rounded-lg border bg-[var(--inset)] px-2.5 focus-within:border-ring">
             <PaduIcon className="size-[13px] text-[var(--text-tertiary)]" name="search" />
             <input
+              ref={searchRef}
               aria-label={t('settings.search')}
               className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-[var(--text-ghost)]"
               placeholder={t('settings.search')}
@@ -146,6 +167,7 @@ export function SettingsView({
                 onPageChange(pages[(current + delta + pages.length) % pages.length]!.id)
               }}
             />
+            <Kbd className="group-focus-within:hidden" size="xs">/</Kbd>
           </label>
         </div>
         <nav aria-label={t('common.settings')} className="mt-[18px] flex flex-col gap-[3px] px-3">

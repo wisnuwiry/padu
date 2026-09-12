@@ -794,6 +794,7 @@ pub(crate) struct RightPanelSessionState {
     pub(crate) diff_snapshot: Option<Arc<ReviewDiffSnapshot>>,
     pub(crate) diff_selected_file: Option<usize>,
     pub(crate) diff_expanded_paths: HashSet<String>,
+    pub(crate) diff_collapsed_files: HashSet<usize>,
     pub(crate) diff_file_layout: right_panel::DiffFileLayout,
     pub(crate) diff_files_visible: bool,
 }
@@ -816,6 +817,7 @@ impl RightPanelSessionState {
             diff_snapshot: None,
             diff_selected_file: None,
             diff_expanded_paths: HashSet::new(),
+            diff_collapsed_files: HashSet::new(),
             diff_file_layout: right_panel::DiffFileLayout::default(),
             diff_files_visible: true,
         }
@@ -1485,6 +1487,8 @@ pub struct Padu {
     right_panel_diff_generation: u64,
     right_panel_diff_selected_file: Option<usize>,
     right_panel_diff_expanded_paths: HashSet<String>,
+    right_panel_diff_collapsed_files: HashSet<usize>,
+    right_panel_diff_visible_lines: Vec<usize>,
     right_panel_diff_file_layout: right_panel::DiffFileLayout,
     right_panel_diff_files_visible: bool,
     right_panel_diff_tree_rows: RefCell<Vec<right_panel::ReviewDiffTreeRow>>,
@@ -1772,6 +1776,7 @@ pub use dialogs::init as init_dialog_keys;
 pub use image_preview::init as init_image_preview_keys;
 pub use note_preview::init as init_note_preview_keys;
 pub use onboarding::init as init_onboarding_keys;
+pub use right_panel::init_diff_keys as init_right_panel_diff_keys;
 pub use right_panel::init_files_keys as init_right_panel_files_keys;
 pub use settings::init as init_settings_keys;
 pub use settings::init_skills_keys;
@@ -3345,6 +3350,8 @@ impl Padu {
                 right_panel_diff_generation: 0,
                 right_panel_diff_selected_file: None,
                 right_panel_diff_expanded_paths: HashSet::new(),
+                right_panel_diff_collapsed_files: HashSet::new(),
+                right_panel_diff_visible_lines: Vec::new(),
                 right_panel_diff_file_layout: right_panel::DiffFileLayout::default(),
                 right_panel_diff_files_visible: true,
                 right_panel_diff_tree_rows: RefCell::new(Vec::new()),

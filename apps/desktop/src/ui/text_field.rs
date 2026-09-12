@@ -22,6 +22,7 @@ pub struct TextField {
     base: Stateful<Div>,
     input: gpui::Entity<TextInput>,
     icon: Option<(&'static str, f32)>,
+    suffix: Option<AnyElement>,
 }
 
 impl TextField {
@@ -30,12 +31,19 @@ impl TextField {
             base: div().id(id),
             input,
             icon: None,
+            suffix: None,
         }
     }
 
     /// Leading icon, tinted tertiary like the address bar's lock.
     pub fn icon(mut self, path: &'static str, size: f32) -> Self {
         self.icon = Some((path, size));
+        self
+    }
+
+    /// Trailing content, typically a keyboard hint that hides while typing.
+    pub fn suffix(mut self, suffix: impl IntoElement) -> Self {
+        self.suffix = Some(suffix.into_any_element());
         self
     }
 }
@@ -82,5 +90,6 @@ impl RenderOnce for TextField {
                 element.child(icon(path, size, theme.text_tertiary))
             })
             .child(div().min_w_0().flex_1().child(self.input))
+            .when_some(self.suffix, |element, suffix| element.child(suffix))
     }
 }

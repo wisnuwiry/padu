@@ -1396,7 +1396,7 @@ impl Padu {
                     note.title.clone()
                 },
                 detail: Some(note.body.lines().next().unwrap_or_default().to_owned()),
-                icon: PaletteIcon::Asset("icons/file.svg"),
+                icon: PaletteIcon::Asset("icons/note.svg"),
                 shortcut: None,
                 action: PaletteAction::EmbedNote(note.clone()),
                 content_match: None,

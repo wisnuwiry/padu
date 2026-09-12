@@ -12,6 +12,7 @@ mod model;
 mod render;
 mod tabs;
 
+pub use diff::init_keys as init_diff_keys;
 pub use files::init_keys as init_files_keys;
 pub(crate) use links::*;
 pub(crate) use model::*;
@@ -277,6 +278,63 @@ mod tests {
                     depth: 0,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn review_visible_lines_keep_headers_when_files_collapse() {
+        let snapshot = crate::review_diff::from_file_changes(&[
+            crate::model::ActivityFileChange {
+                path: "a.rs".into(),
+                additions: Some(1),
+                deletions: Some(0),
+                status: None,
+                diff: Some("@@\n+one\n".into()),
+            },
+            crate::model::ActivityFileChange {
+                path: "b.rs".into(),
+                additions: Some(1),
+                deletions: Some(0),
+                status: None,
+                diff: Some("@@\n+two\n".into()),
+            },
+        ]);
+        assert_eq!(
+            review_diff_visible_line_indices(&snapshot.lines, &HashSet::new()).len(),
+            snapshot.lines.len()
+        );
+
+        let visible = review_diff_visible_line_indices(&snapshot.lines, &HashSet::from([0]));
+        assert!(visible.iter().any(|&index| {
+            snapshot.lines[index].file_index == 0
+                && snapshot.lines[index].kind == crate::review_diff::LineKind::FileHeader
+        }));
+        assert!(!visible.iter().any(|&index| {
+            snapshot.lines[index].file_index == 0
+                && snapshot.lines[index].kind != crate::review_diff::LineKind::FileHeader
+        }));
+        assert_eq!(
+            visible
+                .iter()
+                .filter(|&&index| snapshot.lines[index].file_index == 1)
+                .count(),
+            snapshot
+                .lines
+                .iter()
+                .filter(|line| line.file_index == 1)
+                .count()
+        );
+        assert_eq!(
+            review_diff_collapsible_files(&snapshot).collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+    }
+
+    #[test]
+    fn review_list_splice_collapses_a_contiguous_file_body() {
+        assert_eq!(
+            review_diff_list_splice(&[0, 1, 2, 3, 4], &[0, 3, 4]),
+            Some((1..3, 0))
         );
     }
 
