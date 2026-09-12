@@ -429,7 +429,7 @@ export function ChangesPanel({
           type="button"
           onClick={() => void diff.refetch()}
         >
-          <PaduIcon className={cn('size-3.5', diff.isFetching && 'motion-safe:animate-spin')} name="rotateCw" />
+          <PaduIcon className={cn('size-3.5 text-[var(--text-tertiary)]', diff.isFetching && 'motion-safe:animate-spin')} name="rotateCw" />
         </button>
         <button
           aria-pressed={showNavigator}

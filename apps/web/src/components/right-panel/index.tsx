@@ -426,19 +426,19 @@ export const RightPanel = forwardRef<RightPanelHandle, RightPanelProps>(function
             shortcut={fullscreenShortcut}
           >
             <Button
+              className={"size-7"}
               aria-label={t(fullscreen ? 'right_panel.collapse' : 'right_panel.expand')}
               aria-pressed={fullscreen}
-              size="icon-sm"
-              variant="ghost"
+              size="icon-sm" variant="ghost"
               onClick={() => toggleExpanded(!fullscreen)}
             >
-              <PaduIcon name={fullscreen ? 'minimize' : 'maximize'} />
+              <PaduIcon className="size-3.5! text-[var(--text-tertiary)]" name={fullscreen ? 'minimize' : 'maximize'} />
             </Button>
           </Tooltip>
         )}
         {!fullscreen && (
           <Tooltip content={t('right_panel.toggle')} shortcut={togglePanelShortcut}>
-            <Button aria-label={t('right_panel.hide')} size="icon-sm" variant="ghost" onClick={() => onOpenChange(false)}>
+            <Button aria-label={t('right_panel.hide')} className={"size-7"} size="icon-sm" variant="ghost" onClick={() => onOpenChange(false)}>
               <PaduIcon name="panelRight" />
             </Button>
           </Tooltip>

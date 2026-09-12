@@ -36,6 +36,7 @@ import { useI18n } from '@/lib/i18n'
 import { formatNoteTimeAgo, noteExcerpt } from '@/lib/notes-utils'
 import { usePrimaryShortcut } from '@/lib/platform'
 import { projectDisplayName } from '@/lib/project-presentation'
+import { readSidebarGrouping, readSidebarOrdering, sidebarVisualSessions } from '@/lib/sidebar-presentation'
 
 const ALL_NOTES_PROJECT_ID = '00000000-0000-0000-0000-000000000000'
 const SAVE_DEBOUNCE_MS = 650
@@ -112,6 +113,65 @@ function NotesShell() {
     window.sessionStorage.removeItem('padu.note-target-session')
     void navigate({ to: '/', search: { session: sessionId } })
   }, [navigate])
+
+  const selectAdjacentSession = useCallback((delta: number) => {
+    const data = taskState.data
+    if (!data) return
+    const started = sidebarVisualSessions(
+      data.projects,
+      data.sessions,
+      readSidebarGrouping(),
+      readSidebarOrdering(),
+      t('sidebar.unknown_project'),
+      t('project.no_project_name'),
+    )
+    if (!started.length) return
+    const targetSession = window.sessionStorage.getItem('padu.note-target-session')
+    const currentId = targetSession && targetSession !== 'new' ? targetSession : undefined
+    const currentIndex = currentId ? started.findIndex((session) => session.id === currentId) : -1
+    const nextIndex = currentIndex >= 0
+      ? (delta > 0 ? Math.min(currentIndex + 1, started.length - 1) : Math.max(currentIndex - 1, 0))
+      : (delta > 0 ? 0 : started.length - 1)
+    const next = started[nextIndex]
+    if (next) {
+      window.sessionStorage.setItem('padu.note-target-session', next.id)
+      void navigate({ to: '/', search: { session: next.id } })
+    }
+  }, [navigate, t, taskState.data])
+
+  // Global shortcuts that stay available on the notes page, mirroring
+  // padu-app: ⌘B toggles the sidebar, ⌘⇧M returns to the conversation that
+  // opened notes, and ⌘⌥↑/↓ (or ⌘⇧[/]) steps through conversations.
+  // padu-app unmounts on this route, so without these the shortcuts die here.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || !taskState.data) return
+      const key = event.key.toLowerCase()
+      if (key === 'b' && !event.shiftKey && !event.altKey) {
+        event.preventDefault()
+        setSidebarVisible((value) => !value)
+        return
+      }
+      if (key === 'm' && event.shiftKey && !event.altKey) {
+        event.preventDefault()
+        const target = window.sessionStorage.getItem('padu.note-target-session')
+        window.sessionStorage.removeItem('padu.note-target-session')
+        void navigate({ to: '/', search: { session: target && target !== 'new' ? target : undefined } })
+        return
+      }
+      if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+        event.preventDefault()
+        selectAdjacentSession(event.key === 'ArrowDown' ? 1 : -1)
+        return
+      }
+      if (event.shiftKey && (event.code === 'BracketLeft' || event.code === 'BracketRight')) {
+        event.preventDefault()
+        selectAdjacentSession(event.code === 'BracketRight' ? 1 : -1)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [navigate, selectAdjacentSession, taskState.data])
 
   if (!taskState.data) {
     return (
