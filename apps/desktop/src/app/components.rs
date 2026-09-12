@@ -227,6 +227,9 @@ pub(super) fn render_message_footer(
         .text_color(footer_color)
         .child(format_message_time(footer_time));
     let note_content = copy_content.clone();
+    // Attachment/note-only prompts carry no text, so there is nothing to
+    // copy. Check before `copy_button` moves `copy_content` below.
+    let can_copy = !copy_content.trim().is_empty();
     let note_padu = padu.clone();
     let copy_button = div()
         .id(SharedString::from(format!("copy-message-{message_id}")))
@@ -292,7 +295,10 @@ pub(super) fn render_message_footer(
         .when(align_right, |element| element.justify_end());
 
     if align_right {
-        footer = footer.child(timestamp).child(copy_button);
+        footer = footer.child(timestamp);
+        if can_copy {
+            footer = footer.child(copy_button);
+        }
     } else {
         footer = footer.child(copy_button);
         if message.role == MessageRole::Assistant {

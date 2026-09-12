@@ -1314,6 +1314,8 @@ function MessageFooter({
 }) {
   const [copied, setCopied] = useState(false)
   const copiedTimeout = useRef<number | null>(null)
+  // Attachment/note-only messages carry no text, so there is nothing to copy.
+  const canCopy = content.trim().length > 0
   useEffect(() => () => {
     if (copiedTimeout.current !== null) window.clearTimeout(copiedTimeout.current)
   }, [])
@@ -1324,6 +1326,7 @@ function MessageFooter({
       !alignRight && '-ml-[7px]',
     )}>
       {alignRight && <span className="flex h-[27px] items-center px-1">{formatMessageTime(timestamp, undefined, locale)}</span>}
+      {canCopy && (
       <button
         aria-label={t(copied ? 'common.copied' : 'common.copy_message')}
         className="grid size-[27px] place-items-center rounded-lg outline-none hover:bg-accent hover:text-[var(--text-secondary)] focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring"
@@ -1341,6 +1344,7 @@ function MessageFooter({
       >
         <PaduIcon className="size-3.5" name={copied ? 'check' : 'copy'} />
       </button>
+      )}
       {alignRight && rewindAction && (
         <button
           aria-label={t(rewindAction.pending ? 'session.reverting_message' : 'session.revert_to_here')}
