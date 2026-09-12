@@ -1,6 +1,7 @@
 import type { ProviderKind } from '@padu/client'
 
 export const PADU_ICONS = {
+  addToChat: 'i-padu-add-to-chat',
   alert: 'i-padu-alert',
   appearance: 'i-padu-appearance',
   archive: 'i-padu-archive',
@@ -66,6 +67,7 @@ export const PADU_ICONS = {
   search: 'i-padu-search',
   server: 'i-padu-server',
   settings: 'i-padu-settings',
+  split: 'i-padu-split',
   sparkle: 'i-padu-sparkle',
   star: 'i-padu-star',
   starFilled: 'i-padu-star-filled',
