@@ -31,7 +31,7 @@ describe('keybindings settings parity', () => {
   })
 
   test('every keybinding item and section has valid English translations', () => {
-    expect(KEYBINDING_SECTIONS.length).toBe(5)
+    expect(KEYBINDING_SECTIONS.length).toBe(7)
 
     for (const section of KEYBINDING_SECTIONS) {
       expect(en[section.sectionKey]).toBeDefined()
@@ -73,7 +73,9 @@ describe('keybindings settings parity', () => {
       }),
     })).filter((section) => section.items.length > 0)
 
-    expect(matching.length).toBe(1)
+    expect(matching.length).toBe(2)
     expect(matching[0]!.items[0]!.titleKey).toBe('keybindings.command_palette')
+    expect(matching[1]!.sectionKey).toBe('keybindings.section_review')
+    expect(matching[1]!.items[0]!.titleKey).toBe('keybindings.toggle_review_file')
   })
 })
