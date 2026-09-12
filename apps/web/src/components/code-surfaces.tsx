@@ -3,7 +3,6 @@ import {
   preloadHighlighter,
   type CodeViewItem,
   type SupportedLanguages,
-  type ThemeTypes,
 } from '@pierre/diffs'
 import { Editor, type EditorOptions } from '@pierre/diffs/edit'
 import {
@@ -30,6 +29,7 @@ import { PaduIcon } from '@/components/padu-icon'
 import { usePrimaryShortcut } from '@/lib/platform'
 import { useI18n } from '../lib/i18n'
 import { compactReviewPatch, createReviewDiffLoader } from '../lib/review-diff'
+import { useResolvedTheme } from '../lib/theme'
 
 const sharedOptions = {
   overflow: 'wrap' as const,
@@ -420,31 +420,6 @@ function CodeSurfaceLoading({ label }: { label: string }) {
       {label}
     </div>
   )
-}
-
-function useResolvedTheme(): ThemeTypes {
-  const [theme, setTheme] = useState<ThemeTypes>(() => resolvedTheme())
-
-  useEffect(() => {
-    const update = () => setTheme(resolvedTheme())
-    const observer = new MutationObserver(update)
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
-    const media = window.matchMedia('(prefers-color-scheme: dark)')
-    media.addEventListener('change', update)
-    update()
-    return () => {
-      observer.disconnect()
-      media.removeEventListener('change', update)
-    }
-  }, [])
-
-  return theme
-}
-
-function resolvedTheme(): ThemeTypes {
-  if (typeof document === 'undefined') return 'system'
-  if (document.documentElement.classList.contains('dark')) return 'dark'
-  return 'light'
 }
 
 function fastHash(value: string): string {

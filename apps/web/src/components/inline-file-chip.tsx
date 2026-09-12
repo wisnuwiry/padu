@@ -32,7 +32,7 @@ export function InlineFileChip({
     </>
   )
   const classes = cn(
-    'inline-flex max-w-[240px] items-center gap-2 whitespace-nowrap rounded-[8px] border border-border bg-[var(--inset)] px-2.5 py-1.5 align-baseline font-mono text-[12px] font-medium leading-4 text-foreground no-underline',
+    'inline-flex max-w-[240px] items-center gap-1 whitespace-nowrap rounded-[6px] border border-border bg-[var(--inset)] px-2 py-[3.5px] align-baseline font-mono text-[12px] font-medium leading-4 text-foreground no-underline',
     composer && 'mx-1 select-all',
     className,
   )

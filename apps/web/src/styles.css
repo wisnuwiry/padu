@@ -387,9 +387,6 @@
     background: var(--code-wash);
     @apply rounded px-1 py-0.5 font-mono text-[0.9em];
   }
-  .markdown .mention-chip {
-    @apply inline-flex items-center gap-2 rounded-[6px] border border-border bg-[var(--inset)] px-2.5 py-1.5 font-mono text-[12px] font-medium leading-4 text-foreground;
-  }
   .composer-rich-input:empty::before {
     color: var(--text-ghost);
     content: attr(data-placeholder);
@@ -407,6 +404,14 @@
   .markdown table { @apply block max-w-full overflow-x-auto border-collapse text-sm; }
   .markdown th,
   .markdown td { @apply border px-3 py-2 text-left; }
+  .markdown .katex-display {
+    @apply overflow-x-auto overflow-y-hidden py-1;
+  }
+  .markdown .katex { color: inherit; }
+  .markdown .mermaid-diagram { @apply flex justify-center py-1; }
+  .markdown .mermaid-diagram svg {
+    @apply block h-auto max-w-full;
+  }
 
   .markdown-stream-veil {
     animation: markdown-stream-veil var(--markdown-veil-duration) linear both;

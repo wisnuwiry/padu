@@ -1,6 +1,8 @@
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import type { Note, NoteSummary, PaduClient, Project } from '@padu/client'
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -9,10 +11,9 @@ import {
 } from 'react'
 import { ContextMenu } from '@base-ui/react/context-menu'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
 import { ConnectionPanel } from '@/components/connection-panel'
+import { MarkdownView } from '@/components/markdown-view'
 import { PaduIcon } from '@/components/padu-icon'
 import { Sidebar } from '@/components/sidebar'
 import { StartupScreen } from '@/components/startup-screen'
@@ -40,6 +41,8 @@ import { readSidebarGrouping, readSidebarOrdering, sidebarVisualSessions } from 
 
 const ALL_NOTES_PROJECT_ID = '00000000-0000-0000-0000-000000000000'
 const SAVE_DEBOUNCE_MS = 650
+
+const CodeFileSurface = lazy(() => import('@/components/code-surfaces').then((module) => ({ default: module.CodeFileSurface })))
 
 type NotesLayout = 'edit' | 'split' | 'preview'
 
@@ -692,7 +695,7 @@ function NotesWorkspace({
               <label className="sr-only" htmlFor="note-title">{t('notes.title_placeholder')}</label>
               <input
                 id="note-title"
-                className="h-[38px] w-full shrink-0 bg-transparent px-1 text-[22px] font-bold outline-none placeholder:text-[var(--text-ghost)] focus-visible:ring-2 focus-visible:ring-ring"
+                className="h-[38px] w-full shrink-0 rounded-lg px-1 text-[22px] font-bold outline-none placeholder:text-[var(--text-ghost)] focus-visible:ring-2 focus-visible:ring-ring"
                 placeholder={t('notes.title_placeholder')}
                 value={selected.title}
                 onChange={(event) => setSelected({ ...selected, title: event.target.value })}
@@ -754,34 +757,34 @@ function NotesWorkspace({
               </div>
 
               {layout === 'edit' && (
-                <div className="min-h-0 flex-1 rounded-lg bg-muted/60">
-                  <label className="sr-only" htmlFor="note-body">{t('notes.body_placeholder')}</label>
-                  <textarea
-                    id="note-body"
-                    className="size-full resize-none rounded-lg bg-transparent p-3.5 text-[14px] leading-7 outline-none placeholder:text-[var(--text-ghost)] focus-visible:ring-2 focus-visible:ring-ring"
-                    placeholder={t('notes.body_placeholder')}
-                    value={selected.content}
-                    onChange={(event) => setSelected({ ...selected, content: event.target.value })}
-                  />
+                <div className="min-h-0 flex-1 overflow-hidden rounded-lg">
+                  <Suspense fallback={<EditorLoading />}>
+                    <CodeFileSurface
+                      key={selected.id}
+                      path="note.md"
+                      contents={selected.content}
+                      cacheKey={`note:${selected.id}`}
+                      onChange={(content) => setSelected({ ...selected, content })}
+                    />
+                  </Suspense>
                 </div>
               )}
               {layout === 'preview' && (
-                <article className="markdown min-h-0 flex-1 overflow-y-auto rounded-lg bg-muted/60 p-3.5 text-[14px] leading-7 break-words">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{selected.content}</ReactMarkdown>
-                </article>
+                <MarkdownView
+                  className="min-h-0 flex-1 overflow-y-auto rounded-lg bg-muted/60 p-3.5 text-[14px] leading-7 break-words"
+                  text={selected.content}
+                />
               )}
               {layout === 'split' && (
                 <SplitEditor
+                  key={selected.id}
+                  noteId={selected.id}
                   content={selected.content}
                   onChange={(content) => setSelected({ ...selected, content })}
                   ratio={splitRatio}
                   onRatioChange={setSplitRatio}
-                  bodyPlaceholder={t('notes.body_placeholder')}
                 />
               )}
-              <p className="shrink-0 truncate text-[11px] text-[var(--text-ghost)]">
-                {projectName} · {selectedSummary ? `${t('notes.updated', { time: formatNoteTimeAgo(selectedSummary.updatedAt, t) })}` : ''}
-              </p>
             </>
           ) : (
             <div className="grid min-h-0 flex-1 place-items-center">
@@ -898,33 +901,42 @@ function NoteRow({
   )
 }
 
+function EditorLoading() {
+  const { t } = useI18n()
+  return (
+    <div className="grid size-full place-items-center bg-muted/60 text-[11px] text-[var(--text-tertiary)]">
+      {t('files.preparing_syntax')}
+    </div>
+  )
+}
+
 function SplitEditor({
+  noteId,
   content,
   onChange,
   ratio,
   onRatioChange,
-  bodyPlaceholder,
 }: {
+  noteId: string
   content: string
   onChange: (content: string) => void
   ratio: number
   onRatioChange: (ratio: number) => void
-  bodyPlaceholder: string
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const dragging = useRef(false)
 
   return (
     <div ref={containerRef} className="flex min-h-0 flex-1 gap-1.5">
-      <div className="min-h-0 min-w-0 rounded-lg bg-muted/60" style={{ flexGrow: ratio, flexShrink: 1, flexBasis: 0 }}>
-        <label className="sr-only" htmlFor="note-body-split">{bodyPlaceholder}</label>
-        <textarea
-          id="note-body-split"
-          className="size-full resize-none rounded-lg bg-transparent p-3.5 text-[14px] leading-7 outline-none placeholder:text-[var(--text-ghost)] focus-visible:ring-2 focus-visible:ring-ring"
-          placeholder={bodyPlaceholder}
-          value={content}
-          onChange={(event) => onChange(event.target.value)}
-        />
+      <div className="min-h-0 min-w-0 overflow-hidden rounded-lg" style={{ flexGrow: ratio, flexShrink: 1, flexBasis: 0 }}>
+        <Suspense fallback={<EditorLoading />}>
+          <CodeFileSurface
+            path="note.md"
+            contents={content}
+            cacheKey={`note-split:${noteId}`}
+            onChange={onChange}
+          />
+        </Suspense>
       </div>
       <div
         aria-label="Resize editor and preview"
@@ -969,12 +981,11 @@ function SplitEditor({
       >
         <span className="absolute inset-y-0 left-[3px] w-0.5 bg-transparent transition-colors motion-reduce:transition-none group-hover:bg-ring/70 group-focus-visible:bg-ring group-active:bg-ring" />
       </div>
-      <article
-        className="markdown min-h-0 min-w-0 overflow-y-auto rounded-lg bg-muted/60 p-3.5 text-[14px] leading-7 break-words"
+      <MarkdownView
+        className="min-h-0 min-w-0 overflow-y-auto rounded-lg bg-muted/60 p-3.5 text-[14px] leading-7 break-words"
         style={{ flexGrow: 1 - ratio, flexShrink: 1, flexBasis: 0 }}
-      >
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-      </article>
+        text={content}
+      />
     </div>
   )
 }

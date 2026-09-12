@@ -6,26 +6,17 @@ import type {
   ReviewDiffSource,
 } from '@padu/client'
 import { ContextMenu } from '@base-ui/react/context-menu'
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { Virtuoso, type ListItem, type VirtuosoHandle } from 'react-virtuoso'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { MarkdownView, TranscriptLinkContext } from '@/components/markdown-view'
 import { PreviewableImage } from '@/components/image-preview'
-import { InlineFileChip } from '@/components/inline-file-chip'
 import { FileTypeIcon, PaduIcon, type PaduIconName } from '@/components/padu-icon'
 import { Kbd } from '@/components/ui/kbd'
 import { readAttachmentImage } from '@/lib/attachments'
 import { useDaemon } from '@/lib/daemon-context'
 import { activitiesForBlock } from '@/lib/event-reducer'
 import { useI18n, type AppLocale } from '@/lib/i18n'
-import { isLocalFileTarget } from '@/lib/inline-file-references'
-import { rehypeMentionChips } from '@/lib/markdown-mentions'
-import {
-  advanceMarkdownVeil,
-  createMarkdownVeilState,
-  markdownVeilPlugin,
-} from '@/lib/markdown-veil'
 import type {
   BackgroundWorkItem,
   BackgroundWorkKey,
@@ -62,8 +53,6 @@ import { cn } from '@/lib/utils'
 const NAVIGATION_RAIL_MIN_WIDTH = 872
 const NAVIGATION_RAIL_PITCH = 12
 const NAVIGATION_PREVIEW_HEIGHT = 126
-const TranscriptLinkContext = createContext<(target: string) => boolean>(() => false)
-
 type NavigationTurn = {
   messageId: string
   prompt: string
@@ -1087,9 +1076,10 @@ function EmbeddedNoteCard({
               <Kbd size="xs">Esc</Kbd>
             </button>
             <h2 id={`note-preview-${note.id}`} className="pr-24 text-base font-semibold">{title}</h2>
-            <div className="markdown min-h-0 overflow-y-auto text-sm leading-6">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{note.content}</ReactMarkdown>
-            </div>
+            <MarkdownView
+              className="min-h-0 overflow-y-auto text-sm leading-6"
+              text={note.content}
+            />
           </div>
         </div>,
         document.body,
@@ -1161,7 +1151,7 @@ function MessageRow({
             />
           ) : visible ? (
             <div className="max-w-[540px] min-w-0 rounded-xl bg-[var(--raised)] px-3 py-2 text-[14px] leading-5">
-              <Markdown text={visible} compact />
+              <MarkdownView text={visible} compact />
             </div>
           ) : null}
           {!editing && (
@@ -1190,7 +1180,7 @@ function MessageRow({
   return (
     <MessageContextMenu content={copyContent} forkAction={forkAction} t={t}>
       <article className="group/message min-w-0 py-1">
-        <Markdown streaming={message.streaming} text={visible} />
+        <MarkdownView streaming={message.streaming} text={visible} />
         {beforeFooter && <div className="mb-[3px] mt-3 w-full">{beforeFooter}</div>}
         {footer && (
           <MessageFooter
@@ -1493,76 +1483,6 @@ function MessageContextMenu({
   )
 }
 
-function Markdown({
-  text,
-  compact = false,
-  streaming = false,
-}: {
-  text: string
-  compact?: boolean
-  streaming?: boolean
-}) {
-  const onOpenLink = useContext(TranscriptLinkContext)
-  // Match the painter's attach semantics: text already present when this row
-  // mounts is the baseline; only later appends dissolve in.
-  const veil = useRef(createMarkdownVeilState(text))
-  const now = Date.now()
-  const chunks = advanceMarkdownVeil(veil.current, text, streaming, now)
-  return (
-    <div className={cn('markdown min-w-0', compact && '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0')}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={chunks.length ? [markdownVeilPlugin(chunks, now), rehypeMentionChips] : [rehypeMentionChips]}
-        components={{
-          a: ({ children, href, ...props }) => {
-            if (typeof href === 'string' && isLocalFileTarget(href)) {
-              return (
-                <InlineFileChip
-                  className={props.className}
-                  href={href}
-                  target={href}
-                  onOpen={onOpenLink}
-                />
-              )
-            }
-            return (
-              <a
-                {...props}
-                href={href}
-                target="_blank"
-                rel="noreferrer noopener"
-                onClick={(event) => {
-                  if (href && onOpenLink(href)) event.preventDefault()
-                }}
-              >
-                {children}
-              </a>
-            )
-          },
-          img: ({ alt, src }) => typeof src === 'string' ? (
-            <PreviewableImage
-              buttonClassName="max-w-full rounded-[9px] border bg-[var(--inset)]"
-              imageClassName="max-h-64 max-w-full object-contain"
-              name={alt || imageName(src)}
-              source={src}
-            />
-          ) : null,
-          span: ({ children, className, ...props }) => {
-            const mentionProps = props as { 'data-mention'?: string; dataMention?: string }
-            const mention = mentionProps['data-mention'] ?? mentionProps.dataMention
-            if (!mention || !className?.toString().includes('mention-chip')) {
-              return <span className={className} {...props}>{children}</span>
-            }
-            return <InlineFileChip legacy target={mention} />
-          },
-        }}
-      >
-        {text}
-      </ReactMarkdown>
-    </div>
-  )
-}
-
 function ActivityGroup({
   activities,
   backgroundWork,
@@ -1710,7 +1630,7 @@ function ActivityRow({
               viewportRef={detailScroll}
               onScroll={updateDetailEdges}
             >
-              <Markdown streaming={!activity.complete} text={reasoningContent} />
+              <MarkdownView streaming={!activity.complete} text={reasoningContent} />
             </ActivityScrollableContent>
           </div>
         ) : (
@@ -2120,14 +2040,4 @@ function lastIndexWhere<T>(values: readonly T[], predicate: (value: T) => boolea
     if (predicate(values[index]!)) return index
   }
   return -1
-}
-
-function imageName(source: string) {
-  if (source.startsWith('data:')) return 'Image'
-  try {
-    const path = new URL(source, window.location.href).pathname
-    return decodeURIComponent(path.split('/').filter(Boolean).at(-1) ?? 'Image')
-  } catch {
-    return source.split('/').filter(Boolean).at(-1) ?? 'Image'
-  }
 }
