@@ -54,6 +54,7 @@ export const PADU_ICONS = {
   lock: 'i-padu-lock',
   lockOpen: 'i-padu-lock-open',
   note: 'i-padu-note',
+  noteAdd: 'i-padu-note-add',
   package: 'i-padu-package',
   paperclip: 'i-padu-paperclip',
   panelLeft: 'i-padu-panel-left',

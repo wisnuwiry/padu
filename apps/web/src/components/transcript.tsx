@@ -18,6 +18,7 @@ import { readAttachmentImage } from '@/lib/attachments'
 import { useDaemon } from '@/lib/daemon-context'
 import { activitiesForBlock } from '@/lib/event-reducer'
 import { useI18n, type AppLocale } from '@/lib/i18n'
+import { rehypeMentionChips } from '@/lib/markdown-mentions'
 import {
   advanceMarkdownVeil,
   createMarkdownVeilState,
@@ -1368,7 +1369,7 @@ function MessageFooter({
           type="button"
           onClick={() => onAddToNote(content)}
         >
-          <PaduIcon className="size-3.5" name="compose" />
+          <PaduIcon className="size-3.5" name="noteAdd" />
         </button>
       )}
       {!alignRight && forkAction && (
@@ -1488,55 +1489,6 @@ function MessageContextMenu({
       </ContextMenu.Portal>
     </ContextMenu.Root>
   )
-}
-
-function rehypeMentionChips() {
-  return () => (tree: any) => {
-    const regex = /(?:^|\s)@([a-zA-Z0-9_.\-\\/]+)/g
-    const visit = (node: any) => {
-      if (!node.children || node.tagName === 'code' || node.tagName === 'pre' || node.tagName === 'a') return
-      node.children = node.children.flatMap((child: any) => {
-        if (child.type === 'text') {
-          const value: string = child.value || ''
-          if (!value.includes('@')) return [child]
-          const result: any[] = []
-          let lastIndex = 0
-          let match: RegExpExecArray | null
-          regex.lastIndex = 0
-          while ((match = regex.exec(value)) !== null) {
-            const fullMatch = match[0]
-            const atOffset = fullMatch.indexOf('@')
-            const start = match.index + atOffset
-            const end = match.index + fullMatch.length
-            const trimmedEnd = value.slice(start, end).replace(/[,;!?:)\]}"']+$/, '').length + start
-            if (trimmedEnd <= start + 1) continue
-
-            if (start > lastIndex) {
-              result.push({ type: 'text', value: value.slice(lastIndex, start) })
-            }
-            result.push({
-              type: 'element',
-              tagName: 'span',
-              properties: {
-                className: ['mention-chip'],
-                'data-mention': value.slice(start, trimmedEnd).replace(/^@/, ''),
-              },
-              children: [{ type: 'text', value: value.slice(start, trimmedEnd) }],
-            })
-            lastIndex = trimmedEnd
-            regex.lastIndex = trimmedEnd
-          }
-          if (lastIndex < value.length) {
-            result.push({ type: 'text', value: value.slice(lastIndex) })
-          }
-          return result.length ? result : [child]
-        }
-        visit(child)
-        return [child]
-      })
-    }
-    visit(tree)
-  }
 }
 
 function Markdown({
