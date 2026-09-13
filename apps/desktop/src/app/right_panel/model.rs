@@ -496,6 +496,7 @@ pub(crate) fn review_diff_flat_text(
     }
 }
 
+// ===== BEGIN GENERATED: file-icons =====
 pub(crate) fn file_icon_for_name(name: &str) -> &'static str {
     let name = name.to_ascii_lowercase();
     let named_icon = if name.starts_with("readme") {
@@ -511,16 +512,13 @@ pub(crate) fn file_icon_for_name(name: &str) -> &'static str {
         Some("icons/file-types/cmake.svg")
     } else if name == "makefile" || name.starts_with("makefile.") || name == "justfile" {
         Some("icons/file-types/makefile.svg")
-    } else if matches!(
-        name.as_str(),
-        "cargo.toml" | "cargo.lock" | "rust-toolchain.toml"
-    ) {
+    } else if name == "cargo.toml" || name == "cargo.lock" || name == "rust-toolchain.toml" {
         Some("icons/file-types/rust.svg")
-    } else if matches!(name.as_str(), "go.mod" | "go.sum" | "go.work") {
+    } else if name == "go.mod" || name == "go.sum" || name == "go.work" {
         Some("icons/file-types/go.svg")
     } else if name == "pyproject.toml" || name == "pipfile" || name.starts_with("requirements") {
         Some("icons/file-types/python.svg")
-    } else if matches!(name.as_str(), "bun.lock" | "bun.lockb" | "bunfig.toml") {
+    } else if name == "bun.lock" || name == "bun.lockb" || name == "bunfig.toml" {
         Some("icons/file-types/bun.svg")
     } else if name.starts_with("pnpm-") || name == ".pnpmfile.cjs" {
         Some("icons/file-types/pnpm.svg")
@@ -530,9 +528,9 @@ pub(crate) fn file_icon_for_name(name: &str) -> &'static str {
         Some("icons/file-types/nodejs.svg")
     } else if name == "package-lock.json" {
         Some("icons/file-types/npm.svg")
-    } else if name.starts_with("tsconfig.") || name == "tsconfig.json" {
+    } else if name == "tsconfig.json" || name.starts_with("tsconfig.") {
         Some("icons/file-types/typescript.svg")
-    } else if name.starts_with("jsconfig.") || name == "jsconfig.json" {
+    } else if name == "jsconfig.json" || name.starts_with("jsconfig.") {
         Some("icons/file-types/javascript.svg")
     } else if name == ".gitignore"
         || name == ".gitattributes"
@@ -562,9 +560,7 @@ pub(crate) fn file_icon_for_name(name: &str) -> &'static str {
         Some("icons/file-types/webpack.svg")
     } else if name.starts_with("rollup.config.") {
         Some("icons/file-types/rollup.svg")
-    } else if name.starts_with("next.config.") {
-        Some("icons/file-types/next.svg")
-    } else if name == "next-env.d.ts" {
+    } else if name.starts_with("next.config.") || name == "next-env.d.ts" {
         Some("icons/file-types/next.svg")
     } else if name.starts_with("nuxt.config.") || name == ".nuxtrc" {
         Some("icons/file-types/nuxt.svg")
@@ -696,6 +692,7 @@ pub(crate) fn file_icon_for_name(name: &str) -> &'static str {
         _ => "icons/file-types/file.svg",
     }
 }
+// ===== END GENERATED: file-icons =====
 
 #[cfg(test)]
 pub(crate) fn visible_working_tree_entries(

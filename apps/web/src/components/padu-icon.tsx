@@ -114,6 +114,7 @@ export function PaduIcon({
   )
 }
 
+// ===== BEGIN GENERATED: file-type-icons-map =====
 const FILE_TYPE_ICONS = {
   angular: 'i-padu-file-type-angular',
   astro: 'i-padu-file-type-astro',
@@ -216,6 +217,7 @@ const FILE_TYPE_ICONS = {
   zig: 'i-padu-file-type-zig',
   zip: 'i-padu-file-type-zip',
 } as const
+// ===== END GENERATED: file-type-icons-map =====
 
 type FileTypeIconName = keyof typeof FILE_TYPE_ICONS
 
@@ -241,24 +243,25 @@ export function fileTypeIconClass(path: string): string {
   return FILE_TYPE_ICONS[fileTypeIconName(path)]
 }
 
+// ===== BEGIN GENERATED: file-type-icon-name =====
 function fileTypeIconName(path: string): FileTypeIconName {
   const name = path.split(/[\\/]/).at(-1)?.toLocaleLowerCase() ?? path.toLocaleLowerCase()
   if (name.startsWith('readme')) return 'readme'
-  if (/^(license|licence|copying)/.test(name)) return 'certificate'
+  if (name.startsWith('license') || name.startsWith('licence') || name.startsWith('copying')) return 'certificate'
   if (name.startsWith('dockerfile') || name.startsWith('compose.')) return 'docker'
   if (name === 'cmakelists.txt' || name.startsWith('cmake.')) return 'cmake'
   if (name === 'makefile' || name.startsWith('makefile.') || name === 'justfile') return 'makefile'
-  if (['cargo.toml', 'cargo.lock', 'rust-toolchain.toml'].includes(name)) return 'rust'
-  if (['go.mod', 'go.sum', 'go.work'].includes(name)) return 'go'
+  if (name === 'cargo.toml' || name === 'cargo.lock' || name === 'rust-toolchain.toml') return 'rust'
+  if (name === 'go.mod' || name === 'go.sum' || name === 'go.work') return 'go'
   if (name === 'pyproject.toml' || name === 'pipfile' || name.startsWith('requirements')) return 'python'
-  if (['bun.lock', 'bun.lockb', 'bunfig.toml'].includes(name)) return 'bun'
+  if (name === 'bun.lock' || name === 'bun.lockb' || name === 'bunfig.toml') return 'bun'
   if (name.startsWith('pnpm-') || name === '.pnpmfile.cjs') return 'pnpm'
   if (name === 'yarn.lock' || name.startsWith('.yarnrc')) return 'yarn'
   if (name === 'package.json') return 'nodejs'
   if (name === 'package-lock.json') return 'npm'
   if (name === 'tsconfig.json' || name.startsWith('tsconfig.')) return 'typescript'
   if (name === 'jsconfig.json' || name.startsWith('jsconfig.')) return 'javascript'
-  if (['.gitignore', '.gitattributes', '.gitmodules', '.gitconfig'].includes(name)) return 'git'
+  if (name === '.gitignore' || name === '.gitattributes' || name === '.gitmodules' || name === '.gitconfig') return 'git'
   if (name === '.editorconfig') return 'editorconfig'
   if (name.startsWith('.env')) return 'settings'
   if (name.startsWith('.prettier') || name.startsWith('prettier.config.')) return 'prettier'
@@ -288,26 +291,25 @@ function fileTypeIconName(path: string): FileTypeIconName {
   if (name === 'chart.yaml' || name === 'values.yaml') return 'helm'
   if (name === 'nginx.conf') return 'nginx'
   if (name === '.nvmrc' || name === '.node-version') return 'nodejs'
-  if (['build.gradle', 'settings.gradle', 'gradlew', 'gradlew.bat'].includes(name)) return 'gradle'
+  if (name === 'build.gradle' || name === 'settings.gradle' || name === 'gradlew' || name === 'gradlew.bat') return 'gradle'
   if (name.includes('.stories.') || name.includes('.story.')) return 'storybook'
   if (name === 'gemfile' || name === 'gemfile.lock') return 'ruby'
   if (name === 'pom.xml') return 'java'
-
   const extension = name.includes('.') ? name.split('.').at(-1) ?? '' : ''
-  if (extension === 'rs') return 'rust'
+  if (['rs'].includes(extension)) return 'rust'
   if (['js', 'mjs', 'cjs'].includes(extension)) return 'javascript'
   if (['ts', 'mts', 'cts'].includes(extension)) return 'typescript'
   if (['jsx', 'tsx'].includes(extension)) return 'react'
   if (['py', 'pyi', 'pyw'].includes(extension)) return 'python'
-  if (extension === 'go') return 'go'
+  if (['go'].includes(extension)) return 'go'
   if (['c', 'h', 'm'].includes(extension)) return 'c'
   if (['cc', 'cpp', 'cxx', 'hh', 'hpp', 'hxx', 'mm'].includes(extension)) return 'cpp'
-  if (extension === 'cs') return 'csharp'
-  if (extension === 'swift') return 'swift'
+  if (['cs'].includes(extension)) return 'csharp'
+  if (['swift'].includes(extension)) return 'swift'
   if (['kt', 'kts'].includes(extension)) return 'kotlin'
   if (['java', 'class'].includes(extension)) return 'java'
-  if (extension === 'rb') return 'ruby'
-  if (extension === 'php') return 'php'
+  if (['rb'].includes(extension)) return 'ruby'
+  if (['php'].includes(extension)) return 'php'
   if (['html', 'htm'].includes(extension)) return 'html'
   if (['css', 'less'].includes(extension)) return 'css'
   if (['scss', 'sass'].includes(extension)) return 'sass'
@@ -320,36 +322,46 @@ function fileTypeIconName(path: string): FileTypeIconName {
   if (['ps1', 'psm1'].includes(extension)) return 'powershell'
   if (['sql', 'db', 'sqlite', 'sqlite3', 'csv', 'xls', 'xlsx'].includes(extension)) return 'database'
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'ico', 'tiff'].includes(extension)) return 'image'
-  if (extension === 'svg') return 'svg'
-  if (extension === 'pdf') return 'pdf'
+  if (['svg'].includes(extension)) return 'svg'
+  if (['pdf'].includes(extension)) return 'pdf'
   if (['mp3', 'wav', 'flac', 'ogg', 'm4a'].includes(extension)) return 'audio'
   if (['mp4', 'mov', 'avi', 'webm', 'mkv'].includes(extension)) return 'video'
   if (['zip', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'tar', 'jar'].includes(extension)) return 'zip'
   if (['wasm', 'wat'].includes(extension)) return 'webassembly'
-  if (['svelte', 'vue', 'lua', 'dart', 'astro', 'prisma', 'xaml', 'zig', 'nix', 'proto'].includes(extension)) return extension as FileTypeIconName
+  if (['svelte'].includes(extension)) return 'svelte'
+  if (['vue'].includes(extension)) return 'vue'
   if (['tf', 'tfvars'].includes(extension)) return 'terraform'
   if (['graphql', 'gql'].includes(extension)) return 'graphql'
+  if (['lua'].includes(extension)) return 'lua'
+  if (['dart'].includes(extension)) return 'dart'
+  if (['astro'].includes(extension)) return 'astro'
   if (['coffee', 'cson'].includes(extension)) return 'coffee'
-  if (extension === 'cr') return 'crystal'
+  if (['cr'].includes(extension)) return 'crystal'
   if (['ex', 'exs'].includes(extension)) return 'elixir'
-  if (extension === 'elm') return 'elm'
+  if (['elm'].includes(extension)) return 'elm'
   if (['erl', 'hrl'].includes(extension)) return 'erlang'
   if (['clj', 'cljs', 'cljc', 'edn'].includes(extension)) return 'clojure'
   if (['hs', 'lhs'].includes(extension)) return 'haskell'
   if (['hx', 'hxml'].includes(extension)) return 'haxe'
   if (['jinja', 'jinja2', 'j2'].includes(extension)) return 'jinja'
-  if (extension === 'jl') return 'julia'
+  if (['jl'].includes(extension)) return 'julia'
   if (['ml', 'mli'].includes(extension)) return 'ocaml'
   if (['pl', 'pm'].includes(extension)) return 'perl'
+  if (['prisma'].includes(extension)) return 'prisma'
   if (['pug', 'jade'].includes(extension)) return 'pug'
   if (['scala', 'sbt', 'sc'].includes(extension)) return 'scala'
-  if (extension === 'sol') return 'solidity'
+  if (['sol'].includes(extension)) return 'solidity'
   if (['tex', 'sty', 'cls'].includes(extension)) return 'tex'
+  if (['xaml'].includes(extension)) return 'xaml'
+  if (['zig'].includes(extension)) return 'zig'
+  if (['nix'].includes(extension)) return 'nix'
+  if (['proto'].includes(extension)) return 'proto'
   if (['diff', 'patch'].includes(extension)) return 'diff'
   if (['exe', 'dll', 'so', 'dylib'].includes(extension)) return 'exe'
-  if (extension === 'lock') return 'lock'
+  if (['lock'].includes(extension)) return 'lock'
   return 'file'
 }
+// ===== END GENERATED: file-type-icon-name =====
 
 const PROVIDER_ICONS: Record<ProviderKind, string> = {
   agy: 'i-padu-provider-agy',
