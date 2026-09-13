@@ -50,12 +50,68 @@ pub struct InlineRun {
 }
 
 impl InlineRun {
-    fn plain(text: impl Into<String>) -> Self {
+    pub(crate) fn plain(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             style: InlineStyle::default(),
         }
     }
+}
+
+/// An open inline-HTML tag, tracked across `Event::InlineHtml` fragments so a
+/// `<b>…</b>` pair styles the `Event::Text` runs between its two halves.
+#[derive(Clone, Debug)]
+enum HtmlOp {
+    Bold,
+    Italic,
+    Code,
+    Strikethrough,
+    Sup,
+    Sub,
+    Link { url: Option<String> },
+}
+
+/// The effective inline style: the markdown style threaded through emphasis
+/// and links, plus every open HTML tag.
+fn effective_style(markdown: &InlineStyle, html: &[HtmlOp]) -> InlineStyle {
+    let mut style = markdown.clone();
+    for op in html {
+        match op {
+            HtmlOp::Bold => style.bold = true,
+            HtmlOp::Italic => style.italic = true,
+            HtmlOp::Code => style.code = true,
+            HtmlOp::Strikethrough => style.strikethrough = true,
+            HtmlOp::Link { url } => style.link = url.clone(),
+            HtmlOp::Sup | HtmlOp::Sub => {}
+        }
+    }
+    style
+}
+
+fn pop_html_op(html: &mut Vec<HtmlOp>, kind: HtmlOpMatch) {
+    let Some(index) = html.iter().rposition(|op| match kind {
+        HtmlOpMatch::Bold => matches!(op, HtmlOp::Bold),
+        HtmlOpMatch::Italic => matches!(op, HtmlOp::Italic),
+        HtmlOpMatch::Code => matches!(op, HtmlOp::Code),
+        HtmlOpMatch::Strikethrough => matches!(op, HtmlOp::Strikethrough),
+        HtmlOpMatch::Sup => matches!(op, HtmlOp::Sup),
+        HtmlOpMatch::Sub => matches!(op, HtmlOp::Sub),
+        HtmlOpMatch::Link => matches!(op, HtmlOp::Link { .. }),
+    }) else {
+        return;
+    };
+    html.remove(index);
+}
+
+#[derive(Clone, Copy)]
+enum HtmlOpMatch {
+    Bold,
+    Italic,
+    Code,
+    Strikethrough,
+    Sup,
+    Sub,
+    Link,
 }
 
 /// GFM column alignment. Unspecified renders as `Left`.
@@ -75,11 +131,14 @@ pub struct ListItem {
 }
 
 /// One piece of inline content. Images interrupt a run of text rather than
-/// styling it, so they cannot be an [`InlineStyle`] flag.
+/// styling it, so they cannot be an [`InlineStyle`] flag. The same goes for
+/// inline math (`$…$`) and HTML sup/sub, which render as their own elements.
 #[derive(Clone, Debug, PartialEq)]
-enum InlinePiece {
+pub(crate) enum InlinePiece {
     Run(InlineRun),
     Image { url: String, alt: String },
+    Math { source: String, display: bool },
+    SubSup { text: String, sup: bool },
 }
 
 /// A markdown block. Containers nest.
@@ -88,11 +147,26 @@ pub enum Block {
     Paragraph {
         runs: Vec<InlineRun>,
     },
+    /// A paragraph that mixes text with inline math or sup/sub, which cannot
+    /// be shaped into a single run. Rendered as a wrapping row of text
+    /// elements and math images.
+    InlineRich {
+        pieces: Vec<InlinePiece>,
+    },
     /// A standalone image. Inline images split their paragraph so the text
     /// before and after keeps its order around them.
     Image {
         url: String,
         alt: String,
+    },
+    /// Display math (`$$…$$`), rendered as an SVG image by the rich renderer.
+    Math {
+        source: String,
+        display: bool,
+    },
+    /// A ` ```mermaid ` fenced block, rendered as an SVG diagram.
+    Mermaid {
+        source: String,
     },
     Heading {
         level: u8,
@@ -141,7 +215,10 @@ impl BlockTree {
 // ── Full parse ─────────────────────────────────────────────────────────────
 
 fn options() -> Options {
-    Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS
+    Options::ENABLE_TABLES
+        | Options::ENABLE_STRIKETHROUGH
+        | Options::ENABLE_TASKLISTS
+        | Options::ENABLE_MATH
 }
 
 /// Parse a whole source into a [`BlockTree`].
@@ -267,7 +344,16 @@ fn parse_started_block(cursor: &mut Cursor) -> Vec<Block> {
             if code.ends_with('\n') {
                 code.pop();
             }
-            vec![Block::CodeBlock { language, code }]
+            // `mermaid` fences are diagrams; LaTeX fences are explicit
+            // display-math escapes (mirroring the web client).
+            match language.as_deref() {
+                Some("mermaid") => vec![Block::Mermaid { source: code }],
+                Some("latex") | Some("tex") | Some("math") => vec![Block::Math {
+                    source: code,
+                    display: true,
+                }],
+                _ => vec![Block::CodeBlock { language, code }],
+            }
         }
         Tag::BlockQuote(_) => vec![Block::BlockQuote {
             children: parse_block_sequence(cursor),
@@ -304,8 +390,11 @@ fn parse_started_block(cursor: &mut Cursor) -> Vec<Block> {
             vec![parse_table(cursor, align)]
         }
         Tag::HtmlBlock => {
-            // Raw HTML renders literally: an agent transcript is far more
-            // likely to be *discussing* markup than asking us to apply it.
+            // Raw HTML renders structurally where the allowlist can map it
+            // (tables, paragraphs, inline styles); anything else keeps its
+            // text. An agent transcript is far more likely to be *discussing*
+            // markup than asking us to apply it, so unmappable fragments stay
+            // literal rather than being reinterpreted.
             let mut text = String::new();
             loop {
                 match cursor.next_event() {
@@ -317,6 +406,8 @@ fn parse_started_block(cursor: &mut Cursor) -> Vec<Block> {
             let text = text.trim_end_matches('\n').to_owned();
             if text.is_empty() {
                 Vec::new()
+            } else if let Some(blocks) = super::raw_html::blocks_from_html(&text) {
+                blocks
             } else {
                 vec![Block::Paragraph {
                     runs: vec![InlineRun::plain(text)],
@@ -350,6 +441,7 @@ fn parse_list_item(cursor: &mut Cursor) -> ListItem {
 fn parse_block_sequence(cursor: &mut Cursor) -> Vec<Block> {
     let mut blocks: Vec<Block> = Vec::new();
     let mut inline: Vec<InlinePiece> = Vec::new();
+    let mut html: Vec<HtmlOp> = Vec::new();
     while let Some(event) = cursor.peek_event() {
         match event {
             Event::End(_) => {
@@ -365,7 +457,7 @@ fn parse_block_sequence(cursor: &mut Cursor) -> Vec<Block> {
                 cursor.bump();
                 blocks.push(Block::Rule);
             }
-            _ => parse_inline_event(cursor, &mut inline, &InlineStyle::default()),
+            _ => parse_inline_event(cursor, &mut inline, &InlineStyle::default(), &mut html),
         }
     }
     flush_paragraph(&mut blocks, &mut inline);
@@ -428,78 +520,148 @@ fn parse_table_row(cursor: &mut Cursor) -> Vec<Vec<InlineRun>> {
 /// Collect inline pieces until the container's `End` (which is consumed).
 fn parse_inline_container(cursor: &mut Cursor) -> Vec<InlinePiece> {
     let mut pieces = Vec::new();
+    let mut html: Vec<HtmlOp> = Vec::new();
     while let Some(event) = cursor.peek_event() {
         if matches!(event, Event::End(_)) {
             cursor.bump();
             break;
         }
-        parse_inline_event(cursor, &mut pieces, &InlineStyle::default());
+        parse_inline_event(cursor, &mut pieces, &InlineStyle::default(), &mut html);
     }
     merge_pieces(pieces)
 }
 
-/// Split inline pieces into blocks, so images become their own block and the
-/// text around them keeps its order.
+/// Split inline pieces into blocks, so images and display math become their
+/// own blocks and the text around them keeps its order. A paragraph that mixes
+/// plain text with inline math or sup/sub becomes an [`Block::InlineRich`]
+/// rather than a single-shaped paragraph.
 fn pieces_into_blocks(pieces: Vec<InlinePiece>) -> Vec<Block> {
     let mut blocks = Vec::new();
-    let mut runs: Vec<InlineRun> = Vec::new();
+    let mut inline: Vec<InlinePiece> = Vec::new();
+    let flush = |blocks: &mut Vec<Block>, inline: &mut Vec<InlinePiece>| {
+        if inline.is_empty() {
+            return;
+        }
+        let has_rich = inline
+            .iter()
+            .any(|piece| matches!(piece, InlinePiece::Math { .. } | InlinePiece::SubSup { .. }));
+        if has_rich {
+            blocks.push(Block::InlineRich {
+                pieces: std::mem::take(inline),
+            });
+        } else {
+            let runs = std::mem::take(inline)
+                .into_iter()
+                .map(|piece| match piece {
+                    InlinePiece::Run(run) => run,
+                    _ => unreachable!("a non-rich paragraph holds only runs"),
+                })
+                .collect();
+            blocks.push(Block::Paragraph { runs });
+        }
+    };
     for piece in pieces {
         match piece {
-            InlinePiece::Run(run) => runs.push(run),
             InlinePiece::Image { url, alt } => {
-                if !runs.is_empty() {
-                    blocks.push(Block::Paragraph {
-                        runs: std::mem::take(&mut runs),
-                    });
-                }
+                flush(&mut blocks, &mut inline);
                 blocks.push(Block::Image { url, alt });
             }
+            InlinePiece::Math {
+                source,
+                display: true,
+            } => {
+                flush(&mut blocks, &mut inline);
+                blocks.push(Block::Math {
+                    source,
+                    display: true,
+                });
+            }
+            piece => inline.push(piece),
         }
     }
-    if !runs.is_empty() {
-        blocks.push(Block::Paragraph { runs });
-    }
+    flush(&mut blocks, &mut inline);
     blocks
 }
 
 /// Flatten pieces to runs for contexts that cannot host a block-level image.
-fn pieces_into_runs(pieces: Vec<InlinePiece>) -> Vec<InlineRun> {
+/// Images degrade to their alt text, inline math to its source, so the caller
+/// always gets plain runs.
+pub(crate) fn pieces_into_runs(pieces: Vec<InlinePiece>) -> Vec<InlineRun> {
     merge_runs(
         pieces
             .into_iter()
             .map(|piece| match piece {
                 InlinePiece::Run(run) => run,
                 InlinePiece::Image { alt, .. } => InlineRun::plain(alt),
+                InlinePiece::Math { source, .. } => InlineRun::plain(source),
+                InlinePiece::SubSup { text, .. } => InlineRun::plain(text),
             })
             .collect(),
     )
 }
 
 /// Consume one inline event, appending its runs with `style` applied. Nested
-/// emphasis and links recurse with an extended style.
-fn parse_inline_event(cursor: &mut Cursor, pieces: &mut Vec<InlinePiece>, style: &InlineStyle) {
+/// emphasis and links recurse with an extended style; `html` tracks open
+/// inline-HTML tags so their text runs pick up the tag's styling.
+fn parse_inline_event(
+    cursor: &mut Cursor,
+    pieces: &mut Vec<InlinePiece>,
+    style: &InlineStyle,
+    html: &mut Vec<HtmlOp>,
+) {
     let Some(event) = cursor.next_event() else {
         return;
     };
     let mut push_run = |run: InlineRun| pieces.push(InlinePiece::Run(run));
     match event {
-        Event::Text(text) => push_run(InlineRun {
-            text: text.to_string(),
-            style: style.clone(),
-        }),
+        Event::Text(text) => {
+            // HTML sup/sub are their own elements; everything else applies the
+            // combined markdown + HTML style.
+            if let Some(op) = html.last() {
+                match op {
+                    HtmlOp::Sup => {
+                        pieces.push(InlinePiece::SubSup {
+                            text: text.to_string(),
+                            sup: true,
+                        });
+                        return;
+                    }
+                    HtmlOp::Sub => {
+                        pieces.push(InlinePiece::SubSup {
+                            text: text.to_string(),
+                            sup: false,
+                        });
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+            push_run(InlineRun {
+                text: text.to_string(),
+                style: effective_style(style, html),
+            });
+        }
         Event::Code(text) => {
-            let mut style = style.clone();
+            let mut style = effective_style(style, html);
             style.code = true;
             push_run(InlineRun {
                 text: text.to_string(),
                 style,
             });
         }
+        Event::InlineMath(text) => pieces.push(InlinePiece::Math {
+            source: text.to_string(),
+            display: false,
+        }),
+        Event::DisplayMath(text) => pieces.push(InlinePiece::Math {
+            source: text.to_string(),
+            display: true,
+        }),
         // A hard or soft break inside a paragraph is a line break in the
         // rendered run: shaped text splits on '\n' on its own.
         Event::SoftBreak | Event::HardBreak => push_run(InlineRun {
             text: "\n".to_owned(),
-            style: style.clone(),
+            style: effective_style(style, html),
         }),
         Event::Start(Tag::Image {
             dest_url, title, ..
@@ -511,7 +673,12 @@ fn parse_inline_event(cursor: &mut Cursor, pieces: &mut Vec<InlinePiece>, style:
                     cursor.bump();
                     break;
                 }
-                parse_inline_event(cursor, &mut alt_pieces, &InlineStyle::default());
+                parse_inline_event(
+                    cursor,
+                    &mut alt_pieces,
+                    &InlineStyle::default(),
+                    &mut Vec::new(),
+                );
             }
             let alt = pieces_into_runs(alt_pieces)
                 .into_iter()
@@ -541,23 +708,129 @@ fn parse_inline_event(cursor: &mut Cursor, pieces: &mut Vec<InlinePiece>, style:
                     cursor.bump();
                     break;
                 }
-                parse_inline_event(cursor, pieces, &nested);
+                parse_inline_event(cursor, pieces, &nested, html);
             }
         }
-        // Inline HTML renders literally, matching the block-level choice.
-        Event::Html(text) | Event::InlineHtml(text) => push_run(InlineRun {
-            text: text.to_string(),
-            style: style.clone(),
-        }),
+        // Inline HTML is mapped onto the allowlist (bold, links, images,
+        // sup/sub); unknown tags degrade to their text.
+        Event::Html(text) | Event::InlineHtml(text) => {
+            handle_inline_html(&text, style, html, pieces)
+        }
         Event::FootnoteReference(label) => push_run(InlineRun {
             text: format!("[{label}]"),
-            style: style.clone(),
+            style: effective_style(style, html),
         }),
         Event::TaskListMarker(checked) => push_run(InlineRun {
             text: if checked { "[x] " } else { "[ ] " }.to_owned(),
             style: style.clone(),
         }),
-        Event::End(_) | Event::Rule | Event::InlineMath(_) | Event::DisplayMath(_) => {}
+        Event::End(_) | Event::Rule => {}
+    }
+}
+
+/// Map one `InlineHtml` fragment onto the allowlist. Pulldown splits a tag pair
+/// across events, so an opening tag (e.g. `<b>`) pushes onto `html` and its
+/// closer pops; a self-contained fragment (text, `<img>`, `<br>`, `<a …>x</a>`)
+/// is walked immediately with the currently-open tags applied.
+fn handle_inline_html(
+    fragment: &str,
+    style: &InlineStyle,
+    html: &mut Vec<HtmlOp>,
+    pieces: &mut Vec<InlinePiece>,
+) {
+    let trimmed = fragment.trim();
+    if trimmed.starts_with("</") {
+        let name = trimmed[2..]
+            .trim_end_matches('>')
+            .split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        match name.as_str() {
+            "b" | "strong" => pop_html_op(html, HtmlOpMatch::Bold),
+            "i" | "em" => pop_html_op(html, HtmlOpMatch::Italic),
+            "code" => pop_html_op(html, HtmlOpMatch::Code),
+            "s" | "del" | "strike" => pop_html_op(html, HtmlOpMatch::Strikethrough),
+            "sup" => pop_html_op(html, HtmlOpMatch::Sup),
+            "sub" => pop_html_op(html, HtmlOpMatch::Sub),
+            "a" => pop_html_op(html, HtmlOpMatch::Link),
+            _ => {}
+        }
+        return;
+    }
+
+    let Ok(dom) = tl::parse(trimmed, tl::ParserOptions::default()) else {
+        pieces.push(InlinePiece::Run(InlineRun {
+            text: trimmed.to_string(),
+            style: effective_style(style, html),
+        }));
+        return;
+    };
+    let handles = dom.children();
+    let bare_tag = handles.len() == 1
+        && handles
+            .first()
+            .and_then(|handle| handle.get(dom.parser()))
+            .is_some_and(
+                |node| matches!(node, tl::Node::Tag(tag) if tag.children().top().len() == 0),
+            );
+
+    if bare_tag {
+        if let Some(node) = handles.first().and_then(|handle| handle.get(dom.parser())) {
+            if let tl::Node::Tag(tag) = node {
+                let name = tag.name().as_utf8_str().to_ascii_lowercase();
+                match name.as_str() {
+                    "b" | "strong" => html.push(HtmlOp::Bold),
+                    "i" | "em" => html.push(HtmlOp::Italic),
+                    "code" => html.push(HtmlOp::Code),
+                    "s" | "del" | "strike" => html.push(HtmlOp::Strikethrough),
+                    "sup" => html.push(HtmlOp::Sup),
+                    "sub" => html.push(HtmlOp::Sub),
+                    "a" => {
+                        let url = tag
+                            .attributes()
+                            .get("href")
+                            .and_then(|value| value)
+                            .map(|value| value.as_utf8_str().into_owned())
+                            .filter(|url| safe_inline_url(url));
+                        html.push(HtmlOp::Link { url });
+                    }
+                    "br" => pieces.push(InlinePiece::Run(InlineRun {
+                        text: "\n".into(),
+                        style: effective_style(style, html),
+                    })),
+                    "img" => push_inline_image(tag, pieces),
+                    "script" | "style" | "iframe" | "object" | "embed" | "noscript" => {}
+                    _ => {}
+                }
+            }
+        }
+        return;
+    }
+
+    super::raw_html::push_inline_pieces(trimmed, &effective_style(style, html), pieces);
+}
+
+fn safe_inline_url(url: &str) -> bool {
+    let lower = url.trim().to_ascii_lowercase();
+    !lower.starts_with("javascript:") && !lower.starts_with("vbscript:")
+}
+
+fn push_inline_image(tag: &tl::HTMLTag<'_>, pieces: &mut Vec<InlinePiece>) {
+    let src = tag
+        .attributes()
+        .get("src")
+        .and_then(|value| value)
+        .map(|value| value.as_utf8_str().into_owned())
+        .filter(|url| safe_inline_url(url));
+    let alt = tag
+        .attributes()
+        .get("alt")
+        .and_then(|value| value)
+        .map(|value| value.as_utf8_str().into_owned())
+        .unwrap_or_default();
+    if let Some(src) = src {
+        pieces.push(InlinePiece::Image { url: src, alt });
     }
 }
 
@@ -942,6 +1215,89 @@ mod tests {
             }
             _ => panic!("expected a text block, got {block:?}"),
         }
+    }
+
+    #[test]
+    fn inline_math_becomes_a_rich_paragraph() {
+        let tree = parse("Solve $x^2 + 1 = 0$ for real $x$.");
+        assert_eq!(tree.len(), 1);
+        let Block::InlineRich { pieces } = &tree.blocks[0].block else {
+            panic!("expected an inline-rich paragraph");
+        };
+        assert!(matches!(
+            pieces.iter().find(|piece| matches!(piece, InlinePiece::Math { .. })),
+            Some(InlinePiece::Math { source, display: false }) if source == "x^2 + 1 = 0"
+        ));
+        // The surrounding prose keeps its order as runs.
+        assert!(pieces.iter().any(|piece| matches!(
+            piece,
+            InlinePiece::Run(run) if run.text == "Solve "
+        )));
+    }
+
+    #[test]
+    fn display_math_becomes_its_own_block() {
+        let tree = parse("Before.\n\n$$\\int_0^\\infty e^{-x} dx$$\n\nAfter.");
+        assert_eq!(tree.len(), 3);
+        assert!(matches!(
+            tree.blocks[1].block,
+            Block::Math { display: true, ref source } if source == "\\int_0^\\infty e^{-x} dx"
+        ));
+        assert_eq!(paragraph_text(&tree.blocks[0].block), "Before.");
+    }
+
+    #[test]
+    fn mermaid_fences_become_diagram_blocks() {
+        let tree = parse("```mermaid\nflowchart LR\n  A --> B\n```\n");
+        assert_eq!(tree.len(), 1);
+        assert!(matches!(
+            tree.blocks[0].block,
+            Block::Mermaid { ref source } if source == "flowchart LR\n  A --> B"
+        ));
+    }
+
+    #[test]
+    fn latex_fences_become_display_math() {
+        for fence in ["latex", "tex", "math"] {
+            let tree = parse(&format!("```{fence}\nE = mc^2\n```\n"));
+            assert!(
+                matches!(
+                    tree.blocks[0].block,
+                    Block::Math { display: true, ref source } if source == "E = mc^2"
+                ),
+                "{fence} fence should become display math"
+            );
+        }
+    }
+
+    #[test]
+    fn other_fences_stay_code_blocks() {
+        let tree = parse("```mermaid\nx\n```\n\n```text\nmermaid\n```\n");
+        assert!(matches!(tree.blocks[0].block, Block::Mermaid { .. }));
+        assert!(matches!(tree.blocks[1].block, Block::CodeBlock { .. }));
+    }
+
+    #[test]
+    fn inline_html_maps_to_styles_not_literal_text() {
+        let tree = parse("Go <b>bold</b> and <i>italic</i>.");
+        let Block::Paragraph { runs } = &tree.blocks[0].block else {
+            panic!("expected a paragraph, got {:?}", tree.blocks[0]);
+        };
+        assert!(runs.iter().any(|run| run.style.bold && run.text == "bold"));
+        assert!(
+            runs.iter()
+                .any(|run| run.style.italic && run.text == "italic")
+        );
+        assert!(
+            runs.iter().all(|run| !run.text.contains('<')),
+            "inline HTML should be interpreted, not literal"
+        );
+    }
+
+    #[test]
+    fn block_html_tables_become_tables() {
+        let tree = parse("<table><tr><th>A</th></tr><tr><td>1</td></tr></table>");
+        assert!(matches!(tree.blocks[0].block, Block::Table { .. }));
     }
 
     #[test]

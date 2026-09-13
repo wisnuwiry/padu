@@ -34,7 +34,10 @@ use regex::Regex;
 
 use super::highlight::{self, Lang, TokenClass};
 use super::mend::PENDING_LINK_URL;
-use super::parser::{Block, IncrementalParser, InlineRun, ListItem, TableAlign, TopBlock};
+use super::parser::{
+    Block, IncrementalParser, InlinePiece, InlineRun, InlineStyle, ListItem, TableAlign, TopBlock,
+};
+use super::rich::{self, RenderTheme, RichKind};
 use super::selection::{
     RegisteredText, SelectionRegistry, SelectionState, Span, TextKey, line_range, word_range,
 };
@@ -154,7 +157,7 @@ const MENTION_CHIP_RADIUS: f32 = 7.0;
 const MENTION_CHIP_PAD_X: f32 = 9.0;
 // Negative here expands the chip beyond the text line so the rounded
 // background includes the requested vertical padding instead of shrinking.
-const MENTION_CHIP_INSET_Y: f32 = -3.0;
+const MENTION_CHIP_INSET_Y: f32 = -0.5;
 
 /// Heading scale relative to body text, by level.
 fn heading_metrics(level: u8, metrics: &Metrics) -> (f32, f32, FontWeight) {
@@ -191,6 +194,7 @@ pub struct Palette {
     pub mention_border: Hsla,
     pub added: Hsla,
     pub removed: Hsla,
+    pub warning: Hsla,
     is_dark: bool,
 }
 
@@ -230,7 +234,29 @@ impl Palette {
             mention_border: theme.border,
             added: theme.success,
             removed: theme.danger,
+            warning: theme.warning,
             is_dark: theme.is_dark,
+        }
+    }
+
+    /// Theme colors for the rich renderer, as the hex strings MathJax and
+    /// Mermaid consume. The font size drives the SVG's em/ex resolution so
+    /// rendered math scales with the transcript text.
+    pub fn rich_theme(&self, font_px: f32) -> RenderTheme {
+        RenderTheme {
+            is_dark: self.is_dark,
+            font_px,
+            text: hsla_hex(self.text),
+            secondary: hsla_hex(self.secondary),
+            tertiary: hsla_hex(self.tertiary),
+            border: hsla_hex(self.border),
+            card: hsla_hex(self.inset),
+            surface: hsla_hex(self.overlay),
+            accent: hsla_hex(self.accent),
+            success: hsla_hex(self.added),
+            warning: hsla_hex(self.warning),
+            danger: hsla_hex(self.removed),
+            font_family: "system-ui".into(),
         }
     }
 
@@ -257,6 +283,16 @@ impl Palette {
 
 fn hue(is_dark: bool, dark: u32, light: u32) -> Hsla {
     gpui::rgb(if is_dark { dark } else { light }).into()
+}
+
+fn hsla_hex(color: Hsla) -> String {
+    let rgba = gpui::Rgba::from(color);
+    format!(
+        "#{:02x}{:02x}{:02x}",
+        (rgba.r.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (rgba.g.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (rgba.b.clamp(0.0, 1.0) * 255.0).round() as u8,
+    )
 }
 
 // ── Flattened inline text ──────────────────────────────────────────────────
@@ -1466,10 +1502,33 @@ fn search_block(
             *ordinal += 1;
             search_text(&text, current, regex, cap, matches)
         }
+        Block::InlineRich { pieces } => pieces.iter().any(|piece| match piece {
+            InlinePiece::Run(run) => {
+                let current = *ordinal;
+                *ordinal += 1;
+                search_text(&run.text, current, regex, cap, matches)
+            }
+            InlinePiece::Math { .. } | InlinePiece::Image { .. } => {
+                // An image consumes an ordinal for its id; its caption is not a
+                // shaped text element, so there is no geometry to highlight.
+                *ordinal += 1;
+                false
+            }
+            InlinePiece::SubSup { text, .. } => {
+                let current = *ordinal;
+                *ordinal += 1;
+                search_text(text, current, regex, cap, matches)
+            }
+        }),
         Block::CodeBlock { code, .. } => {
             let current = *ordinal;
             *ordinal += 1;
             search_text(code, current, regex, cap, matches)
+        }
+        Block::Math { .. } | Block::Mermaid { .. } => {
+            // Rendered as images, not shaped text.
+            *ordinal += 1;
+            false
         }
         Block::Image { .. } => {
             // The renderer consumes an ordinal for the image id, but its alt
@@ -1605,6 +1664,9 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
                 .child(text_element(&flat, key, ctx))
                 .into_any_element()
         }
+        Block::InlineRich { pieces } => render_inline_rich(pieces, ctx),
+        Block::Math { source, display } => render_math_block(source, *display, ctx),
+        Block::Mermaid { source } => render_mermaid_block(source, ctx),
         Block::Heading { level, runs } => {
             let (size, line_height, weight) = heading_metrics(*level, &ctx.metrics);
             let key = ctx.next_key();
@@ -1801,6 +1863,220 @@ fn render_image(url: &str, alt: &str, ctx: &Ctx) -> AnyElement {
                     .child(SharedString::from(alt.to_owned())),
             )
         })
+        .into_any_element()
+}
+
+// ── Rich content (LaTeX, Mermaid) ──────────────────────────────────────────
+
+/// A paragraph that mixes text with inline math or sup/sub. Rendered as a
+/// wrapping row of shrink-wrapped text elements and inline images: each text
+/// chunk wraps at the container width, and the math sits inline between them.
+fn render_inline_rich(pieces: &[InlinePiece], ctx: &Ctx) -> AnyElement {
+    let mut children = Vec::with_capacity(pieces.len());
+    for piece in pieces {
+        match piece {
+            InlinePiece::Run(run) => {
+                let key = ctx.next_key();
+                let flat = ctx.flat(key.index, || {
+                    flatten(
+                        std::slice::from_ref(run),
+                        ctx.palette,
+                        FontWeight::NORMAL,
+                        ctx.palette.text,
+                    )
+                });
+                children.push(
+                    div()
+                        .min_w_0()
+                        .child(text_element(&flat, key, ctx))
+                        .into_any_element(),
+                );
+            }
+            InlinePiece::Math { source, .. } => {
+                children.push(render_inline_math(source, ctx));
+            }
+            InlinePiece::SubSup { text, sup } => {
+                children.push(render_sub_sup(text, *sup, ctx));
+            }
+            InlinePiece::Image { url, alt } => {
+                // Images are split to their own blocks before this point;
+                // render defensively rather than dropping content.
+                children.push(render_image(url, alt, ctx));
+            }
+        }
+    }
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .text_size(px(ctx.metrics.text_size))
+        .line_height(px(ctx.metrics.line_height))
+        .children(children)
+        .into_any_element()
+}
+
+fn render_inline_math(source: &str, ctx: &Ctx) -> AnyElement {
+    let key = ctx.next_key();
+    let theme = ctx.palette.rich_theme(ctx.metrics.text_size);
+    let kind = RichKind::Math { display: false };
+    let hash = rich::hash(kind, source, &theme);
+    let source = rich::rich_image_source_value(hash, kind, source.to_string(), theme);
+    let loading_height = ctx.metrics.text_size;
+    img(source)
+        .id(SharedString::from(format!(
+            "math-{}-{}",
+            key.row, key.index
+        )))
+        .with_loading(move || div().w(px(14.0)).h(px(loading_height)).into_any_element())
+        .into_any_element()
+}
+
+fn render_sub_sup(text: &str, sup: bool, ctx: &Ctx) -> AnyElement {
+    let key = ctx.next_key();
+    let run = InlineRun {
+        text: text.to_string(),
+        style: InlineStyle::default(),
+    };
+    let flat = ctx.flat(key.index, || {
+        flatten(
+            std::slice::from_ref(&run),
+            ctx.palette,
+            FontWeight::NORMAL,
+            ctx.palette.text,
+        )
+    });
+    let size = (ctx.metrics.text_size * 0.74).max(10.0);
+    div()
+        .min_w_0()
+        .text_size(px(size))
+        .line_height(px(ctx.metrics.line_height * 0.8))
+        // Centered row + margin approximates the baseline shift of a
+        // superscript (lifted) or subscript (lowered).
+        .when(sup, |element| element.mb(px(4.0)))
+        .when(!sup, |element| element.mt(px(4.0)))
+        .child(text_element(&flat, key, ctx))
+        .into_any_element()
+}
+
+/// Display math (`$$…$$`), rendered as an SVG image centered on its own line.
+fn render_math_block(source: &str, display: bool, ctx: &Ctx) -> AnyElement {
+    let key = ctx.next_key();
+    let theme = ctx.palette.rich_theme(ctx.metrics.text_size);
+    let kind = RichKind::Math { display };
+    let hash = rich::hash(kind, source, &theme);
+    let image_source = rich::rich_image_source_value(hash, kind, source.to_string(), theme);
+    let palette = *ctx.palette;
+    let text_size = ctx.metrics.text_size;
+    let line_height = ctx.metrics.line_height;
+    let latex = source.to_owned();
+    let image = img(image_source)
+        .id(SharedString::from(format!(
+            "math-{}-{}",
+            key.row, key.index
+        )))
+        .max_w(relative(1.0))
+        .object_fit(gpui::ObjectFit::ScaleDown)
+        .with_loading(move || div().w_full().h(px(line_height + 6.0)).into_any_element())
+        .with_fallback(move || {
+            div()
+                .w_full()
+                .min_w_0()
+                .text_size(px(text_size))
+                .line_height(px(line_height))
+                .text_color(palette.removed)
+                .child(SharedString::from(latex.clone()))
+                .into_any_element()
+        });
+    if display {
+        div()
+            .w_full()
+            .min_w_0()
+            .flex()
+            .justify_center()
+            .py(px(6.0))
+            .child(image)
+            .into_any_element()
+    } else {
+        div()
+            .w_full()
+            .min_w_0()
+            .py(px(2.0))
+            .child(image)
+            .into_any_element()
+    }
+}
+
+/// A ` ```mermaid ` fenced block, rendered as a bordered diagram card.
+fn render_mermaid_block(source: &str, ctx: &Ctx) -> AnyElement {
+    let key = ctx.next_key();
+    let theme = ctx.palette.rich_theme(ctx.metrics.text_size);
+    let kind = RichKind::Mermaid;
+    let hash = rich::hash(kind, source, &theme);
+    let image_source = rich::rich_image_source_value(hash, kind, source.to_string(), theme);
+    let palette = *ctx.palette;
+    let metrics = ctx.metrics;
+    let diagram_source = source.to_owned();
+    let image = img(image_source)
+        .id(SharedString::from(format!(
+            "mermaid-{}-{}",
+            key.row, key.index
+        )))
+        .max_w(relative(1.0))
+        .object_fit(gpui::ObjectFit::ScaleDown)
+        .with_loading(move || {
+            div()
+                .w_full()
+                .h(px(72.0))
+                .flex()
+                .items_center()
+                .text_size(px(12.5))
+                .text_color(palette.ghost)
+                .child(SharedString::from("Rendering diagram…"))
+                .into_any_element()
+        })
+        .with_fallback(move || {
+            let code_size = (metrics.code_text_size - 1.0).max(11.5);
+            let code_line = metrics.code_line_height - 1.0;
+            div()
+                .w_full()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap(px(6.0))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(4.0))
+                        .text_size(px(12.5))
+                        .text_color(palette.removed)
+                        .child(SharedString::from("Diagram failed to render")),
+                )
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .font_family(MONO_FAMILY)
+                        .text_size(px(code_size))
+                        .line_height(px(code_line))
+                        .text_color(palette.secondary)
+                        .whitespace_normal()
+                        .child(SharedString::from(diagram_source.clone())),
+                )
+                .into_any_element()
+        });
+    div()
+        .w_full()
+        .min_w_0()
+        .rounded(px(10.0))
+        .border_1()
+        .border_color(ctx.palette.border)
+        .bg(ctx.palette.overlay)
+        .p(px(14.0))
+        .overflow_hidden()
+        .child(image)
         .into_any_element()
 }
 
