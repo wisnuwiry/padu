@@ -82,6 +82,7 @@ import { CursorFieldProvider } from "~/components/butterfly";
 import { AGENT_PAGES } from "~/data/agent-pages";
 import {
   getDownloadOptions,
+  trackDownload,
   useDetectedPlatform,
 } from "~/downloads";
 import { useRelease } from "~/routes/__root";
@@ -721,6 +722,7 @@ function DownloadButton() {
       href={primary.href}
       target="_blank"
       rel="noopener noreferrer"
+      onClick={() => trackDownload(primary.platform)}
       className="inline-flex items-center gap-2 rounded-lg bg-foreground px-5 py-2.5 text-sm font-medium text-background hover:bg-foreground/90 active:scale-[0.98] transition-all"
     >
       <PrimaryIcon className="h-4 w-4" />

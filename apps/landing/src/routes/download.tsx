@@ -6,6 +6,7 @@ import { SiteShell } from "~/components/site-shell";
 import { pageMeta } from "~/meta";
 import {
   downloadUrls,
+  trackDownload,
   webAppUrl,
   AppleIcon,
   AndroidIcon,
@@ -86,7 +87,7 @@ function Download() {
         <div className="divide-y divide-white/10">
           <PlatformRow icon={AppleIcon} label="macOS">
             <PillGroup>
-              <DownloadPill href={urls.macDmg} label="Download DMG" />
+              <DownloadPill href={urls.macDmg} label="Download DMG" platform="macos" />
             </PillGroup>
           </PlatformRow>
 
@@ -95,9 +96,10 @@ function Download() {
               <DownloadPill
                 href={urls.windowsExeX64}
                 label={urls.windowsExeArm64 ? "Intel / x64 (.exe)" : "Download (.exe)"}
+                platform="windows-x64"
               />
               {urls.windowsExeArm64 && (
-                <DownloadPill href={urls.windowsExeArm64} label="ARM64 (.exe)" />
+                <DownloadPill href={urls.windowsExeArm64} label="ARM64 (.exe)" platform="windows-arm64" />
               )}
             </PillGroup>
           </PlatformRow>
@@ -106,9 +108,9 @@ function Download() {
             <div className="flex flex-col gap-3 sm:items-end">
               <CodeBlock size="sm">curl -fsSL https://padu.dev/install.sh | sh</CodeBlock>
               <PillGroup>
-                <DownloadPill href={urls.linuxTarballX64} label="x86_64 (.tar.gz)" />
+                <DownloadPill href={urls.linuxTarballX64} label="x86_64 (.tar.gz)" platform="linux-x64" />
                 {urls.linuxTarballArm64 && (
-                  <DownloadPill href={urls.linuxTarballArm64} label="ARM64 (.tar.gz)" />
+                  <DownloadPill href={urls.linuxTarballArm64} label="ARM64 (.tar.gz)" platform="linux-arm64" />
                 )}
               </PillGroup>
             </div>
@@ -155,7 +157,7 @@ function Download() {
           <div className="divide-y divide-white/10">
             <PlatformRow icon={GlobeIcon} label="Web App">
               <PillGroup>
-                <DownloadPill href={webAppUrl} label="Open Web App" external />
+                <DownloadPill href={webAppUrl} label="Open Web App" external platform="web" />
               </PillGroup>
             </PlatformRow>
           </div>
@@ -292,16 +294,19 @@ function DownloadPill({
   href,
   label,
   external,
+  platform,
 }: {
   href: string;
   label: string;
   external?: boolean;
+  platform?: string;
 }) {
   return (
     <a
       href={href}
       target="_blank"
       rel="noopener noreferrer"
+      onClick={() => platform && trackDownload(platform)}
       className="inline-flex items-center justify-center rounded-full bg-foreground px-4 py-1.5 text-sm font-medium text-background hover:bg-foreground/85 transition-colors"
     >
       {label}

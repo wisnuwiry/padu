@@ -163,6 +163,7 @@ syncLlmsTxt();
 
 export default defineConfig((): UserConfig => {
   return {
+    envPrefix: ["VITE_", "PADU_"],
     server: {
       host: "0.0.0.0",
       port: 3000,

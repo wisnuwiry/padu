@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { createContext, useContext } from "react";
 import { Outlet, createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
 import type { ReleaseChannels, ReleaseInfo } from "~/latest-release";
+import { AnalyticsHeadScript } from "~/analytics";
 import { getLatestRelease } from "~/release";
 import { getStarCount } from "~/stars";
 import { useRealtimeStars } from "~/realtime-stars";
@@ -81,6 +82,7 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
     <html lang="en">
       <head>
         <HeadContent />
+        <AnalyticsHeadScript />
       </head>
       <body className="antialiased bg-background text-foreground">
         {children}

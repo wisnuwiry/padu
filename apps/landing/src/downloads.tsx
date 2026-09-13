@@ -1,5 +1,7 @@
 import * as React from "react";
 
+import { trackEvent } from "~/analytics";
+
 export const RELEASES_BASE = "https://releases.padu.dev";
 
 export function releaseBase(_version?: string) {
@@ -42,6 +44,10 @@ export const playStoreUrl = "https://play.google.com/store/apps/details?id=dev.p
 export const webAppUrl = "https://app.padu.dev";
 
 type Platform = "mac-silicon" | "mac-intel" | "windows" | "linux";
+
+export function trackDownload(platform: string) {
+  trackEvent("download", { platform });
+}
 
 export interface DownloadOption {
   platform: Platform;
