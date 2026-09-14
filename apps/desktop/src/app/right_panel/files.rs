@@ -1523,7 +1523,14 @@ impl Padu {
         match self.active_right_panel_surface() {
             Some(RightPanelSurface::Diff) => self.refresh_right_panel_diff(cx),
             Some(RightPanelSurface::Files | RightPanelSurface::File(_)) => {
-                self.refresh_right_panel_working_tree(cx)
+                self.refresh_right_panel_working_tree(cx);
+                // The agent may have rewritten the file on disk since the
+                // editor's last read; the markdown preview and editor must
+                // follow. Reload only the file on screen — one background read,
+                // and a no-op while a read is already in flight.
+                if let Some(path) = self.visible_right_panel_file_path() {
+                    self.reload_right_panel_file_if_clean(&path, cx);
+                }
             }
             _ => {}
         }
