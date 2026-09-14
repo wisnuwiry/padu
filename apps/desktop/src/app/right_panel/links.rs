@@ -111,7 +111,9 @@ pub(crate) fn workspace_relative_file_path(workspace: &Path, target: &Path) -> O
         if relative.as_os_str().is_empty() {
             return None;
         }
-        Some(relative.to_string_lossy().into_owned())
+        // Workspace-relative paths are protocol values, not native paths.
+        // Keep them stable across clients and operating systems.
+        Some(relative.to_string_lossy().replace('\\', "/"))
     }
 
     let workspace = normalized_path(workspace);
@@ -123,7 +125,8 @@ pub(crate) fn workspace_relative_file_path(workspace: &Path, target: &Path) -> O
 
 pub(crate) fn transcript_link_route(target: &str, workspace: Option<&Path>) -> TranscriptLinkRoute {
     let target = strip_file_location(target.trim());
-    let path = markdown_file_link_path(target).or_else(|| {
+    let explicit_file_path = markdown_file_link_path(target);
+    let path = explicit_file_path.clone().or_else(|| {
         let workspace = workspace?;
         let decoded = percent_decode_file_path(target);
         let path = Path::new(&decoded);
@@ -144,6 +147,7 @@ pub(crate) fn transcript_link_route(target: &str, workspace: Option<&Path>) -> T
     {
         TranscriptLinkRoute::ProjectFile(relative_path)
     } else if workspace.is_some()
+        && explicit_file_path.is_none()
         && !target.starts_with('/')
         && !target.starts_with("file:")
         && !target.contains("://")
@@ -178,6 +182,17 @@ mod tests {
         assert_eq!(
             transcript_link_route("../outside.rs", Some(Path::new("/work/repo"))),
             TranscriptLinkRoute::External
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_absolute_paths_outside_workspace_open_in_finder() {
+        let workspace = Path::new(r"D:\a\padu\padu\apps\desktop");
+        let outside = r"D:\a\padu\padu\apps\kero\src\app.rs:20";
+        assert_eq!(
+            transcript_link_route(outside, Some(workspace)),
+            TranscriptLinkRoute::Finder(PathBuf::from(r"D:\a\padu\padu\apps\kero\src\app.rs"))
         );
     }
 }
