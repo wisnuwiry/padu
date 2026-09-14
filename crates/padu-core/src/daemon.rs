@@ -629,7 +629,8 @@ impl Backend for PaduBackend {
                     ProviderKind::Agy
                     | ProviderKind::Cursor
                     | ProviderKind::Fx
-                    | ProviderKind::OpenCode => {
+                    | ProviderKind::OpenCode
+                    | ProviderKind::Qoder => {
                         crate::acp_session::list_provider_sessions(provider, &binary, &[], limit)?
                     }
                     ProviderKind::DeepSeek => {
@@ -691,7 +692,8 @@ impl Backend for PaduBackend {
                             VISIBLE_TURN_LIMIT,
                         )?
                     }
-                    ProviderResumeCursor::CommandCode { .. } => ProviderSessionHistory {
+                    ProviderResumeCursor::CommandCode { .. }
+                    | ProviderResumeCursor::Qoder { .. } => ProviderSessionHistory {
                         messages: Vec::new(),
                         turns: Vec::new(),
                     },
@@ -1391,7 +1393,8 @@ impl PaduBackend {
             ProviderKind::Agy
             | ProviderKind::CommandCode
             | ProviderKind::Fx
-            | ProviderKind::Kimi => {
+            | ProviderKind::Kimi
+            | ProviderKind::Qoder => {
                 bail!(
                     "{} cannot branch a conversation at a turn",
                     source.provider.display_name()
@@ -1597,7 +1600,8 @@ impl PaduBackend {
             ProviderKind::Agy
             | ProviderKind::CommandCode
             | ProviderKind::Fx
-            | ProviderKind::Kimi => {
+            | ProviderKind::Kimi
+            | ProviderKind::Qoder => {
                 bail!(
                     "{} cannot rewind a conversation to a turn",
                     source.provider.display_name()

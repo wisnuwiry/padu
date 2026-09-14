@@ -377,6 +377,7 @@ const PROVIDER_ICONS: Record<ProviderKind, string> = {
   kimi: 'i-padu-provider-kimi',
   ohMyPi: 'i-padu-provider-ohmypi',
   pi: 'i-padu-provider-pi',
+  qoder: 'i-padu-provider-qoder',
 }
 
 export const PROVIDERS: Array<{
@@ -398,6 +399,7 @@ export const PROVIDERS: Array<{
   { id: 'kimi', name: 'Kimi Code', shortName: 'Kimi', command: 'kimi' },
   { id: 'ohMyPi', name: 'Oh My Pi', shortName: 'Oh My Pi', command: 'omp' },
   { id: 'pi', name: 'Pi', shortName: 'Pi', command: 'pi' },
+  { id: 'qoder', name: 'Qoder CLI', shortName: 'Qoder', command: 'qoder' },
 ]
 
 export function providerMeta(provider: ProviderKind) {

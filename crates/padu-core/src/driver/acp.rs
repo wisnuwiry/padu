@@ -123,6 +123,10 @@ fn launch_for(provider: ProviderKind, reasoning_effort: Option<&str>) -> anyhow:
             args: vec!["acp".into()],
             env: Vec::new(),
         }),
+        ProviderKind::Qoder => Ok(AcpLaunch {
+            args: vec!["--acp".into()],
+            env: Vec::new(),
+        }),
         ProviderKind::OpenCode => Ok(AcpLaunch {
             args: vec!["acp".into()],
             env: Vec::new(),
@@ -1045,6 +1049,13 @@ fn desired_mode(
         } else {
             "code"
         }
+    } else if provider == ProviderKind::Qoder {
+        match mode {
+            RuntimeMode::Plan | RuntimeMode::Ask => "default",
+            RuntimeMode::AutoAcceptEdits => "acceptEdits",
+            RuntimeMode::Auto => "auto",
+            RuntimeMode::FullAccess => "yolo",
+        }
     } else {
         if interaction_mode != InteractionMode::Plan && mode != RuntimeMode::Plan {
             return None;
@@ -1067,6 +1078,7 @@ fn desired_mode(
 fn reasoning_effort_config_id(provider: ProviderKind) -> &'static str {
     match provider {
         ProviderKind::Kimi => "thinking",
+        ProviderKind::Qoder => "reasoning_effort",
         _ => "mode",
     }
 }
@@ -1335,6 +1347,15 @@ async fn apply_model(
         .then_some(config_options)
         .flatten()
         .and_then(|options| find_config_option(options, SessionConfigOptionCategory::Model));
+    let qoder_model_option = (provider == ProviderKind::Qoder)
+        .then_some(config_options)
+        .flatten()
+        .and_then(|options| {
+            options.iter().find(|option| {
+                option.category == Some(SessionConfigOptionCategory::Model)
+                    && option.id.to_string().eq_ignore_ascii_case("model")
+            })
+        });
     if let Some(option) = cursor_model_option
         && let Some(selection) = cursor_model_selection(option, model)
     {
@@ -1368,6 +1389,76 @@ async fn apply_model(
                     "errors.select_model",
                     error = error
                 )));
+            }
+        }
+        return;
+    }
+
+    if let Some(option) = qoder_model_option {
+        let requested = model.to_ascii_lowercase();
+        let value = session_config_select_values(option)
+            .iter()
+            .find(|value| {
+                value.eq_ignore_ascii_case(model) || value.to_ascii_lowercase().contains(&requested)
+            })
+            .copied()
+            .or_else(|| {
+                // Qoder's catalog command exposes the display model name while
+                // ACP may expose a provider-internal model id.
+                match &option.kind {
+                    SessionConfigKind::Select(select) => match &select.options {
+                        SessionConfigSelectOptions::Ungrouped(options) => options
+                            .iter()
+                            .find(|candidate| {
+                                candidate.name.to_ascii_lowercase().contains(&requested)
+                            })
+                            .map(|candidate| candidate.value.0.as_ref()),
+                        SessionConfigSelectOptions::Grouped(_) => None,
+                        _ => None,
+                    },
+                    _ => None,
+                }
+            });
+        if let Some(value) = value {
+            let mut options = config_options.unwrap_or_default().to_vec();
+            if session_config_current_value(option) != Some(value) {
+                match connection
+                    .send_request(SetSessionConfigOptionRequest::new(
+                        session_id.clone(),
+                        option.id.clone(),
+                        value,
+                    ))
+                    .block_task()
+                    .await
+                {
+                    Ok(response) => options = response.config_options,
+                    Err(error) => {
+                        let _ = events.send(DriverEvent::Error(tr!(
+                            "errors.select_model",
+                            error = error
+                        )));
+                        return;
+                    }
+                }
+            }
+            if let Some(effort) = reasoning_effort
+                && let Some(option) = options.iter().find(|option| {
+                    option
+                        .id
+                        .to_string()
+                        .eq_ignore_ascii_case("reasoning_effort")
+                })
+                && session_config_select_values(option).contains(&effort)
+                && session_config_current_value(option) != Some(effort)
+            {
+                let _ = connection
+                    .send_request(SetSessionConfigOptionRequest::new(
+                        session_id.clone(),
+                        option.id.clone(),
+                        effort,
+                    ))
+                    .block_task()
+                    .await;
             }
         }
         return;
@@ -2285,6 +2376,13 @@ mod tests {
     }
 
     #[test]
+    fn launch_for_qoder_starts_its_documented_acp_server() {
+        let launch = launch_for(ProviderKind::Qoder, None).expect("Qoder launch should succeed");
+        assert_eq!(launch.args, vec!["--acp"]);
+        assert!(launch.env.is_empty());
+    }
+
+    #[test]
     fn launch_for_agy_sets_appropriate_arguments() {
         let launch = launch_for(ProviderKind::Agy, None).expect("agy launch should succeed");
         #[cfg(target_os = "linux")]
@@ -2459,6 +2557,36 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn qoder_access_modes_select_its_advertised_permission_profiles() {
+        let modes = SessionModeState::new(
+            "default",
+            vec![
+                SessionMode::new("default", "Default"),
+                SessionMode::new("acceptEdits", "Accept Edits"),
+                SessionMode::new("auto", "Auto"),
+                SessionMode::new("yolo", "Bypass Permissions"),
+            ],
+        );
+        for (runtime_mode, expected) in [
+            (RuntimeMode::Ask, None),
+            (RuntimeMode::AutoAcceptEdits, Some("acceptEdits")),
+            (RuntimeMode::Auto, Some("auto")),
+            (RuntimeMode::FullAccess, Some("yolo")),
+        ] {
+            assert_eq!(
+                desired_mode(
+                    ProviderKind::Qoder,
+                    Some(&modes),
+                    runtime_mode,
+                    InteractionMode::Build,
+                )
+                .map(|mode| mode.to_string()),
+                expected.map(str::to_owned)
+            );
+        }
     }
 
     #[test]

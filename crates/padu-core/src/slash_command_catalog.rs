@@ -46,7 +46,8 @@ pub(crate) fn discover(
         | ProviderKind::Fx
         | ProviderKind::Grok
         | ProviderKind::Kimi
-        | ProviderKind::CommandCode => None,
+        | ProviderKind::CommandCode
+        | ProviderKind::Qoder => None,
     }
 }
 

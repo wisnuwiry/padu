@@ -27,6 +27,7 @@ import { Route as OhmypiRouteImport } from "./routes/ohmypi";
 import { Route as OpencodeRouteImport } from "./routes/opencode";
 import { Route as PiRouteImport } from "./routes/pi";
 import { Route as PrivacyRouteImport } from "./routes/privacy";
+import { Route as QoderRouteImport } from "./routes/qoder";
 import { Route as TermsRouteImport } from "./routes/terms";
 import { Route as DocsIndexRouteImport } from "./routes/docs/index";
 import { Route as DocsSplatRouteImport } from "./routes/docs/$";
@@ -121,6 +122,11 @@ const PrivacyRoute = PrivacyRouteImport.update({
   path: "/privacy",
   getParentRoute: () => rootRouteImport,
 } as any);
+const QoderRoute = QoderRouteImport.update({
+  id: "/qoder",
+  path: "/qoder",
+  getParentRoute: () => rootRouteImport,
+} as any);
 const TermsRoute = TermsRouteImport.update({
   id: "/terms",
   path: "/terms",
@@ -156,6 +162,7 @@ export interface FileRoutesByFullPath {
   "/opencode": typeof OpencodeRoute;
   "/pi": typeof PiRoute;
   "/privacy": typeof PrivacyRoute;
+  "/qoder": typeof QoderRoute;
   "/terms": typeof TermsRoute;
   "/docs/$": typeof DocsSplatRoute;
   "/docs/": typeof DocsIndexRoute;
@@ -178,6 +185,7 @@ export interface FileRoutesByTo {
   "/opencode": typeof OpencodeRoute;
   "/pi": typeof PiRoute;
   "/privacy": typeof PrivacyRoute;
+  "/qoder": typeof QoderRoute;
   "/terms": typeof TermsRoute;
   "/docs/$": typeof DocsSplatRoute;
   "/docs": typeof DocsIndexRoute;
@@ -202,6 +210,7 @@ export interface FileRoutesById {
   "/opencode": typeof OpencodeRoute;
   "/pi": typeof PiRoute;
   "/privacy": typeof PrivacyRoute;
+  "/qoder": typeof QoderRoute;
   "/terms": typeof TermsRoute;
   "/docs/$": typeof DocsSplatRoute;
   "/docs/": typeof DocsIndexRoute;
@@ -227,6 +236,7 @@ export interface FileRouteTypes {
     | "/opencode"
     | "/pi"
     | "/privacy"
+    | "/qoder"
     | "/terms"
     | "/docs/$"
     | "/docs/";
@@ -249,6 +259,7 @@ export interface FileRouteTypes {
     | "/opencode"
     | "/pi"
     | "/privacy"
+    | "/qoder"
     | "/terms"
     | "/docs/$"
     | "/docs";
@@ -272,6 +283,7 @@ export interface FileRouteTypes {
     | "/opencode"
     | "/pi"
     | "/privacy"
+    | "/qoder"
     | "/terms"
     | "/docs/$"
     | "/docs/";
@@ -296,6 +308,7 @@ export interface RootRouteChildren {
   OpencodeRoute: typeof OpencodeRoute;
   PiRoute: typeof PiRoute;
   PrivacyRoute: typeof PrivacyRoute;
+  QoderRoute: typeof QoderRoute;
   TermsRoute: typeof TermsRoute;
 }
 
@@ -427,6 +440,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof PrivacyRouteImport;
       parentRoute: typeof rootRouteImport;
     };
+    "/qoder": {
+      id: "/qoder";
+      path: "/qoder";
+      fullPath: "/qoder";
+      preLoaderRoute: typeof QoderRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     "/terms": {
       id: "/terms";
       path: "/terms";
@@ -482,6 +502,7 @@ const rootRouteChildren: RootRouteChildren = {
   OpencodeRoute: OpencodeRoute,
   PiRoute: PiRoute,
   PrivacyRoute: PrivacyRoute,
+  QoderRoute: QoderRoute,
   TermsRoute: TermsRoute,
 };
 export const routeTree = rootRouteImport

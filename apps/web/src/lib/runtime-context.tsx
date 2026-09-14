@@ -1464,6 +1464,7 @@ function providerName(provider: AgentSession['provider']) {
       commandCode: 'Command Code',
       ohMyPi: 'Oh My Pi',
       pi: 'Pi',
+      qoder: 'Qoder',
     } as const
   )[provider] ?? provider
 }

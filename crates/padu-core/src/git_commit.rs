@@ -361,7 +361,7 @@ fn agent_arguments(
                 push(&mut args, effort);
             }
         }
-        ProviderKind::Kimi => {
+        ProviderKind::Kimi | ProviderKind::Qoder => {
             push(&mut args, "--prompt");
             push(&mut args, prompt);
             push(&mut args, "--output-format");
@@ -839,7 +839,7 @@ mod tests {
                     assert!(has_pair(&args, "--model", "model"));
                     assert!(has_pair(&args, "--effort", "low"));
                 }
-                ProviderKind::Kimi => {
+                ProviderKind::Kimi | ProviderKind::Qoder => {
                     assert!(has_pair(&args, "--prompt", prompt));
                     assert!(has_pair(&args, "--output-format", "text"));
                     assert!(has_pair(&args, "--model", "model"));

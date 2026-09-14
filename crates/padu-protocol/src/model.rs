@@ -26,10 +26,11 @@ pub enum ProviderKind {
     CommandCode,
     OhMyPi,
     Pi,
+    Qoder,
 }
 
 impl ProviderKind {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Agy,
         Self::Amp,
         Self::Claude,
@@ -43,6 +44,7 @@ impl ProviderKind {
         Self::CommandCode,
         Self::OhMyPi,
         Self::Pi,
+        Self::Qoder,
     ];
 
     pub fn id(self) -> &'static str {
@@ -60,6 +62,7 @@ impl ProviderKind {
             Self::CommandCode => "commandcode",
             Self::OhMyPi => "ohmypi",
             Self::Pi => "pi",
+            Self::Qoder => "qoder",
         }
     }
 
@@ -78,6 +81,7 @@ impl ProviderKind {
             Self::CommandCode => "Command Code",
             Self::OhMyPi => "Oh My Pi",
             Self::Pi => "Pi",
+            Self::Qoder => "Qoder CLI",
         }
     }
 
@@ -96,6 +100,7 @@ impl ProviderKind {
             Self::CommandCode => "Command",
             Self::OhMyPi => "Oh My Pi",
             Self::Pi => "Pi",
+            Self::Qoder => "Qoder",
         }
     }
 
@@ -116,6 +121,7 @@ impl ProviderKind {
             Self::CommandCode => "command-code",
             Self::OhMyPi => "omp",
             Self::Pi => "pi",
+            Self::Qoder => "qoder",
         }
     }
 
@@ -169,6 +175,7 @@ impl ProviderKind {
                 | Self::CommandCode
                 | Self::OhMyPi
                 | Self::Pi
+                | Self::Qoder
         )
     }
 }
@@ -229,6 +236,9 @@ pub enum ProviderResumeCursor {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session_file: Option<PathBuf>,
     },
+    Qoder {
+        session_id: String,
+    },
 }
 
 impl ProviderResumeCursor {
@@ -262,6 +272,7 @@ impl ProviderResumeCursor {
                 session_id: id,
                 session_file: None,
             },
+            ProviderKind::Qoder => Self::Qoder { session_id: id },
         }
     }
 
@@ -280,6 +291,7 @@ impl ProviderResumeCursor {
             Self::CommandCode { .. } => ProviderKind::CommandCode,
             Self::OhMyPi { .. } => ProviderKind::OhMyPi,
             Self::Pi { .. } => ProviderKind::Pi,
+            Self::Qoder { .. } => ProviderKind::Qoder,
         }
     }
 
@@ -296,7 +308,8 @@ impl ProviderResumeCursor {
             | Self::Kimi { session_id }
             | Self::CommandCode { session_id }
             | Self::OhMyPi { session_id, .. }
-            | Self::Pi { session_id, .. } => session_id,
+            | Self::Pi { session_id, .. }
+            | Self::Qoder { session_id } => session_id,
             Self::Codex { thread_id } => thread_id,
         }
     }
@@ -4073,6 +4086,10 @@ mod tests {
         assert_eq!(ProviderKind::OpenCode.command(), "opencode");
         assert_eq!(ProviderKind::Grok.command(), "grok");
         assert_eq!(ProviderKind::Pi.command(), "pi");
+        assert_eq!(ProviderKind::Qoder.id(), "qoder");
+        assert_eq!(ProviderKind::Qoder.command(), "qoder");
+        assert_eq!(ProviderKind::Qoder.display_name(), "Qoder CLI");
+        assert_eq!(ProviderKind::Qoder.short_name(), "Qoder");
     }
 
     #[test]

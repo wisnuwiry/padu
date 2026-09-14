@@ -558,12 +558,14 @@ fn perform_provider_rewind(
         }
         // Unreachable through the UI, which hides rewinding for providers that
         // answer `supports_conversation_rollback` with false.
-        ProviderKind::Agy | ProviderKind::CommandCode | ProviderKind::Fx | ProviderKind::Kimi => {
-            Err(anyhow::anyhow!(tr!(
-                "errors.provider_turn_branching_unsupported",
-                provider = provider.display_name()
-            )))
-        }
+        ProviderKind::Agy
+        | ProviderKind::CommandCode
+        | ProviderKind::Fx
+        | ProviderKind::Kimi
+        | ProviderKind::Qoder => Err(anyhow::anyhow!(tr!(
+            "errors.provider_turn_branching_unsupported",
+            provider = provider.display_name()
+        ))),
     }
 }
 
@@ -854,7 +856,8 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
             ProviderKind::Agy
             | ProviderKind::CommandCode
             | ProviderKind::Fx
-            | ProviderKind::Kimi => anyhow::bail!(tr!(
+            | ProviderKind::Kimi
+            | ProviderKind::Qoder => anyhow::bail!(tr!(
                 "errors.provider_turn_branching_unsupported",
                 provider = provider.display_name()
             )),

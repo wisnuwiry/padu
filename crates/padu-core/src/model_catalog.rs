@@ -102,7 +102,8 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         ProviderKind::CommandCode
         | ProviderKind::Kimi
         | ProviderKind::OhMyPi
-        | ProviderKind::Pi => Vec::new(),
+        | ProviderKind::Pi
+        | ProviderKind::Qoder => Vec::new(),
     }
 }
 
@@ -146,6 +147,7 @@ pub fn discover_catalog(
         ProviderKind::CommandCode => (discover_command_code_models(binary), None),
         ProviderKind::Pi => (discover_pi_models(binary, PiDialect::Pi), None),
         ProviderKind::OhMyPi => (discover_pi_models(binary, PiDialect::OhMyPi), None),
+        ProviderKind::Qoder => (discover_qoder_models(binary), None),
     };
     let models = if discovered.is_empty() {
         // A failed or empty probe keeps the last successful discovery over
@@ -407,6 +409,20 @@ fn parse_cursor_models(output: &str) -> Vec<ProviderModel> {
             Some(if is_default { model.default() } else { model })
         })
         .collect()
+}
+
+fn discover_qoder_models(binary: &Path) -> Vec<ProviderModel> {
+    let mut command = crate::command_env::command(binary);
+    let Ok(output) = crate::command_env::output(command.arg("--list-models")) else {
+        return Vec::new();
+    };
+    parse_qoder_models(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn parse_qoder_models(output: &str) -> Vec<ProviderModel> {
+    // Qoder prints each account-visible model below a `MODEL` heading. Its
+    // current CLI can repeat a heading and model, so normalize the list here.
+    deduplicate(parse_cursor_models(output))
 }
 
 fn discover_opencode_models(binary: &Path) -> Vec<ProviderModel> {
@@ -1444,6 +1460,15 @@ printf '%s\n' '{"type":"control_response","response":{"request_id":"padu-initial
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].id, "auto");
         assert!(models[0].is_default);
+    }
+
+    #[test]
+    fn parses_qoder_models_and_deduplicates_repeated_headings() {
+        let models = parse_qoder_models("MODEL\nQwen3.8-Max\n\nMODEL\nQwen3.8-Max\n");
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "Qwen3.8-Max");
+        assert_eq!(models[0].name, "Qwen3.8 Max");
+        assert!(!models[0].is_default);
     }
 
     #[test]
