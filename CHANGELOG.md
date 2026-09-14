@@ -16,6 +16,25 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## 0.1.5 - 2026-09-14
+
+### Added
+
+- **Qoder and Command Code Providers**: Added Qoder ACP support and Command Code as a first-class coding-agent provider across the desktop workflow, including provider setup, model/session handling, and client parity.
+- **Rich Markdown Rendering**: Added native Mermaid diagrams and LaTeX math rendering to Markdown previews, alongside richer code blocks and constrained raw HTML.
+- **Inline File References**: Added inline file path chips and file mention support for referencing workspace files from conversations.
+- **Review and Workspace Navigation**: Added collapsible review files, review shortcuts, settings breadcrumbs, and synchronized keyboard navigation improvements.
+
+### Improved
+
+- **Markdown and Transcript Experience**: Improved preview refresh behavior, text selection, transcript link handling on Windows, and file-type icon presentation.
+- **Notes and Provider Reliability**: Improved adding notes from projectless sessions and hardened Command Code process teardown and Antigravity authentication refresh handling.
+
+### Fixed
+
+- **Rendering Stability**: Fixed duplicate rich-render waits, raw HTML rendering, and Markdown preview refresh issues.
+- **Conversation Input**: Preserved file mentions as plain text and prevented copying an empty prompt.
+
 ## 0.1.4 - 2026-09-10
 
 ### Added
