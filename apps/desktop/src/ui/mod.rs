@@ -231,6 +231,7 @@ pub fn provider_color(theme: &Theme, provider: ProviderKind) -> Hsla {
         | ProviderKind::OpenCode
         | ProviderKind::Grok
         | ProviderKind::Kimi
+        | ProviderKind::CommandCode
         | ProviderKind::OhMyPi
         | ProviderKind::Pi => {
             if theme.is_dark {
@@ -255,6 +256,7 @@ pub fn provider_icon(provider: ProviderKind) -> &'static str {
         ProviderKind::OpenCode => "icons/provider-opencode.svg",
         ProviderKind::Grok => "icons/provider-grok.svg",
         ProviderKind::Kimi => "icons/provider-kimi.svg",
+        ProviderKind::CommandCode => "icons/provider-command-code.svg",
         ProviderKind::OhMyPi => "icons/provider-ohmypi.svg",
         ProviderKind::Pi => "icons/provider-pi.svg",
     }

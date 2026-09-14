@@ -5,6 +5,7 @@ mod activity;
 mod amp;
 mod claude;
 mod codex;
+mod command_code;
 mod computer_use;
 mod deepseek;
 mod opencode;
@@ -215,6 +216,9 @@ pub fn start_local(
 ) -> anyhow::Result<DriverHandle> {
     let inner: Arc<dyn DriverControl> = match provider {
         ProviderKind::Codex => Arc::new(codex::CodexDriver::start(options, events)?),
+        ProviderKind::CommandCode => {
+            Arc::new(command_code::CommandCodeDriver::start(options, events)?)
+        }
         ProviderKind::Pi => Arc::new(pi::PiDriver::start(pi::PiFlavor::Pi, options, events)?),
         ProviderKind::OhMyPi => {
             Arc::new(pi::PiDriver::start(pi::PiFlavor::OhMyPi, options, events)?)

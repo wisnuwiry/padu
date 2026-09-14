@@ -99,7 +99,10 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         // Pi, Oh My Pi, and Kimi Code all take their catalog from the user's
         // configured LLM providers. A fabricated fallback would make
         // unavailable models look selectable.
-        ProviderKind::Kimi | ProviderKind::OhMyPi | ProviderKind::Pi => Vec::new(),
+        ProviderKind::CommandCode
+        | ProviderKind::Kimi
+        | ProviderKind::OhMyPi
+        | ProviderKind::Pi => Vec::new(),
     }
 }
 
@@ -140,6 +143,7 @@ pub fn discover_catalog(
         ProviderKind::OpenCode => (discover_opencode_models(binary), None),
         ProviderKind::Grok => (discover_grok_models(binary), None),
         ProviderKind::Kimi => (discover_kimi_models(binary), None),
+        ProviderKind::CommandCode => (discover_command_code_models(binary), None),
         ProviderKind::Pi => (discover_pi_models(binary, PiDialect::Pi), None),
         ProviderKind::OhMyPi => (discover_pi_models(binary, PiDialect::OhMyPi), None),
     };
@@ -154,6 +158,59 @@ pub fn discover_catalog(
     };
     let presets = discovered_presets.unwrap_or_else(|| fallback_agent_presets(provider));
     (models, presets)
+}
+
+fn discover_command_code_models(binary: &Path) -> Vec<ProviderModel> {
+    let mut command = crate::command_env::command(binary);
+    let Ok(output) = crate::command_env::output(command.arg("--list-models")) else {
+        return Vec::new();
+    };
+    parse_command_code_models(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn parse_command_code_models(output: &str) -> Vec<ProviderModel> {
+    let mut models = Vec::new();
+    for line in output.lines() {
+        let trimmed = line.trim();
+        let Some(id) = trimmed.split_whitespace().next() else {
+            continue;
+        };
+        if !is_command_code_model_id(id)
+            || models.iter().any(|model: &ProviderModel| model.id == id)
+        {
+            continue;
+        }
+        let name = id
+            .rsplit_once('/')
+            .map(|(_, name)| name)
+            .unwrap_or(id)
+            .replace(['-', '_'], " ");
+        let name = name
+            .split_whitespace()
+            .map(|word| {
+                let mut chars = word.chars();
+                chars
+                    .next()
+                    .map(|first| first.to_uppercase().collect::<String>() + chars.as_str())
+                    .unwrap_or_default()
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let model = ProviderModel::new(id, name);
+        models.push(if trimmed.contains("(default)") {
+            model.default()
+        } else {
+            model
+        });
+    }
+    models
+}
+
+fn is_command_code_model_id(id: &str) -> bool {
+    (id.contains('-') || id.contains('/'))
+        && id.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '/' | '.' | ':')
+        })
 }
 
 /// Where a provider's last discovered catalog is cached. Debug builds keep it
@@ -1817,6 +1874,18 @@ done
 
     /// Ignored by default because it needs the CLI and its configured
     /// providers; run it after changing Oh My Pi's probe flags.
+    #[test]
+    fn parses_command_code_models_and_default() {
+        let output = "Available models  ·  3 models\n\nOpen Source\ndeepseek/deepseek-v4-flash  fast (default)\nclaude-sonnet-5  capable\ndeepseek/deepseek-v4-flash  duplicate\n\nDocs: https://commandcode.ai/docs/reference/cli/models\n";
+        let models = parse_command_code_models(output);
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].id, "deepseek/deepseek-v4-flash");
+        assert_eq!(models[0].name, "Deepseek V4 Flash");
+        assert!(models[0].is_default);
+        assert_eq!(models[1].id, "claude-sonnet-5");
+        assert!(!models[1].is_default);
+    }
+
     #[test]
     #[ignore = "requires an installed, authenticated omp"]
     fn ohmypi_catalog_against_the_real_cli() {
