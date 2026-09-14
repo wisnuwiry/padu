@@ -49,6 +49,15 @@ impl Note {
 }
 
 impl Padu {
+    /// Returns the project owning the current workspace, including the
+    /// projectless workspace. Notes are persisted against a project id, and
+    /// the daemon accepts the projectless workspace as a valid scope too.
+    fn current_project_id(&self) -> Option<Uuid> {
+        self.selected_session()
+            .map(|session| session.project_id)
+            .or(self.state.selected_project)
+    }
+
     pub(super) fn open_notes(&mut self, cx: &mut Context<Self>) {
         self.navigate_workspace_page(WorkspacePage::Notes, cx);
         self.ensure_notes_loaded(cx);
@@ -400,7 +409,7 @@ impl Padu {
         if content.is_empty() {
             return false;
         }
-        let Some(project_id) = self.active_project().map(|project| project.id) else {
+        let Some(project_id) = self.current_project_id() else {
             self.show_toast(tr!("notes.add_failed"));
             cx.notify();
             return false;
@@ -464,7 +473,7 @@ impl Padu {
         if self.notes.is_empty() {
             return self.add_content_to_new_note(content, cx);
         }
-        let Some(_project_id) = self.active_project().map(|project| project.id) else {
+        let Some(_project_id) = self.current_project_id() else {
             self.show_toast(tr!("notes.add_failed"));
             cx.notify();
             return false;
