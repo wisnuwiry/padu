@@ -20,7 +20,7 @@
 //! renders headless in pure Rust with a vendored text measurer, so diagrams
 //! never depend on a DOM shim.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
@@ -259,6 +259,9 @@ pub struct WorkerRequest {
 pub struct RichRenderer {
     cache: Arc<RichCache>,
     worker: Sender<WorkerRequest>,
+    /// Hashes with an active image-source refresh task. Multiple layout passes
+    /// can observe the same in-flight cache entry before it settles.
+    waiting: Mutex<HashSet<u64>>,
 }
 
 static RICH: OnceLock<Arc<RichRenderer>> = OnceLock::new();
@@ -275,6 +278,7 @@ impl RichRenderer {
         Arc::new(Self {
             cache,
             worker: sender,
+            waiting: Mutex::new(HashSet::new()),
         })
     }
 
@@ -317,6 +321,14 @@ impl RichRenderer {
 
     fn settled(&self, hash: u64) -> bool {
         self.cache.settled(hash)
+    }
+
+    fn begin_wait(&self, hash: u64) -> bool {
+        self.waiting.lock().insert(hash)
+    }
+
+    fn end_wait(&self, hash: u64) {
+        self.waiting.lock().remove(&hash);
     }
 }
 
@@ -361,6 +373,9 @@ pub fn rich_image_source(
             anyhow::anyhow!(message),
         )))),
         RenderOutcome::Pending => {
+            if !cache.begin_wait(hash) {
+                return None;
+            }
             let wait_cache = cache.clone();
             window
                 .spawn(cx, async move |cx| {
@@ -371,6 +386,7 @@ pub fn rich_image_source(
                         }
                         cx.background_executor().timer(WAIT_POLL).await;
                     }
+                    wait_cache.end_wait(hash);
                     cx.refresh();
                 })
                 .detach();
@@ -411,6 +427,9 @@ pub fn mermaid_image_source(
             anyhow::anyhow!(message),
         )))),
         RenderOutcome::Pending => {
+            if !cache.begin_wait(hash) {
+                return None;
+            }
             let wait_cache = cache.clone();
             window
                 .spawn(cx, async move |cx| {
@@ -421,6 +440,7 @@ pub fn mermaid_image_source(
                         }
                         cx.background_executor().timer(WAIT_POLL).await;
                     }
+                    wait_cache.end_wait(hash);
                     cx.refresh();
                 })
                 .detach();

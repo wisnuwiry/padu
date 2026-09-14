@@ -33,10 +33,9 @@ pub(super) fn postprocess(svg: &str, theme: &MermaidTheme) -> Result<String> {
     reader.config_mut().check_end_names = false;
     let events = ReaderIter::new(reader);
     // merman's resvg-safe pipeline already removes foreignObject elements and
-    // replaces their labels with native <text> fallback groups. This pass keeps
-    // those fallback labels, but drops any that merely duplicate a native
-    // <text> (e.g. user journey renders some labels both ways).
-    let events = strip_foreignobject::process(events, svg);
+    // replaces their labels with native <text> fallback groups. Preserve those
+    // groups here; duplicate resolution stays in that switch-local pipeline.
+    let events = strip_foreignobject::process(events);
     // Edge-label pills are measured text-tight; pad them before geometry and
     // theme passes run so rounding and fills apply to the final boxes.
     let events = edge_label_pad::process(events);
