@@ -548,8 +548,9 @@ mod tests {
             ("make", Some(Lang::Shell)),
             ("cpp", Some(Lang::C)),
             ("markdown", Some(Lang::Markdown)),
-            // Not yet lexed; these fall back to unhighlighted monospace.
-            ("elixir", None),
+            // Elixir currently shares the Ruby lexer; plain text remains
+            // intentionally unhighlighted monospace.
+            ("elixir", Some(Lang::Ruby)),
             ("text", None),
         ] {
             assert_eq!(lang_for_tag(language), expected, "{language}");

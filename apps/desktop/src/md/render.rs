@@ -34,7 +34,10 @@ use regex::Regex;
 
 use super::highlight::{self, Lang, TokenClass};
 use super::mend::PENDING_LINK_URL;
-use super::parser::{Block, IncrementalParser, InlineRun, ListItem, TableAlign, TopBlock};
+use super::parser::{
+    Block, IncrementalParser, InlinePiece, InlineRun, InlineStyle, ListItem, TableAlign, TopBlock,
+};
+use super::rich::{self, RenderTheme, RichKind};
 use super::selection::{
     RegisteredText, SelectionRegistry, SelectionState, Span, TextKey, line_range, word_range,
 };
@@ -154,7 +157,7 @@ const MENTION_CHIP_RADIUS: f32 = 7.0;
 const MENTION_CHIP_PAD_X: f32 = 9.0;
 // Negative here expands the chip beyond the text line so the rounded
 // background includes the requested vertical padding instead of shrinking.
-const MENTION_CHIP_INSET_Y: f32 = -3.0;
+const MENTION_CHIP_INSET_Y: f32 = -0.5;
 
 /// Heading scale relative to body text, by level.
 fn heading_metrics(level: u8, metrics: &Metrics) -> (f32, f32, FontWeight) {
@@ -181,6 +184,10 @@ pub struct Palette {
     pub border: Hsla,
     pub inset: Hsla,
     pub overlay: Hsla,
+    /// Opaque app canvas. Translucent washes like [`Palette::overlay`] carry an
+    /// RGB that reads light in dark mode and dark in light mode, so they must
+    /// never back opaque math (tint blending, contrast) — use this instead.
+    pub canvas: Hsla,
     pub code_text: Hsla,
     pub code_wash: Hsla,
     pub selection: Hsla,
@@ -191,6 +198,7 @@ pub struct Palette {
     pub mention_border: Hsla,
     pub added: Hsla,
     pub removed: Hsla,
+    pub warning: Hsla,
     is_dark: bool,
 }
 
@@ -216,6 +224,7 @@ impl Palette {
             border: theme.border,
             inset: theme.inset,
             overlay: theme.overlay,
+            canvas: theme.canvas,
             code_text: theme.code_text,
             code_wash: theme.code_wash,
             selection: theme.selection,
@@ -230,7 +239,91 @@ impl Palette {
             mention_border: theme.border,
             added: theme.success,
             removed: theme.danger,
+            warning: theme.warning,
             is_dark: theme.is_dark,
+        }
+    }
+
+    /// Theme colors for the rich renderer, as the hex strings MathJax
+    /// consumes. The font size drives the SVG's em/ex resolution so rendered
+    /// math scales with the transcript text. The same value also keys the
+    /// Mermaid disk/memory cache (see [`Palette::mermaid_theme`]).
+    pub fn rich_theme(&self, font_px: f32) -> RenderTheme {
+        RenderTheme {
+            is_dark: self.is_dark,
+            font_px,
+            text: hsla_hex(self.text),
+            secondary: hsla_hex(self.secondary),
+            tertiary: hsla_hex(self.tertiary),
+            border: hsla_hex(self.border),
+            card: hsla_hex(self.inset),
+            surface: hsla_hex(self.overlay),
+            accent: hsla_hex(self.accent),
+            success: hsla_hex(self.added),
+            warning: hsla_hex(self.warning),
+            danger: hsla_hex(self.removed),
+            font_family: "system-ui".into(),
+        }
+    }
+
+    /// Native Mermaid theme for `padu-mermaid`, derived from the same palette
+    /// as [`Palette::rich_theme`] so diagrams always match the active theme.
+    /// Nodes use `inset` fills; node accents rotate through the status hues so
+    /// adjacent nodes stay distinguishable in both appearances. Diagram labels
+    /// use the transcript prose face ([`SANS_FAMILY`]), never a generic stack.
+    ///
+    /// Opaque roles (canvas, strokes) deliberately avoid the translucent
+    /// washes: `overlay`/`border` carry an RGB that reads light in dark mode
+    /// and dark in light mode, so blending or stroking with them raw inverts
+    /// the appearances. They are composited over [`Palette::canvas`] first.
+    pub fn mermaid_theme(&self) -> padu_mermaid::MermaidTheme {
+        use padu_mermaid::{AccentColor, text_color_for_background};
+        let chart = [
+            self.accent,
+            self.added,
+            self.warning,
+            self.secondary,
+            self.tertiary,
+            self.removed,
+            self.accent,
+            self.added,
+        ];
+        let border = opaque_over_canvas(self.border, self.canvas);
+        padu_mermaid::MermaidTheme {
+            dark_mode: self.is_dark,
+            font_family: SANS_FAMILY.into(),
+            background: self.canvas,
+            primary_color: self.inset,
+            primary_text_color: self.text,
+            primary_border_color: border,
+            secondary_color: self.inset,
+            tertiary_color: self.inset,
+            line_color: self.secondary,
+            text_color: self.text,
+            edge_label_background: self.inset,
+            cluster_background: self.canvas,
+            cluster_border: border,
+            note_background: self.inset,
+            note_border: border,
+            actor_background: self.inset,
+            actor_border: border,
+            activation_background: self.inset,
+            activation_border: border,
+            git_branch_colors: chart,
+            git_branch_label_colors: chart.map(text_color_for_background),
+            // Zebra rows stay neutral (not text hues): labels use the theme
+            // text color, which only contrasts against surface tones.
+            er_attr_bg_odd: self.inset,
+            er_attr_bg_even: self.canvas,
+            error_color: self.removed,
+            warning_color: self.warning,
+            accent_colors: [self.accent, self.added, self.warning, self.removed]
+                .into_iter()
+                .map(|color| AccentColor {
+                    foreground: color,
+                    background: color,
+                })
+                .collect(),
         }
     }
 
@@ -257,6 +350,32 @@ impl Palette {
 
 fn hue(is_dark: bool, dark: u32, light: u32) -> Hsla {
     gpui::rgb(if is_dark { dark } else { light }).into()
+}
+
+fn hsla_hex(color: Hsla) -> String {
+    let rgba = gpui::Rgba::from(color);
+    format!(
+        "#{:02x}{:02x}{:02x}",
+        (rgba.r.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (rgba.g.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (rgba.b.clamp(0.0, 1.0) * 255.0).round() as u8,
+    )
+}
+
+/// Composite a translucent wash over the opaque canvas for roles that need
+/// solid paint. Padu's `overlay`/`border` tones are alpha washes whose RGB is
+/// inverted across appearances (light in dark mode, dark in light mode), so
+/// using them raw as strokes — or as the base of tint math that ignores
+/// alpha — flips dark and light rendering.
+fn opaque_over_canvas(wash: Hsla, canvas: Hsla) -> Hsla {
+    let fg = gpui::Rgba::from(wash);
+    let bg = gpui::Rgba::from(canvas);
+    gpui::Hsla::from(gpui::Rgba {
+        r: fg.r * fg.a + bg.r * (1.0 - fg.a),
+        g: fg.g * fg.a + bg.g * (1.0 - fg.a),
+        b: fg.b * fg.a + bg.b * (1.0 - fg.a),
+        a: 1.0,
+    })
 }
 
 // ── Flattened inline text ──────────────────────────────────────────────────
@@ -497,16 +616,23 @@ pub fn flatten(
             // Inline code's wash is painted as *rounded* quads by the canvas
             // underlay; a run background could only ever be a square box.
             background_color: None,
-            underline: run
-                .style
-                .link
-                .as_deref()
-                .filter(|url| !is_local_file_link(url))
-                .map(|_| UnderlineStyle {
-                    color: Some(palette.tertiary),
+            underline: if run.style.underline {
+                Some(UnderlineStyle {
+                    color: None,
                     thickness: px(1.0),
                     wavy: false,
-                }),
+                })
+            } else {
+                run.style
+                    .link
+                    .as_deref()
+                    .filter(|url| !is_local_file_link(url))
+                    .map(|_| UnderlineStyle {
+                        color: Some(palette.tertiary),
+                        thickness: px(1.0),
+                        wavy: false,
+                    })
+            },
             strikethrough: run.style.strikethrough.then_some(StrikethroughStyle {
                 thickness: px(1.0),
                 color: Some(palette.tertiary),
@@ -660,7 +786,15 @@ impl MarkdownView {
         }
         let changed = self.parser.text() != text;
         if changed {
-            self.parser.set_text(text);
+            // The append path reuses the settled prefix, so its cached flats
+            // stay valid. A full reparse can change any block, so the flats
+            // built for the previous text are stale wholesale — an edit that
+            // lands mid-document must not keep rendering the old text.
+            let prefix_stable = self.parser.set_text(text);
+            if !prefix_stable {
+                self.flats.borrow_mut().clear();
+                self.volatile_from.set(0);
+            }
         }
         // The mended display tail depends only on the source and the
         // streaming flag. Deriving it re-mends — and, with a hanging marker,
@@ -1466,10 +1600,33 @@ fn search_block(
             *ordinal += 1;
             search_text(&text, current, regex, cap, matches)
         }
+        Block::InlineRich { pieces } => pieces.iter().any(|piece| match piece {
+            InlinePiece::Run(run) => {
+                let current = *ordinal;
+                *ordinal += 1;
+                search_text(&run.text, current, regex, cap, matches)
+            }
+            InlinePiece::Math { .. } | InlinePiece::Image { .. } => {
+                // An image consumes an ordinal for its id; its caption is not a
+                // shaped text element, so there is no geometry to highlight.
+                *ordinal += 1;
+                false
+            }
+            InlinePiece::SubSup { text, .. } => {
+                let current = *ordinal;
+                *ordinal += 1;
+                search_text(text, current, regex, cap, matches)
+            }
+        }),
         Block::CodeBlock { code, .. } => {
             let current = *ordinal;
             *ordinal += 1;
             search_text(code, current, regex, cap, matches)
+        }
+        Block::Math { .. } | Block::Mermaid { .. } => {
+            // Rendered as images, not shaped text.
+            *ordinal += 1;
+            false
         }
         Block::Image { .. } => {
             // The renderer consumes an ordinal for the image id, but its alt
@@ -1605,6 +1762,9 @@ fn render_block(block: &Block, ctx: &Ctx) -> AnyElement {
                 .child(text_element(&flat, key, ctx))
                 .into_any_element()
         }
+        Block::InlineRich { pieces } => render_inline_rich(pieces, ctx),
+        Block::Math { source, display } => render_math_block(source, *display, ctx),
+        Block::Mermaid { source } => render_mermaid_block(source, ctx),
         Block::Heading { level, runs } => {
             let (size, line_height, weight) = heading_metrics(*level, &ctx.metrics);
             let key = ctx.next_key();
@@ -1801,6 +1961,224 @@ fn render_image(url: &str, alt: &str, ctx: &Ctx) -> AnyElement {
                     .child(SharedString::from(alt.to_owned())),
             )
         })
+        .into_any_element()
+}
+
+// ── Rich content (LaTeX, Mermaid) ──────────────────────────────────────────
+
+/// A paragraph that mixes text with inline math or sup/sub. Rendered as a
+/// wrapping row of shrink-wrapped text elements and inline images: each text
+/// chunk wraps at the container width, and the math sits inline between them.
+fn render_inline_rich(pieces: &[InlinePiece], ctx: &Ctx) -> AnyElement {
+    let mut children = Vec::with_capacity(pieces.len());
+    for piece in pieces {
+        match piece {
+            InlinePiece::Run(run) => {
+                let key = ctx.next_key();
+                let flat = ctx.flat(key.index, || {
+                    flatten(
+                        std::slice::from_ref(run),
+                        ctx.palette,
+                        FontWeight::NORMAL,
+                        ctx.palette.text,
+                    )
+                });
+                children.push(
+                    div()
+                        .min_w_0()
+                        .child(text_element(&flat, key, ctx))
+                        .into_any_element(),
+                );
+            }
+            InlinePiece::Math { source, .. } => {
+                children.push(render_inline_math(source, ctx));
+            }
+            InlinePiece::SubSup { text, sup } => {
+                children.push(render_sub_sup(text, *sup, ctx));
+            }
+            InlinePiece::Image { url, alt } => {
+                // Images are split to their own blocks before this point;
+                // render defensively rather than dropping content.
+                children.push(render_image(url, alt, ctx));
+            }
+        }
+    }
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .text_size(px(ctx.metrics.text_size))
+        .line_height(px(ctx.metrics.line_height))
+        .children(children)
+        .into_any_element()
+}
+
+fn render_inline_math(source: &str, ctx: &Ctx) -> AnyElement {
+    let key = ctx.next_key();
+    let theme = ctx.palette.rich_theme(ctx.metrics.text_size);
+    let kind = RichKind::Math { display: false };
+    let hash = rich::hash(kind, source, &theme);
+    let source = rich::rich_image_source_value(hash, kind, source.to_string(), theme);
+    let loading_height = ctx.metrics.text_size;
+    img(source)
+        .id(SharedString::from(format!(
+            "math-{}-{}",
+            key.row, key.index
+        )))
+        .with_loading(move || div().w(px(14.0)).h(px(loading_height)).into_any_element())
+        .into_any_element()
+}
+
+fn render_sub_sup(text: &str, sup: bool, ctx: &Ctx) -> AnyElement {
+    let key = ctx.next_key();
+    let run = InlineRun {
+        text: text.to_string(),
+        style: InlineStyle::default(),
+    };
+    let flat = ctx.flat(key.index, || {
+        flatten(
+            std::slice::from_ref(&run),
+            ctx.palette,
+            FontWeight::NORMAL,
+            ctx.palette.text,
+        )
+    });
+    let size = (ctx.metrics.text_size * 0.74).max(10.0);
+    div()
+        .min_w_0()
+        .text_size(px(size))
+        .line_height(px(ctx.metrics.line_height * 0.8))
+        // Centered row + margin approximates the baseline shift of a
+        // superscript (lifted) or subscript (lowered).
+        .when(sup, |element| element.mb(px(4.0)))
+        .when(!sup, |element| element.mt(px(4.0)))
+        .child(text_element(&flat, key, ctx))
+        .into_any_element()
+}
+
+/// Display math (`$$…$$`), rendered as an SVG image centered on its own line.
+fn render_math_block(source: &str, display: bool, ctx: &Ctx) -> AnyElement {
+    let key = ctx.next_key();
+    let theme = ctx.palette.rich_theme(ctx.metrics.text_size);
+    let kind = RichKind::Math { display };
+    let hash = rich::hash(kind, source, &theme);
+    let image_source = rich::rich_image_source_value(hash, kind, source.to_string(), theme);
+    let palette = *ctx.palette;
+    let text_size = ctx.metrics.text_size;
+    let line_height = ctx.metrics.line_height;
+    let latex = source.to_owned();
+    let image = img(image_source)
+        .id(SharedString::from(format!(
+            "math-{}-{}",
+            key.row, key.index
+        )))
+        .max_w(relative(1.0))
+        .object_fit(gpui::ObjectFit::ScaleDown)
+        .with_loading(move || div().w_full().h(px(line_height + 6.0)).into_any_element())
+        .with_fallback(move || {
+            div()
+                .w_full()
+                .min_w_0()
+                .text_size(px(text_size))
+                .line_height(px(line_height))
+                .text_color(palette.removed)
+                .child(SharedString::from(latex.clone()))
+                .into_any_element()
+        });
+    if display {
+        div()
+            .w_full()
+            .min_w_0()
+            .flex()
+            .justify_center()
+            .py(px(6.0))
+            .child(image)
+            .into_any_element()
+    } else {
+        div()
+            .w_full()
+            .min_w_0()
+            .py(px(2.0))
+            .child(image)
+            .into_any_element()
+    }
+}
+
+/// A ` ```mermaid ` fenced block, rendered as a bordered diagram card.
+fn render_mermaid_block(source: &str, ctx: &Ctx) -> AnyElement {
+    let key = ctx.next_key();
+    let theme = ctx.palette.rich_theme(ctx.metrics.text_size);
+    let hash = rich::hash(RichKind::Mermaid, source, &theme);
+    let image_source = rich::mermaid_image_source_value(
+        hash,
+        source.to_string(),
+        theme,
+        ctx.palette.mermaid_theme(),
+    );
+    let palette = *ctx.palette;
+    let metrics = ctx.metrics;
+    let diagram_source = source.to_owned();
+    let image = img(image_source)
+        .id(SharedString::from(format!(
+            "mermaid-{}-{}",
+            key.row, key.index
+        )))
+        .max_w(relative(1.0))
+        .object_fit(gpui::ObjectFit::ScaleDown)
+        .with_loading(move || {
+            div()
+                .w_full()
+                .h(px(72.0))
+                .flex()
+                .items_center()
+                .text_size(px(12.5))
+                .text_color(palette.ghost)
+                .child(SharedString::from("Rendering diagram…"))
+                .into_any_element()
+        })
+        .with_fallback(move || {
+            let code_size = (metrics.code_text_size - 1.0).max(11.5);
+            let code_line = metrics.code_line_height - 1.0;
+            div()
+                .w_full()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap(px(6.0))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(4.0))
+                        .text_size(px(12.5))
+                        .text_color(palette.removed)
+                        .child(SharedString::from("Diagram failed to render")),
+                )
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .font_family(MONO_FAMILY)
+                        .text_size(px(code_size))
+                        .line_height(px(code_line))
+                        .text_color(palette.secondary)
+                        .whitespace_normal()
+                        .child(SharedString::from(diagram_source.clone())),
+                )
+                .into_any_element()
+        });
+    div()
+        .w_full()
+        .min_w_0()
+        .rounded(px(10.0))
+        .border_1()
+        .border_color(ctx.palette.border)
+        .bg(ctx.palette.overlay)
+        .p(px(14.0))
+        .overflow_hidden()
+        .child(image)
         .into_any_element()
 }
 
@@ -2291,6 +2669,46 @@ mod tests {
         Palette::from_theme(&Theme::dark())
     }
 
+    /// The mermaid canvas and strokes must track the appearance instead of
+    /// inverting it. Guards the translucent-wash footgun: `overlay`/`border`
+    /// carry an RGB that reads light in dark mode and dark in light mode, so
+    /// passing them through raw flips the diagram across appearances.
+    #[test]
+    fn mermaid_theme_tracks_appearance() {
+        for (theme, expect_dark) in [(Theme::dark(), true), (Theme::light(), false)] {
+            let palette = Palette::from_theme(&theme);
+            let mermaid = palette.mermaid_theme();
+            assert_eq!(mermaid.dark_mode, expect_dark);
+            let bg = gpui::Rgba::from(mermaid.background);
+            assert_eq!(bg.a, 1.0, "diagram canvas must be opaque");
+            let luminance = 0.2126 * bg.r + 0.7152 * bg.g + 0.0722 * bg.b;
+            if expect_dark {
+                assert!(
+                    luminance < 0.5,
+                    "dark canvas must stay dark, got luminance {luminance}"
+                );
+            } else {
+                assert!(
+                    luminance > 0.5,
+                    "light canvas must stay light, got luminance {luminance}"
+                );
+            }
+            let border = gpui::Rgba::from(mermaid.primary_border_color);
+            assert_eq!(border.a, 1.0, "node strokes must be opaque");
+        }
+    }
+
+    #[test]
+    fn mermaid_labels_use_the_app_prose_face() {
+        for theme in [Theme::dark(), Theme::light()] {
+            assert_eq!(
+                Palette::from_theme(&theme).mermaid_theme().font_family,
+                SANS_FAMILY,
+                "diagram labels must match the transcript prose face"
+            );
+        }
+    }
+
     fn runs_of(source: &str) -> Vec<InlineRun> {
         match &parser::parse(source).blocks[0].block {
             Block::Paragraph { runs } => runs.clone(),
@@ -2330,6 +2748,28 @@ mod tests {
                 .any(|run| run.strikethrough.is_some() && run.len == 4)
         );
         assert!(flat.runs.iter().any(|run| run.underline.is_some()));
+    }
+
+    #[test]
+    fn inserted_text_flattens_to_a_plain_underline() {
+        let flat = flatten(
+            &runs_of("plain <ins>lined</ins>"),
+            &palette(),
+            FontWeight::NORMAL,
+            palette().text,
+        );
+        assert_runs_tile(&flat);
+        assert_eq!(flat.text.as_ref(), "plain lined");
+        assert_eq!(flat.links.len(), 0);
+        let mut offset = 0;
+        let mut underlined = Vec::new();
+        for run in &flat.runs {
+            if run.underline.is_some() {
+                underlined.push(&flat.text[offset..offset + run.len]);
+            }
+            offset += run.len;
+        }
+        assert_eq!(underlined, vec!["lined"]);
     }
 
     #[test]
@@ -2573,6 +3013,36 @@ mod tests {
         let rebuilt = view.flat(1, || stub("c"));
         assert!(!Rc::ptr_eq(&streaming, &rebuilt));
         assert_eq!(rebuilt.text.as_ref(), "c");
+    }
+
+    /// An edit that rewrites the document mid-way (not an append) must drop the
+    /// previously settled prefix's flats: the cache is keyed by element
+    /// ordinal, and after a full reparse those ordinals describe new text.
+    #[test]
+    fn a_rewrite_drops_stale_prefix_flats() {
+        fn stub(label: &str) -> FlatText {
+            flatten_plain(
+                label.to_owned(),
+                SANS_FAMILY,
+                FontWeight::NORMAL,
+                palette().text,
+            )
+        }
+
+        let mut view = MarkdownView::new();
+        view.set_text("First block.\n\nSecond block.", false);
+        // Stand in for a render pass: two settled blocks, cached by ordinal.
+        let settled = view.flat(0, || stub("old first"));
+        let _second = view.flat(1, || stub("old second"));
+        view.volatile_from.set(1);
+
+        // A mid-document edit rewrites the tree from scratch.
+        view.set_text("Edited first.\n\nEdited second.", false);
+
+        // The old prefix must not be handed back out by ordinal.
+        let rebuilt = view.flat(0, || stub("new first"));
+        assert!(!Rc::ptr_eq(&settled, &rebuilt));
+        assert_eq!(rebuilt.text.as_ref(), "new first");
     }
 
     /// Colors live inside `TextRun`s, so a theme switch has to drop the cache
