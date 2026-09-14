@@ -5,10 +5,9 @@
 //! persisted session id used to resume the conversation.
 
 use std::io::{BufRead, BufReader};
-use std::process::{Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::thread;
+use std::thread::{self, JoinHandle};
 
 use anyhow::{Context as _, anyhow};
 use crossbeam_channel::{Receiver, Sender, unbounded};
@@ -37,7 +36,8 @@ struct CommandCodeOptions {
 
 pub struct CommandCodeDriver {
     commands: Sender<CommandMessage>,
-    active_pid: Arc<AtomicU32>,
+    active_child: Arc<Mutex<Option<Child>>>,
+    worker: Option<JoinHandle<()>>,
     options: Arc<Mutex<CommandCodeOptions>>,
 }
 
@@ -61,7 +61,8 @@ fn command_code_args(options: &CommandCodeOptions, prompt: &str) -> Vec<String> 
     } else {
         match options.mode {
             RuntimeMode::AutoAcceptEdits => args.push("--auto-accept".into()),
-            RuntimeMode::Auto | RuntimeMode::FullAccess => args.push("--yolo".into()),
+            RuntimeMode::Auto => args.extend(["--permission-mode".into(), "dont-ask".into()]),
+            RuntimeMode::FullAccess => args.push("--yolo".into()),
             RuntimeMode::Ask | RuntimeMode::Plan => {}
         }
     }
@@ -102,16 +103,17 @@ impl CommandCodeDriver {
             interaction_mode,
             session_id,
         }));
-        let active_pid = Arc::new(AtomicU32::new(0));
+        let active_child = Arc::new(Mutex::new(None));
         let (commands, receiver) = unbounded();
         let worker_state = state.clone();
-        let worker_pid = active_pid.clone();
-        thread::Builder::new()
+        let worker_child = active_child.clone();
+        let worker = thread::Builder::new()
             .name("padu-command-code-worker".into())
-            .spawn(move || worker_loop(binary, receiver, worker_state, worker_pid, events))?;
+            .spawn(move || worker_loop(binary, receiver, worker_state, worker_child, events))?;
         Ok(Self {
             commands,
-            active_pid,
+            active_child,
+            worker: Some(worker),
             options: state,
         })
     }
@@ -121,7 +123,7 @@ fn worker_loop(
     binary: std::path::PathBuf,
     receiver: Receiver<CommandMessage>,
     options: Arc<Mutex<CommandCodeOptions>>,
-    active_pid: Arc<AtomicU32>,
+    active_child: Arc<Mutex<Option<Child>>>,
     events: DriverEventSender,
 ) {
     while let Ok(message) = receiver.recv() {
@@ -130,7 +132,8 @@ fn worker_loop(
                 let current = options.lock().clone();
                 let _ = events.send(DriverEvent::TurnStarted);
                 let mut current = current;
-                if let Err(error) = run_turn(&binary, &mut current, &active_pid, &events, &prompt) {
+                if let Err(error) = run_turn(&binary, &mut current, &active_child, &events, &prompt)
+                {
                     let _ = events.send(DriverEvent::Error(error.to_string()));
                     let _ = events.send(DriverEvent::TurnFinished {
                         success: false,
@@ -154,7 +157,7 @@ fn worker_loop(
 fn run_turn(
     binary: &std::path::Path,
     options: &mut CommandCodeOptions,
-    active_pid: &AtomicU32,
+    active_child: &Arc<Mutex<Option<Child>>>,
     events: &DriverEventSender,
     prompt: &str,
 ) -> anyhow::Result<()> {
@@ -165,17 +168,31 @@ fn run_turn(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child =
-        crate::command_env::spawn(&mut command).context("failed to start Command Code")?;
-    active_pid.store(child.id(), Ordering::Relaxed);
-    let stdout = child
-        .stdout
-        .take()
-        .context("Command Code stdout unavailable")?;
-    let stderr = child
-        .stderr
-        .take()
-        .context("Command Code stderr unavailable")?;
+    let child = crate::command_env::spawn(&mut command).context("failed to start Command Code")?;
+    *active_child.lock() = Some(child);
+    let (stdout, stderr) = {
+        let mut active = active_child.lock();
+        let child = active
+            .as_mut()
+            .context("Command Code child process unavailable")?;
+        let stdout = match child.stdout.take() {
+            Some(stdout) => stdout,
+            None => {
+                drop(active);
+                terminate_and_reap_child(active_child);
+                anyhow::bail!("Command Code stdout unavailable");
+            }
+        };
+        let stderr = match child.stderr.take() {
+            Some(stderr) => stderr,
+            None => {
+                drop(active);
+                terminate_and_reap_child(active_child);
+                anyhow::bail!("Command Code stderr unavailable");
+            }
+        };
+        (stdout, stderr)
+    };
     let stderr_thread = thread::spawn(move || {
         BufReader::new(stderr)
             .lines()
@@ -195,8 +212,11 @@ fn run_turn(
             completed = true;
         }
     }
+    let mut child = active_child
+        .lock()
+        .take()
+        .context("Command Code child process unavailable")?;
     let status = child.wait().context("waiting for Command Code")?;
-    active_pid.store(0, Ordering::Relaxed);
     let stderr = stderr_thread.join().unwrap_or_default();
     if !status.success() && !completed {
         let detail = stderr.last().cloned().unwrap_or_else(|| status.to_string());
@@ -206,6 +226,14 @@ fn run_turn(
         anyhow::bail!("Command Code exited without a result");
     }
     Ok(())
+}
+
+fn terminate_and_reap_child(active_child: &Arc<Mutex<Option<Child>>>) {
+    let mut child = active_child.lock().take();
+    if let Some(child) = child.as_mut() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 }
 
 fn handle_frame(
@@ -234,7 +262,10 @@ fn handle_frame(
                 kind: ActivityKind::Tool,
                 title,
                 detail: None,
-                complete: event_type.contains("complete") || event_type.contains("finished"),
+                complete: matches!(
+                    event_type,
+                    "tool_completed" | "tool_errored" | "tool_denied" | "tool_hook_blocked"
+                ),
             });
         }
         return false;
@@ -280,15 +311,8 @@ impl DriverControl for CommandCodeDriver {
     }
 
     fn cancel(&self) {
-        let pid = self.active_pid.load(Ordering::Relaxed);
-        if pid == 0 {
-            return;
-        }
-        #[cfg(unix)]
-        {
-            let _ = Command::new("/bin/kill")
-                .args(["-INT", &pid.to_string()])
-                .status();
+        if let Some(child) = self.active_child.lock().as_mut() {
+            let _ = child.kill();
         }
     }
 
@@ -313,7 +337,13 @@ impl DriverControl for CommandCodeDriver {
 
 impl Drop for CommandCodeDriver {
     fn drop(&mut self) {
+        if let Some(child) = self.active_child.lock().as_mut() {
+            let _ = child.kill();
+        }
         let _ = self.commands.send(CommandMessage::Shutdown);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
     }
 }
 
@@ -350,6 +380,19 @@ mod tests {
         assert!(args.contains(&"--effort".into()));
         assert!(args.contains(&"--yolo".into()));
         assert_eq!(args.last().unwrap(), "Reply with PONG");
+    }
+
+    #[test]
+    fn auto_mode_uses_permission_mode_without_yolo() {
+        let mut options = options();
+        options.mode = RuntimeMode::Auto;
+        let args = command_code_args(&options, "Reply with PONG");
+
+        assert!(
+            args.windows(2)
+                .any(|window| window == ["--permission-mode", "dont-ask"])
+        );
+        assert!(!args.contains(&"--yolo".into()));
     }
 
     #[test]
