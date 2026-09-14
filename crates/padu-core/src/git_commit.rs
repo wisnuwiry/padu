@@ -345,7 +345,23 @@ fn agent_arguments(
             }
             return args;
         }
-        ProviderKind::Kimi => {
+        ProviderKind::CommandCode => {
+            push(&mut args, "--print");
+            push(&mut args, "--output-format");
+            push(&mut args, "text");
+            push(&mut args, "--plan");
+            push(&mut args, "--skip-onboarding");
+            push(&mut args, "--trust");
+            if let Some(model) = model {
+                push(&mut args, "--model");
+                push(&mut args, model);
+            }
+            if let Some(effort) = reasoning_effort {
+                push(&mut args, "--effort");
+                push(&mut args, effort);
+            }
+        }
+        ProviderKind::Kimi | ProviderKind::Qoder => {
             push(&mut args, "--prompt");
             push(&mut args, prompt);
             push(&mut args, "--output-format");
@@ -816,7 +832,14 @@ mod tests {
                     assert!(has_pair(&args, "--output-format", "text"));
                     assert!(has_pair(&args, "--model", "model"));
                 }
-                ProviderKind::Kimi => {
+                ProviderKind::CommandCode => {
+                    assert!(has(&args, "--print"));
+                    assert!(has_pair(&args, "--output-format", "text"));
+                    assert!(has(&args, "--plan"));
+                    assert!(has_pair(&args, "--model", "model"));
+                    assert!(has_pair(&args, "--effort", "low"));
+                }
+                ProviderKind::Kimi | ProviderKind::Qoder => {
                     assert!(has_pair(&args, "--prompt", prompt));
                     assert!(has_pair(&args, "--output-format", "text"));
                     assert!(has_pair(&args, "--model", "model"));

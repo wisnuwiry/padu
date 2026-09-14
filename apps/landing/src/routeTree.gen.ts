@@ -16,6 +16,7 @@ import { Route as AntigravityRouteImport } from "./routes/antigravity";
 import { Route as ChangelogRouteImport } from "./routes/changelog";
 import { Route as ClaudeCodeRouteImport } from "./routes/claude-code";
 import { Route as CodexRouteImport } from "./routes/codex";
+import { Route as CommandCodeRouteImport } from "./routes/command-code";
 import { Route as CursorRouteImport } from "./routes/cursor";
 import { Route as DeepseekTuiRouteImport } from "./routes/deepseek-tui";
 import { Route as DocsRouteImport } from "./routes/docs";
@@ -27,6 +28,7 @@ import { Route as OhmypiRouteImport } from "./routes/ohmypi";
 import { Route as OpencodeRouteImport } from "./routes/opencode";
 import { Route as PiRouteImport } from "./routes/pi";
 import { Route as PrivacyRouteImport } from "./routes/privacy";
+import { Route as QoderRouteImport } from "./routes/qoder";
 import { Route as TermsRouteImport } from "./routes/terms";
 import { Route as DocsIndexRouteImport } from "./routes/docs/index";
 import { Route as DocsSplatRouteImport } from "./routes/docs/$";
@@ -64,6 +66,11 @@ const ClaudeCodeRoute = ClaudeCodeRouteImport.update({
 const CodexRoute = CodexRouteImport.update({
   id: "/codex",
   path: "/codex",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const CommandCodeRoute = CommandCodeRouteImport.update({
+  id: "/command-code",
+  path: "/command-code",
   getParentRoute: () => rootRouteImport,
 } as any);
 const CursorRoute = CursorRouteImport.update({
@@ -121,6 +128,11 @@ const PrivacyRoute = PrivacyRouteImport.update({
   path: "/privacy",
   getParentRoute: () => rootRouteImport,
 } as any);
+const QoderRoute = QoderRouteImport.update({
+  id: "/qoder",
+  path: "/qoder",
+  getParentRoute: () => rootRouteImport,
+} as any);
 const TermsRoute = TermsRouteImport.update({
   id: "/terms",
   path: "/terms",
@@ -145,6 +157,7 @@ export interface FileRoutesByFullPath {
   "/changelog": typeof ChangelogRoute;
   "/claude-code": typeof ClaudeCodeRoute;
   "/codex": typeof CodexRoute;
+  "/command-code": typeof CommandCodeRoute;
   "/cursor": typeof CursorRoute;
   "/deepseek-tui": typeof DeepseekTuiRoute;
   "/docs": typeof DocsRouteWithChildren;
@@ -156,6 +169,7 @@ export interface FileRoutesByFullPath {
   "/opencode": typeof OpencodeRoute;
   "/pi": typeof PiRoute;
   "/privacy": typeof PrivacyRoute;
+  "/qoder": typeof QoderRoute;
   "/terms": typeof TermsRoute;
   "/docs/$": typeof DocsSplatRoute;
   "/docs/": typeof DocsIndexRoute;
@@ -168,6 +182,7 @@ export interface FileRoutesByTo {
   "/changelog": typeof ChangelogRoute;
   "/claude-code": typeof ClaudeCodeRoute;
   "/codex": typeof CodexRoute;
+  "/command-code": typeof CommandCodeRoute;
   "/cursor": typeof CursorRoute;
   "/deepseek-tui": typeof DeepseekTuiRoute;
   "/download": typeof DownloadRoute;
@@ -178,6 +193,7 @@ export interface FileRoutesByTo {
   "/opencode": typeof OpencodeRoute;
   "/pi": typeof PiRoute;
   "/privacy": typeof PrivacyRoute;
+  "/qoder": typeof QoderRoute;
   "/terms": typeof TermsRoute;
   "/docs/$": typeof DocsSplatRoute;
   "/docs": typeof DocsIndexRoute;
@@ -191,6 +207,7 @@ export interface FileRoutesById {
   "/changelog": typeof ChangelogRoute;
   "/claude-code": typeof ClaudeCodeRoute;
   "/codex": typeof CodexRoute;
+  "/command-code": typeof CommandCodeRoute;
   "/cursor": typeof CursorRoute;
   "/deepseek-tui": typeof DeepseekTuiRoute;
   "/docs": typeof DocsRouteWithChildren;
@@ -202,6 +219,7 @@ export interface FileRoutesById {
   "/opencode": typeof OpencodeRoute;
   "/pi": typeof PiRoute;
   "/privacy": typeof PrivacyRoute;
+  "/qoder": typeof QoderRoute;
   "/terms": typeof TermsRoute;
   "/docs/$": typeof DocsSplatRoute;
   "/docs/": typeof DocsIndexRoute;
@@ -216,6 +234,7 @@ export interface FileRouteTypes {
     | "/changelog"
     | "/claude-code"
     | "/codex"
+    | "/command-code"
     | "/cursor"
     | "/deepseek-tui"
     | "/docs"
@@ -227,6 +246,7 @@ export interface FileRouteTypes {
     | "/opencode"
     | "/pi"
     | "/privacy"
+    | "/qoder"
     | "/terms"
     | "/docs/$"
     | "/docs/";
@@ -239,6 +259,7 @@ export interface FileRouteTypes {
     | "/changelog"
     | "/claude-code"
     | "/codex"
+    | "/command-code"
     | "/cursor"
     | "/deepseek-tui"
     | "/download"
@@ -249,6 +270,7 @@ export interface FileRouteTypes {
     | "/opencode"
     | "/pi"
     | "/privacy"
+    | "/qoder"
     | "/terms"
     | "/docs/$"
     | "/docs";
@@ -261,6 +283,7 @@ export interface FileRouteTypes {
     | "/changelog"
     | "/claude-code"
     | "/codex"
+    | "/command-code"
     | "/cursor"
     | "/deepseek-tui"
     | "/docs"
@@ -272,6 +295,7 @@ export interface FileRouteTypes {
     | "/opencode"
     | "/pi"
     | "/privacy"
+    | "/qoder"
     | "/terms"
     | "/docs/$"
     | "/docs/";
@@ -285,6 +309,7 @@ export interface RootRouteChildren {
   ChangelogRoute: typeof ChangelogRoute;
   ClaudeCodeRoute: typeof ClaudeCodeRoute;
   CodexRoute: typeof CodexRoute;
+  CommandCodeRoute: typeof CommandCodeRoute;
   CursorRoute: typeof CursorRoute;
   DeepseekTuiRoute: typeof DeepseekTuiRoute;
   DocsRoute: typeof DocsRouteWithChildren;
@@ -296,6 +321,7 @@ export interface RootRouteChildren {
   OpencodeRoute: typeof OpencodeRoute;
   PiRoute: typeof PiRoute;
   PrivacyRoute: typeof PrivacyRoute;
+  QoderRoute: typeof QoderRoute;
   TermsRoute: typeof TermsRoute;
 }
 
@@ -348,6 +374,13 @@ declare module "@tanstack/react-router" {
       path: "/codex";
       fullPath: "/codex";
       preLoaderRoute: typeof CodexRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/command-code": {
+      id: "/command-code";
+      path: "/command-code";
+      fullPath: "/command-code";
+      preLoaderRoute: typeof CommandCodeRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/cursor": {
@@ -427,6 +460,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof PrivacyRouteImport;
       parentRoute: typeof rootRouteImport;
     };
+    "/qoder": {
+      id: "/qoder";
+      path: "/qoder";
+      fullPath: "/qoder";
+      preLoaderRoute: typeof QoderRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     "/terms": {
       id: "/terms";
       path: "/terms";
@@ -471,6 +511,7 @@ const rootRouteChildren: RootRouteChildren = {
   ChangelogRoute: ChangelogRoute,
   ClaudeCodeRoute: ClaudeCodeRoute,
   CodexRoute: CodexRoute,
+  CommandCodeRoute: CommandCodeRoute,
   CursorRoute: CursorRoute,
   DeepseekTuiRoute: DeepseekTuiRoute,
   DocsRoute: DocsRouteWithChildren,
@@ -482,6 +523,7 @@ const rootRouteChildren: RootRouteChildren = {
   OpencodeRoute: OpencodeRoute,
   PiRoute: PiRoute,
   PrivacyRoute: PrivacyRoute,
+  QoderRoute: QoderRoute,
   TermsRoute: TermsRoute,
 };
 export const routeTree = rootRouteImport

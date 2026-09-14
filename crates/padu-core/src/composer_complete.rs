@@ -316,7 +316,12 @@ fn assemble_slash_commands(
         // Harness commands are session-scoped and reported live by the Host,
         // and Kimi Code likewise publishes its whole command set over ACP
         // rather than from files Padu could scan.
-        ProviderKind::Agy | ProviderKind::DeepSeek | ProviderKind::Grok | ProviderKind::Kimi => {}
+        ProviderKind::Agy
+        | ProviderKind::CommandCode
+        | ProviderKind::DeepSeek
+        | ProviderKind::Grok
+        | ProviderKind::Kimi
+        | ProviderKind::Qoder => {}
     }
     // The cross-tool skill standard, read by Amp and OpenCode among others;
     // Padu lists it for every provider.

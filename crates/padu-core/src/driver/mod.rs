@@ -5,6 +5,7 @@ mod activity;
 mod amp;
 mod claude;
 mod codex;
+mod command_code;
 mod computer_use;
 mod deepseek;
 mod opencode;
@@ -215,18 +216,22 @@ pub fn start_local(
 ) -> anyhow::Result<DriverHandle> {
     let inner: Arc<dyn DriverControl> = match provider {
         ProviderKind::Codex => Arc::new(codex::CodexDriver::start(options, events)?),
+        ProviderKind::CommandCode => {
+            Arc::new(command_code::CommandCodeDriver::start(options, events)?)
+        }
         ProviderKind::Pi => Arc::new(pi::PiDriver::start(pi::PiFlavor::Pi, options, events)?),
         ProviderKind::OhMyPi => {
             Arc::new(pi::PiDriver::start(pi::PiFlavor::OhMyPi, options, events)?)
         }
-        // Cursor, Fx, Grok, and Kimi Code all serve a long-lived ACP session,
+        // Cursor, Fx, Grok, Kimi Code, and Qoder all serve a long-lived ACP session,
         // which is the only way their Supervised mode can actually ask the user
         // rather than silently forcing or denying.
         ProviderKind::Agy
         | ProviderKind::Cursor
         | ProviderKind::Fx
         | ProviderKind::Grok
-        | ProviderKind::Kimi => Arc::new(acp::AcpDriver::start(provider, options, events)?),
+        | ProviderKind::Kimi
+        | ProviderKind::Qoder => Arc::new(acp::AcpDriver::start(provider, options, events)?),
         ProviderKind::DeepSeek => Arc::new(deepseek::DeepSeekDriver::start(options, events)?),
         // OpenCode's own server is its real API, and it is what exposes
         // interactive permission requests.

@@ -123,6 +123,18 @@ export const AGENT_PAGES = [
       "Open source app for Moonshot AI's Kimi Code CLI. Launch sessions on your machine, monitor progress, ship from anywhere.",
   },
   {
+    slug: "qoder",
+    name: "Qoder CLI",
+    category: "acp",
+    badge: "ACP",
+    title: "Open source desktop app for Qoder CLI",
+    subtitle:
+      "Run Qoder CLI on your machine with ACP-powered permissions, local session continuity, and unified diff review.",
+    metaTitle: "Qoder CLI Desktop & Web App, Open Source",
+    metaDescription:
+      "Open source app for Qoder CLI. Launch coding sessions on your machine, monitor live output, and review changes from anywhere.",
+  },
+  {
     slug: "deepseek-tui",
     name: "DeepSeek (CodeWhale)",
     category: "native",
@@ -145,6 +157,18 @@ export const AGENT_PAGES = [
     metaTitle: "Oh My Pi Desktop & Web App, Open Source",
     metaDescription:
       "Open source app for Oh My Pi coding agent. Launch sessions on your machine, monitor progress, ship from anywhere. Self-hosted.",
+  },
+  {
+    slug: "command-code",
+    name: "Command Code",
+    category: "native",
+    badge: "Native",
+    title: "Open source desktop app for Command Code",
+    subtitle:
+      "Run Command Code on your machine with native session resume, reasoning controls, and local workspace execution.",
+    metaTitle: "Command Code Desktop & Web App, Open Source",
+    metaDescription:
+      "Open source app for Command Code. Launch coding sessions on your machine, resume conversations, and monitor progress from anywhere. Self-hosted.",
   },
   {
     slug: "antigravity",

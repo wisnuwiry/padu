@@ -24,6 +24,7 @@ use crate::model::{
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
+use padu_protocol::model::ProviderSessionHistory;
 use padu_protocol::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
 
 pub struct PaduBackend {
@@ -628,7 +629,8 @@ impl Backend for PaduBackend {
                     ProviderKind::Agy
                     | ProviderKind::Cursor
                     | ProviderKind::Fx
-                    | ProviderKind::OpenCode => {
+                    | ProviderKind::OpenCode
+                    | ProviderKind::Qoder => {
                         crate::acp_session::list_provider_sessions(provider, &binary, &[], limit)?
                     }
                     ProviderKind::DeepSeek => {
@@ -636,6 +638,7 @@ impl Backend for PaduBackend {
                     }
                     ProviderKind::Grok => crate::grok_session::list_provider_sessions(limit)?,
                     ProviderKind::Kimi => crate::kimi_session::list_provider_sessions(limit)?,
+                    ProviderKind::CommandCode => Vec::new(),
                     ProviderKind::OhMyPi | ProviderKind::Pi => {
                         crate::pi_session::list_provider_sessions(provider, limit)?
                     }
@@ -689,6 +692,11 @@ impl Backend for PaduBackend {
                             VISIBLE_TURN_LIMIT,
                         )?
                     }
+                    ProviderResumeCursor::CommandCode { .. }
+                    | ProviderResumeCursor::Qoder { .. } => ProviderSessionHistory {
+                        messages: Vec::new(),
+                        turns: Vec::new(),
+                    },
                     ProviderResumeCursor::Agy { session_id }
                     | ProviderResumeCursor::Cursor { session_id, .. }
                     | ProviderResumeCursor::Fx { session_id }
@@ -1382,7 +1390,11 @@ impl PaduBackend {
             }
             // Unreachable through the UI, which hides branching for providers
             // that answer `supports_conversation_fork` with false.
-            ProviderKind::Agy | ProviderKind::Fx | ProviderKind::Kimi => {
+            ProviderKind::Agy
+            | ProviderKind::CommandCode
+            | ProviderKind::Fx
+            | ProviderKind::Kimi
+            | ProviderKind::Qoder => {
                 bail!(
                     "{} cannot branch a conversation at a turn",
                     source.provider.display_name()
@@ -1585,7 +1597,11 @@ impl PaduBackend {
             )),
             // Unreachable through the UI, which hides rewinding for providers
             // that answer `supports_conversation_rollback` with false.
-            ProviderKind::Agy | ProviderKind::Fx | ProviderKind::Kimi => {
+            ProviderKind::Agy
+            | ProviderKind::CommandCode
+            | ProviderKind::Fx
+            | ProviderKind::Kimi
+            | ProviderKind::Qoder => {
                 bail!(
                     "{} cannot rewind a conversation to a turn",
                     source.provider.display_name()

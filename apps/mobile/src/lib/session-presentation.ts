@@ -105,6 +105,7 @@ export function providerLabel(provider: ProviderKind): string {
     amp: 'Amp',
     claude: 'Claude',
     codex: 'Codex',
+    commandCode: 'Command Code',
     cursor: 'Cursor',
     deepSeek: 'DeepSeek',
     fx: 'Fx',

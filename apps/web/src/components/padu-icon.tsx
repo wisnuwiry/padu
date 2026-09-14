@@ -368,6 +368,7 @@ const PROVIDER_ICONS: Record<ProviderKind, string> = {
   amp: 'i-padu-provider-amp',
   claude: 'i-padu-provider-claude',
   codex: 'i-padu-provider-openai',
+  commandCode: 'i-padu-provider-command-code',
   cursor: 'i-padu-provider-cursor',
   deepSeek: 'i-padu-provider-deepseek',
   fx: 'i-padu-provider-fx',
@@ -376,6 +377,7 @@ const PROVIDER_ICONS: Record<ProviderKind, string> = {
   kimi: 'i-padu-provider-kimi',
   ohMyPi: 'i-padu-provider-ohmypi',
   pi: 'i-padu-provider-pi',
+  qoder: 'i-padu-provider-qoder',
 }
 
 export const PROVIDERS: Array<{
@@ -388,6 +390,7 @@ export const PROVIDERS: Array<{
   { id: 'amp', name: 'Amp', shortName: 'Amp', command: 'amp' },
   { id: 'claude', name: 'Claude Code', shortName: 'Claude', command: 'claude' },
   { id: 'codex', name: 'Codex CLI', shortName: 'Codex', command: 'codex' },
+  { id: 'commandCode', name: 'Command Code', shortName: 'Command Code', command: 'command-code' },
   { id: 'cursor', name: 'Cursor CLI', shortName: 'Cursor', command: 'cursor-agent' },
   { id: 'deepSeek', name: 'DeepSeek Harness', shortName: 'DeepSeek', command: 'dsh' },
   { id: 'fx', name: 'Fx', shortName: 'Fx', command: 'fx' },
@@ -396,6 +399,7 @@ export const PROVIDERS: Array<{
   { id: 'kimi', name: 'Kimi Code', shortName: 'Kimi', command: 'kimi' },
   { id: 'ohMyPi', name: 'Oh My Pi', shortName: 'Oh My Pi', command: 'omp' },
   { id: 'pi', name: 'Pi', shortName: 'Pi', command: 'pi' },
+  { id: 'qoder', name: 'Qoder CLI', shortName: 'Qoder', command: 'qoder' },
 ]
 
 export function providerMeta(provider: ProviderKind) {

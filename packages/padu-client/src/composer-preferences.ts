@@ -32,6 +32,7 @@ const PROVIDERS = new Set<ProviderKind>([
   'amp',
   'claude',
   'codex',
+  'commandCode',
   'cursor',
   'deepSeek',
   'fx',

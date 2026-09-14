@@ -1461,10 +1461,12 @@ function providerName(provider: AgentSession['provider']) {
       openCode: 'OpenCode',
       grok: 'Grok',
       kimi: 'Kimi',
+      commandCode: 'Command Code',
       ohMyPi: 'Oh My Pi',
       pi: 'Pi',
+      qoder: 'Qoder',
     } as const
-  )[provider]
+  )[provider] ?? provider
 }
 
 function errorMessage(error: unknown) {
