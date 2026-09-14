@@ -39,7 +39,7 @@ const doc = mathjax.document('', { InputJax: tex, OutputJax: svg })
 globalThis.__paduRenderMath = function (source, display, themeJson) {
   try {
     const theme = JSON.parse(themeJson)
-    const fontPx = Number(theme.fontPx) || 14
+    const fontPx = Number(theme.font_px ?? theme.fontPx) || 14
     const em = fontPx
     const exPx = em / 2
     const node = doc.convert(source, { display: Boolean(display), em, ex: exPx, containerWidth: 800 })

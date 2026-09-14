@@ -38,6 +38,8 @@ pub struct InlineStyle {
     pub code: bool,
     pub mention: bool,
     pub strikethrough: bool,
+    /// `<ins>`/`<u>` — an underline with no link semantics.
+    pub underline: bool,
     /// Destination URL when inside a link.
     pub link: Option<String>,
 }
@@ -68,7 +70,14 @@ enum HtmlOp {
     Strikethrough,
     Sup,
     Sub,
-    Link { url: Option<String> },
+    Underline,
+    /// `<q>` — transparent to styling; the opening run already emitted the
+    /// leading quote, so this op only marks where the closer should emit the
+    /// trailing quote.
+    Quote,
+    Link {
+        url: Option<String>,
+    },
 }
 
 /// The effective inline style: the markdown style threaded through emphasis
@@ -81,8 +90,9 @@ fn effective_style(markdown: &InlineStyle, html: &[HtmlOp]) -> InlineStyle {
             HtmlOp::Italic => style.italic = true,
             HtmlOp::Code => style.code = true,
             HtmlOp::Strikethrough => style.strikethrough = true,
+            HtmlOp::Underline => style.underline = true,
             HtmlOp::Link { url } => style.link = url.clone(),
-            HtmlOp::Sup | HtmlOp::Sub => {}
+            HtmlOp::Sup | HtmlOp::Sub | HtmlOp::Quote => {}
         }
     }
     style
@@ -96,6 +106,8 @@ fn pop_html_op(html: &mut Vec<HtmlOp>, kind: HtmlOpMatch) {
         HtmlOpMatch::Strikethrough => matches!(op, HtmlOp::Strikethrough),
         HtmlOpMatch::Sup => matches!(op, HtmlOp::Sup),
         HtmlOpMatch::Sub => matches!(op, HtmlOp::Sub),
+        HtmlOpMatch::Underline => matches!(op, HtmlOp::Underline),
+        HtmlOpMatch::Quote => matches!(op, HtmlOp::Quote),
         HtmlOpMatch::Link => matches!(op, HtmlOp::Link { .. }),
     }) else {
         return;
@@ -111,6 +123,8 @@ enum HtmlOpMatch {
     Strikethrough,
     Sup,
     Sub,
+    Underline,
+    Quote,
     Link,
 }
 
@@ -657,9 +671,15 @@ fn parse_inline_event(
             source: text.to_string(),
             display: true,
         }),
-        // A hard or soft break inside a paragraph is a line break in the
-        // rendered run: shaped text splits on '\n' on its own.
-        Event::SoftBreak | Event::HardBreak => push_run(InlineRun {
+        // A single newline is a soft break: standard markdown joins it with
+        // a space, splitting paragraphs only on blank lines. A hard break
+        // (two trailing spaces or a backslash) keeps its explicit line
+        // break, which shaped text splits on its own.
+        Event::SoftBreak => push_run(InlineRun {
+            text: " ".to_owned(),
+            style: effective_style(style, html),
+        }),
+        Event::HardBreak => push_run(InlineRun {
             text: "\n".to_owned(),
             style: effective_style(style, html),
         }),
@@ -749,10 +769,18 @@ fn handle_inline_html(
         match name.as_str() {
             "b" | "strong" => pop_html_op(html, HtmlOpMatch::Bold),
             "i" | "em" => pop_html_op(html, HtmlOpMatch::Italic),
-            "code" => pop_html_op(html, HtmlOpMatch::Code),
+            "code" | "kbd" | "samp" | "var" | "tt" => pop_html_op(html, HtmlOpMatch::Code),
             "s" | "del" | "strike" => pop_html_op(html, HtmlOpMatch::Strikethrough),
             "sup" => pop_html_op(html, HtmlOpMatch::Sup),
             "sub" => pop_html_op(html, HtmlOpMatch::Sub),
+            "ins" | "u" => pop_html_op(html, HtmlOpMatch::Underline),
+            "q" => {
+                pop_html_op(html, HtmlOpMatch::Quote);
+                pieces.push(InlinePiece::Run(InlineRun {
+                    text: "\u{201D}".into(),
+                    style: effective_style(style, html),
+                }));
+            }
             "a" => pop_html_op(html, HtmlOpMatch::Link),
             _ => {}
         }
@@ -782,16 +810,26 @@ fn handle_inline_html(
                 match name.as_str() {
                     "b" | "strong" => html.push(HtmlOp::Bold),
                     "i" | "em" => html.push(HtmlOp::Italic),
-                    "code" => html.push(HtmlOp::Code),
+                    "code" | "kbd" | "samp" | "var" | "tt" => html.push(HtmlOp::Code),
                     "s" | "del" | "strike" => html.push(HtmlOp::Strikethrough),
                     "sup" => html.push(HtmlOp::Sup),
                     "sub" => html.push(HtmlOp::Sub),
+                    "ins" | "u" => html.push(HtmlOp::Underline),
+                    "q" => {
+                        pieces.push(InlinePiece::Run(InlineRun {
+                            text: "\u{201C}".into(),
+                            style: effective_style(style, html),
+                        }));
+                        html.push(HtmlOp::Quote);
+                    }
                     "a" => {
                         let url = tag
                             .attributes()
                             .get("href")
                             .and_then(|value| value)
-                            .map(|value| value.as_utf8_str().into_owned())
+                            .map(|value| {
+                                html_escape::decode_html_entities(&value.as_utf8_str()).into_owned()
+                            })
                             .filter(|url| safe_inline_url(url));
                         html.push(HtmlOp::Link { url });
                     }
@@ -799,7 +837,7 @@ fn handle_inline_html(
                         text: "\n".into(),
                         style: effective_style(style, html),
                     })),
-                    "img" => push_inline_image(tag, pieces),
+                    "img" => push_inline_image(tag, &effective_style(style, html), pieces),
                     "script" | "style" | "iframe" | "object" | "embed" | "noscript" => {}
                     _ => {}
                 }
@@ -816,21 +854,32 @@ fn safe_inline_url(url: &str) -> bool {
     !lower.starts_with("javascript:") && !lower.starts_with("vbscript:")
 }
 
-fn push_inline_image(tag: &tl::HTMLTag<'_>, pieces: &mut Vec<InlinePiece>) {
+fn push_inline_image(tag: &tl::HTMLTag<'_>, style: &InlineStyle, pieces: &mut Vec<InlinePiece>) {
+    // Attribute values arrive entity-encoded from `tl`; decode before the
+    // safety check so an encoded `javascript:` URL is still refused.
     let src = tag
         .attributes()
         .get("src")
         .and_then(|value| value)
-        .map(|value| value.as_utf8_str().into_owned())
+        .map(|value| html_escape::decode_html_entities(&value.as_utf8_str()).into_owned())
         .filter(|url| safe_inline_url(url));
     let alt = tag
         .attributes()
         .get("alt")
         .and_then(|value| value)
-        .map(|value| value.as_utf8_str().into_owned())
+        .map(|value| html_escape::decode_html_entities(&value.as_utf8_str()).into_owned())
         .unwrap_or_default();
     if let Some(src) = src {
-        pieces.push(InlinePiece::Image { url: src, alt });
+        if style.link.is_some() {
+            // A linked image degrades to its alt text but keeps the
+            // link, so badges stay clickable.
+            pieces.push(InlinePiece::Run(InlineRun {
+                text: alt,
+                style: style.clone(),
+            }));
+        } else {
+            pieces.push(InlinePiece::Image { url: src, alt });
+        }
     }
 }
 
@@ -1065,16 +1114,20 @@ impl IncrementalParser {
 
     /// Point the parser at `text`. Appends reparse incrementally; any other
     /// change falls back to a full reparse.
-    pub fn set_text(&mut self, text: &str) {
+    ///
+    /// Returns `true` when the change was applied incrementally so the settled
+    /// prefix of the previous tree is still valid, `false` when the tree was
+    /// rebuilt wholesale.
+    pub fn set_text(&mut self, text: &str) -> bool {
         if text == self.text {
-            return;
+            return false;
         }
         match text.strip_prefix(self.text.as_str()) {
-            Some(delta) if !self.text.is_empty() && !self.full_reparse_only => {
-                let delta = delta.to_owned();
-                self.append(&delta);
+            Some(delta) if !self.text.is_empty() && !self.full_reparse_only => self.append(delta),
+            _ => {
+                self.reset(text);
+                false
             }
-            _ => self.reset(text),
         }
     }
 
@@ -1087,15 +1140,18 @@ impl IncrementalParser {
     }
 
     /// Append `delta`, reparsing only from the last stable block boundary.
-    pub fn append(&mut self, delta: &str) {
+    ///
+    /// Returns `true` when the append stayed incremental, `false` when the tree
+    /// had to be rebuilt wholesale (a link definition appeared).
+    pub fn append(&mut self, delta: &str) -> bool {
         if delta.is_empty() {
-            return;
+            return true;
         }
         if self.full_reparse_only {
             let mut text = std::mem::take(&mut self.text);
             text.push_str(delta);
             self.reset(&text);
-            return;
+            return false;
         }
 
         let boundary = self
@@ -1107,7 +1163,7 @@ impl IncrementalParser {
         if has_link_definition(delta) {
             let text = std::mem::take(&mut self.text);
             self.reset(&text);
-            return;
+            return false;
         }
 
         let tail = parse(&self.text[boundary..]);
@@ -1120,6 +1176,7 @@ impl IncrementalParser {
                 block
             }));
         self.stable_prefix = self.settled_prefix();
+        true
     }
 
     /// Replacement blocks for the final block while streaming, with its hanging
@@ -1292,6 +1349,21 @@ mod tests {
             runs.iter().all(|run| !run.text.contains('<')),
             "inline HTML should be interpreted, not literal"
         );
+    }
+
+    #[test]
+    fn inline_html_ins_kbd_and_q_map_to_styles() {
+        let tree = parse("a<ins>u</ins> <kbd>K</kbd> <q>cited</q>");
+        let Block::Paragraph { runs } = &tree.blocks[0].block else {
+            panic!("expected a paragraph");
+        };
+        assert!(
+            runs.iter()
+                .any(|run| run.style.underline && run.text == "u")
+        );
+        assert!(runs.iter().any(|run| run.style.code && run.text == "K"));
+        let text = runs.iter().map(|run| run.text.as_str()).collect::<String>();
+        assert_eq!(text, "au K \u{201C}cited\u{201D}");
     }
 
     #[test]
@@ -1494,9 +1566,25 @@ mod tests {
     }
 
     #[test]
-    fn soft_breaks_become_newlines_in_the_run() {
+    fn soft_breaks_become_spaces_in_the_run() {
         let tree = parse("first\nsecond");
+        assert_eq!(paragraph_text(&tree.blocks[0].block), "first second");
+    }
+
+    #[test]
+    fn hard_breaks_keep_their_line_break() {
+        let tree = parse("first  \nsecond");
         assert_eq!(paragraph_text(&tree.blocks[0].block), "first\nsecond");
+        let tree = parse("first\\\nsecond");
+        assert_eq!(paragraph_text(&tree.blocks[0].block), "first\nsecond");
+    }
+
+    #[test]
+    fn blank_lines_still_split_paragraphs() {
+        let tree = parse("first\n\nsecond");
+        assert_eq!(tree.blocks.len(), 2);
+        assert_eq!(paragraph_text(&tree.blocks[0].block), "first");
+        assert_eq!(paragraph_text(&tree.blocks[1].block), "second");
     }
 
     /// The incremental path must agree with a full parse at every prefix —

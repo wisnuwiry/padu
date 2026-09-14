@@ -533,16 +533,23 @@ pub fn flatten(
             // Inline code's wash is painted as *rounded* quads by the canvas
             // underlay; a run background could only ever be a square box.
             background_color: None,
-            underline: run
-                .style
-                .link
-                .as_deref()
-                .filter(|url| !is_local_file_link(url))
-                .map(|_| UnderlineStyle {
-                    color: Some(palette.tertiary),
+            underline: if run.style.underline {
+                Some(UnderlineStyle {
+                    color: None,
                     thickness: px(1.0),
                     wavy: false,
-                }),
+                })
+            } else {
+                run.style
+                    .link
+                    .as_deref()
+                    .filter(|url| !is_local_file_link(url))
+                    .map(|_| UnderlineStyle {
+                        color: Some(palette.tertiary),
+                        thickness: px(1.0),
+                        wavy: false,
+                    })
+            },
             strikethrough: run.style.strikethrough.then_some(StrikethroughStyle {
                 thickness: px(1.0),
                 color: Some(palette.tertiary),
@@ -696,7 +703,15 @@ impl MarkdownView {
         }
         let changed = self.parser.text() != text;
         if changed {
-            self.parser.set_text(text);
+            // The append path reuses the settled prefix, so its cached flats
+            // stay valid. A full reparse can change any block, so the flats
+            // built for the previous text are stale wholesale — an edit that
+            // lands mid-document must not keep rendering the old text.
+            let prefix_stable = self.parser.set_text(text);
+            if !prefix_stable {
+                self.flats.borrow_mut().clear();
+                self.volatile_from.set(0);
+            }
         }
         // The mended display tail depends only on the source and the
         // streaming flag. Deriving it re-mends — and, with a hanging marker,
@@ -2609,6 +2624,28 @@ mod tests {
     }
 
     #[test]
+    fn inserted_text_flattens_to_a_plain_underline() {
+        let flat = flatten(
+            &runs_of("plain <ins>lined</ins>"),
+            &palette(),
+            FontWeight::NORMAL,
+            palette().text,
+        );
+        assert_runs_tile(&flat);
+        assert_eq!(flat.text.as_ref(), "plain lined");
+        assert_eq!(flat.links.len(), 0);
+        let mut offset = 0;
+        let mut underlined = Vec::new();
+        for run in &flat.runs {
+            if run.underline.is_some() {
+                underlined.push(&flat.text[offset..offset + run.len]);
+            }
+            offset += run.len;
+        }
+        assert_eq!(underlined, vec!["lined"]);
+    }
+
+    #[test]
     fn inline_code_file_paths_use_full_path_chip_labels() {
         let flat = flatten(
             &runs_of("inspect `apps/desktop/src/app/right_panel/files.rs` now"),
@@ -2849,6 +2886,36 @@ mod tests {
         let rebuilt = view.flat(1, || stub("c"));
         assert!(!Rc::ptr_eq(&streaming, &rebuilt));
         assert_eq!(rebuilt.text.as_ref(), "c");
+    }
+
+    /// An edit that rewrites the document mid-way (not an append) must drop the
+    /// previously settled prefix's flats: the cache is keyed by element
+    /// ordinal, and after a full reparse those ordinals describe new text.
+    #[test]
+    fn a_rewrite_drops_stale_prefix_flats() {
+        fn stub(label: &str) -> FlatText {
+            flatten_plain(
+                label.to_owned(),
+                SANS_FAMILY,
+                FontWeight::NORMAL,
+                palette().text,
+            )
+        }
+
+        let mut view = MarkdownView::new();
+        view.set_text("First block.\n\nSecond block.", false);
+        // Stand in for a render pass: two settled blocks, cached by ordinal.
+        let settled = view.flat(0, || stub("old first"));
+        let _second = view.flat(1, || stub("old second"));
+        view.volatile_from.set(1);
+
+        // A mid-document edit rewrites the tree from scratch.
+        view.set_text("Edited first.\n\nEdited second.", false);
+
+        // The old prefix must not be handed back out by ordinal.
+        let rebuilt = view.flat(0, || stub("new first"));
+        assert!(!Rc::ptr_eq(&settled, &rebuilt));
+        assert_eq!(rebuilt.text.as_ref(), "new first");
     }
 
     /// Colors live inside `TextRun`s, so a theme switch has to drop the cache

@@ -638,6 +638,70 @@ mod tests {
             width.is_some_and(|w| (1.0..50000.0).contains(&w)),
             "diagram width should be sane, got {view_box:?}"
         );
+        assert!(
+            !svg.contains("<foreignObject"),
+            "labels must be <text>, not <foreignObject>: resvg cannot raster HTML labels, so they render blank"
+        );
+        assert!(
+            !svg.contains("font-family:undefined") && !svg.contains("font-size:undefined"),
+            "the theme font must reach mermaid: {svg}"
+        );
+    }
+
+    /// The DOM shim estimates geometry so mermaid can derive a viewBox that
+    /// covers the laid-out diagram. If child `transform`s are ignored, that box
+    /// hugs the origin and the diagram rasterizes blank, so every node's
+    /// translated origin must land inside the emitted viewBox.
+    #[test]
+    fn view_box_covers_every_node() {
+        let svg = render(
+            RichKind::Mermaid,
+            "flowchart TD\n  A[Christmas] --> B(Go shopping)\n  B --> C{Let me think}\n  C -->|One| D[Laptop]\n  C -->|Two| E[iPhone]\n  C -->|Three| F[fa:fa-car Car]",
+        )
+        .expect("render");
+        let vb = svg.find("viewBox=\"").map(|start| {
+            let rest = &svg[start + "viewBox=\"".len()..];
+            &rest[..rest.find('"').unwrap_or(0)]
+        });
+        let vb = vb.expect("diagram should carry a viewBox");
+        let coords = vb
+            .split_whitespace()
+            .filter_map(|part| part.parse::<f32>().ok())
+            .collect::<Vec<_>>();
+        assert_eq!(coords.len(), 4, "viewBox has four numbers: {vb}");
+        let (min_x, min_y, width, height) = (coords[0], coords[1], coords[2], coords[3]);
+        assert!(
+            width > 400.0,
+            "a 6-node TD diagram needs a wide viewBox, got {vb}"
+        );
+        assert!(
+            height > 400.0,
+            "a 6-node TD diagram needs a tall viewBox, got {vb}"
+        );
+
+        let mut nodes = 0;
+        // Node groups carry `transform="translate(x, y)"` followed by a
+        // `data-look` attribute in the same tag; edge-label groups share the
+        // translate syntax but are nested inside `class="edgeLabel"` groups.
+        let node_re = regex::Regex::new(r#"transform="translate\(([^)]*)\)"[^>]*data-look"#)
+            .expect("node translate pattern is valid");
+        for captures in node_re.captures_iter(&svg) {
+            let mut parts = captures[1]
+                .split(',')
+                .filter_map(|part| part.trim().parse::<f32>().ok());
+            let (Some(x), Some(y)) = (parts.next(), parts.next()) else {
+                continue;
+            };
+            nodes += 1;
+            assert!(
+                x >= min_x && x <= min_x + width && y >= min_y && y <= min_y + height,
+                "node origin ({x}, {y}) falls outside viewBox {vb}"
+            );
+        }
+        assert!(
+            nodes >= 5,
+            "expected every node to be measured, saw {nodes}"
+        );
     }
 
     #[test]
