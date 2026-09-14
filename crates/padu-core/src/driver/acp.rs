@@ -889,8 +889,9 @@ pub(crate) fn resolve_agy_model_id(
 }
 
 pub fn agy_auth_status(binary: &Path) -> anyhow::Result<bool> {
-    let output = std::process::Command::new(binary)
+    let output = crate::command_env::command(binary)
         .args(["auth", "status"])
+        .stdin(std::process::Stdio::null())
         .output()
         .map_err(|error| anyhow!("could not query Antigravity authentication: {error}"))?;
     Ok(output.status.success())

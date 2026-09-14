@@ -1446,7 +1446,16 @@ impl Padu {
     /// page's refresh, or one whose binary override just changed. Also re-runs
     /// model discovery and version probes for whatever the detection finds
     /// installed.
-    pub(super) fn refresh_provider_detection(&mut self, scope: Option<ProviderKind>) {
+    pub(super) fn refresh_provider_detection(
+        &mut self,
+        scope: Option<ProviderKind>,
+        cx: &mut Context<Self>,
+    ) {
+        if scope.is_none() || scope == Some(ProviderKind::Agy) {
+            // Provider refreshes must also revalidate Agy's persisted CLI session;
+            // binary detection alone does not reveal whether its credential expired.
+            self.refresh_agy_auth_status(cx);
+        }
         if self.provider_detection_remaining > 0 {
             return;
         }

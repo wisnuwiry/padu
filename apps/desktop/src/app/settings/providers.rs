@@ -33,7 +33,7 @@ impl Padu {
                 tr!("common.refresh")
             })
             .on_click(cx.listener(|this, _, _, cx| {
-                this.refresh_provider_detection(None);
+                this.refresh_provider_detection(None, cx);
                 cx.notify();
             }));
 
@@ -264,6 +264,7 @@ impl Padu {
             return;
         }
 
+        self.invalidate_agy_auth_status();
         self.agy_installing = true;
         self.agy_install_cancelling = false;
         self.agy_install_percent = 0;
@@ -320,7 +321,7 @@ impl Padu {
                             "providers.agy_installed_at",
                             path = display_path
                         ));
-                        this.refresh_provider_detection(Some(ProviderKind::Agy));
+                        this.refresh_provider_detection(Some(ProviderKind::Agy), cx);
                     }
                     Ok(response) => {
                         this.show_toast(format!(
@@ -364,10 +365,51 @@ impl Padu {
         .detach();
     }
 
+    pub(crate) fn refresh_agy_auth_status(&mut self, cx: &mut Context<Self>) {
+        self.agy_auth_check_generation = self.agy_auth_check_generation.wrapping_add(1);
+        let generation = self.agy_auth_check_generation;
+        self.agy_auth_checking = true;
+        let daemon = self.daemon.client();
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let authenticated = cx
+                .background_executor()
+                .spawn(async move {
+                    match daemon.request(
+                        uuid::Uuid::nil(),
+                        uuid::Uuid::nil(),
+                        padu_client::Command::CheckAgyAuth,
+                    ) {
+                        Ok(padu_client::ResponsePayload::AgyAuthStatus { authenticated }) => {
+                            Some(authenticated)
+                        }
+                        _ => None,
+                    }
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.agy_auth_check_generation == generation {
+                    this.agy_auth_checking = false;
+                    if let Some(authenticated) = authenticated {
+                        this.agy_authenticated = authenticated;
+                    }
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn invalidate_agy_auth_status(&mut self) {
+        self.agy_auth_check_generation = self.agy_auth_check_generation.wrapping_add(1);
+        self.agy_auth_checking = false;
+    }
+
     fn authenticate_agy(&mut self, cx: &mut Context<Self>) {
-        if self.agy_installing {
+        if self.agy_installing || self.agy_auth_checking {
             return;
         }
+        self.invalidate_agy_auth_status();
         self.agy_installing = true;
         cx.notify();
         let daemon = self.daemon.client();
@@ -407,6 +449,7 @@ impl Padu {
         if self.agy_installing {
             return;
         }
+        self.invalidate_agy_auth_status();
         self.agy_installing = true;
         cx.notify();
         let daemon = self.daemon.client();
@@ -439,6 +482,7 @@ impl Padu {
         if self.agy_installing {
             return;
         }
+        self.invalidate_agy_auth_status();
         self.agy_installing = true;
         cx.notify();
         let daemon = self.daemon.client();
@@ -461,7 +505,7 @@ impl Padu {
                             .provider_binary_overrides
                             .remove(&ProviderKind::Agy);
                         this.save();
-                        this.refresh_provider_detection(Some(ProviderKind::Agy));
+                        this.refresh_provider_detection(Some(ProviderKind::Agy), cx);
                         this.show_success_toast(tr!("providers.agy_removed"));
                     }
                     Ok(response) => this.show_toast(format!(
@@ -628,6 +672,7 @@ impl Padu {
             )
             .when(kind == ProviderKind::Agy && installed, |element| {
                 let installing = self.agy_installing;
+                let checking = self.agy_auth_checking;
                 element.child(
                     div()
                         .mt(px(6.0))
@@ -646,24 +691,26 @@ impl Padu {
                                 .border_color(theme.border_strong)
                                 .flex()
                                 .items_center()
-                                .cursor(if installing {
+                                .cursor(if installing || checking {
                                     gpui::CursorStyle::Arrow
                                 } else {
                                     gpui::CursorStyle::PointingHand
                                 })
-                                .opacity(if installing { 0.65 } else { 1.0 })
+                                .opacity(if installing || checking { 0.65 } else { 1.0 })
                                 .text_size(sp(12.5))
                                 .text_color(theme.text_secondary)
                                 .hover(|element| element.bg(theme.overlay))
                                 .child(if installing {
                                     tr!("providers.agy_working")
+                                } else if checking {
+                                    tr!("common.checking")
                                 } else if self.agy_authenticated {
                                     tr!("providers.agy_sign_out")
                                 } else {
                                     tr!("providers.agy_sign_in")
                                 })
                                 .on_click(cx.listener(|this, _, window, cx| {
-                                    if !this.agy_installing {
+                                    if !this.agy_installing && !this.agy_auth_checking {
                                         if this.agy_authenticated {
                                             this.confirm_sign_out_agy(window, cx);
                                         } else {
@@ -674,6 +721,7 @@ impl Padu {
                                 .on_key_down(cx.listener(
                                     move |this, event: &KeyDownEvent, window, cx| {
                                         if !this.agy_installing
+                                            && !this.agy_auth_checking
                                             && matches!(
                                                 event.keystroke.key.as_str(),
                                                 "enter" | "space"
@@ -848,7 +896,7 @@ impl Padu {
             self.state.provider_binary_overrides.insert(provider, text);
         }
         self.save();
-        self.refresh_provider_detection(Some(provider));
+        self.refresh_provider_detection(Some(provider), cx);
         self.refresh_composer_sources(cx);
         cx.notify();
     }
