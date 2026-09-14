@@ -33,6 +33,7 @@ unicode-segmentation = "1.12"
 url = "2"
 uuid = { version = "1.18", features = ["v4", "serde"] }
 padu-client = { path = "../../crates/padu-client" }
+padu-mermaid = { path = "../../crates/padu-mermaid" }
 padu-protocol = { path = "../../crates/padu-protocol" }
 pulldown-cmark = "0.13"
 regex = "1"

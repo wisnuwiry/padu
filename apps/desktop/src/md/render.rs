@@ -184,6 +184,10 @@ pub struct Palette {
     pub border: Hsla,
     pub inset: Hsla,
     pub overlay: Hsla,
+    /// Opaque app canvas. Translucent washes like [`Palette::overlay`] carry an
+    /// RGB that reads light in dark mode and dark in light mode, so they must
+    /// never back opaque math (tint blending, contrast) — use this instead.
+    pub canvas: Hsla,
     pub code_text: Hsla,
     pub code_wash: Hsla,
     pub selection: Hsla,
@@ -220,6 +224,7 @@ impl Palette {
             border: theme.border,
             inset: theme.inset,
             overlay: theme.overlay,
+            canvas: theme.canvas,
             code_text: theme.code_text,
             code_wash: theme.code_wash,
             selection: theme.selection,
@@ -239,9 +244,10 @@ impl Palette {
         }
     }
 
-    /// Theme colors for the rich renderer, as the hex strings MathJax and
-    /// Mermaid consume. The font size drives the SVG's em/ex resolution so
-    /// rendered math scales with the transcript text.
+    /// Theme colors for the rich renderer, as the hex strings MathJax
+    /// consumes. The font size drives the SVG's em/ex resolution so rendered
+    /// math scales with the transcript text. The same value also keys the
+    /// Mermaid disk/memory cache (see [`Palette::mermaid_theme`]).
     pub fn rich_theme(&self, font_px: f32) -> RenderTheme {
         RenderTheme {
             is_dark: self.is_dark,
@@ -257,6 +263,67 @@ impl Palette {
             warning: hsla_hex(self.warning),
             danger: hsla_hex(self.removed),
             font_family: "system-ui".into(),
+        }
+    }
+
+    /// Native Mermaid theme for `padu-mermaid`, derived from the same palette
+    /// as [`Palette::rich_theme`] so diagrams always match the active theme.
+    /// Nodes use `inset` fills; node accents rotate through the status hues so
+    /// adjacent nodes stay distinguishable in both appearances. Diagram labels
+    /// use the transcript prose face ([`SANS_FAMILY`]), never a generic stack.
+    ///
+    /// Opaque roles (canvas, strokes) deliberately avoid the translucent
+    /// washes: `overlay`/`border` carry an RGB that reads light in dark mode
+    /// and dark in light mode, so blending or stroking with them raw inverts
+    /// the appearances. They are composited over [`Palette::canvas`] first.
+    pub fn mermaid_theme(&self) -> padu_mermaid::MermaidTheme {
+        use padu_mermaid::{AccentColor, text_color_for_background};
+        let chart = [
+            self.accent,
+            self.added,
+            self.warning,
+            self.secondary,
+            self.tertiary,
+            self.removed,
+            self.accent,
+            self.added,
+        ];
+        let border = opaque_over_canvas(self.border, self.canvas);
+        padu_mermaid::MermaidTheme {
+            dark_mode: self.is_dark,
+            font_family: SANS_FAMILY.into(),
+            background: self.canvas,
+            primary_color: self.inset,
+            primary_text_color: self.text,
+            primary_border_color: border,
+            secondary_color: self.inset,
+            tertiary_color: self.inset,
+            line_color: self.secondary,
+            text_color: self.text,
+            edge_label_background: self.inset,
+            cluster_background: self.canvas,
+            cluster_border: border,
+            note_background: self.inset,
+            note_border: border,
+            actor_background: self.inset,
+            actor_border: border,
+            activation_background: self.inset,
+            activation_border: border,
+            git_branch_colors: chart,
+            git_branch_label_colors: chart.map(text_color_for_background),
+            // Zebra rows stay neutral (not text hues): labels use the theme
+            // text color, which only contrasts against surface tones.
+            er_attr_bg_odd: self.inset,
+            er_attr_bg_even: self.canvas,
+            error_color: self.removed,
+            warning_color: self.warning,
+            accent_colors: [self.accent, self.added, self.warning, self.removed]
+                .into_iter()
+                .map(|color| AccentColor {
+                    foreground: color,
+                    background: color,
+                })
+                .collect(),
         }
     }
 
@@ -293,6 +360,22 @@ fn hsla_hex(color: Hsla) -> String {
         (rgba.g.clamp(0.0, 1.0) * 255.0).round() as u8,
         (rgba.b.clamp(0.0, 1.0) * 255.0).round() as u8,
     )
+}
+
+/// Composite a translucent wash over the opaque canvas for roles that need
+/// solid paint. Padu's `overlay`/`border` tones are alpha washes whose RGB is
+/// inverted across appearances (light in dark mode, dark in light mode), so
+/// using them raw as strokes — or as the base of tint math that ignores
+/// alpha — flips dark and light rendering.
+fn opaque_over_canvas(wash: Hsla, canvas: Hsla) -> Hsla {
+    let fg = gpui::Rgba::from(wash);
+    let bg = gpui::Rgba::from(canvas);
+    gpui::Hsla::from(gpui::Rgba {
+        r: fg.r * fg.a + bg.r * (1.0 - fg.a),
+        g: fg.g * fg.a + bg.g * (1.0 - fg.a),
+        b: fg.b * fg.a + bg.b * (1.0 - fg.a),
+        a: 1.0,
+    })
 }
 
 // ── Flattened inline text ──────────────────────────────────────────────────
@@ -2027,9 +2110,13 @@ fn render_math_block(source: &str, display: bool, ctx: &Ctx) -> AnyElement {
 fn render_mermaid_block(source: &str, ctx: &Ctx) -> AnyElement {
     let key = ctx.next_key();
     let theme = ctx.palette.rich_theme(ctx.metrics.text_size);
-    let kind = RichKind::Mermaid;
-    let hash = rich::hash(kind, source, &theme);
-    let image_source = rich::rich_image_source_value(hash, kind, source.to_string(), theme);
+    let hash = rich::hash(RichKind::Mermaid, source, &theme);
+    let image_source = rich::mermaid_image_source_value(
+        hash,
+        source.to_string(),
+        theme,
+        ctx.palette.mermaid_theme(),
+    );
     let palette = *ctx.palette;
     let metrics = ctx.metrics;
     let diagram_source = source.to_owned();
@@ -2580,6 +2667,46 @@ mod tests {
 
     fn palette() -> Palette {
         Palette::from_theme(&Theme::dark())
+    }
+
+    /// The mermaid canvas and strokes must track the appearance instead of
+    /// inverting it. Guards the translucent-wash footgun: `overlay`/`border`
+    /// carry an RGB that reads light in dark mode and dark in light mode, so
+    /// passing them through raw flips the diagram across appearances.
+    #[test]
+    fn mermaid_theme_tracks_appearance() {
+        for (theme, expect_dark) in [(Theme::dark(), true), (Theme::light(), false)] {
+            let palette = Palette::from_theme(&theme);
+            let mermaid = palette.mermaid_theme();
+            assert_eq!(mermaid.dark_mode, expect_dark);
+            let bg = gpui::Rgba::from(mermaid.background);
+            assert_eq!(bg.a, 1.0, "diagram canvas must be opaque");
+            let luminance = 0.2126 * bg.r + 0.7152 * bg.g + 0.0722 * bg.b;
+            if expect_dark {
+                assert!(
+                    luminance < 0.5,
+                    "dark canvas must stay dark, got luminance {luminance}"
+                );
+            } else {
+                assert!(
+                    luminance > 0.5,
+                    "light canvas must stay light, got luminance {luminance}"
+                );
+            }
+            let border = gpui::Rgba::from(mermaid.primary_border_color);
+            assert_eq!(border.a, 1.0, "node strokes must be opaque");
+        }
+    }
+
+    #[test]
+    fn mermaid_labels_use_the_app_prose_face() {
+        for theme in [Theme::dark(), Theme::light()] {
+            assert_eq!(
+                Palette::from_theme(&theme).mermaid_theme().font_family,
+                SANS_FAMILY,
+                "diagram labels must match the transcript prose face"
+            );
+        }
     }
 
     fn runs_of(source: &str) -> Vec<InlineRun> {

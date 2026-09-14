@@ -1,0 +1,31 @@
+[package]
+name = "padu-mermaid"
+version = "0.1.0"
+edition = "2024"
+description = "Native Mermaid diagram → SVG rendering for Padu (vendored from Zed's mermaid_render)"
+license = "GPL-3.0-only"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1.0"
+gpui = { git = "https://github.com/egoist/zed", branch = "waku-webview" }
+merman = { version = "=0.8.0-alpha.5", default-features = false, features = [
+    "layout-cytoscape",
+    "svg",
+] }
+# Pinned exactly: merman's own requirement on these is caret-based, which lets
+# cargo mix alpha.5 with alpha.6 (API-incompatible). Keep the whole stack on
+# the version Zed's vendored code was written against.
+merman-core = "=0.8.0-alpha.5"
+merman-render = "=0.8.0-alpha.5"
+quick-xml = "0.41"
+serde_json = "1.0"
+
+[dev-dependencies]
+# Same rasterizer GPUI uses for `ImageFormat::Svg`, so tests rasterize what
+# the transcript will actually paint.
+usvg = "=0.46.0"
+resvg = "=0.46.0"
+tiny-skia = "=0.11.4"
