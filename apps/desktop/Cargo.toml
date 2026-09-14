@@ -56,7 +56,7 @@ gpui = { git = "https://github.com/egoist/zed", branch = "waku-webview", feature
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-wry = { version = "0.56", features = ["devtools"] }
+wry = { version = "0.57", features = ["devtools"] }
 block2 = "0.6"
 # Matches the version GPUI itself renders with, so RenderImage frames are the
 # same `image` types.
