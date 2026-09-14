@@ -24,7 +24,7 @@ gpui_platform = { git = "https://github.com/egoist/zed", branch = "waku-webview"
     "x11",
 ] }
 parking_lot = "0.12"
-rquickjs = "0.12.2"
+rquickjs = "0.13.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 html-escape = "0.2"
