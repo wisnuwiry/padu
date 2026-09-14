@@ -240,6 +240,7 @@ impl Backend for PaduBackend {
                 Ok(ResponsePayload::Ack)
             }
             Command::CheckAgyAuth => {
+                ensure_shell_environment();
                 let settings = self.settings.get();
                 let binary_override = settings
                     .provider_binary_overrides

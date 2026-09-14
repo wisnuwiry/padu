@@ -426,7 +426,7 @@ impl Padu {
         for probe in &mut self.probes {
             probe.models = crate::model_catalog::fallback_models(probe.provider);
         }
-        self.refresh_provider_detection(None);
+        self.refresh_provider_detection(None, cx);
         self.invalidate_composer_sources(cx);
 
         let updater_available = cx
