@@ -16,6 +16,7 @@ import { Route as AntigravityRouteImport } from "./routes/antigravity";
 import { Route as ChangelogRouteImport } from "./routes/changelog";
 import { Route as ClaudeCodeRouteImport } from "./routes/claude-code";
 import { Route as CodexRouteImport } from "./routes/codex";
+import { Route as CommandCodeRouteImport } from "./routes/command-code";
 import { Route as CursorRouteImport } from "./routes/cursor";
 import { Route as DeepseekTuiRouteImport } from "./routes/deepseek-tui";
 import { Route as DocsRouteImport } from "./routes/docs";
@@ -65,6 +66,11 @@ const ClaudeCodeRoute = ClaudeCodeRouteImport.update({
 const CodexRoute = CodexRouteImport.update({
   id: "/codex",
   path: "/codex",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const CommandCodeRoute = CommandCodeRouteImport.update({
+  id: "/command-code",
+  path: "/command-code",
   getParentRoute: () => rootRouteImport,
 } as any);
 const CursorRoute = CursorRouteImport.update({
@@ -151,6 +157,7 @@ export interface FileRoutesByFullPath {
   "/changelog": typeof ChangelogRoute;
   "/claude-code": typeof ClaudeCodeRoute;
   "/codex": typeof CodexRoute;
+  "/command-code": typeof CommandCodeRoute;
   "/cursor": typeof CursorRoute;
   "/deepseek-tui": typeof DeepseekTuiRoute;
   "/docs": typeof DocsRouteWithChildren;
@@ -175,6 +182,7 @@ export interface FileRoutesByTo {
   "/changelog": typeof ChangelogRoute;
   "/claude-code": typeof ClaudeCodeRoute;
   "/codex": typeof CodexRoute;
+  "/command-code": typeof CommandCodeRoute;
   "/cursor": typeof CursorRoute;
   "/deepseek-tui": typeof DeepseekTuiRoute;
   "/download": typeof DownloadRoute;
@@ -199,6 +207,7 @@ export interface FileRoutesById {
   "/changelog": typeof ChangelogRoute;
   "/claude-code": typeof ClaudeCodeRoute;
   "/codex": typeof CodexRoute;
+  "/command-code": typeof CommandCodeRoute;
   "/cursor": typeof CursorRoute;
   "/deepseek-tui": typeof DeepseekTuiRoute;
   "/docs": typeof DocsRouteWithChildren;
@@ -225,6 +234,7 @@ export interface FileRouteTypes {
     | "/changelog"
     | "/claude-code"
     | "/codex"
+    | "/command-code"
     | "/cursor"
     | "/deepseek-tui"
     | "/docs"
@@ -249,6 +259,7 @@ export interface FileRouteTypes {
     | "/changelog"
     | "/claude-code"
     | "/codex"
+    | "/command-code"
     | "/cursor"
     | "/deepseek-tui"
     | "/download"
@@ -272,6 +283,7 @@ export interface FileRouteTypes {
     | "/changelog"
     | "/claude-code"
     | "/codex"
+    | "/command-code"
     | "/cursor"
     | "/deepseek-tui"
     | "/docs"
@@ -297,6 +309,7 @@ export interface RootRouteChildren {
   ChangelogRoute: typeof ChangelogRoute;
   ClaudeCodeRoute: typeof ClaudeCodeRoute;
   CodexRoute: typeof CodexRoute;
+  CommandCodeRoute: typeof CommandCodeRoute;
   CursorRoute: typeof CursorRoute;
   DeepseekTuiRoute: typeof DeepseekTuiRoute;
   DocsRoute: typeof DocsRouteWithChildren;
@@ -361,6 +374,13 @@ declare module "@tanstack/react-router" {
       path: "/codex";
       fullPath: "/codex";
       preLoaderRoute: typeof CodexRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/command-code": {
+      id: "/command-code";
+      path: "/command-code";
+      fullPath: "/command-code";
+      preLoaderRoute: typeof CommandCodeRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/cursor": {
@@ -491,6 +511,7 @@ const rootRouteChildren: RootRouteChildren = {
   ChangelogRoute: ChangelogRoute,
   ClaudeCodeRoute: ClaudeCodeRoute,
   CodexRoute: CodexRoute,
+  CommandCodeRoute: CommandCodeRoute,
   CursorRoute: CursorRoute,
   DeepseekTuiRoute: DeepseekTuiRoute,
   DocsRoute: DocsRouteWithChildren,
