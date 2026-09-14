@@ -280,6 +280,22 @@ fn agent_arguments(
                 push(&mut args, model);
             }
         }
+        ProviderKind::Elph => {
+            push(&mut args, "run");
+            push(&mut args, "--no-session");
+            push(&mut args, "--mode");
+            push(&mut args, "plan");
+            push(&mut args, "--output-format");
+            push(&mut args, "plain");
+            if let Some(model) = model {
+                push(&mut args, "--model");
+                push(&mut args, model);
+            }
+            if let Some(effort) = reasoning_effort {
+                push(&mut args, "--effort");
+                push(&mut args, effort);
+            }
+        }
         ProviderKind::DeepSeek => {
             // The headless profile is Harness's one-shot, stdout-only client.
             // The commit prompt embeds all context and explicitly forbids tools.
@@ -783,6 +799,14 @@ mod tests {
                 }
                 ProviderKind::DeepSeek => {
                     assert!(has_pair(&args, "--profile", "headless"));
+                }
+                ProviderKind::Elph => {
+                    assert_eq!(args.first().and_then(|arg| arg.to_str()), Some("run"));
+                    assert!(has(&args, "--no-session"));
+                    assert!(has_pair(&args, "--mode", "plan"));
+                    assert!(has_pair(&args, "--output-format", "plain"));
+                    assert!(has_pair(&args, "--model", "model"));
+                    assert!(has_pair(&args, "--effort", "low"));
                 }
                 ProviderKind::Fx => {
                     assert_eq!(args.first().and_then(|arg| arg.to_str()), Some("ask"));

@@ -87,6 +87,10 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         // Harness reports its account/configuration-specific catalog from its
         // Host. An invented fallback would make unavailable routes selectable.
         ProviderKind::DeepSeek => Vec::new(),
+        // Elph advertises the configured provider/model catalog through ACP.
+        // A fabricated fallback would expose routes the user's credentials may
+        // not support.
+        ProviderKind::Elph => Vec::new(),
         // Fx resolves its catalog through the user's active Gateway or
         // subscription login. An invented fallback could expose an unusable
         // route, so discovery is authoritative.
@@ -140,6 +144,7 @@ pub fn discover_catalog(
         ProviderKind::OpenCode => (discover_opencode_models(binary), None),
         ProviderKind::Grok => (discover_grok_models(binary), None),
         ProviderKind::Kimi => (discover_kimi_models(binary), None),
+        ProviderKind::Elph => (discover_elph_models(binary), None),
         ProviderKind::Pi => (discover_pi_models(binary, PiDialect::Pi), None),
         ProviderKind::OhMyPi => (discover_pi_models(binary, PiDialect::OhMyPi), None),
     };
@@ -281,6 +286,58 @@ fn parse_claude_models(value: &Value) -> Vec<ProviderModel> {
                             .map(|option| option.id.as_str())
                     })
                     .map(str::to_owned);
+            }
+            Some(model)
+        })
+        .collect()
+}
+
+fn discover_elph_models(binary: &Path) -> Vec<ProviderModel> {
+    let mut command = crate::command_env::command(binary);
+    let Ok(output) = crate::command_env::output(command.arg("models")) else {
+        return Vec::new();
+    };
+    let combined = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    parse_elph_models(&combined)
+}
+
+fn parse_elph_models(output: &str) -> Vec<ProviderModel> {
+    let mut provider = None;
+    strip_ansi(output)
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty()
+                || line.starts_with('─')
+                || line.starts_with("Providers ")
+                || line.starts_with("Models ")
+                || line.starts_with("Query ")
+                || line.starts_with("Filters:")
+                || line.starts_with("No models")
+            {
+                return None;
+            }
+            if !line.contains('·') {
+                provider = line
+                    .rsplit_once('(')
+                    .and_then(|(name, id)| id.strip_suffix(')').map(|_| name.trim()))
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_owned);
+                return None;
+            }
+            let before_metadata = line.split_once('·')?.0.trim();
+            let (name, id) = before_metadata.rsplit_once(' ')?;
+            let id = id.trim().trim_start_matches('~');
+            if id.is_empty() || id.chars().any(char::is_whitespace) {
+                return None;
+            }
+            let mut model = ProviderModel::new(id, name.trim());
+            if let Some(provider) = provider.as_deref() {
+                model = model.sub_provider(provider);
             }
             Some(model)
         })
@@ -1398,6 +1455,18 @@ printf '%s\n' '{"type":"control_response","response":{"request_id":"padu-initial
         assert_eq!(models[1].id, "github-copilot/gpt-5.4");
         assert_eq!(models[1].name, "GPT-5.4");
         assert_eq!(models[1].sub_provider.as_deref(), Some("Github Copilot"));
+    }
+
+    #[test]
+    fn parses_elph_human_model_catalog_with_provider_metadata() {
+        let models = parse_elph_models(
+            "Models\n  Providers          1\n  Models             2\n\nOpenCode Zen (opencode)\n────────────────────\n  DeepSeek V4 Flash Free       deepseek-v4-flash-free  · 200k ctx · free per M · reasoning\n  Muse Spark 1.3 Contributor   muse-spark-1.3-contributor  · 1.0M ctx · reasoning\n",
+        );
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].id, "deepseek-v4-flash-free");
+        assert_eq!(models[0].name, "DeepSeek V4 Flash Free");
+        assert_eq!(models[0].sub_provider.as_deref(), Some("OpenCode Zen"));
+        assert_eq!(models[1].id, "muse-spark-1.3-contributor");
     }
 
     #[test]

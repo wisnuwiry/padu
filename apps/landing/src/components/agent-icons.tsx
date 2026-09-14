@@ -2,6 +2,14 @@
 
 import type * as React from "react";
 
+export function ElphIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 64 64" fill="currentColor" aria-hidden="true" {...props}>
+      <path d="M12 8h40v10H23v9h25v10H23v9h29v10H12z" />
+    </svg>
+  );
+}
+
 export function ClaudeCodeIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg
@@ -157,6 +165,8 @@ export function DeepSeekIcon(props: React.SVGProps<SVGSVGElement>) {
 
 export function AgentIcon({ slug, className }: { slug: string; className?: string }) {
   switch (slug) {
+    case "elph":
+      return <ElphIcon className={className} />;
     case "claude-code":
       return <ClaudeCodeIcon className={className} />;
     case "codex":
@@ -185,5 +195,3 @@ export function AgentIcon({ slug, className }: { slug: string; className?: strin
       return null;
   }
 }
-
-

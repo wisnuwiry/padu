@@ -20,6 +20,7 @@ import { Route as CursorRouteImport } from "./routes/cursor";
 import { Route as DeepseekTuiRouteImport } from "./routes/deepseek-tui";
 import { Route as DocsRouteImport } from "./routes/docs";
 import { Route as DownloadRouteImport } from "./routes/download";
+import { Route as ElphRouteImport } from "./routes/elph";
 import { Route as FxRouteImport } from "./routes/fx";
 import { Route as GrokRouteImport } from "./routes/grok";
 import { Route as KimiRouteImport } from "./routes/kimi";
@@ -86,6 +87,11 @@ const DownloadRoute = DownloadRouteImport.update({
   path: "/download",
   getParentRoute: () => rootRouteImport,
 } as any);
+const ElphRoute = ElphRouteImport.update({
+  id: "/elph",
+  path: "/elph",
+  getParentRoute: () => rootRouteImport,
+} as any);
 const FxRoute = FxRouteImport.update({
   id: "/fx",
   path: "/fx",
@@ -149,6 +155,7 @@ export interface FileRoutesByFullPath {
   "/deepseek-tui": typeof DeepseekTuiRoute;
   "/docs": typeof DocsRouteWithChildren;
   "/download": typeof DownloadRoute;
+  "/elph": typeof ElphRoute;
   "/fx": typeof FxRoute;
   "/grok": typeof GrokRoute;
   "/kimi": typeof KimiRoute;
@@ -171,6 +178,7 @@ export interface FileRoutesByTo {
   "/cursor": typeof CursorRoute;
   "/deepseek-tui": typeof DeepseekTuiRoute;
   "/download": typeof DownloadRoute;
+  "/elph": typeof ElphRoute;
   "/fx": typeof FxRoute;
   "/grok": typeof GrokRoute;
   "/kimi": typeof KimiRoute;
@@ -195,6 +203,7 @@ export interface FileRoutesById {
   "/deepseek-tui": typeof DeepseekTuiRoute;
   "/docs": typeof DocsRouteWithChildren;
   "/download": typeof DownloadRoute;
+  "/elph": typeof ElphRoute;
   "/fx": typeof FxRoute;
   "/grok": typeof GrokRoute;
   "/kimi": typeof KimiRoute;
@@ -220,6 +229,7 @@ export interface FileRouteTypes {
     | "/deepseek-tui"
     | "/docs"
     | "/download"
+    | "/elph"
     | "/fx"
     | "/grok"
     | "/kimi"
@@ -242,6 +252,7 @@ export interface FileRouteTypes {
     | "/cursor"
     | "/deepseek-tui"
     | "/download"
+    | "/elph"
     | "/fx"
     | "/grok"
     | "/kimi"
@@ -265,6 +276,7 @@ export interface FileRouteTypes {
     | "/deepseek-tui"
     | "/docs"
     | "/download"
+    | "/elph"
     | "/fx"
     | "/grok"
     | "/kimi"
@@ -289,6 +301,7 @@ export interface RootRouteChildren {
   DeepseekTuiRoute: typeof DeepseekTuiRoute;
   DocsRoute: typeof DocsRouteWithChildren;
   DownloadRoute: typeof DownloadRoute;
+  ElphRoute: typeof ElphRoute;
   FxRoute: typeof FxRoute;
   GrokRoute: typeof GrokRoute;
   KimiRoute: typeof KimiRoute;
@@ -376,6 +389,13 @@ declare module "@tanstack/react-router" {
       path: "/download";
       fullPath: "/download";
       preLoaderRoute: typeof DownloadRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/elph": {
+      id: "/elph";
+      path: "/elph";
+      fullPath: "/elph";
+      preLoaderRoute: typeof ElphRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/fx": {
@@ -475,6 +495,7 @@ const rootRouteChildren: RootRouteChildren = {
   DeepseekTuiRoute: DeepseekTuiRoute,
   DocsRoute: DocsRouteWithChildren,
   DownloadRoute: DownloadRoute,
+  ElphRoute: ElphRoute,
   FxRoute: FxRoute,
   GrokRoute: GrokRoute,
   KimiRoute: KimiRoute,

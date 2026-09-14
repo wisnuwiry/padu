@@ -123,6 +123,10 @@ fn launch_for(provider: ProviderKind, reasoning_effort: Option<&str>) -> anyhow:
             args: vec!["acp".into()],
             env: Vec::new(),
         }),
+        ProviderKind::Elph => Ok(AcpLaunch {
+            args: vec!["acp".into(), "--stdio".into()],
+            env: Vec::new(),
+        }),
         ProviderKind::OpenCode => Ok(AcpLaunch {
             args: vec!["acp".into()],
             env: Vec::new(),
@@ -1427,9 +1431,38 @@ async fn apply_model(
         return;
     }
 
+    if provider == ProviderKind::Elph {
+        let Some(option) = config_options
+            .unwrap_or_default()
+            .iter()
+            .find(|option| option.category == Some(SessionConfigOptionCategory::Model))
+        else {
+            let _ = events.send(DriverEvent::Error(tr!(
+                "errors.select_model",
+                error = "Elph did not advertise its model configuration"
+            )));
+            return;
+        };
+        if let Err(error) = connection
+            .send_request(SetSessionConfigOptionRequest::new(
+                session_id.clone(),
+                option.id.clone(),
+                model,
+            ))
+            .block_task()
+            .await
+        {
+            let _ = events.send(DriverEvent::Error(tr!(
+                "errors.select_model",
+                error = error
+            )));
+        }
+        return;
+    }
+
     // Grok, Kimi, OpenCode, and Cursor agents that do not advertise a model
-    // config option retain the legacy request unchanged. Fx intentionally
-    // stays on session/set_config_option, its documented model API.
+    // config option retain the legacy request unchanged. Fx and Elph use
+    // session/set_config_option, their documented model APIs.
     let request = match UntypedMessage::new(
         "session/set_model",
         set_model_params(session_id, model, reasoning_effort, provider),
@@ -2465,6 +2498,13 @@ mod tests {
     fn fx_launches_its_documented_acp_subcommand() {
         let launch = launch_for(ProviderKind::Fx, None).unwrap();
         assert_eq!(launch.args, ["acp"]);
+        assert!(launch.env.is_empty());
+    }
+
+    #[test]
+    fn elph_launches_acp_over_stdio() {
+        let launch = launch_for(ProviderKind::Elph, None).expect("Elph launch should succeed");
+        assert_eq!(launch.args, ["acp", "--stdio"]);
         assert!(launch.env.is_empty());
     }
 

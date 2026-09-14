@@ -225,6 +225,13 @@ pub fn provider_color(theme: &Theme, provider: ProviderKind) -> Hsla {
         ProviderKind::Claude => rgb(0xD97757).into(),
         ProviderKind::DeepSeek => rgb(0x4D6BFE).into(),
         ProviderKind::Agy => rgb(0x4285F4).into(),
+        ProviderKind::Elph => {
+            if theme.is_dark {
+                rgb(0xF3F3F3).into()
+            } else {
+                rgb(0x34363B).into()
+            }
+        }
         ProviderKind::Codex
         | ProviderKind::Cursor
         | ProviderKind::Fx
@@ -251,6 +258,7 @@ pub fn provider_icon(provider: ProviderKind) -> &'static str {
         ProviderKind::Codex => "icons/provider-openai.svg",
         ProviderKind::Cursor => "icons/provider-cursor.svg",
         ProviderKind::DeepSeek => "icons/provider-deepseek.svg",
+        ProviderKind::Elph => "icons/provider-elph.svg",
         ProviderKind::Fx => "icons/provider-fx.svg",
         ProviderKind::OpenCode => "icons/provider-opencode.svg",
         ProviderKind::Grok => "icons/provider-grok.svg",

@@ -19,6 +19,7 @@ pub enum ProviderKind {
     Codex,
     Cursor,
     DeepSeek,
+    Elph,
     Fx,
     OpenCode,
     Grok,
@@ -28,13 +29,14 @@ pub enum ProviderKind {
 }
 
 impl ProviderKind {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Agy,
         Self::Amp,
         Self::Claude,
         Self::Codex,
         Self::Cursor,
         Self::DeepSeek,
+        Self::Elph,
         Self::Fx,
         Self::OpenCode,
         Self::Grok,
@@ -51,6 +53,7 @@ impl ProviderKind {
             Self::Codex => "codex",
             Self::Cursor => "cursor",
             Self::DeepSeek => "deepseek",
+            Self::Elph => "elph",
             Self::Fx => "fx",
             Self::OpenCode => "opencode",
             Self::Grok => "grok",
@@ -68,6 +71,7 @@ impl ProviderKind {
             Self::Codex => "Codex CLI",
             Self::Cursor => "Cursor CLI",
             Self::DeepSeek => "DeepSeek Harness",
+            Self::Elph => "Elph",
             Self::Fx => "Fx",
             Self::OpenCode => "OpenCode",
             Self::Grok => "Grok Build",
@@ -85,6 +89,7 @@ impl ProviderKind {
             Self::Codex => "Codex",
             Self::Cursor => "Cursor",
             Self::DeepSeek => "DeepSeek",
+            Self::Elph => "Elph",
             Self::Fx => "Fx",
             Self::OpenCode => "OpenCode",
             Self::Grok => "Grok",
@@ -104,6 +109,7 @@ impl ProviderKind {
             // shared by other CLIs. The backward-compatible alias is unambiguous.
             Self::Cursor => "cursor-agent",
             Self::DeepSeek => "dsh",
+            Self::Elph => "elph",
             Self::Fx => "fx",
             Self::OpenCode => "opencode",
             Self::Grok => "grok",
@@ -156,6 +162,7 @@ impl ProviderKind {
                 | Self::Codex
                 | Self::Cursor
                 | Self::DeepSeek
+                | Self::Elph
                 | Self::Fx
                 | Self::OpenCode
                 | Self::Grok
@@ -200,6 +207,9 @@ pub enum ProviderResumeCursor {
     DeepSeek {
         session_id: String,
     },
+    Elph {
+        session_id: String,
+    },
     Fx {
         session_id: String,
     },
@@ -239,6 +249,7 @@ impl ProviderResumeCursor {
                 fork_context: None,
             },
             ProviderKind::DeepSeek => Self::DeepSeek { session_id: id },
+            ProviderKind::Elph => Self::Elph { session_id: id },
             ProviderKind::Fx => Self::Fx { session_id: id },
             ProviderKind::OpenCode => Self::OpenCode { session_id: id },
             ProviderKind::Grok => Self::Grok { session_id: id },
@@ -262,6 +273,7 @@ impl ProviderResumeCursor {
             Self::Codex { .. } => ProviderKind::Codex,
             Self::Cursor { .. } => ProviderKind::Cursor,
             Self::DeepSeek { .. } => ProviderKind::DeepSeek,
+            Self::Elph { .. } => ProviderKind::Elph,
             Self::Fx { .. } => ProviderKind::Fx,
             Self::OpenCode { .. } => ProviderKind::OpenCode,
             Self::Grok { .. } => ProviderKind::Grok,
@@ -278,6 +290,7 @@ impl ProviderResumeCursor {
             Self::Claude { session_id, .. }
             | Self::Cursor { session_id, .. }
             | Self::DeepSeek { session_id }
+            | Self::Elph { session_id }
             | Self::Fx { session_id }
             | Self::OpenCode { session_id }
             | Self::Grok { session_id }

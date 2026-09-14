@@ -219,14 +219,15 @@ pub fn start_local(
         ProviderKind::OhMyPi => {
             Arc::new(pi::PiDriver::start(pi::PiFlavor::OhMyPi, options, events)?)
         }
-        // Cursor, Fx, Grok, and Kimi Code all serve a long-lived ACP session,
+        // Cursor, Elph, Fx, Grok, and Kimi Code all serve a long-lived ACP session,
         // which is the only way their Supervised mode can actually ask the user
         // rather than silently forcing or denying.
         ProviderKind::Agy
         | ProviderKind::Cursor
         | ProviderKind::Fx
         | ProviderKind::Grok
-        | ProviderKind::Kimi => Arc::new(acp::AcpDriver::start(provider, options, events)?),
+        | ProviderKind::Kimi
+        | ProviderKind::Elph => Arc::new(acp::AcpDriver::start(provider, options, events)?),
         ProviderKind::DeepSeek => Arc::new(deepseek::DeepSeekDriver::start(options, events)?),
         // OpenCode's own server is its real API, and it is what exposes
         // interactive permission requests.
