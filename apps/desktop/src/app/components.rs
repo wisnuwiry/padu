@@ -1198,6 +1198,49 @@ fn activity_tool_display_name(activity: &ActivityItem) -> String {
     tr!("activity.tool")
 }
 
+/// The file an activity acts on, when it acts on exactly one. A multi-file
+/// patch has no single subject, so it keeps the generic icon.
+pub(super) fn activity_file_path(activity: &ActivityItem) -> Option<&str> {
+    match activity.kind {
+        ActivityKind::FileChange => match activity.file_changes.as_slice() {
+            [change] => Some(change.path.as_str()),
+            _ => None,
+        },
+        ActivityKind::FileRead => activity.display_target.as_deref(),
+        _ => None,
+    }
+}
+
+/// The leading glyph for an activity row: the target file's own type icon when
+/// the activity names one file, otherwise the kind's icon.
+pub(super) fn activity_lead_icon(activity: &ActivityItem, theme: &Theme) -> AnyElement {
+    match activity_file_path(activity) {
+        // Polychrome, like the file panel and the diff drawer beside it: the
+        // authored file-type colours are the colour schema this row follows.
+        Some(path) => file_icon(right_panel::file_icon_for_path(path), 12.0).into_any_element(),
+        None => icon(
+            activity_icon(activity.kind),
+            12.0,
+            activity_icon_color(activity, theme),
+        )
+        .into_any_element(),
+    }
+}
+
+/// Tint for the kind icons. A file listing takes the folder colour from that
+/// same file-type schema; the rest use a semantic theme hue, so a group of
+/// activities scans as colour-coded rather than a uniform grey column.
+pub(super) fn activity_icon_color(activity: &ActivityItem, theme: &Theme) -> Hsla {
+    match activity.kind {
+        ActivityKind::FileList => right_panel::file_icon_color("folder.svg"),
+        ActivityKind::Reasoning | ActivityKind::Search | ActivityKind::FileSearch => theme.accent,
+        ActivityKind::Command => theme.success,
+        ActivityKind::Plan => theme.warning,
+        ActivityKind::Tool => theme.text_secondary,
+        _ => theme.text_tertiary,
+    }
+}
+
 pub(super) fn activity_display_title(activity: &ActivityItem) -> String {
     use crate::model::ActivityKind;
 
@@ -2034,5 +2077,84 @@ mod message_time_tests {
             false,
         );
         assert_eq!(activity_display_title(&plan), "Updating plan");
+    }
+
+    #[test]
+    fn file_activities_resolve_the_target_file_type() {
+        let edit = ActivityItem::new(
+            Some("edit-1".into()),
+            crate::model::ActivityKind::FileChange,
+            "apply_patch",
+            None,
+            true,
+        )
+        .with_arguments(Some(
+            serde_json::json!({
+                "patch": "*** Begin Patch\n*** Update File: src/main.rs\n@@\n-old\n+new\n*** End Patch"
+            })
+            .to_string(),
+        ));
+        assert_eq!(activity_file_path(&edit), Some("src/main.rs"));
+        assert_eq!(
+            activity_file_path(&edit).map(right_panel::file_icon_for_path),
+            Some("icons/file-types/rust.svg")
+        );
+
+        let multi = ActivityItem::new(
+            Some("edit-2".into()),
+            crate::model::ActivityKind::FileChange,
+            "apply_patch",
+            None,
+            true,
+        )
+        .with_arguments(Some(
+            serde_json::json!({
+                "patch": "*** Begin Patch\n*** Update File: src/a.rs\n@@\n-a\n+b\n*** Update File: src/b.rs\n@@\n-c\n+d\n*** End Patch"
+            })
+            .to_string(),
+        ));
+        assert_eq!(activity_file_path(&multi), None);
+
+        let readme = ActivityItem::new(
+            Some("read-1".into()),
+            crate::model::ActivityKind::FileRead,
+            "read",
+            None,
+            true,
+        )
+        .with_arguments(Some(
+            serde_json::json!({"filePath": "/tmp/padu/README.md"}).to_string(),
+        ));
+        assert_eq!(
+            activity_file_path(&readme).map(right_panel::file_icon_for_path),
+            Some("icons/file-types/readme.svg")
+        );
+
+        let unknown = ActivityItem::new(
+            Some("read-2".into()),
+            crate::model::ActivityKind::FileRead,
+            "read",
+            None,
+            true,
+        )
+        .with_arguments(Some(
+            serde_json::json!({"filePath": "/tmp/padu/notes.unknownext"}).to_string(),
+        ));
+        assert_eq!(
+            activity_file_path(&unknown).map(right_panel::file_icon_for_path),
+            Some("icons/file-types/file.svg")
+        );
+
+        let command = ActivityItem::new(
+            Some("command-1".into()),
+            crate::model::ActivityKind::Command,
+            "bash",
+            None,
+            true,
+        )
+        .with_arguments(Some(
+            serde_json::json!({"command": "git status"}).to_string(),
+        ));
+        assert_eq!(activity_file_path(&command), None);
     }
 }

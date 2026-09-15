@@ -7,6 +7,9 @@ const CHANGED_FILES_PREVIEW_LIMIT: usize = 3;
 /// hundreds of files. The full immutable list remains one click away in the
 /// right panel.
 const CHANGED_FILES_EXPANDED_LIMIT: usize = 12;
+/// An expanded activity group previews this many rows; the rest sit behind a
+/// "show more" toggle so one long turn cannot dominate the transcript.
+const ACTIVITY_PREVIEW_LIMIT: usize = 4;
 /// An expanded edit stays one transcript row tall; past this the diff scrolls
 /// in place, the same as long command output.
 const ACTIVITY_DIFF_MAX_HEIGHT: f32 = 400.0;
@@ -872,6 +875,22 @@ impl Padu {
         });
     }
 
+    /// Reveals the activity rows past the group's four-row preview.
+    pub(super) fn toggle_activities_show_all(
+        &mut self,
+        block_index: usize,
+        show_all: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.toggle_block_disclosure(block_index, cx, |this| {
+            if show_all {
+                this.activities_show_all.remove(&block_index);
+            } else {
+                this.activities_show_all.insert(block_index);
+            }
+        });
+    }
+
     pub(super) fn toggle_activity_item(&mut self, id: Uuid, current: bool, cx: &mut Context<Self>) {
         let block_index = self
             .selected_transcript_blocks()
@@ -932,6 +951,63 @@ impl Padu {
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
                     this.open_activity_file(&key_path, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .into_any_element()
+    }
+
+    /// The row past the group's four-item preview: reveals the remaining
+    /// activities, or folds them back behind the preview.
+    fn render_activity_show_all_toggle(
+        &self,
+        block_index: usize,
+        total: usize,
+        show_all: bool,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let id = format!("activity-show-all-{block_index}");
+        let focus = self.transcript_control_focus(id.clone(), cx);
+        let label = if show_all {
+            tr!("activity.show_fewer")
+        } else {
+            tr!("activity.show_more", count = total - ACTIVITY_PREVIEW_LIMIT)
+        };
+        div()
+            .id(SharedString::from(id))
+            .track_focus(&focus)
+            .tab_index(0)
+            .h(px(24.0))
+            .px(px(8.0))
+            .rounded(px(6.0))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .cursor_pointer()
+            .text_size(sp(12.5))
+            .line_height(sp(16.0))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(theme.text_secondary)
+            .focus_visible(|element| element.bg(theme.overlay_strong))
+            .hover(|element| element.bg(theme.overlay_strong).text_color(theme.text))
+            .active(|element| element.bg(theme.overlay))
+            .child(SharedString::from(label))
+            .child(icon(
+                if show_all {
+                    "icons/chevron-up.svg"
+                } else {
+                    "icons/chevron-down.svg"
+                },
+                10.0,
+                theme.text_tertiary,
+            ))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.toggle_activities_show_all(block_index, show_all, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.toggle_activities_show_all(block_index, show_all, cx);
                     cx.stop_propagation();
                 }
             }))
@@ -1963,7 +2039,19 @@ impl Padu {
             .flex()
             .flex_col()
             .gap(px(8.0));
-        for activity in activities {
+        let total = activities.len();
+        let show_all = self.activities_show_all.contains(&block_index);
+        let capped = !show_all && total > ACTIVITY_PREVIEW_LIMIT;
+        // A live group is a running log, so its preview keeps the newest rows in
+        // view; a settled group is read from the top and previews the first.
+        let (preview_start, preview_end) = if !capped {
+            (0, total)
+        } else if live_group {
+            (total - ACTIVITY_PREVIEW_LIMIT, total)
+        } else {
+            (0, ACTIVITY_PREVIEW_LIMIT)
+        };
+        for activity in &activities[preview_start..preview_end] {
             let id = activity.id;
             let background_work = self
                 .state
@@ -2087,11 +2175,7 @@ impl Padu {
                                 .hover(|element| element.bg(activity_hover_surface))
                                 .active(|element| element.bg(activity_active_surface))
                         })
-                        .child(icon(
-                            activity_icon(activity.kind),
-                            12.0,
-                            theme.text_tertiary,
-                        ))
+                        .child(activity_lead_icon(activity, theme))
                         .child(
                             div()
                                 .flex_none()
@@ -2455,6 +2539,15 @@ impl Padu {
                 item = item.child(detail_card);
             }
             items = items.child(item);
+        }
+        if total > ACTIVITY_PREVIEW_LIMIT {
+            items = items.child(self.render_activity_show_all_toggle(
+                block_index,
+                total,
+                show_all,
+                theme,
+                cx,
+            ));
         }
         cluster.child(items).into_any_element()
     }

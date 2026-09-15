@@ -587,6 +587,8 @@ activity.running: 実行中：%{activities}
 activity.detail: アクティビティの詳細
 activity.named_content: "%{name} の内容"
 activity.ran: 実行済み：%{activities}
+activity.show_more: "さらに %{count} 件のアクティビティを表示"
+activity.show_fewer: アクティビティを折りたたむ
 activity.action_think: 思考
 activity.action_run: 実行
 activity.action_edit: 編集

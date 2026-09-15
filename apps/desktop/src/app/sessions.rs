@@ -947,6 +947,7 @@ impl Padu {
 
     pub(super) fn reset_visible_state(&mut self) {
         self.activities_expanded.clear();
+        self.activities_show_all.clear();
         self.expanded_activity_items.clear();
         self.expanded_turns.clear();
         self.expanded_changed_files.clear();

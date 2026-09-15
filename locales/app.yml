@@ -1188,6 +1188,10 @@ activity.named_content:
   en: "%{name} content"
 activity.ran:
   en: Ran %{activities}
+activity.show_more:
+  en: Show %{count} more activities
+activity.show_fewer:
+  en: Show fewer activities
 activity.action_think:
   en: Think
 activity.action_run:
