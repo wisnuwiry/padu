@@ -14,8 +14,11 @@ use crossbeam_channel::{Receiver, Sender, unbounded};
 use parking_lot::Mutex;
 use serde_json::Value;
 
-use super::{DriverControl, DriverEventSender, DriverStartOptions, SessionOptions};
-use crate::model::{ActivityKind, DriverEvent, InteractionMode, ProviderResumeCursor, RuntimeMode};
+use super::{DriverControl, DriverEventSender, DriverStartOptions, SessionOptions, activity};
+use crate::model::{
+    ActivityKind, DriverEvent, InteractionMode, ProviderResumeCursor, RuntimeMode, UserInputAnswer,
+    UserInputOption, UserInputQuestion,
+};
 
 #[derive(Debug)]
 enum CommandMessage {
@@ -61,12 +64,22 @@ fn command_code_args(options: &CommandCodeOptions, prompt: &str) -> Vec<String> 
     } else {
         match options.mode {
             RuntimeMode::AutoAcceptEdits => args.push("--auto-accept".into()),
-            RuntimeMode::Auto => args.extend(["--permission-mode".into(), "dont-ask".into()]),
-            RuntimeMode::FullAccess => args.push("--yolo".into()),
+            // Print mode has no permission prompt channel. `dont-ask` denies
+            // tools that need approval, so the automatic mode must use the
+            // provider's non-interactive authorization flag as well.
+            RuntimeMode::Auto | RuntimeMode::FullAccess => args.push("--yolo".into()),
             RuntimeMode::Ask | RuntimeMode::Plan => {}
         }
     }
-    args.extend(["--skip-onboarding".into(), "--trust".into(), prompt.into()]);
+    // User questions are withheld from print mode unless all tools are
+    // enabled. Their event payload is normalized below into Padu's answerable
+    // in-app question flow.
+    args.extend([
+        "--skip-onboarding".into(),
+        "--trust".into(),
+        "--tools-all".into(),
+        prompt.into(),
+    ]);
     args
 }
 
@@ -236,6 +249,129 @@ fn terminate_and_reap_child(active_child: &Arc<Mutex<Option<Child>>>) {
     }
 }
 
+fn handle_tool_event(event: &Value, event_type: &str, events: &DriverEventSender) {
+    let tool_name = event
+        .get("toolName")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if matches!(tool_name, "ask_user_question" | "user_question") {
+        if event_type == "tool_queued" {
+            handle_user_question(event, events);
+        }
+        return;
+    }
+
+    let id = event
+        .get("toolCallId")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let title = event
+        .get("toolName")
+        .or_else(|| event.get("description"))
+        .and_then(Value::as_str)
+        .unwrap_or("Command Code tool")
+        .to_owned();
+    let kind = ActivityKind::from_tool_name(&title);
+    let arguments = event.get("input").filter(|value| !value.is_null());
+    let output = event
+        .get("result")
+        .filter(|value| !value.is_null())
+        .or_else(|| event.get("partial").filter(|value| !value.is_null()))
+        .or_else(|| event.get("error").filter(|value| !value.is_null()));
+    let failed = matches!(
+        event_type,
+        "tool_errored" | "tool_denied" | "tool_hook_blocked"
+    );
+    let complete = matches!(
+        event_type,
+        "tool_completed" | "tool_errored" | "tool_denied" | "tool_hook_blocked"
+    );
+    let activity =
+        activity::tool_activity(id, kind, title, arguments, output, None, failed, complete);
+    let _ = events.send(DriverEvent::RichActivity(activity));
+}
+
+fn handle_user_question(event: &Value, events: &DriverEventSender) {
+    let Some(request_id) = event.get("toolCallId").and_then(Value::as_str) else {
+        return;
+    };
+    let Some(questions) = event
+        .get("input")
+        .and_then(|input| input.get("questions"))
+        .and_then(Value::as_array)
+    else {
+        return;
+    };
+
+    let questions = questions
+        .iter()
+        .enumerate()
+        .filter_map(|(index, question)| {
+            let text = question.get("question").and_then(Value::as_str)?.trim();
+            if text.is_empty() {
+                return None;
+            }
+            let header = question
+                .get("header")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|header| !header.is_empty())
+                .unwrap_or("Question");
+            let options = question
+                .get("options")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|option| {
+                    let label = option.get("label").and_then(Value::as_str)?.trim();
+                    (!label.is_empty()).then(|| UserInputOption {
+                        label: label.to_owned(),
+                        description: option
+                            .get("description")
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|description| !description.is_empty())
+                            .map(str::to_owned),
+                    })
+                })
+                .collect();
+            Some(UserInputQuestion {
+                id: question
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.is_empty())
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| format!("question-{index}")),
+                header: header.to_owned(),
+                question: text.to_owned(),
+                options,
+                multi_select: question
+                    .get("multiple")
+                    .or_else(|| question.get("multiSelect"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            })
+        })
+        .collect::<Vec<_>>();
+    if !questions.is_empty() {
+        let _ = events.send(DriverEvent::UserInputRequested {
+            request_id: request_id.to_owned(),
+            questions,
+        });
+    }
+}
+
+fn format_user_input_answers(request_id: &str, answers: &[UserInputAnswer]) -> String {
+    let answers = answers
+        .iter()
+        .map(|answer| format!("{}: {}", answer.question_id, answer.answers.join(", ")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "The user answered your in-app question request {request_id}:\n{answers}\nContinue with these answers in mind."
+    )
+}
+
 fn handle_frame(
     value: &Value,
     events: &DriverEventSender,
@@ -248,25 +384,7 @@ fn handle_frame(
             .and_then(Value::as_str)
             .unwrap_or_default();
         if event_type.contains("tool") {
-            let title = event
-                .get("toolName")
-                .or_else(|| event.get("description"))
-                .and_then(Value::as_str)
-                .unwrap_or("Command Code tool")
-                .to_owned();
-            let _ = events.send(DriverEvent::Activity {
-                id: event
-                    .get("toolCallId")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-                kind: ActivityKind::Tool,
-                title,
-                detail: None,
-                complete: matches!(
-                    event_type,
-                    "tool_completed" | "tool_errored" | "tool_denied" | "tool_hook_blocked"
-                ),
-            });
+            handle_tool_event(event, event_type, events);
         }
         return false;
     }
@@ -317,6 +435,11 @@ impl DriverControl for CommandCodeDriver {
     }
 
     fn respond(&self, _request_id: String, _option_id: String) {}
+
+    fn respond_user_input(&self, request_id: String, answers: Vec<UserInputAnswer>) {
+        let prompt = format_user_input_answers(&request_id, &answers);
+        let _ = self.commands.send(CommandMessage::Prompt(prompt));
+    }
 
     fn apply_options(&self, options: SessionOptions) -> bool {
         let _ = self.commands.send(CommandMessage::Options(options.clone()));
@@ -383,16 +506,110 @@ mod tests {
     }
 
     #[test]
-    fn auto_mode_uses_permission_mode_without_yolo() {
+    fn auto_mode_authorizes_tools_in_print_mode() {
         let mut options = options();
         options.mode = RuntimeMode::Auto;
         let args = command_code_args(&options, "Reply with PONG");
 
-        assert!(
-            args.windows(2)
-                .any(|window| window == ["--permission-mode", "dont-ask"])
+        assert!(args.contains(&"--yolo".into()));
+        assert!(!args.contains(&"--permission-mode".into()));
+    }
+
+    #[test]
+    fn tool_events_preserve_activity_content() {
+        let (events, received) = super::super::test_event_channel();
+        let mut options = options();
+        assert!(!handle_frame(
+            &serde_json::json!({
+                "type": "event",
+                "event": {
+                    "type": "tool_running",
+                    "toolCallId": "tool-1",
+                    "toolName": "shell_command",
+                    "input": {"command": "pwd"}
+                }
+            }),
+            &events,
+            &mut options,
+        ));
+        assert!(!handle_frame(
+            &serde_json::json!({
+                "type": "event",
+                "event": {
+                    "type": "tool_completed",
+                    "toolCallId": "tool-1",
+                    "toolName": "shell_command",
+                    "result": [{"type": "text", "text": "/tmp\n"}]
+                }
+            }),
+            &events,
+            &mut options,
+        ));
+
+        let values = received.try_iter().collect::<Vec<_>>();
+        assert!(matches!(
+            &values[0],
+            DriverEvent::RichActivity(activity)
+                if activity.kind == ActivityKind::Command
+                    && !activity.complete
+                    && activity.arguments.as_deref() == Some("pwd")
+        ));
+        assert!(matches!(
+            &values[1],
+            DriverEvent::RichActivity(activity)
+                if activity.complete
+                    && activity.output.as_deref() == Some("/tmp")
+        ));
+    }
+
+    #[test]
+    fn user_question_events_request_answers_in_the_app() {
+        let (events, received) = super::super::test_event_channel();
+        let mut options = options();
+        assert!(!handle_frame(
+            &serde_json::json!({
+                "type": "event",
+                "event": {
+                    "type": "tool_queued",
+                    "toolCallId": "question-1",
+                    "toolName": "ask_user_question",
+                    "input": {
+                        "questions": [{
+                            "header": "App architecture",
+                            "question": "Which paradigm do you prefer?",
+                            "options": [
+                                {"label": "Functional", "description": "Pure functions"},
+                                {"label": "Object-oriented"}
+                            ],
+                            "multiple": false
+                        }]
+                    }
+                }
+            }),
+            &events,
+            &mut options,
+        ));
+
+        let values = received.try_iter().collect::<Vec<_>>();
+        assert!(matches!(
+            &values[0],
+            DriverEvent::UserInputRequested { request_id, questions }
+                if request_id == "question-1"
+                    && questions.len() == 1
+                    && questions[0].question == "Which paradigm do you prefer?"
+                    && questions[0].options.len() == 2
+                    && questions[0].options[0].description.as_deref() == Some("Pure functions")
+        ));
+        assert_eq!(
+            format_user_input_answers(
+                "question-1",
+                &[UserInputAnswer {
+                    question_id: "question-0".into(),
+                    answers: vec!["Functional".into()],
+                }]
+            ),
+            "The user answered your in-app question request question-1:\nquestion-0: Functional\nContinue with these answers in mind."
         );
-        assert!(!args.contains(&"--yolo".into()));
     }
 
     #[test]
