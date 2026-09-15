@@ -610,7 +610,7 @@ impl Padu {
                     self.add_note_to_chat(note.id, window, cx);
                 }
             }
-            "l" if modifiers.shift && !modifiers.alt => {
+            "l" if modifiers.secondary() && modifiers.shift && !modifiers.alt => {
                 self.notes_list_collapsed = !self.notes_list_collapsed;
                 cx.notify();
             }
@@ -1288,6 +1288,7 @@ impl Padu {
                         "note-add-to-chat" => key == "enter",
                         "note-toggle-list" => {
                             key == "l"
+                                && event.keystroke.modifiers.secondary()
                                 && event.keystroke.modifiers.shift
                                 && !event.keystroke.modifiers.alt
                         }
