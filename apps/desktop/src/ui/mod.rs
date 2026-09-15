@@ -601,6 +601,18 @@ mod tests {
         ] {
             paths.push(activity_icon(kind));
         }
+        // Every file-type icon an activity row can resolve for a named file,
+        // including the extensionless fallback.
+        for path in [
+            "src/main.rs",
+            "app.ts",
+            "package.json",
+            "README.md",
+            "Makefile",
+            "notes.unknownext",
+        ] {
+            paths.push(crate::app::right_panel::file_icon_for_path(path));
+        }
         for path in paths {
             assert!(
                 Assets.load(path).unwrap().is_some(),

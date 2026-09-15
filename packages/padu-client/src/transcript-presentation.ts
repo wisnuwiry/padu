@@ -294,6 +294,35 @@ export function activityFileChangeStats(activity: ActivityItem) {
   }
 }
 
+/** The file an activity acts on, when it acts on exactly one. Mirrors the
+ * desktop row: a multi-file patch has no single subject, so it keeps the
+ * kind's own icon. */
+export function activityFilePath(activity: ActivityItem): string | null {
+  if (activity.kind === 'fileChange') {
+    const changes = activity.file_changes ?? []
+    return changes.length === 1 ? changes[0]!.path : null
+  }
+  if (activity.kind === 'fileRead') return activity.display_target ?? null
+  return null
+}
+
+/** Rows an expanded activity group previews before it offers "show more". */
+export const ACTIVITY_PREVIEW_LIMIT = 4
+
+/** The slice of activities an expanded group shows before the user asks for
+ * all of them. A live group previews its newest rows so running work stays in
+ * view; a settled group previews the first, since it reads from the top. */
+export function activityPreviewWindow(
+  total: number,
+  liveGroup: boolean,
+  showAll: boolean,
+): { start: number; end: number } {
+  if (showAll || total <= ACTIVITY_PREVIEW_LIMIT) return { start: 0, end: total }
+  return liveGroup
+    ? { start: total - ACTIVITY_PREVIEW_LIMIT, end: total }
+    : { start: 0, end: ACTIVITY_PREVIEW_LIMIT }
+}
+
 export function turnFoldLabel(turn: AgentSession['turns'][number], t?: Translator) {
   const seconds = Math.max(1, (turn.completed_at ?? Math.floor(Date.now() / 1_000)) - turn.started_at)
   if (t) {

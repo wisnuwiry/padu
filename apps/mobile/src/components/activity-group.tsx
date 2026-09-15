@@ -1,11 +1,13 @@
 import type { ActivityFileChange, ActivityItem, ActivityKind, TranscriptBlock } from '@padu/client';
 import { activitiesForBlock } from '@padu/client/event-reducer';
 import {
+  ACTIVITY_PREVIEW_LIMIT,
   activityActionLabel,
   activityDisclosureSections,
   activityFileChangeStats,
   activityHeaderTitle,
   activityPreview,
+  activityPreviewWindow,
   activityRowDetail,
 } from '@padu/client/transcript-presentation';
 import type { SymbolViewProps } from 'expo-symbols';
@@ -45,10 +47,14 @@ export const ActivityGroup = memo(function ActivityGroup({
   const theme = useTheme();
   const activities = activitiesForBlock(block);
   const [expanded, setExpanded] = useState(live);
+  const [showAll, setShowAll] = useState(false);
   useEffect(() => {
     setExpanded(live);
   }, [live]);
   if (!activities.length) return null;
+  const preview = activityPreviewWindow(activities.length, live, showAll);
+  const visible = activities.slice(preview.start, preview.end);
+  const hiddenCount = activities.length - (preview.end - preview.start);
   return (
     <View style={styles.group}>
       <Pressable
@@ -69,9 +75,27 @@ export const ActivityGroup = memo(function ActivityGroup({
       </Pressable>
       {expanded && (
         <View style={[styles.rail, { borderLeftColor: theme.border }]}>
-          {activities.map((activity) => (
+          {visible.map((activity) => (
             <ActivityRow activity={activity} key={activity.id} />
           ))}
+          {activities.length > ACTIVITY_PREVIEW_LIMIT && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ expanded: showAll }}
+              onPress={() => setShowAll((value) => !value)}
+              style={({ pressed }) => [styles.showAll, { opacity: pressed ? 0.6 : 1 }]}>
+              <Text numberOfLines={1} style={[styles.showAllLabel, { color: theme.textSecondary }]}>
+                {showAll ? 'Show fewer activities' : `Show ${hiddenCount} more activities`}
+              </Text>
+              <AppSymbol
+                name={showAll
+                  ? { ios: 'chevron.up', android: 'keyboard_arrow_up', web: 'keyboard_arrow_up' }
+                  : { ios: 'chevron.down', android: 'keyboard_arrow_down', web: 'keyboard_arrow_down' }}
+                size={10}
+                tintColor={theme.textGhost}
+              />
+            </Pressable>
+          )}
         </View>
       )}
     </View>
@@ -283,6 +307,14 @@ const styles = StyleSheet.create({
     paddingBottom: 2,
     paddingLeft: 11,
   },
+  showAll: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    minHeight: 24,
+    paddingHorizontal: 8,
+  },
+  showAllLabel: { flexShrink: 1, fontSize: 12.5, fontWeight: '500' },
   card: {
     borderRadius: 9,
     borderWidth: StyleSheet.hairlineWidth,

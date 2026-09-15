@@ -568,6 +568,8 @@ activity.running: Menjalankan %{activities}
 activity.detail: Detail aktivitas
 activity.named_content: Konten %{name}
 activity.ran: Menjalankan %{activities}
+activity.show_more: Tampilkan %{count} aktivitas lagi
+activity.show_fewer: Tampilkan lebih sedikit aktivitas
 activity.action_think: Berpikir
 activity.action_run: Jalankan
 activity.action_edit: Edit

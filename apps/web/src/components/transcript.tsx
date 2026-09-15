@@ -23,13 +23,16 @@ import type {
   BackgroundWorkStatus,
 } from '@/lib/runtime-context'
 import {
+  ACTIVITY_PREVIEW_LIMIT,
   activityActionLabel,
   activityDisclosureSections,
   activityDisplayTitle,
   activityFileChangeStats,
+  activityFilePath,
   activityGroupIsLive,
   activityHeaderTitle,
   activityPreview,
+  activityPreviewWindow,
   activityRowDetail,
   activityTextRows,
   assistantResponseFooters,
@@ -1497,10 +1500,14 @@ function ActivityGroup({
   onOpenBackgroundWork?: (key: BackgroundWorkKey) => void
 }) {
   const [expanded, setExpanded] = useState(liveGroup)
+  const [showAll, setShowAll] = useState(false)
   useEffect(() => {
     setExpanded(liveGroup)
   }, [liveGroup])
   if (!activities.length) return null
+  const preview = activityPreviewWindow(activities.length, liveGroup, showAll)
+  const visible = activities.slice(preview.start, preview.end)
+  const hiddenCount = activities.length - (preview.end - preview.start)
   return (
     <div className="min-w-0 text-[12px] text-[var(--text-tertiary)]">
       <button
@@ -1514,7 +1521,7 @@ function ActivityGroup({
       </button>
       {expanded && (
         <div className="ml-1.5 flex min-w-0 flex-col gap-2 border-l pb-0.5 pl-3">
-          {activities.map((activity) => (
+          {visible.map((activity) => (
             <ActivityRow
               activity={activity}
               backgroundWork={backgroundWork.find((item) => (
@@ -1525,6 +1532,24 @@ function ActivityGroup({
               onOpenBackgroundWork={onOpenBackgroundWork}
             />
           ))}
+          {activities.length > ACTIVITY_PREVIEW_LIMIT && (
+            <button
+              aria-expanded={showAll}
+              className="flex h-6 w-full items-center gap-1.5 rounded px-2 text-left text-[12.5px] font-medium text-[var(--text-secondary)] outline-none hover:bg-[var(--activity-hover-surface)] focus-visible:ring-1 focus-visible:ring-ring"
+              type="button"
+              onClick={() => setShowAll((value) => !value)}
+            >
+              <span className="min-w-0 truncate">
+                {showAll
+                  ? t('activity.show_fewer')
+                  : t('activity.show_more', { count: hiddenCount })}
+              </span>
+              <PaduIcon
+                className="size-2.5 shrink-0"
+                name={showAll ? 'chevronUp' : 'chevronDown'}
+              />
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -1547,6 +1572,7 @@ function ActivityRow({
   const hasDetail = Boolean(reasoningContent || sections.length)
   const [expanded, setExpanded] = useState(Boolean(activity.reasoning && !activity.complete))
   const iconName = activityIcon(activity)
+  const filePath = activityFilePath(activity)
   const preview = expanded || activity.reasoning ? '' : activityPreview(activity, t)
   const actionLabel = activityActionLabel(activity, t)
   const rowDetail = activityRowDetail(activity, t) || preview
@@ -1590,7 +1616,11 @@ function ActivityRow({
           type="button"
           onClick={() => setExpanded((value) => !value)}
         >
-          <PaduIcon className="size-3 shrink-0 text-[var(--text-tertiary)]" name={iconName} />
+          {filePath ? (
+            <FileTypeIcon className="size-3.5 shrink-0" path={filePath} />
+          ) : (
+            <PaduIcon className="size-3 shrink-0 text-[var(--text-tertiary)]" name={iconName} />
+          )}
           <span className="shrink-0 font-semibold text-[var(--text-secondary)]">{actionLabel}</span>
           {rowDetail && (
             <span className="min-w-0 flex-1 truncate text-[var(--text-secondary)]">

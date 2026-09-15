@@ -1388,6 +1388,9 @@ pub struct Padu {
     last_stream_save: Instant,
     /// User expansion overrides keyed by persisted transcript block index.
     activities_expanded: HashMap<usize, bool>,
+    /// Activity groups the user has reopened past the four-row preview. Runtime
+    /// only, like the other transcript disclosures.
+    activities_show_all: HashSet<usize>,
     /// Per-item disclosure overrides. Reasoning starts open while live; tool
     /// details start closed, so the stored bool must preserve either choice.
     expanded_activity_items: HashMap<Uuid, bool>,
@@ -3287,6 +3290,7 @@ impl Padu {
                 stream_state_dirty: false,
                 last_stream_save: Instant::now(),
                 activities_expanded: HashMap::new(),
+                activities_show_all: HashSet::new(),
                 expanded_activity_items: HashMap::new(),
                 expanded_turns: HashSet::new(),
                 expanded_changed_files: HashSet::new(),

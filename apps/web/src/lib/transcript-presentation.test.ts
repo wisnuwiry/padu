@@ -1,13 +1,16 @@
 import { describe, expect, test } from 'bun:test'
 import type { ActivityItem, AgentSession } from '@padu/client'
 import {
+  ACTIVITY_PREVIEW_LIMIT,
   activityActionLabel,
   activityDisclosureSections,
   activityDisplayTitle,
   activityFileChangeStats,
+  activityFilePath,
   activityGroupIsLive,
   activityHeaderTitle,
   activityPreview,
+  activityPreviewWindow,
   activityRowDetail,
   activitySummary,
   activityTextRows,
@@ -155,6 +158,28 @@ describe('desktop transcript language', () => {
     }
     expect(activityFileChangeStats(item)).toEqual({ additions: 5, deletions: 5 })
     expect(activityFileChangeStats({ ...item, file_changes: [{ path: 'a.ts' }] })).toBeNull()
+  })
+
+  test('resolves one file per row and previews four activities at a time', () => {
+    expect(activityFilePath({
+      ...activity('fileChange', true),
+      file_changes: [{ path: '/tmp/src/app.ts' }],
+    })).toBe('/tmp/src/app.ts')
+    expect(activityFilePath({
+      ...activity('fileChange', true),
+      file_changes: [{ path: 'a.ts' }, { path: 'b.ts' }],
+    })).toBeNull()
+    expect(activityFilePath({
+      ...activity('fileRead', true),
+      display_target: '/tmp/README.md',
+    })).toBe('/tmp/README.md')
+    expect(activityFilePath(activity('command', true))).toBeNull()
+
+    expect(ACTIVITY_PREVIEW_LIMIT).toBe(4)
+    expect(activityPreviewWindow(3, false, false)).toEqual({ start: 0, end: 3 })
+    expect(activityPreviewWindow(9, false, false)).toEqual({ start: 0, end: 4 })
+    expect(activityPreviewWindow(9, true, false)).toEqual({ start: 5, end: 9 })
+    expect(activityPreviewWindow(9, false, true)).toEqual({ start: 0, end: 9 })
   })
 
   test('keeps the live working duration compact', () => {
