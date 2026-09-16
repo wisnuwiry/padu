@@ -706,6 +706,45 @@ fn render_markdown_message_body<'a>(
         })
 }
 
+pub(super) fn render_preview_message(
+    role: MessageRole,
+    content: impl Into<SharedString>,
+    theme: &Theme,
+) -> AnyElement {
+    let content = content.into();
+    let body = div()
+        .text_size(sp(11.5))
+        .line_height(sp(16.0))
+        .child(content);
+
+    match role {
+        MessageRole::User => div()
+            .w_full()
+            .flex()
+            .justify_end()
+            .child(
+                div()
+                    .self_end()
+                    .max_w(gpui::relative(0.82))
+                    .min_w_0()
+                    .rounded(px(12.0))
+                    .bg(theme.raised)
+                    .px(px(12.0))
+                    .py(px(8.0))
+                    .child(body),
+            )
+            .into_any_element(),
+        MessageRole::Assistant => div()
+            .w_full()
+            .min_w_0()
+            .max_w(gpui::relative(0.86))
+            .py(px(4.0))
+            .child(body)
+            .into_any_element(),
+        MessageRole::System => div().w_full().child(body).into_any_element(),
+    }
+}
+
 pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement {
     let MessageRender {
         theme,

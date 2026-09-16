@@ -367,6 +367,19 @@ settings.code_font_size_description: Ukuran teks di editor berkas, diff, blok ko
 settings.theme_system: Sistem
 settings.theme_light: Terang
 settings.theme_dark: Gelap
+settings.background: Latar belakang
+settings.background_description: Tambahkan gambar lembut di belakang pesan percakapan
+settings.background_choose: Pilih gambar
+settings.background_remove: Hapus
+settings.background_opacity: Opasitas
+settings.background_height: Tinggi gambar
+settings.background_fit: Penyesuaian gambar
+settings.background_cover: Isi
+settings.background_contain: Muat
+settings.background_preview_user: Bisa rangkum catatan rapat hari ini?
+settings.background_preview_assistant: Tentu — saya akan menyoroti keputusan utama dan tugas tindak lanjut.
+settings.background_unsupported: Pilih format gambar yang didukung
+settings.background_unavailable: Gambar latar belakang tidak dapat dimuat
 input.do_anything: Lakukan apa saja…
 input.search_models: Cari model…
 input.search_branches: Cari cabang

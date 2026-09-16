@@ -13,85 +13,369 @@ fn font_size_label(size: f32) -> String {
     }
 }
 
+fn render_background_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) -> AnyElement {
+    let settings = &padu.state.conversation_background;
+    let image = padu.conversation_background_image();
+    let weak = cx.entity().downgrade();
+    let choose = div()
+        .id("conversation-background-choose")
+        .tab_index(0)
+        .px(px(10.0))
+        .py(px(6.0))
+        .rounded(px(6.0))
+        .border_1()
+        .border_color(theme.border)
+        .text_size(sp(12.0))
+        .cursor_pointer()
+        .focus_visible(|style| style.border_color(theme.accent))
+        .hover(|style| style.bg(theme.overlay))
+        .flex()
+        .items_center()
+        .gap(px(6.0))
+        .child(icon("icons/folder-open.svg", 13.0, theme.text_secondary))
+        .child(tr!("settings.background_choose"))
+        .on_click({
+            let weak = weak.clone();
+            move |_, _, cx| {
+                let _ = weak.update(cx, |this, cx| this.choose_conversation_background(cx));
+            }
+        })
+        .on_key_down({
+            let weak = weak.clone();
+            move |event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    let _ = weak.update(cx, |this, cx| this.choose_conversation_background(cx));
+                }
+            }
+        });
+    let opacity = (settings.opacity * 100.0).round() as i32;
+    let height = settings.height_percent.round() as i32;
+    let preview = div()
+        .relative()
+        .w_full()
+        .aspect_ratio(188.0 / 142.0)
+        .min_h(px(240.0))
+        .overflow_hidden()
+        .rounded(px(8.0))
+        .bg(theme.surface)
+        .border_1()
+        .border_color(theme.border)
+        .children(
+            crate::app::conversation_background::render_conversation_background(
+                image.clone(),
+                settings,
+                &theme,
+            ),
+        )
+        .child(
+            div()
+                .relative()
+                .h_full()
+                .p(px(16.0))
+                .flex()
+                .flex_col()
+                .justify_end()
+                .gap(px(3.0))
+                .child(render_preview_message(
+                    MessageRole::User,
+                    tr!("settings.background_preview_user"),
+                    &theme,
+                ))
+                .child(render_preview_message(
+                    MessageRole::Assistant,
+                    tr!("settings.background_preview_assistant"),
+                    &theme,
+                )),
+        );
+    let remove = image.map(|_| {
+        let weak = cx.entity().downgrade();
+        div()
+            .id("conversation-background-remove")
+            .tab_index(0)
+            .px(px(8.0))
+            .py(px(6.0))
+            .text_size(sp(12.0))
+            .text_color(theme.text_secondary)
+            .cursor_pointer()
+            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .child(icon("icons/trash.svg", 13.0, theme.danger))
+            .child(tr!("settings.background_remove"))
+            .on_click({
+                let weak = weak.clone();
+                move |_, _, cx| {
+                    let _ = weak.update(cx, |this, cx| this.clear_conversation_background(cx));
+                }
+            })
+            .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    let _ = weak.update(cx, |this, cx| this.clear_conversation_background(cx));
+                }
+            })
+            .into_any_element()
+    });
+    div()
+        .mt(px(15.0))
+        .w_full()
+        .rounded(px(13.0))
+        .overflow_hidden()
+        .bg(theme.raised)
+        .px(px(20.0))
+        .py(px(16.0))
+        .flex()
+        .flex_col()
+        .items_start()
+        .gap(px(12.0))
+        .child(
+            div()
+                .w_full()
+                .child(
+                    div()
+                        .text_size(sp(13.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(tr!("settings.background")),
+                )
+                .child(
+                    div()
+                        .mt(px(5.0))
+                        .text_size(sp(12.5))
+                        .line_height(sp(18.0))
+                        .text_color(theme.text_secondary)
+                        .child(tr!("settings.background_description")),
+                ),
+        )
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .items_start()
+                .justify_between()
+                .gap(px(14.0))
+                .child(
+                    div()
+                        .w(px(150.0))
+                        .flex()
+                        .flex_col()
+                        .gap(px(8.0))
+                        .child(choose)
+                        .children(remove),
+                )
+                .child(div().flex_1().child(preview)),
+        )
+        .child(background_adjuster(
+            tr!("settings.background_opacity"),
+            opacity,
+            0,
+            100,
+            theme,
+            {
+                let weak = cx.entity().downgrade();
+                move |value, cx| {
+                    let _ = weak.update(cx, |this, cx| {
+                        this.set_conversation_background_opacity(value as f32 / 100.0, cx)
+                    });
+                }
+            },
+        ))
+        .child(background_adjuster(
+            tr!("settings.background_height"),
+            height,
+            20,
+            100,
+            theme,
+            {
+                let weak = cx.entity().downgrade();
+                move |value, cx| {
+                    let _ = weak.update(cx, |this, cx| {
+                        this.set_conversation_background_height(value as f32, cx)
+                    });
+                }
+            },
+        ))
+        .into_any_element()
+}
+
+fn background_adjuster(
+    label: String,
+    value: i32,
+    min: i32,
+    max: i32,
+    theme: Theme,
+    on_change: impl Fn(i32, &mut App) + 'static,
+) -> AnyElement {
+    let on_change: Rc<dyn Fn(i32, &mut App)> = Rc::new(on_change);
+    let mut buttons = Vec::new();
+    for (id, delta) in [("decrease", -1), ("increase", 1)] {
+        let next = (value + delta).clamp(min, max);
+        let on_change = on_change.clone();
+        buttons.push(
+            div()
+                .id(SharedString::from(format!("background-{id}")))
+                .tab_index(0)
+                .px(px(7.0))
+                .py(px(3.0))
+                .border_1()
+                .border_color(theme.border)
+                .rounded(px(4.0))
+                .cursor_pointer()
+                .child(if delta < 0 { "−" } else { "+" })
+                .on_click({
+                    let on_change = on_change.clone();
+                    move |_, _, cx| on_change(next, cx)
+                })
+                .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        on_change(next, cx);
+                    }
+                }),
+        );
+    }
+    div()
+        .w_full()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(8.0))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_size(sp(12.0))
+                .text_color(theme.text_secondary)
+                .child(label),
+        )
+        .children(buttons)
+        .child(
+            div()
+                .w(px(42.0))
+                .text_size(sp(12.0))
+                .text_color(theme.text)
+                .child(format!("{value}%")),
+        )
+        .into_any_element()
+}
+
+fn render_theme_section(
+    theme: Theme,
+    selected_theme: ThemePreference,
+    weak: gpui::WeakEntity<Padu>,
+) -> AnyElement {
+    let theme_cards = ThemePreference::ALL
+        .into_iter()
+        .map(|preference| {
+            let selected = preference == selected_theme;
+            let weak = weak.clone();
+            let preference_id = match preference {
+                ThemePreference::System => "system",
+                ThemePreference::Light => "light",
+                ThemePreference::Dark => "dark",
+            };
+            let preview_path = match preference {
+                ThemePreference::System => "themes/system.svg",
+                ThemePreference::Light => "themes/light.svg",
+                ThemePreference::Dark => "themes/dark.svg",
+            };
+            let preview = div()
+                .w_full()
+                .aspect_ratio(188.0 / 142.0)
+                .rounded(px(6.0))
+                .overflow_hidden()
+                .border_1()
+                .border_color(theme.border)
+                .bg(theme.surface)
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    img(preview_path)
+                        .size_full()
+                        .rounded(px(6.0))
+                        .object_fit(ObjectFit::Contain),
+                );
+
+            div()
+                .id(SharedString::from(format!("theme-card-{preference_id}")))
+                .tab_index(0)
+                .flex_1()
+                .max_w(px(140.0))
+                .min_w(px(0.0))
+                .p(px(7.0))
+                .rounded(px(10.0))
+                .border_1()
+                .border_color(if selected { theme.accent } else { theme.border })
+                .bg(if selected {
+                    theme.accent.opacity(0.08)
+                } else {
+                    theme.surface
+                })
+                .cursor_pointer()
+                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .hover(|el| el.bg(theme.overlay))
+                .on_click(move |_, window, cx| {
+                    let _ = weak.update(cx, |this, cx| {
+                        this.set_theme_preference(preference, window, cx);
+                    });
+                })
+                .child(preview)
+                .child(
+                    div()
+                        .mt(px(7.0))
+                        .text_size(sp(12.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(preference.label()),
+                )
+        })
+        .collect::<Vec<_>>();
+    let theme_selector = div()
+        .flex()
+        .w_full()
+        .justify_end()
+        .gap(px(8.0))
+        .children(theme_cards);
+
+    div()
+        .w_full()
+        .min_h(px(60.0))
+        .px(px(20.0))
+        .py(px(16.0))
+        .flex()
+        .flex_col()
+        .items_start()
+        .gap(px(12.0))
+        .child(
+            div()
+                .w_full()
+                .child(
+                    div()
+                        .text_size(sp(13.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(tr!("settings.theme")),
+                )
+                .child(
+                    div()
+                        .mt(px(5.0))
+                        .text_size(sp(12.5))
+                        .line_height(sp(18.0))
+                        .text_color(theme.text_secondary)
+                        .child(tr!("settings.theme_description")),
+                ),
+        )
+        .child(theme_selector)
+        .into_any_element()
+}
+
 impl Padu {
     pub(super) fn render_appearance_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let selected_theme = self.state.theme;
         let selected_language = self.state.language;
         let weak = cx.entity().downgrade();
-        let theme_cards = ThemePreference::ALL
-            .into_iter()
-            .map(|preference| {
-                let selected = preference == selected_theme;
-                let weak = weak.clone();
-                let preference_id = match preference {
-                    ThemePreference::System => "system",
-                    ThemePreference::Light => "light",
-                    ThemePreference::Dark => "dark",
-                };
-                let preview_path = match preference {
-                    ThemePreference::System => "themes/system.svg",
-                    ThemePreference::Light => "themes/light.svg",
-                    ThemePreference::Dark => "themes/dark.svg",
-                };
-                let preview = div()
-                    .w_full()
-                    .aspect_ratio(188.0 / 142.0)
-                    .rounded(px(6.0))
-                    .overflow_hidden()
-                    .border_1()
-                    .border_color(theme.border)
-                    .bg(theme.surface)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(
-                        img(preview_path)
-                            .size_full()
-                            .rounded(px(6.0))
-                            .object_fit(ObjectFit::Contain),
-                    );
-
-                div()
-                    .id(SharedString::from(format!("theme-card-{preference_id}")))
-                    .tab_index(0)
-                    .flex_1()
-                    .max_w(px(140.0))
-                    .min_w(px(0.0))
-                    .p(px(7.0))
-                    .rounded(px(10.0))
-                    .border_1()
-                    .border_color(if selected { theme.accent } else { theme.border })
-                    .bg(if selected {
-                        theme.accent.opacity(0.08)
-                    } else {
-                        theme.surface
-                    })
-                    .cursor_pointer()
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
-                    .hover(|el| el.bg(theme.overlay))
-                    .on_click(move |_, window, cx| {
-                        let _ = weak.update(cx, |this, cx| {
-                            this.set_theme_preference(preference, window, cx);
-                        });
-                    })
-                    .child(preview)
-                    .child(
-                        div()
-                            .mt(px(7.0))
-                            .text_size(sp(12.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text)
-                            .child(preference.label()),
-                    )
-            })
-            .collect::<Vec<_>>();
-        let theme_selector = div()
-            .flex()
-            .w_full()
-            .justify_end()
-            .gap(px(8.0))
-            .children(theme_cards);
+        let theme_weak = weak.clone();
 
         let selected_ui_font_size = self.state.ui_font_size;
         let weak = cx.entity().downgrade();
@@ -179,7 +463,7 @@ impl Padu {
             },
         );
 
-        div()
+        let appearance_card = div()
             .mt(px(15.0))
             .w_full()
             .flex()
@@ -187,37 +471,7 @@ impl Padu {
             .rounded(px(13.0))
             .overflow_hidden()
             .bg(theme.raised)
-            .child(
-                div()
-                    .w_full()
-                    .min_h(px(60.0))
-                    .px(px(20.0))
-                    .py(px(16.0))
-                    .flex()
-                    .flex_col()
-                    .items_start()
-                    .gap(px(12.0))
-                    .child(
-                        div()
-                            .w_full()
-                            .child(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("settings.theme")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("settings.theme_description")),
-                            ),
-                    )
-                    .child(theme_selector),
-            )
+            .child(render_theme_section(theme, selected_theme, theme_weak))
             .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
             .child(
                 div()
@@ -314,6 +568,14 @@ impl Padu {
                     )
                     .child(code_font_size_selector),
             )
+            .into_any_element();
+
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(appearance_card)
+            .child(render_background_section(self, theme, cx))
             .into_any_element()
     }
 

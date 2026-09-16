@@ -35,6 +35,53 @@ const APP_STATE_VERSION: u32 = 1;
 pub const DEFAULT_SIDEBAR_WIDTH: f32 = 252.0;
 pub const DEFAULT_RIGHT_PANEL_WIDTH: f32 = 460.0;
 
+pub const DEFAULT_BACKGROUND_OPACITY: f32 = 0.18;
+pub const DEFAULT_BACKGROUND_HEIGHT: f32 = 50.0;
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConversationBackgroundFit {
+    #[default]
+    Cover,
+    Contain,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct ConversationBackgroundSettings {
+    pub image_path: Option<PathBuf>,
+    pub opacity: f32,
+    pub height_percent: f32,
+    pub fit: ConversationBackgroundFit,
+}
+
+impl Default for ConversationBackgroundSettings {
+    fn default() -> Self {
+        Self {
+            image_path: None,
+            opacity: DEFAULT_BACKGROUND_OPACITY,
+            height_percent: DEFAULT_BACKGROUND_HEIGHT,
+            fit: ConversationBackgroundFit::Cover,
+        }
+    }
+}
+
+impl ConversationBackgroundSettings {
+    pub fn sanitized(mut self) -> Self {
+        self.opacity = if self.opacity.is_finite() {
+            self.opacity.clamp(0.0, 1.0)
+        } else {
+            DEFAULT_BACKGROUND_OPACITY
+        };
+        self.height_percent = if self.height_percent.is_finite() {
+            self.height_percent.clamp(20.0, 100.0)
+        } else {
+            DEFAULT_BACKGROUND_HEIGHT
+        };
+        self
+    }
+}
+
 /// How the desktop groups task history in the sidebar.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -275,6 +322,8 @@ pub struct AppSettings {
     pub notifications_enabled: bool,
     #[serde(default = "default_notification_sound_enabled")]
     pub notification_sound_enabled: bool,
+    #[serde(default)]
+    pub conversation_background: ConversationBackgroundSettings,
 }
 
 impl Default for AppSettings {
@@ -292,6 +341,7 @@ impl Default for AppSettings {
             active_host_id: None,
             notifications_enabled: default_notifications_enabled(),
             notification_sound_enabled: default_notification_sound_enabled(),
+            conversation_background: ConversationBackgroundSettings::default(),
         }
     }
 }
@@ -482,6 +532,8 @@ pub struct PersistedState {
     pub notifications_enabled: bool,
     #[serde(default = "default_notification_sound_enabled")]
     pub notification_sound_enabled: bool,
+    #[serde(default)]
+    pub conversation_background: ConversationBackgroundSettings,
     #[serde(skip)]
     daemon_settings_extra: BTreeMap<String, serde_json::Value>,
     #[serde(skip)]
@@ -531,6 +583,7 @@ impl PersistedState {
             active_host_id: None,
             notifications_enabled: true,
             notification_sound_enabled: true,
+            conversation_background: ConversationBackgroundSettings::default(),
             sidebar_visible: true,
             right_panel_visible: false,
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
@@ -659,6 +712,7 @@ impl PersistedState {
             active_host_id: self.active_host_id.clone(),
             notifications_enabled: self.notifications_enabled,
             notification_sound_enabled: self.notification_sound_enabled,
+            conversation_background: self.conversation_background.clone(),
         }
     }
 
@@ -700,6 +754,7 @@ impl PersistedState {
         self.active_host_id = settings.active_host_id;
         self.notifications_enabled = settings.notifications_enabled;
         self.notification_sound_enabled = settings.notification_sound_enabled;
+        self.conversation_background = settings.conversation_background.sanitized();
     }
 
     pub fn active_host_profile(&self) -> Option<&HostProfile> {
