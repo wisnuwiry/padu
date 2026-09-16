@@ -1351,6 +1351,8 @@ pub struct Padu {
     /// one background fetch only when a visible row asks to render it; the
     /// desktop never creates another attachment file.
     remote_images: RefCell<HashMap<String, RemoteImageState>>,
+    conversation_background_image: RefCell<Option<Arc<gpui::Image>>>,
+    conversation_background_generation: Cell<u64>,
     /// Coalesced edge trigger for provider and background result queues. The
     /// payloads stay in their typed channels; this channel only wakes the UI.
     event_wake_tx: smol::channel::Sender<()>,
@@ -1751,6 +1753,7 @@ mod branches;
 mod command_palette;
 mod components;
 mod composer;
+mod conversation_background;
 pub(crate) mod dialogs;
 mod drafts;
 mod file_search;
@@ -3275,6 +3278,8 @@ impl Padu {
                 note_preview: None,
                 note_preview_generation: 0,
                 remote_images: RefCell::new(HashMap::new()),
+                conversation_background_image: RefCell::new(None),
+                conversation_background_generation: Cell::new(0),
                 event_wake_tx,
                 task_state_sync_tx,
                 task_state_sync_events,
@@ -3504,6 +3509,7 @@ impl Padu {
         // first frame.
         entity.update(cx, |this, cx| {
             this.restart_task_state_sync();
+            this.load_persisted_conversation_background(cx);
             for session_id in startup_live_session_ids {
                 this.start_runtime_attachment(session_id, cx);
             }
