@@ -53,6 +53,7 @@ pub mod workspace;
 mod protocol;
 
 pub use driver_wire::{decode_enum, encode_enum, event_from_wire, event_to_wire};
+pub use model::clean_file_read_output;
 pub use protocol::{
     APP_EXECUTABLE_ENV, ClientMessage, Command, DAEMON_ADDRESS_ENV, DAEMON_TOKEN_ENV, DaemonReady,
     MAX_WIRE_MESSAGE_BYTES, PADU_CLIENT_HEADER, PADU_CLIENT_NATIVE, PROTOCOL_VERSION, ReplayCursor,

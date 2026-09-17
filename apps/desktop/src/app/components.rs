@@ -1643,11 +1643,23 @@ pub(super) fn activity_disclosure_sections(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
+        .map(|value| {
+            if (activity.kind == ActivityKind::FileRead
+                || value.contains("<content>")
+                || (value.contains("<path>") && value.contains("</path>")))
+                && !activity.failed
+            {
+                padu_protocol::clean_file_read_output(value)
+            } else {
+                value.to_owned()
+            }
+        })
+        .filter(|value| !value.is_empty())
         .filter(|_| !shows_diff || activity.failed)
     {
         sections.push(ActivityDisclosureSection {
             kind: ActivityDisclosureSectionKind::Output,
-            content: output.to_owned(),
+            content: output,
         });
     } else if !activity.image_urls.is_empty() {
         sections.push(ActivityDisclosureSection {

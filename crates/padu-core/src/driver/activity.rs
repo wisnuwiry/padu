@@ -28,7 +28,18 @@ pub(super) fn tool_activity(
     };
     let formatted_output = output
         .filter(|value| !value.is_null())
-        .and_then(format_output);
+        .and_then(format_output)
+        .map(|out| {
+            if (kind == ActivityKind::FileRead
+                || out.contains("<content>")
+                || (out.contains("<path>") && out.contains("</path>")))
+                && !failed
+            {
+                padu_protocol::clean_file_read_output(&out)
+            } else {
+                out
+            }
+        });
     let mut image_urls = Vec::new();
     if let Some(value) = output {
         collect_image_urls(value, &mut image_urls);

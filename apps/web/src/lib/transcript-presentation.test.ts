@@ -7,6 +7,7 @@ import {
   activityDisclosureSections,
   activityDisplayTitle,
   activityFileChangeStats,
+  cleanFileReadOutput,
   activityFilePath,
   activityGroupIsLive,
   activityHeaderTitle,
@@ -168,6 +169,35 @@ describe('desktop transcript language', () => {
     const commandItem = activity('command', true)
     expect(activitySectionLanguage(commandItem, 'output', 'raw text log')).toBeNull()
     expect(activitySectionLanguage(commandItem, 'output', '{"status":"ok"}')).toBe('json')
+  })
+
+  test('cleans xml envelope tags and pagination notices from file read output', () => {
+    const raw =
+      '<path>/Users/wisnusaputra/Documents/Personal/Project/2026/padu/apps/web/src/lib/conversation-background.ts</path>\n<type>file</type>\n<content>\n12: export function useConversationBackground() {\n13:   return null;\n14: }\n\nShowing lines 12-25 of 228. Use offset=26 to continue.)\n</content>'
+    expect(cleanFileReadOutput(raw)).toBe(
+      'export function useConversationBackground() {\n  return null;\n}'
+    )
+
+    const item = {
+      ...activity('fileRead', true),
+      arguments: '{"filePath":"/apps/web/src/lib/conversation-background.ts"}',
+      display_target: '/apps/web/src/lib/conversation-background.ts',
+      output: raw,
+      detail: 'Completed',
+    }
+    expect(activityDisclosureSections(item)).toEqual([
+      {
+        kind: 'output',
+        label: 'Output',
+        content: 'export function useConversationBackground() {\n  return null;\n}',
+      },
+    ])
+
+    // Output with only notices and tags results in no output section
+    const emptyNotice =
+      '<path>/apps/web/src/lib/conversation-background.ts</path>\n<type>file</type>\n<content>\n\nShowing lines 12-25 of 228. Use offset=26 to continue.)\n</content>'
+    expect(cleanFileReadOutput(emptyNotice)).toBe('')
+    expect(activityDisclosureSections({ ...item, output: emptyNotice, detail: undefined })).toEqual([])
   })
 
   test('detects when an activity shows a diff instead of raw arguments', () => {

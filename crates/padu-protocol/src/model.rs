@@ -2371,8 +2371,138 @@ impl ActivityItem {
                 .output
                 .take()
                 .and_then(normalize_command_activity_output);
+        } else if (self.kind == ActivityKind::FileRead
+            || self.output.as_deref().is_some_and(|s| {
+                s.contains("<content>") || (s.contains("<path>") && s.contains("</path>"))
+            }))
+            && !self.failed
+        {
+            self.output = self
+                .output
+                .take()
+                .map(|s| clean_file_read_output(&s))
+                .filter(|s| !s.is_empty());
         }
     }
+}
+
+pub fn clean_file_read_output(raw: &str) -> String {
+    let mut text = raw;
+
+    if let Some(content) = extract_tag_content(text, "content") {
+        text = content;
+    } else if let Some(entries) = extract_tag_content(text, "entries") {
+        text = entries;
+    } else {
+        if let Some(start) = text.find("<content>") {
+            text = &text[start + "<content>".len()..];
+        }
+        if let Some(end) = text.rfind("</content>") {
+            text = &text[..end];
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if (trimmed.starts_with("<path>") && trimmed.contains("</path>"))
+            || (trimmed.starts_with("<type>") && trimmed.contains("</type>"))
+            || trimmed == "<content>"
+            || trimmed == "</content>"
+            || trimmed == "<entries>"
+            || trimmed == "</entries>"
+            || trimmed == "<system-reminder>"
+            || trimmed == "</system-reminder>"
+            || trimmed.starts_with("<system-reminder>")
+            || trimmed.ends_with("</system-reminder>")
+        {
+            continue;
+        }
+
+        if is_file_read_notice(trimmed) {
+            continue;
+        }
+
+        lines.push(strip_line_number_prefix(line.trim_end()));
+    }
+
+    while lines.first().is_some_and(|l| l.is_empty()) {
+        lines.remove(0);
+    }
+    while lines.last().is_some_and(|l| l.is_empty()) {
+        lines.pop();
+    }
+    lines.join("\n")
+}
+
+fn extract_tag_content<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = text.find(&open)? + open.len();
+    let end = text[start..].find(&close)? + start;
+    Some(&text[start..end])
+}
+
+fn is_file_read_notice(trimmed: &str) -> bool {
+    let s = trimmed.strip_prefix('(').unwrap_or(trimmed);
+    let s = s.strip_suffix(')').unwrap_or(s).trim();
+
+    if s.starts_with("End of file")
+        || s.starts_with("Showing lines")
+        || s.starts_with("Output capped at")
+        || s.starts_with("Use offset=")
+    {
+        return true;
+    }
+
+    if trimmed.contains("to continue.)")
+        || trimmed.contains("to continue)")
+        || trimmed.contains("Use offset=")
+    {
+        return true;
+    }
+
+    if trimmed.contains("Showing lines") && trimmed.contains("of") {
+        return true;
+    }
+
+    if let Some((count, rest)) = s.split_once(' ') {
+        if rest.trim() == "entries"
+            && !count.is_empty()
+            && count.chars().all(|c| c.is_ascii_digit())
+        {
+            return true;
+        }
+    }
+
+    if trimmed.starts_with('(')
+        && (trimmed.contains("lines") || trimmed.contains("offset"))
+        && trimmed.ends_with(')')
+    {
+        return true;
+    }
+
+    false
+}
+
+fn strip_line_number_prefix(line: &str) -> &str {
+    let trimmed = line.trim_start();
+    if let Some((num, rest)) = trimmed.split_once(':') {
+        if !num.is_empty() && num.chars().all(|c| c.is_ascii_digit()) {
+            return rest.strip_prefix(' ').unwrap_or(rest);
+        }
+    }
+    if let Some((num, rest)) = trimmed.split_once("│ ") {
+        if !num.trim().is_empty() && num.trim().chars().all(|c| c.is_ascii_digit()) {
+            return rest;
+        }
+    }
+    if let Some((num, rest)) = trimmed.split_once("| ") {
+        if !num.trim().is_empty() && num.trim().chars().all(|c| c.is_ascii_digit()) {
+            return rest;
+        }
+    }
+    line
 }
 
 fn normalize_command_activity_command(source: String) -> Option<String> {
@@ -4693,5 +4823,27 @@ mod tests {
         assert!(projection.transcript_blocks.is_empty());
         assert!(projection.turns.is_empty());
         assert!(projection.queued_messages.is_empty());
+    }
+
+    #[test]
+    fn cleans_file_read_output_envelopes_and_notices() {
+        let raw = "<path>/Users/wisnusaputra/Documents/Personal/Project/2026/padu/apps/web/src/lib/conversation-background.ts</path>\n<type>file</type>\n<content>\n12: export function useConversationBackground() {\n13:   return null;\n14: }\n\nShowing lines 12-25 of 228. Use offset=26 to continue.)\n</content>";
+        let cleaned = clean_file_read_output(raw);
+        assert_eq!(
+            cleaned,
+            "export function useConversationBackground() {\n  return null;\n}"
+        );
+
+        // Empty file read with only notice is emptied
+        let raw_empty = "<path>/file.ts</path>\n<type>file</type>\n<content>\n\nShowing lines 12-25 of 228. Use offset=26 to continue.)\n</content>";
+        assert_eq!(clean_file_read_output(raw_empty), "");
+
+        // ActivityItem refreshes file read output on construction or refresh
+        let activity = ActivityItem::new(None, ActivityKind::FileRead, "read", None, true)
+            .with_output(Some(raw.into()));
+        assert_eq!(
+            activity.output.as_deref(),
+            Some("export function useConversationBackground() {\n  return null;\n}")
+        );
     }
 }

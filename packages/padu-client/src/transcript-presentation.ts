@@ -438,6 +438,127 @@ function extractStringKey(obj: Record<string, unknown>, keys: string[]): string 
   return null
 }
 
+export function cleanFileReadOutput(raw: string): string {
+  let text = raw
+  const contentMatch = text.match(/<content>([\s\S]*?)<\/content>/)
+  if (contentMatch && contentMatch[1] !== undefined) {
+    text = contentMatch[1]
+  } else {
+    const entriesMatch = text.match(/<entries>([\s\S]*?)<\/entries>/)
+    if (entriesMatch && entriesMatch[1] !== undefined) {
+      text = entriesMatch[1]
+    } else {
+      const start = text.indexOf('<content>')
+      if (start !== -1) {
+        text = text.slice(start + '<content>'.length)
+      }
+      const end = text.lastIndexOf('</content>')
+      if (end !== -1) {
+        text = text.slice(0, end)
+      }
+    }
+  }
+
+  const lines = text.split('\n')
+  const result: string[] = []
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (
+      (trimmed.startsWith('<path>') && trimmed.includes('</path>')) ||
+      (trimmed.startsWith('<type>') && trimmed.includes('</type>')) ||
+      trimmed === '<content>' ||
+      trimmed === '</content>' ||
+      trimmed === '<entries>' ||
+      trimmed === '</entries>' ||
+      trimmed.startsWith('<system-reminder>') ||
+      trimmed.endsWith('</system-reminder>')
+    ) {
+      continue
+    }
+
+    if (isFileReadNotice(trimmed)) {
+      continue
+    }
+
+    result.push(stripLineNumberPrefix(line))
+  }
+
+  while (result.length > 0 && result[0]!.trim() === '') {
+    result.shift()
+  }
+  while (result.length > 0 && result[result.length - 1]!.trim() === '') {
+    result.pop()
+  }
+
+  return result.join('\n')
+}
+
+function isFileReadNotice(trimmed: string): boolean {
+  let s = trimmed
+  if (s.startsWith('(')) s = s.slice(1)
+  if (s.endsWith(')')) s = s.slice(0, -1)
+  s = s.trim()
+
+  if (
+    s.startsWith('End of file') ||
+    s.startsWith('Showing lines') ||
+    s.startsWith('Output capped at') ||
+    s.startsWith('Use offset=')
+  ) {
+    return true
+  }
+
+  if (
+    trimmed.includes('to continue.)') ||
+    trimmed.includes('to continue)') ||
+    trimmed.includes('Use offset=')
+  ) {
+    return true
+  }
+
+  if (trimmed.includes('Showing lines') && trimmed.includes('of')) {
+    return true
+  }
+
+  if (/^\d+\s+entries$/i.test(s)) {
+    return true
+  }
+
+  if (trimmed.startsWith('(') && (trimmed.includes('lines') || trimmed.includes('offset')) && trimmed.endsWith(')')) {
+    return true
+  }
+
+  return false
+}
+
+function stripLineNumberPrefix(line: string): string {
+  const trimmed = line.trimStart()
+  const colonIndex = trimmed.indexOf(':')
+  if (colonIndex > 0) {
+    const num = trimmed.slice(0, colonIndex)
+    if (/^\d+$/.test(num)) {
+      const rest = trimmed.slice(colonIndex + 1)
+      return rest.startsWith(' ') ? rest.slice(1) : rest
+    }
+  }
+  const pipeIndex = trimmed.indexOf('│ ')
+  if (pipeIndex > 0) {
+    const num = trimmed.slice(0, pipeIndex).trim()
+    if (/^\d+$/.test(num)) {
+      return trimmed.slice(pipeIndex + 2)
+    }
+  }
+  const vbarIndex = trimmed.indexOf('| ')
+  if (vbarIndex > 0) {
+    const num = trimmed.slice(0, vbarIndex).trim()
+    if (/^\d+$/.test(num)) {
+      return trimmed.slice(vbarIndex + 2)
+    }
+  }
+  return line
+}
+
 export function activityDisclosureSections(activity: ActivityItem, t?: Translator): ActivityDisclosureSection[] {
   const sections: ActivityDisclosureSection[] = []
   if (activity.kind === 'command') {
@@ -450,7 +571,10 @@ export function activityDisclosureSections(activity: ActivityItem, t?: Translato
   }
   const showsDiff = activityShowsDiff(activity)
   const argumentsText = activity.arguments?.trim()
-  const output = activity.output?.trim()
+  const rawOutput = activity.output?.trim()
+  const output = (activity.kind === 'fileRead' || (rawOutput && (rawOutput.includes('<content>') || (rawOutput.includes('<path>') && rawOutput.includes('</path>'))))) && !activity.failed
+    ? (rawOutput ? cleanFileReadOutput(rawOutput) : '')
+    : rawOutput
   if (argumentsText && !showsDiff && activity.kind !== 'fileRead') {
     sections.push({ kind: 'arguments', label: t ? t('activity.arguments') : 'Arguments', content: argumentsText })
   }

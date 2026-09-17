@@ -1310,10 +1310,10 @@ fn tool_activity(part: &Value, events: &impl DriverEventSink, state: &mut OpenCo
             part.pointer("/state/output")
                 .filter(|value| !value.is_null())
         });
+    let raw_text = raw_output.and_then(extract_text_from_output_value);
     let is_read = kind == ActivityKind::FileRead
-        || raw_output.is_some_and(|o| {
-            o.as_str()
-                .is_some_and(|s| s.contains("<content>") || s.contains("<path>"))
+        || raw_text.as_deref().is_some_and(|s| {
+            s.contains("<content>") || (s.contains("<path>") && s.contains("</path>"))
         })
         || part
             .pointer("/state/metadata/display/text")
@@ -1340,6 +1340,37 @@ fn tool_activity(part: &Value, events: &impl DriverEventSink, state: &mut OpenCo
     let _ = events.send(DriverEvent::RichActivity(item));
 }
 
+fn extract_text_from_output_value(value: &Value) -> Option<String> {
+    if let Some(s) = value.as_str() {
+        return (!s.trim().is_empty()).then(|| s.to_owned());
+    }
+    if let Some(content) = value.get("content") {
+        if let Some(s) = content.as_str() {
+            return (!s.trim().is_empty()).then(|| s.to_owned());
+        }
+        if let Some(arr) = content.as_array() {
+            let mut parts = Vec::new();
+            for item in arr {
+                if let Some(text) = item.get("text").and_then(Value::as_str) {
+                    parts.push(text);
+                } else if let Some(s) = item.as_str() {
+                    parts.push(s);
+                }
+            }
+            if !parts.is_empty() {
+                return Some(parts.join("\n"));
+            }
+        }
+    }
+    if let Some(text) = value.get("text").and_then(Value::as_str) {
+        return (!text.trim().is_empty()).then(|| text.to_owned());
+    }
+    if let Some(output) = value.get("output").and_then(Value::as_str) {
+        return (!output.trim().is_empty()).then(|| output.to_owned());
+    }
+    None
+}
+
 fn normalize_opencode_read_output(raw_output: Option<&Value>, part: &Value) -> Option<Value> {
     if let Some(entries) = part
         .pointer("/state/metadata/display/entries")
@@ -1358,99 +1389,11 @@ fn normalize_opencode_read_output(raw_output: Option<&Value>, part: &Value) -> O
         .pointer("/state/metadata/display/text")
         .and_then(Value::as_str)
         .filter(|text| !text.is_empty())
-        .or_else(|| raw_output.and_then(Value::as_str))?;
+        .map(str::to_owned)
+        .or_else(|| raw_output.and_then(extract_text_from_output_value))?;
 
-    if let Some(entries) = extract_tag_content(text, "entries") {
-        let mut lines = Vec::new();
-        for line in entries.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with('(') && trimmed.ends_with(')') {
-                continue;
-            }
-            if !trimmed.is_empty() {
-                lines.push(trimmed);
-            }
-        }
-        return Some(Value::String(lines.join("\n")));
-    }
-
-    let cleaned = clean_opencode_read_content(text);
+    let cleaned = padu_protocol::clean_file_read_output(&text);
     Some(Value::String(cleaned))
-}
-
-fn clean_opencode_read_content(raw: &str) -> String {
-    let mut text = raw;
-
-    if let Some(content) = extract_tag_content(text, "content") {
-        text = content;
-    } else {
-        if let Some(start) = text.find("<content>") {
-            text = &text[start + "<content>".len()..];
-        }
-        if let Some(end) = text.rfind("</content>") {
-            text = &text[..end];
-        }
-    }
-
-    let mut lines = Vec::new();
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("<path>") && trimmed.ends_with("</path>") {
-            continue;
-        }
-        if trimmed.starts_with("<type>") && trimmed.ends_with("</type>") {
-            continue;
-        }
-        if trimmed == "<content>" || trimmed == "</content>" {
-            continue;
-        }
-        if trimmed.starts_with("(End of file")
-            || trimmed.starts_with("(Showing lines")
-            || trimmed.starts_with("(Output capped at")
-            || trimmed.starts_with("(Use offset=")
-            || (trimmed.starts_with('(') && trimmed.contains("to continue.)"))
-            || (trimmed.starts_with('(') && trimmed.contains("lines") && trimmed.ends_with(')'))
-        {
-            continue;
-        }
-        lines.push(strip_line_number_prefix(line.trim_end()));
-    }
-
-    while lines.first().is_some_and(|l| l.is_empty()) {
-        lines.remove(0);
-    }
-    while lines.last().is_some_and(|l| l.is_empty()) {
-        lines.pop();
-    }
-    lines.join("\n")
-}
-
-fn extract_tag_content<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
-    let open = format!("<{tag}>");
-    let close = format!("</{tag}>");
-    let start = text.find(&open)? + open.len();
-    let end = text[start..].find(&close)? + start;
-    Some(&text[start..end])
-}
-
-fn strip_line_number_prefix(line: &str) -> &str {
-    let trimmed = line.trim_start();
-    if let Some((num, rest)) = trimmed.split_once(':') {
-        if !num.is_empty() && num.chars().all(|c| c.is_ascii_digit()) {
-            return rest.strip_prefix(' ').unwrap_or(rest);
-        }
-    }
-    if let Some((num, rest)) = trimmed.split_once("│ ") {
-        if !num.trim().is_empty() && num.trim().chars().all(|c| c.is_ascii_digit()) {
-            return rest;
-        }
-    }
-    if let Some((num, rest)) = trimmed.split_once("| ") {
-        if !num.trim().is_empty() && num.trim().chars().all(|c| c.is_ascii_digit()) {
-            return rest;
-        }
-    }
-    line
 }
 
 #[cfg(test)]
@@ -2273,6 +2216,18 @@ mod tests {
             normalized,
             Some(Value::String(
                 "fn main() {\n    println!(\"hi\");\n}".into()
+            ))
+        );
+
+        // 6. Pagination notice without leading parenthesis and structured output
+        let raw_structured = json!({
+            "content": "<path>/apps/web/src/lib/conversation-background.ts</path>\n<type>file</type>\n<content>\n12: export function useConversationBackground() {\n13:   return null;\n14: }\n\nShowing lines 12-25 of 228. Use offset=26 to continue.)\n</content>"
+        });
+        let normalized = normalize_opencode_read_output(Some(&raw_structured), &part_empty);
+        assert_eq!(
+            normalized,
+            Some(Value::String(
+                "export function useConversationBackground() {\n  return null;\n}".into()
             ))
         );
     }
