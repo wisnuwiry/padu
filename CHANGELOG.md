@@ -16,6 +16,30 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.1.6] - 2026-09-18
+
+### Added
+
+- **What's New Release Notes**: Added an in-app "What's new" dialog that appears once after each update, with a sidebar button, an About-page entry, and notes for the current version bundled at build time.
+- **Conversation Backgrounds**: Added per-conversation background customization with always-cover rendering in appearance settings.
+- **Activity Previews**: Added a four-row activity preview with per-file-type icons and file-target helpers for tool activity groups.
+- **Richer Activity Disclosures**: Added syntax-highlighted code blocks and compare-style diffs for edit activities in the transcript.
+- **Antigravity Plan Mode**: Added Antigravity plan-mode support with multiple-choice questions, an activity stream, inlined plan artifacts, and `ask_question` recognition in transcripts.
+- **Provider Icons in Sessions**: Added provider icons beside session titles in the sidebar.
+- **Out-of-Workspace File Links**: Open file links outside the workspace with the system default app on desktop.
+- **Cleaner Agent Output**: Cleaned OpenCode read envelopes, pagination notices, and file-read arguments from transcripts, and present file creations as creates instead of edits.
+
+### Improved
+
+- **Command Code Driver**: Improved Command Code activities, question handling, and process teardown.
+- **Performance**: Cached activity-disclosure highlighting to keep transcript scrolling smooth.
+
+### Fixed
+
+- **Shortcuts**: Required the primary modifier for the notes-collapse shortcut.
+- **Plan Detection**: Fixed multiplatform plan-file detection and path extraction, and hardened Antigravity plan inlining and scope auto-approve.
+- **Transcript Robustness**: Fixed file-read envelope stripping across drivers and clients.
+
 ## 0.1.5 - 2026-09-14
 
 ### Added
