@@ -372,7 +372,7 @@ settings.background_description: Tambahkan gambar lembut di belakang pesan perca
 settings.background_choose: Pilih gambar
 settings.background_remove: Hapus
 settings.background_opacity: Opasitas
-settings.background_height: Tinggi gambar
+settings.background_height: Tinggi
 settings.background_preview_user: Bisa rangkum catatan rapat hari ini?
 settings.background_preview_assistant: Tentu — saya akan menyoroti keputusan utama dan tugas tindak lanjut.
 settings.background_unsupported: Pilih format gambar yang didukung

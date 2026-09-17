@@ -377,7 +377,7 @@ settings.background_description: 会話メッセージの背後に画像を追�
 settings.background_choose: 画像を選択
 settings.background_remove: 削除
 settings.background_opacity: 不透明度
-settings.background_height: 画像の高さ
+settings.background_height: 高さ
 settings.background_preview_user: 今日の会議メモを要約してくれる？
 settings.background_preview_assistant: もちろんです。主な決定事項と次のアクションをまとめます。
 settings.background_unsupported: 対応している画像形式を選択してください

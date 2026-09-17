@@ -769,7 +769,7 @@ settings.background_remove:
 settings.background_opacity:
   en: Opacity
 settings.background_height:
-  en: Image height
+  en: Height
 settings.background_preview_user:
   en: Can you summarize today's meeting notes?
 settings.background_preview_assistant:
