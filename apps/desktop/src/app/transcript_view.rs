@@ -2453,9 +2453,21 @@ impl Padu {
                         );
                     }
                     if !content.is_empty() {
-                        if activity.kind == ActivityKind::Command
-                            && section_kind == ActivityDisclosureSectionKind::Output
-                        {
+                        let lang = activity_section_language(activity, section_kind, &content)
+                            .and_then(crate::md::highlight::lang_for_tag);
+                        let is_scrollable = section_kind == ActivityDisclosureSectionKind::Output;
+                        let rendered_text = if let Some(lang) = lang {
+                            md::render::highlighted_code(content.clone(), Some(lang), &ctx)
+                        } else {
+                            md::render::plain_text(
+                                content.clone(),
+                                md::render::MONO_FAMILY,
+                                FontWeight::NORMAL,
+                                theme.text_secondary,
+                                &ctx,
+                            )
+                        };
+                        if is_scrollable {
                             let output_viewport = self
                                 .activity_scroll_viewports
                                 .borrow_mut()
@@ -2483,13 +2495,7 @@ impl Padu {
                                             .track_scroll(&output_viewport.scroll_handle)
                                             .py(px(4.0))
                                             .pr(px(8.0))
-                                            .child(md::render::plain_text(
-                                                content.clone(),
-                                                md::render::MONO_FAMILY,
-                                                FontWeight::NORMAL,
-                                                theme.text_secondary,
-                                                &ctx,
-                                            ))
+                                            .child(rendered_text)
                                             .on_scroll_wheel(move |_, window, cx| {
                                                 contain_scroll(&wheel_scroll, cx);
                                                 let scroll = wheel_scroll.clone();
@@ -2520,15 +2526,8 @@ impl Padu {
                                     )),
                             );
                         } else {
-                            section_view = section_view.child(div().w_full().min_w_0().child(
-                                md::render::plain_text(
-                                    content.clone(),
-                                    md::render::MONO_FAMILY,
-                                    FontWeight::NORMAL,
-                                    theme.text_secondary,
-                                    &ctx,
-                                ),
-                            ));
+                            section_view =
+                                section_view.child(div().w_full().min_w_0().child(rendered_text));
                         }
                     }
                     detail_card = detail_card.child(section_view);

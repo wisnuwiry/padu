@@ -1266,6 +1266,30 @@ pub fn plain_text(
     text_element(&flat, key, ctx)
 }
 
+/// A selectable syntax-highlighted code element: tool inputs, JSON arguments,
+/// file read contents, or command lines.
+pub fn highlighted_code(
+    code: impl Into<SharedString>,
+    lang: Option<Lang>,
+    ctx: &Ctx,
+) -> AnyElement {
+    let code: SharedString = code.into();
+    let key = ctx.next_key();
+    let flat = ctx.flat(key.index, || {
+        let mut code_font = font(MONO_FAMILY);
+        code_font.weight = FontWeight::NORMAL;
+        FlatText {
+            runs: code_runs(&code, lang, &code_font, ctx.palette),
+            text: code,
+            links: Vec::new(),
+            code_ranges: Vec::new(),
+            mention_ranges: Vec::new(),
+            file_link_ranges: Vec::new(),
+        }
+    });
+    text_element(&flat, key, ctx)
+}
+
 /// A zero-size canvas that clears the frame's registry. Paint it *before* any
 /// transcript text so the registry holds exactly this frame's visible elements.
 pub fn frame_reset(selection: TranscriptSelection) -> impl IntoElement {

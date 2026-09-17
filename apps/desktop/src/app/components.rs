@@ -1623,13 +1623,15 @@ pub(super) fn activity_disclosure_sections(
     }
     // An edit renders as a diff, which says everything the raw arguments would
     // and reads. What the tool replied is only worth the room when it failed.
+    // A file read only shows the read content, not the filePath arguments
+    // which are already displayed in the activity header.
     let shows_diff = activity_shows_diff(activity);
     if let Some(arguments) = activity
         .arguments
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .filter(|_| !shows_diff)
+        .filter(|_| !shows_diff && activity.kind != ActivityKind::FileRead)
     {
         sections.push(ActivityDisclosureSection {
             kind: ActivityDisclosureSectionKind::Arguments,
@@ -1666,6 +1668,47 @@ pub(super) fn activity_disclosure_sections(
         });
     }
     sections
+}
+
+pub(super) fn activity_section_language(
+    activity: &ActivityItem,
+    section_kind: ActivityDisclosureSectionKind,
+    content: &str,
+) -> Option<&'static str> {
+    match section_kind {
+        ActivityDisclosureSectionKind::Command => Some("shell"),
+        ActivityDisclosureSectionKind::Arguments => {
+            let trimmed = content.trim();
+            if (trimmed.starts_with('{') && trimmed.ends_with('}'))
+                || (trimmed.starts_with('[') && trimmed.ends_with(']'))
+            {
+                Some("json")
+            } else {
+                None
+            }
+        }
+        ActivityDisclosureSectionKind::Output => {
+            if activity.kind == ActivityKind::FileRead {
+                let target = activity.display_target.as_deref().unwrap_or_default();
+                let lang = super::right_panel::file_highlighter_language(target);
+                if lang != "text" { Some(lang) } else { None }
+            } else {
+                let trimmed = content.trim();
+                if (trimmed.starts_with('{') && trimmed.ends_with('}'))
+                    || (trimmed.starts_with('[') && trimmed.ends_with(']'))
+                {
+                    if serde_json::from_str::<serde_json::Value>(trimmed).is_ok() {
+                        Some("json")
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+        }
+        ActivityDisclosureSectionKind::Detail => None,
+    }
 }
 
 pub(super) fn activity_preview(activity: &ActivityItem) -> String {
@@ -1849,6 +1892,52 @@ mod message_time_tests {
         assert_eq!(
             activity_disclosure_text(&activity).as_deref(),
             Some("Command\ngit status --short\n\nOutput\nclean")
+        );
+    }
+
+    #[test]
+    fn file_read_disclosure_shows_only_output_and_detects_language() {
+        let activity = ActivityItem::new(
+            Some("read-1".into()),
+            crate::model::ActivityKind::FileRead,
+            "read",
+            Some("Completed".into()),
+            true,
+        )
+        .with_activity_source(Some(&serde_json::json!({"filePath": "src/main.rs"})))
+        .with_arguments(Some(r#"{"filePath":"src/main.rs"}"#.into()))
+        .with_output(Some("fn main() {\n    println!(\"hi\");\n}".into()));
+
+        assert_eq!(
+            activity_disclosure_sections(&activity),
+            vec![ActivityDisclosureSection {
+                kind: ActivityDisclosureSectionKind::Output,
+                content: "fn main() {\n    println!(\"hi\");\n}".into(),
+            }]
+        );
+        assert_eq!(
+            activity_section_language(
+                &activity,
+                ActivityDisclosureSectionKind::Output,
+                "fn main() {}"
+            ),
+            Some("rust")
+        );
+        assert_eq!(
+            activity_section_language(
+                &activity,
+                ActivityDisclosureSectionKind::Command,
+                "cargo check"
+            ),
+            Some("shell")
+        );
+        assert_eq!(
+            activity_section_language(
+                &activity,
+                ActivityDisclosureSectionKind::Arguments,
+                r#"{"key": "value"}"#
+            ),
+            Some("json")
         );
     }
 
