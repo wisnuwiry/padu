@@ -19,9 +19,13 @@ pub(super) fn tool_activity(
     complete: bool,
 ) -> ActivityItem {
     let raw_arguments = arguments;
-    let arguments = arguments
-        .filter(|value| !value.is_null())
-        .and_then(format_json);
+    let arguments = if kind == ActivityKind::FileRead {
+        None
+    } else {
+        arguments
+            .filter(|value| !value.is_null())
+            .and_then(format_json)
+    };
     let formatted_output = output
         .filter(|value| !value.is_null())
         .and_then(format_output);

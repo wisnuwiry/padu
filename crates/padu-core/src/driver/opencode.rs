@@ -1303,13 +1303,19 @@ fn tool_activity(part: &Value, events: &impl DriverEventSink, state: &mut OpenCo
         || part
             .pointer("/state/error")
             .is_some_and(|error| !error.is_null());
-    let output = part
+    let raw_output = part
         .pointer("/state/error")
         .filter(|value| !value.is_null())
         .or_else(|| {
             part.pointer("/state/output")
                 .filter(|value| !value.is_null())
         });
+    let normalized_output = if !failed && kind == ActivityKind::FileRead {
+        normalize_opencode_read_output(raw_output, part)
+    } else {
+        None
+    };
+    let output = normalized_output.as_ref().or(raw_output);
     let item = activity::tool_activity(
         id,
         kind,
@@ -1321,6 +1327,85 @@ fn tool_activity(part: &Value, events: &impl DriverEventSink, state: &mut OpenCo
         complete,
     );
     let _ = events.send(DriverEvent::RichActivity(item));
+}
+
+fn normalize_opencode_read_output(raw_output: Option<&Value>, part: &Value) -> Option<Value> {
+    if let Some(text) = part
+        .pointer("/state/metadata/display/text")
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty())
+    {
+        return Some(Value::String(text.to_owned()));
+    }
+
+    if let Some(entries) = part
+        .pointer("/state/metadata/display/entries")
+        .and_then(Value::as_array)
+        .filter(|entries| !entries.is_empty())
+    {
+        let lines = entries
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Some(Value::String(lines));
+    }
+
+    let text = raw_output.and_then(Value::as_str)?;
+
+    if let Some(content) = extract_tag_content(text, "content") {
+        let mut lines = Vec::new();
+        for line in content.lines() {
+            let trimmed = line.trim_end();
+            if trimmed.starts_with("(End of file")
+                || trimmed.starts_with("(Showing lines")
+                || trimmed.starts_with("(Output capped at")
+            {
+                continue;
+            }
+            lines.push(strip_line_number_prefix(trimmed));
+        }
+        while lines.first().is_some_and(|l| l.is_empty()) {
+            lines.remove(0);
+        }
+        while lines.last().is_some_and(|l| l.is_empty()) {
+            lines.pop();
+        }
+        return Some(Value::String(lines.join("\n")));
+    }
+
+    if let Some(entries) = extract_tag_content(text, "entries") {
+        let mut lines = Vec::new();
+        for line in entries.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with('(') && trimmed.ends_with(')') {
+                continue;
+            }
+            if !trimmed.is_empty() {
+                lines.push(trimmed);
+            }
+        }
+        return Some(Value::String(lines.join("\n")));
+    }
+
+    None
+}
+
+fn extract_tag_content<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = text.find(&open)? + open.len();
+    let end = text[start..].find(&close)? + start;
+    Some(&text[start..end])
+}
+
+fn strip_line_number_prefix(line: &str) -> &str {
+    if let Some((num, rest)) = line.split_once(':') {
+        if !num.is_empty() && num.chars().all(|c| c.is_ascii_digit()) {
+            return rest.strip_prefix(' ').unwrap_or(rest);
+        }
+    }
+    line
 }
 
 #[cfg(test)]
@@ -2081,5 +2166,64 @@ mod tests {
         reader.join().unwrap();
         assert!(control.is_cancelled());
         assert!(control.socket.lock().is_none());
+    }
+
+    #[test]
+    fn normalizes_opencode_read_output_from_metadata_or_xml_content() {
+        // 1. From metadata.display.text
+        let part_with_metadata = json!({
+            "state": {
+                "metadata": {
+                    "display": {
+                        "text": "fn main() {\n    println!(\"hi\");\n}"
+                    }
+                }
+            }
+        });
+        let normalized = normalize_opencode_read_output(None, &part_with_metadata);
+        assert_eq!(
+            normalized,
+            Some(Value::String(
+                "fn main() {\n    println!(\"hi\");\n}".into()
+            ))
+        );
+
+        // 2. From metadata.display.entries (directory)
+        let part_with_entries = json!({
+            "state": {
+                "metadata": {
+                    "display": {
+                        "entries": ["src/", "Cargo.toml"]
+                    }
+                }
+            }
+        });
+        let normalized = normalize_opencode_read_output(None, &part_with_entries);
+        assert_eq!(normalized, Some(Value::String("src/\nCargo.toml".into())));
+
+        // 3. Fallback: Parse XML with line numbers
+        let raw_xml = Value::String(
+            "<path>/app/src/main.rs</path>\n<type>file</type>\n<content>\n1: fn main() {\n2:     println!(\"hello\");\n3: }\n\n(End of file - total 3 lines)\n</content>\n<system-reminder>\nfoo\n</system-reminder>".into()
+        );
+        let part_empty = json!({"state": {}});
+        let normalized = normalize_opencode_read_output(Some(&raw_xml), &part_empty);
+        assert_eq!(
+            normalized,
+            Some(Value::String(
+                "fn main() {\n    println!(\"hello\");\n}".into()
+            ))
+        );
+
+        // 4. Fallback: Directory entries XML
+        let raw_dir_xml = Value::String(
+            "<path>/app</path>\n<type>directory</type>\n<entries>\nsrc/\nCargo.toml\n\n(2 entries)\n</entries>".into()
+        );
+        let normalized = normalize_opencode_read_output(Some(&raw_dir_xml), &part_empty);
+        assert_eq!(normalized, Some(Value::String("src/\nCargo.toml".into())));
+
+        // 5. Plain output without tags returns None (fallback to raw)
+        let raw_plain = Value::String("plain text".into());
+        let normalized = normalize_opencode_read_output(Some(&raw_plain), &part_empty);
+        assert_eq!(normalized, None);
     }
 }
