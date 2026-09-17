@@ -2559,7 +2559,13 @@ fn extract_agy_tool_plan(update: &Value, state: &mut AcpStreamState) {
     };
 
     let file_keys = &["TargetFile", "targetFile", "target_file", "path", "file"];
-    let content_keys = &["CodeContent", "codeContent", "code_content", "content", "text"];
+    let content_keys = &[
+        "CodeContent",
+        "codeContent",
+        "code_content",
+        "content",
+        "text",
+    ];
 
     let (target_file, code_content) = match arguments {
         Some(Value::Object(map)) => (get_prop(map, file_keys), get_prop(map, content_keys)),
@@ -3846,8 +3852,7 @@ mod tests {
         let non_plan_text = "Created [hello.rs](file:///Users/alice/project/hello.rs).";
         assert_eq!(extract_plan_link_path(non_plan_text), None);
 
-        let windows_file_url =
-            "Review in [plan.md](file:///C:/Users/alice/.gemini/antigravity-acp/brain/123/plan.md).";
+        let windows_file_url = "Review in [plan.md](file:///C:/Users/alice/.gemini/antigravity-acp/brain/123/plan.md).";
         let extracted_win = extract_plan_link_path(windows_file_url);
         assert!(extracted_win.is_some());
         let win_path_str = extracted_win.unwrap().to_string_lossy().replace('\\', "/");
@@ -3897,7 +3902,9 @@ mod tests {
         assert!(!is_plan_file(Path::new(
             r"C:\Users\alice\.gemini\brain\output.json"
         )));
-        assert!(!is_plan_file(Path::new("/home/bob/.gemini/brain/script.py")));
+        assert!(!is_plan_file(Path::new(
+            "/home/bob/.gemini/brain/script.py"
+        )));
         assert!(!is_plan_file(Path::new("/Users/alice/project/plan.rs")));
 
         // Ordinary markdown files outside brain directories without "plan" in name (must be false)
