@@ -387,6 +387,25 @@ impl PendingPrompts {
 
 type PendingPromptRequests = Arc<Mutex<PendingPrompts>>;
 
+/// Whether a permission request is answered without surfacing it.
+///
+/// Antigravity advertises its own permission profiles through the session
+/// modes it is put in, so it only blanket-approves when the user chose auto or
+/// full access. Every other ACP provider keeps the historic rule: approve in
+/// anything but ask.
+fn should_auto_approve(
+    provider: ProviderKind,
+    mode: RuntimeMode,
+    interaction_mode: InteractionMode,
+) -> bool {
+    if provider == ProviderKind::Agy {
+        interaction_mode != InteractionMode::Plan
+            && matches!(mode, RuntimeMode::Auto | RuntimeMode::FullAccess)
+    } else {
+        mode != RuntimeMode::Ask
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_sdk_connection(
     agent: AcpAgent,
@@ -408,8 +427,7 @@ async fn run_sdk_connection(
     let pending_user_inputs: PendingAcpUserInputs = Arc::new(Mutex::new(HashMap::new()));
     let prompt_requests = Arc::new(Mutex::new(PendingPrompts::default()));
     let title_refresh = super::title_refresh::NativeTitleRefresh::default();
-    let auto_approve = interaction_mode != InteractionMode::Plan
-        && matches!(mode, RuntimeMode::Auto | RuntimeMode::FullAccess);
+    let auto_approve = should_auto_approve(provider, mode, interaction_mode);
 
     Client
         .builder()
@@ -2590,6 +2608,19 @@ fn extract_agy_tool_plan(update: &Value, state: &mut AcpStreamState) {
     }
 }
 
+/// The first `max` bytes of `value`, backed off to a UTF-8 boundary so a
+/// multi-byte character straddling the cut cannot panic.
+fn byte_prefix(value: &str, max: usize) -> &str {
+    if value.len() <= max {
+        return value;
+    }
+    let mut end = max;
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    &value[..end]
+}
+
 fn maybe_inline_agy_plan(
     provider: ProviderKind,
     state: &mut AcpStreamState,
@@ -2611,7 +2642,7 @@ fn maybe_inline_agy_plan(
         let trimmed = content.trim();
         if !trimmed.is_empty() {
             if !state.agy_text_buffer.contains(trimmed)
-                && !(trimmed.len() > 60 && state.agy_text_buffer.contains(&trimmed[..60]))
+                && !(trimmed.len() > 60 && state.agy_text_buffer.contains(byte_prefix(trimmed, 60)))
             {
                 state.inlined_plan = true;
                 let _ = events.send(DriverEvent::TextDelta(format!("\n\n---\n\n{trimmed}\n")));
@@ -4014,5 +4045,80 @@ mod tests {
         assert!(state.inlined_plan);
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn byte_prefix_backs_off_to_a_char_boundary() {
+        // "é" is two bytes, so a 3-byte cut lands mid-character.
+        let value = "éééé";
+        assert_eq!(byte_prefix(value, 3), "é");
+        assert_eq!(byte_prefix(value, 4), "éé");
+        // Below the max the whole value comes back.
+        assert_eq!(byte_prefix("abc", 60), "abc");
+        // An ASCII cut is exact.
+        assert_eq!(byte_prefix("abcdefgh", 4), "abcd");
+    }
+
+    #[test]
+    fn inlining_a_plan_with_multibyte_plan_artifacts_does_not_panic() {
+        let (events, event_rx) = crossbeam_channel::unbounded();
+        let mut state = AcpStreamState::default();
+        // A plan whose 60-byte mark falls inside a multi-byte character used
+        // to panic the slice; it must inline cleanly instead.
+        state.agy_plan_content = Some(format!("{}é{}", "a".repeat(59), "b".repeat(40)));
+
+        maybe_inline_agy_plan(ProviderKind::Agy, &mut state, &events);
+
+        assert!(state.inlined_plan);
+        let seen = event_rx.try_iter().collect::<Vec<_>>();
+        assert!(seen.iter().any(|event| matches!(
+            event,
+            DriverEvent::TextDelta(text) if text.contains("bbbb")
+        )));
+    }
+
+    #[test]
+    fn auto_approve_narrows_only_for_antigravity() {
+        // Antigravity: only the auto profiles blanket-approve, never plan.
+        assert!(should_auto_approve(
+            ProviderKind::Agy,
+            RuntimeMode::Auto,
+            InteractionMode::Build
+        ));
+        assert!(should_auto_approve(
+            ProviderKind::Agy,
+            RuntimeMode::FullAccess,
+            InteractionMode::Build
+        ));
+        assert!(!should_auto_approve(
+            ProviderKind::Agy,
+            RuntimeMode::AutoAcceptEdits,
+            InteractionMode::Build
+        ));
+        assert!(!should_auto_approve(
+            ProviderKind::Agy,
+            RuntimeMode::Auto,
+            InteractionMode::Plan
+        ));
+
+        // Every other provider keeps the historic rule for its own modes.
+        for provider in [ProviderKind::Cursor, ProviderKind::Grok, ProviderKind::Kimi] {
+            for mode in [
+                RuntimeMode::AutoAcceptEdits,
+                RuntimeMode::Auto,
+                RuntimeMode::FullAccess,
+                RuntimeMode::Plan,
+            ] {
+                assert!(
+                    should_auto_approve(provider, mode, InteractionMode::Build),
+                    "{provider:?} should keep auto-approving in {mode:?}"
+                );
+            }
+            assert!(!should_auto_approve(
+                provider,
+                RuntimeMode::Ask,
+                InteractionMode::Build
+            ));
+        }
     }
 }
