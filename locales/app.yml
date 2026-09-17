@@ -758,6 +758,28 @@ settings.theme_light:
   en: Light
 settings.theme_dark:
   en: Dark
+settings.background:
+  en: Background
+settings.background_description:
+  en: Add a subtle image behind conversation messages
+settings.background_choose:
+  en: Choose image
+settings.background_remove:
+  en: Remove
+settings.background_opacity:
+  en: Opacity
+settings.background_height:
+  en: Height
+settings.background_preview_user:
+  en: Can you summarize today's meeting notes?
+settings.background_preview_assistant:
+  en: Sure — I'll highlight the key decisions and action items.
+settings.background_unsupported:
+  en: Choose a supported image format
+settings.background_too_large:
+  en: Choose an image smaller than 2 MB
+settings.background_unavailable:
+  en: The background image could not be loaded
 
 input.do_anything:
   en: Do anything…

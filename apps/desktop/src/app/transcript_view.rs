@@ -336,6 +336,12 @@ impl Padu {
             )
         });
         let transcript_focus = self.transcript_focus.clone();
+        let conversation_background =
+            crate::app::conversation_background::render_conversation_background(
+                self.conversation_background_image(),
+                &self.state.conversation_background,
+                &Theme::current(cx),
+            );
         div()
             .flex_1()
             .min_h_0()
@@ -351,6 +357,7 @@ impl Padu {
             )
             // Painted before any row, so the frame's selection registry holds
             // exactly the text elements this frame put on screen, in order.
+            .children(conversation_background)
             .child(md::render::frame_reset(self.transcript_selection.clone()))
             .child(
                 list(transcript_rows, move |index, window, cx| {

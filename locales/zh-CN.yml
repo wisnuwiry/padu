@@ -368,6 +368,17 @@ settings.code_font_size_description: 文件编辑器、差分视图、代码块�
 settings.theme_system: 跟随系统
 settings.theme_light: 浅色
 settings.theme_dark: 深色
+settings.background: 背景
+settings.background_description: 在对话消息后添加柔和的图片
+settings.background_choose: 选择图片
+settings.background_remove: 移除
+settings.background_opacity: 不透明度
+settings.background_height: 高度
+settings.background_preview_user: 可以帮我总结一下今天的会议记录吗？
+settings.background_preview_assistant: 当然，我会整理出主要决定和待办事项。
+settings.background_unsupported: 请选择受支持的图片格式
+settings.background_too_large: 请选择小于 2 MB 的图片
+settings.background_unavailable: 无法加载背景图片
 input.do_anything: 做什么都可以…
 input.search_models: 搜索模型…
 input.search_branches: 搜索分支

@@ -9,6 +9,7 @@ pub mod dialog;
 pub mod menu;
 pub mod motion;
 pub mod scrollbar;
+pub mod slider;
 pub mod text_field;
 pub mod tooltip;
 
