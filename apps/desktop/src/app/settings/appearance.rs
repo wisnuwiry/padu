@@ -87,7 +87,7 @@ fn render_background_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) 
                     &theme,
                 )),
         );
-    let remove = image.map(|_| {
+    let remove = settings.image_path.as_ref().map(|_| {
         let weak = cx.entity().downgrade();
         div()
             .id("conversation-background-remove")
@@ -166,6 +166,7 @@ fn render_background_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) 
                 .child(div().flex_1().child(preview)),
         )
         .child(background_adjuster(
+            "background-opacity",
             tr!("settings.background_opacity"),
             opacity,
             0,
@@ -181,6 +182,7 @@ fn render_background_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) 
             },
         ))
         .child(background_adjuster(
+            "background-height",
             tr!("settings.background_height"),
             height,
             20,
@@ -199,6 +201,7 @@ fn render_background_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) 
 }
 
 fn background_adjuster(
+    id_prefix: &'static str,
     label: String,
     value: i32,
     min: i32,
@@ -213,7 +216,7 @@ fn background_adjuster(
         let on_change = on_change.clone();
         buttons.push(
             div()
-                .id(SharedString::from(format!("background-{id}")))
+                .id(SharedString::from(format!("{id_prefix}-{id}")))
                 .tab_index(0)
                 .px(px(7.0))
                 .py(px(3.0))
@@ -221,6 +224,7 @@ fn background_adjuster(
                 .border_color(theme.border)
                 .rounded(px(4.0))
                 .cursor_pointer()
+                .focus_visible(|style| style.border_color(theme.accent))
                 .child(if delta < 0 { "−" } else { "+" })
                 .on_click({
                     let on_change = on_change.clone();

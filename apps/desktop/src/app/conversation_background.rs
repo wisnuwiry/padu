@@ -1,5 +1,9 @@
 use super::*;
 
+/// Conversation backgrounds are decorative, so they are capped well below the
+/// 48 MB wire limit to keep daemon uploads and transcript frames cheap.
+pub(super) const MAX_BACKGROUND_IMAGE_BYTES: usize = 2 * 1024 * 1024;
+
 /// Loads and paints the conversation background without doing filesystem work
 /// from the transcript frame path.
 impl Padu {
@@ -100,12 +104,17 @@ impl Padu {
                     return;
                 }
                 match loaded {
-                    Ok((path, format, bytes)) if !bytes.is_empty() => {
+                    Ok((path, format, bytes))
+                        if !bytes.is_empty() && bytes.len() <= MAX_BACKGROUND_IMAGE_BYTES =>
+                    {
                         this.state.conversation_background.image_path = Some(path);
                         this.conversation_background_image
                             .borrow_mut()
                             .replace(Arc::new(gpui::Image::from_bytes(format, bytes)));
                         this.save();
+                    }
+                    Ok((_, _, bytes)) if bytes.len() > MAX_BACKGROUND_IMAGE_BYTES => {
+                        this.show_toast(tr!("settings.background_too_large"));
                     }
                     _ => this.show_toast(tr!("settings.background_unavailable")),
                 }
@@ -134,10 +143,6 @@ pub(super) fn render_conversation_background(
     theme: &Theme,
 ) -> Option<AnyElement> {
     let image = image?;
-    let fit = match settings.fit {
-        padu_client::persistence::ConversationBackgroundFit::Cover => ObjectFit::Cover,
-        padu_client::persistence::ConversationBackgroundFit::Contain => ObjectFit::Contain,
-    };
     Some(
         div()
             .absolute()
@@ -149,7 +154,7 @@ pub(super) fn render_conversation_background(
             .child(
                 img(image)
                     .size_full()
-                    .object_fit(fit)
+                    .object_fit(ObjectFit::Cover)
                     .opacity(settings.opacity)
                     .flex_none(),
             )
