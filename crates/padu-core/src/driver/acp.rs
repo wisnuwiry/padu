@@ -5,7 +5,7 @@
 //! only adapts typed ACP messages to its provider-neutral [`DriverEvent`]s.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -408,7 +408,8 @@ async fn run_sdk_connection(
     let pending_user_inputs: PendingAcpUserInputs = Arc::new(Mutex::new(HashMap::new()));
     let prompt_requests = Arc::new(Mutex::new(PendingPrompts::default()));
     let title_refresh = super::title_refresh::NativeTitleRefresh::default();
-    let auto_approve = mode != RuntimeMode::Ask;
+    let auto_approve = interaction_mode != InteractionMode::Plan
+        && matches!(mode, RuntimeMode::Auto | RuntimeMode::FullAccess);
 
     Client
         .builder()
@@ -1618,7 +1619,14 @@ fn send_prompt(
     title_refresh: super::title_refresh::NativeTitleRefresh,
     stream_state: Arc<Mutex<AcpStreamState>>,
 ) -> agent_client_protocol::Result<()> {
-    stream_state.lock().produced_content = false;
+    {
+        let mut state = stream_state.lock();
+        state.produced_content = false;
+        state.agy_plan_content = None;
+        state.agy_plan_path = None;
+        state.agy_text_buffer.clear();
+        state.inlined_plan = false;
+    }
     // Read before the turn runs, so the failure lookup cannot mistake an
     // earlier turn's record for this one's.
     let wire_offset = (provider == ProviderKind::Kimi)
@@ -1648,6 +1656,7 @@ fn send_prompt(
     let native_session_id = native_session_id.to_owned();
     let registered = sent.on_receiving_result(async move |result| {
         if settle_prompt_request(&callback_requests, &callback_request_id) {
+            maybe_inline_agy_plan(provider, &mut stream_state.lock(), &callback_events);
             // Only an empty turn pays for this lookup, so a healthy turn never
             // waits on Kimi's records.
             let native_failure = wire_offset
@@ -2317,6 +2326,14 @@ fn handle_session_update(
                 .and_then(Value::as_str)
                 .filter(|text| !text.is_empty())
             {
+                if provider == ProviderKind::Agy {
+                    state.agy_text_buffer.push_str(text);
+                    if state.agy_plan_path.is_none() {
+                        if let Some(path) = extract_plan_link_path(&state.agy_text_buffer) {
+                            state.agy_plan_path = Some(path);
+                        }
+                    }
+                }
                 let _ = events.send(DriverEvent::TextDelta(text.to_owned()));
             }
         }
@@ -2329,7 +2346,12 @@ fn handle_session_update(
                 let _ = events.send(DriverEvent::ReasoningDelta(text.to_owned()));
             }
         }
-        Some("tool_call" | "tool_call_update") => tool_activity(&update, events, state),
+        Some("tool_call" | "tool_call_update") => {
+            if provider == ProviderKind::Agy {
+                extract_agy_tool_plan(&update, state);
+            }
+            tool_activity(&update, events, state);
+        }
         Some("plan") => {
             let _ = events.send(DriverEvent::Activity {
                 id: Some("acp-plan".into()),
@@ -2406,6 +2428,122 @@ struct AcpStreamState {
     /// ends having produced nothing is the shape a swallowed provider error
     /// takes, which is what makes a native failure worth looking up.
     produced_content: bool,
+    agy_plan_content: Option<String>,
+    agy_plan_path: Option<PathBuf>,
+    agy_text_buffer: String,
+    inlined_plan: bool,
+}
+
+fn is_plan_file(path: &Path) -> bool {
+    let ext_matches = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown"));
+    if !ext_matches {
+        return false;
+    }
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let path_str = path.to_string_lossy().to_ascii_lowercase();
+    file_name.contains("plan")
+        || path_str.contains("/brain/")
+        || path_str.contains("\\brain\\")
+        || path_str.contains("/antigravity-acp/")
+        || path_str.contains("\\antigravity-acp\\")
+        || path_str.contains("/.gemini/")
+        || path_str.contains("\\.gemini\\")
+}
+
+fn extract_plan_link_path(text: &str) -> Option<PathBuf> {
+    let mut search_idx = 0;
+    while let Some(start) = text[search_idx..].find("file://") {
+        let actual_start = search_idx + start;
+        let url_part = &text[actual_start..];
+        let end = url_part
+            .find(|c: char| c.is_whitespace() || matches!(c, ')' | ']' | '"' | '\'' | '>'))
+            .unwrap_or(url_part.len());
+        let raw_url = &url_part[..end];
+        let clean_url = raw_url.trim_end_matches(|c: char| c == '.' || c == ',');
+        if let Ok(url) = url::Url::parse(clean_url) {
+            if let Ok(path) = url.to_file_path() {
+                if is_plan_file(&path) {
+                    return Some(path);
+                }
+            }
+        }
+        search_idx = actual_start + "file://".len();
+    }
+    None
+}
+
+fn extract_agy_tool_plan(update: &Value, state: &mut AcpStreamState) {
+    let arguments = update.get("rawInput").filter(|value| !value.is_null());
+    let get_prop = |map: &Map<String, Value>, keys: &[&str]| -> Option<String> {
+        for key in keys {
+            if let Some(val) = map.get(*key).and_then(Value::as_str) {
+                return Some(val.to_owned());
+            }
+        }
+        None
+    };
+
+    let file_keys = &["TargetFile", "targetFile", "target_file", "path", "file"];
+    let content_keys = &["CodeContent", "codeContent", "code_content", "content", "text"];
+
+    let (target_file, code_content) = match arguments {
+        Some(Value::Object(map)) => (get_prop(map, file_keys), get_prop(map, content_keys)),
+        Some(Value::String(s)) => {
+            if let Ok(Value::Object(map)) = serde_json::from_str(s) {
+                (get_prop(&map, file_keys), get_prop(&map, content_keys))
+            } else {
+                (None, None)
+            }
+        }
+        _ => (None, None),
+    };
+
+    if let Some(target_file) = target_file {
+        let path = PathBuf::from(target_file);
+        if is_plan_file(&path) {
+            state.agy_plan_path = Some(path);
+            if let Some(content) = code_content {
+                state.agy_plan_content = Some(content);
+            }
+        }
+    }
+}
+
+fn maybe_inline_agy_plan(
+    provider: ProviderKind,
+    state: &mut AcpStreamState,
+    events: &impl DriverEventSink,
+) {
+    if provider != ProviderKind::Agy || state.inlined_plan {
+        return;
+    }
+    if state.agy_plan_path.is_none() {
+        if let Some(path) = extract_plan_link_path(&state.agy_text_buffer) {
+            state.agy_plan_path = Some(path);
+        }
+    }
+    let content = state.agy_plan_content.clone().or_else(|| {
+        let path = state.agy_plan_path.as_ref()?;
+        std::fs::read_to_string(path).ok()
+    });
+    if let Some(content) = content {
+        let trimmed = content.trim();
+        if !trimmed.is_empty() {
+            if !state.agy_text_buffer.contains(trimmed)
+                && !(trimmed.len() > 60 && state.agy_text_buffer.contains(&trimmed[..60]))
+            {
+                state.inlined_plan = true;
+                let _ = events.send(DriverEvent::TextDelta(format!("\n\n---\n\n{trimmed}\n")));
+            }
+        }
+    }
 }
 
 /// Pull the agent's explanation out of a permission request's tool call.
@@ -3616,5 +3754,127 @@ mod tests {
             resolve_agy_model_id("gemini-3.8-flash-high", None, Some(&options)),
             "gemini-3.8-flash-high"
         );
+    }
+
+    #[test]
+    fn agy_extract_plan_link_path_extracts_file_links() {
+        let text = "I have created the plan artifact. Review the plan in [plan.md](file:///Users/alice/.gemini/antigravity-acp/brain/123/plan.md). Please review.";
+        let extracted = extract_plan_link_path(text);
+        assert_eq!(
+            extracted,
+            Some(PathBuf::from(
+                "/Users/alice/.gemini/antigravity-acp/brain/123/plan.md"
+            ))
+        );
+
+        let text_with_encoded_spaces =
+            "Review [plan.md](file:///Users/alice/My%20Projects/brain/plan.md).";
+        let extracted = extract_plan_link_path(text_with_encoded_spaces);
+        assert_eq!(
+            extracted,
+            Some(PathBuf::from("/Users/alice/My Projects/brain/plan.md"))
+        );
+
+        let non_plan_text = "Created [hello.rs](file:///Users/alice/project/hello.rs).";
+        assert_eq!(extract_plan_link_path(non_plan_text), None);
+    }
+
+    #[test]
+    fn agy_inlines_plan_artifact_when_created_via_tool_call() {
+        let (events, event_rx) = crossbeam_channel::unbounded();
+        let mut state = AcpStreamState::default();
+
+        let tool_update = serde_json::from_value(json!({
+            "sessionUpdate": "tool_call",
+            "toolCallId": "write_1",
+            "title": "write_to_file",
+            "kind": "edit",
+            "status": "completed",
+            "rawInput": {
+                "TargetFile": "/Users/alice/.gemini/antigravity-acp/brain/123/plan.md",
+                "CodeContent": "# Test Plan\n1. Do something"
+            }
+        }))
+        .unwrap();
+
+        handle_session_update(
+            ProviderKind::Agy,
+            SessionNotification::new("s", tool_update),
+            &events,
+            &mut state,
+        )
+        .unwrap();
+
+        assert_eq!(
+            state.agy_plan_path.as_deref(),
+            Some(Path::new(
+                "/Users/alice/.gemini/antigravity-acp/brain/123/plan.md"
+            ))
+        );
+        assert_eq!(
+            state.agy_plan_content.as_deref(),
+            Some("# Test Plan\n1. Do something")
+        );
+
+        // Turn completes:
+        maybe_inline_agy_plan(ProviderKind::Agy, &mut state, &events);
+
+        let seen = event_rx.try_iter().collect::<Vec<_>>();
+        let inlined = seen.iter().find_map(|e| match e {
+            DriverEvent::TextDelta(t) if t.contains("# Test Plan") => Some(t),
+            _ => None,
+        });
+        assert!(inlined.is_some());
+        assert!(state.inlined_plan);
+
+        // Second call does not duplicate:
+        maybe_inline_agy_plan(ProviderKind::Agy, &mut state, &events);
+        let seen2 = event_rx.try_iter().collect::<Vec<_>>();
+        assert!(seen2.is_empty());
+    }
+
+    #[test]
+    fn agy_inlines_plan_artifact_from_text_link() {
+        let (events, event_rx) = crossbeam_channel::unbounded();
+        let mut state = AcpStreamState::default();
+
+        let temp_dir = std::env::temp_dir().join(format!("padu-test-{}", uuid::Uuid::new_v4()));
+        let brain_dir = temp_dir.join("brain").join("test-session");
+        std::fs::create_dir_all(&brain_dir).unwrap();
+        let plan_path = brain_dir.join("plan.md");
+        std::fs::write(&plan_path, "# File Plan Content\n- Step A\n- Step B").unwrap();
+
+        let plan_url = url::Url::from_file_path(&plan_path).unwrap();
+        let message_text = format!("I have created the plan. Review at [plan.md]({plan_url}).");
+
+        let update = serde_json::from_value(json!({
+            "sessionUpdate": "agent_message_chunk",
+            "content": {"type": "text", "text": message_text}
+        }))
+        .unwrap();
+
+        handle_session_update(
+            ProviderKind::Agy,
+            SessionNotification::new("s", update),
+            &events,
+            &mut state,
+        )
+        .unwrap();
+
+        assert_eq!(state.agy_plan_path.as_deref(), Some(plan_path.as_path()));
+
+        // When turn ends, it reads the plan from disk and inlines it
+        maybe_inline_agy_plan(ProviderKind::Agy, &mut state, &events);
+
+        let seen = event_rx.try_iter().collect::<Vec<_>>();
+        let inlined = seen.iter().find_map(|e| match e {
+            DriverEvent::TextDelta(t) if t.contains("# File Plan Content") => Some(t),
+            _ => None,
+        });
+        assert!(inlined.is_some());
+        assert!(inlined.unwrap().contains("- Step A"));
+        assert!(state.inlined_plan);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
