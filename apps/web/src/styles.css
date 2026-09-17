@@ -104,7 +104,7 @@
   --secondary-foreground: var(--foreground);
   --muted: #232323;
   --muted-foreground: #7d7d7d;
-  --accent: rgb(230 230 230 / 6%);
+  --accent: #6d28d9;
   --accent-foreground: var(--foreground);
   --destructive: #e2726a;
   --border: rgb(230 230 230 / 7%);
@@ -261,6 +261,57 @@
 }
 
 @layer components {
+  .padu-slider {
+    height: 32px;
+    appearance: none;
+    background: transparent;
+  }
+
+  .padu-slider::-webkit-slider-runnable-track {
+    height: 6px;
+    border-radius: 999px;
+    background: linear-gradient(
+      to right,
+      var(--accent-color, var(--ring)) var(--slider-progress, 0%),
+      var(--border) var(--slider-progress, 0%)
+    );
+  }
+
+  .padu-slider::-webkit-slider-thumb {
+    width: 18px;
+    height: 18px;
+    margin-top: -6px;
+    appearance: none;
+    border: 0;
+    border-radius: 999px;
+    background: var(--foreground);
+  }
+
+  .padu-slider::-moz-range-track {
+    height: 6px;
+    border-radius: 999px;
+    background: var(--border);
+  }
+
+  .padu-slider::-moz-range-progress {
+    height: 6px;
+    border-radius: 999px;
+    background: var(--ring);
+  }
+
+  .padu-slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--foreground);
+  }
+
+  .padu-slider:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
   .padu-popover-surface {
     border: 1px solid var(--input);
     background: var(--raised);

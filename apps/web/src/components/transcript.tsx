@@ -86,14 +86,20 @@ function ConversationBackgroundLayer() {
   const background = useConversationBackground()
   if (!background.imageUrl || background.loading) return null
   return (
-    <img
-      alt=""
-      aria-hidden="true"
-      className="pointer-events-none absolute inset-x-0 bottom-0 z-0 w-full object-cover object-bottom"
-      draggable={false}
-      src={background.imageUrl}
-      style={{ height: `${background.heightPercent}%`, opacity: background.opacity }}
-    />
+    <>
+      <img
+        alt=""
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 z-0 w-full object-cover object-top"
+        draggable={false}
+        src={background.imageUrl}
+        style={{ height: `${background.heightPercent}%`, opacity: background.opacity }}
+      />
+      <div
+        className="pointer-events-none absolute inset-x-0 top-0 z-0 bg-gradient-to-b from-transparent to-background/95"
+        style={{ height: `${background.heightPercent}%` }}
+      />
+    </>
   )
 }
 

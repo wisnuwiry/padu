@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { toast } from 'sonner'
 import { ControlMenu } from '@/components/control-menu'
+import { MarkdownView } from '@/components/markdown-view'
+import { PaduIcon } from '@/components/padu-icon'
 import {
   applyThemeChoice,
   readThemeChoice,
@@ -28,6 +30,8 @@ export function AppearanceSettings() {
     ? 'system'
     : readThemeChoice(window.localStorage))
   const background = useConversationBackground()
+  const opacityPercent = Math.round(background.opacity * 100)
+  const heightPercent = Math.round(background.heightPercent)
   const fileInput = useRef<HTMLInputElement>(null)
   useEffect(() => {
     const systemAppearance = window.matchMedia('(prefers-color-scheme: dark)')
@@ -95,8 +99,8 @@ export function AppearanceSettings() {
     </div>
   <section className="mt-[15px] w-full rounded-[13px] bg-[var(--raised)] px-5 py-4">
     <SettingText title={t('settings.background')} description={t('settings.background_description')} />
-    <div className="mt-4 flex items-start gap-4 overflow-hidden rounded-lg border bg-background p-4">
-      <div className="flex w-44 shrink-0 flex-col gap-3">
+    <div className="mt-3 flex w-full items-start gap-4">
+      <div className="flex w-[190px] shrink-0 flex-col gap-3">
         <input
           ref={fileInput}
           accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,image/bmp,image/tiff,image/x-icon,image/x-portable-anymap"
@@ -114,33 +118,46 @@ export function AppearanceSettings() {
             })
           }}
         />
-        <button className="rounded-md border px-3 py-2 text-xs outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring" type="button" onClick={() => fileInput.current?.click()}>
+        <button className="flex justify-start items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring" type="button" onClick={() => fileInput.current?.click()}>
+          <PaduIcon className="size-3.5" name="folderOpen" />
           {t('settings.background_choose')}
         </button>
-        {background.imageUrl && <button className="rounded-md px-2 py-1.5 text-left text-xs text-[var(--text-secondary)] hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring" type="button" onClick={() => void clearConversationBackground().catch(() => toast.error(t('settings.background_unavailable')))}>{t('settings.background_remove')}</button>}
+        {background.imageUrl && <button className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs text-[var(--text-secondary)] hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring" type="button" onClick={() => void clearConversationBackground().catch(() => toast.error(t('settings.background_unavailable')))}>
+          <PaduIcon className="size-3.5 text-destructive" name="trash" />
+          {t('settings.background_remove')}
+        </button>}
         {background.fileName && <span className="truncate text-xs text-[var(--text-secondary)]" title={background.fileName}>{background.fileName}</span>}
+        <div className="my-0.5 h-px w-full bg-[var(--border)]" />
         <label className="space-y-1 text-xs">
-          <span className="block text-[var(--text-secondary)]">{t('settings.background_opacity')} · {Math.round(background.opacity * 100)}%</span>
-          <input aria-label={t('settings.background_opacity')} className="w-full accent-[var(--accent)]" max="100" min="0" step="1" type="range" value={Math.round(background.opacity * 100)} onChange={(event) => updateConversationBackground({ opacity: Number(event.target.value) / 100 })} />
+          <span className="flex items-center justify-between gap-2">
+            <span className="text-[var(--text-secondary)]">{t('settings.background_opacity')}</span>
+            <span className="text-foreground">{Math.round(background.opacity * 100)}%</span>
+          </span>
+          <input aria-label={t('settings.background_opacity')} className="padu-slider w-full cursor-pointer" max="100" min="0" step="1" style={{ '--slider-progress': `${opacityPercent}%` } as CSSProperties} type="range" value={opacityPercent} onChange={(event) => updateConversationBackground({ opacity: Number(event.target.value) / 100 })} />
         </label>
         <label className="space-y-1 text-xs">
-          <span className="block text-[var(--text-secondary)]">{t('settings.background_height')} · {Math.round(background.heightPercent)}%</span>
-          <input aria-label={t('settings.background_height')} className="w-full accent-[var(--accent)]" max="100" min="20" step="1" type="range" value={background.heightPercent} onChange={(event) => updateConversationBackground({ heightPercent: Number(event.target.value) })} />
+          <span className="flex items-center justify-between gap-2">
+            <span className="text-[var(--text-secondary)]">{t('settings.background_height')}</span>
+            <span className="text-foreground">{Math.round(background.heightPercent)}%</span>
+          </span>
+          <input aria-label={t('settings.background_height')} className="padu-slider w-full cursor-pointer" max="100" min="20" step="1" style={{ '--slider-progress': `${((heightPercent - 20) / 80) * 100}%` } as CSSProperties} type="range" value={heightPercent} onChange={(event) => updateConversationBackground({ heightPercent: Number(event.target.value) })} />
         </label>
       </div>
-      <div className="relative aspect-[188/142] min-h-[260px] min-w-0 flex-1 overflow-hidden rounded-lg border bg-[var(--inset)]">
-        {background.imageUrl && <img alt="" aria-hidden="true" className="absolute inset-x-0 top-0 w-full rounded-lg object-cover object-top" src={background.imageUrl} style={{ height: `${background.heightPercent}%`, opacity: background.opacity }} />}
-        <div className="absolute inset-x-0 bottom-0 z-[1] h-[58%] bg-gradient-to-b from-transparent to-background/95" />
-        <div className="relative z-[2] flex h-full flex-col justify-end gap-3 p-6 text-xs">
-          <div className="max-w-[72%] rounded-2xl rounded-tl-md bg-background/95 px-4 py-3 shadow-sm">
-            <div className="mb-1 text-[10px] font-medium text-[var(--text-tertiary)]">{t('command_palette.you')}</div>
-            {t('settings.background_preview_user')}
+      <div className="@container relative aspect-[188/142] min-h-[240px] min-w-0 flex-1 overflow-hidden rounded-lg border bg-[var(--inset)]">
+        {background.imageUrl && <img alt="" aria-hidden="true" className="absolute inset-x-0 top-0 h-auto w-full object-cover object-top" src={background.imageUrl} style={{ height: `${heightPercent}%`, opacity: background.opacity }} />}
+        <div
+          className="absolute inset-x-0 top-0 z-[1] bg-gradient-to-b from-transparent to-background/95"
+          style={{ height: `${heightPercent}%` }}
+        />
+        <div className="relative z-[2] flex h-full flex-col justify-end gap-[clamp(4px,1cqw,12px)] p-[clamp(10px,4cqw,24px)] text-[clamp(9px,2cqw,14px)] leading-[clamp(13px,3cqw,20px)]">
+          <div className="flex w-full justify-end">
+            <div className="max-w-[82%] min-w-0 rounded-xl bg-[var(--raised)] px-[clamp(8px,2cqw,12px)] py-[clamp(6px,1.5cqw,8px)]">
+              <MarkdownView compact text={t('settings.background_preview_user')} />
+            </div>
           </div>
-          <div className="max-w-[78%] self-end rounded-2xl rounded-tr-md bg-card/95 px-4 py-3 shadow-sm">
-            <div className="mb-1 text-[10px] font-medium text-[var(--text-tertiary)]">Padu</div>
-            {t('settings.background_preview_assistant')}
+          <div className="max-w-[86%] min-w-0 py-[clamp(2px,0.75cqw,4px)]">
+            <MarkdownView compact text={t('settings.background_preview_assistant')} />
           </div>
-          <div className="max-w-[64%] rounded-2xl rounded-tl-md bg-background/95 px-4 py-3 shadow-sm">{t('settings.background_preview_user')}</div>
         </div>
       </div>
     </div>
