@@ -250,6 +250,194 @@ export type ActivityDisclosureSection = {
   content: string
 }
 
+export function activityShowsDiff(activity: ActivityItem): boolean {
+  if (activity.kind !== 'fileChange') return false
+  if (activity.file_changes?.some((change) => Boolean(change.diff))) return true
+  if (!activity.arguments) return false
+  try {
+    const parsed = JSON.parse(activity.arguments)
+    if (parsed && typeof parsed === 'object') {
+      const hasOld = extractStringKey(parsed, [
+        'oldString', 'old_string', 'oldStr', 'old_str', 'oldText', 'old_text', 'oldContent', 'old_content', 'oldSource', 'old_source',
+      ]) !== null
+      const hasNew = extractStringKey(parsed, [
+        'newString', 'new_string', 'newStr', 'new_str', 'newText', 'new_text', 'newContent', 'new_content', 'newSource', 'new_source',
+      ]) !== null
+      if (hasOld && hasNew) return true
+    }
+  } catch {
+    // ignore
+  }
+  return false
+}
+
+export type ActivityDiffLineKind = 'fileHeader' | 'hunkHeader' | 'gap' | 'context' | 'addition' | 'deletion'
+
+export interface ActivityDiffLine {
+  kind: ActivityDiffLineKind
+  content: string
+  oldLine?: number | null
+  newLine?: number | null
+  filePath?: string
+  additions?: number
+  deletions?: number
+}
+
+export interface ActivityDiffSnapshot {
+  lines: ActivityDiffLine[]
+  hiddenRows: number
+}
+
+const MAX_ACTIVITY_DIFF_ROWS = 400
+
+export function activityDiffSnapshot(activity: ActivityItem): ActivityDiffSnapshot {
+  if (activity.kind !== 'fileChange') {
+    return { lines: [], hiddenRows: 0 }
+  }
+
+  const lines: ActivityDiffLine[] = []
+
+  // 1. Try from activity.file_changes
+  const changesWithDiff = activity.file_changes?.filter((change) => Boolean(change.diff)) ?? []
+  if (changesWithDiff.length > 0) {
+    const showFileHeaders = changesWithDiff.length > 1
+    for (const change of changesWithDiff) {
+      if (showFileHeaders) {
+        lines.push({
+          kind: 'fileHeader',
+          content: change.path,
+          filePath: change.path,
+          additions: change.additions ?? 0,
+          deletions: change.deletions ?? 0,
+        })
+      }
+
+      const diffText = change.diff ?? ''
+      let oldLine = 0
+      let newLine = 0
+      let positioned = true
+
+      for (const raw of diffText.split('\n')) {
+        if (!raw) continue
+        if (raw.startsWith('@@')) {
+          const match = /^@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/.exec(raw)
+          if (match) {
+            positioned = true
+            oldLine = parseInt(match[1]!, 10)
+            newLine = parseInt(match[2]!, 10)
+            lines.push({
+              kind: 'hunkHeader',
+              content: raw.trim(),
+            })
+          } else {
+            positioned = false
+            lines.push({
+              kind: 'hunkHeader',
+              content: '',
+            })
+          }
+          continue
+        }
+
+        const marker = raw[0]
+        const content = raw.slice(1)
+        if (marker === ' ') {
+          lines.push({
+            kind: 'context',
+            content,
+            oldLine: positioned ? oldLine : null,
+            newLine: positioned ? newLine : null,
+          })
+          oldLine++
+          newLine++
+        } else if (marker === '-') {
+          lines.push({
+            kind: 'deletion',
+            content,
+            oldLine: positioned ? oldLine : null,
+            newLine: null,
+          })
+          oldLine++
+        } else if (marker === '+') {
+          lines.push({
+            kind: 'addition',
+            content,
+            oldLine: null,
+            newLine: positioned ? newLine : null,
+          })
+          newLine++
+        }
+      }
+    }
+  } else if (activity.arguments) {
+    // 2. Synthesize from arguments (oldString & newString)
+    try {
+      const parsed = JSON.parse(activity.arguments)
+      if (parsed && typeof parsed === 'object') {
+        const oldStr = extractStringKey(parsed, [
+          'oldString', 'old_string', 'oldStr', 'old_str', 'oldText', 'old_text', 'oldContent', 'old_content', 'oldSource', 'old_source',
+        ])
+        const newStr = extractStringKey(parsed, [
+          'newString', 'new_string', 'newStr', 'new_str', 'newText', 'new_text', 'newContent', 'new_content', 'newSource', 'new_source',
+        ])
+        if (oldStr !== null && newStr !== null) {
+          const oldLines = oldStr.split('\n')
+          const newLines = newStr.split('\n')
+
+          let prefixCount = 0
+          while (
+            prefixCount < oldLines.length &&
+            prefixCount < newLines.length &&
+            oldLines[prefixCount] === newLines[prefixCount]
+          ) {
+            prefixCount++
+          }
+
+          let suffixCount = 0
+          while (
+            suffixCount < (oldLines.length - prefixCount) &&
+            suffixCount < (newLines.length - prefixCount) &&
+            oldLines[oldLines.length - 1 - suffixCount] === newLines[newLines.length - 1 - suffixCount]
+          ) {
+            suffixCount++
+          }
+
+          lines.push({ kind: 'hunkHeader', content: '' })
+
+          for (let i = 0; i < prefixCount; i++) {
+            lines.push({ kind: 'context', content: oldLines[i]! })
+          }
+          for (let i = prefixCount; i < oldLines.length - suffixCount; i++) {
+            lines.push({ kind: 'deletion', content: oldLines[i]! })
+          }
+          for (let i = prefixCount; i < newLines.length - suffixCount; i++) {
+            lines.push({ kind: 'addition', content: newLines[i]! })
+          }
+          for (let i = oldLines.length - suffixCount; i < oldLines.length; i++) {
+            lines.push({ kind: 'context', content: oldLines[i]! })
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const hiddenRows = Math.max(0, lines.length - MAX_ACTIVITY_DIFF_ROWS)
+  return {
+    lines: lines.slice(0, MAX_ACTIVITY_DIFF_ROWS),
+    hiddenRows,
+  }
+}
+
+function extractStringKey(obj: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const val = obj[key]
+    if (typeof val === 'string') return val
+  }
+  return null
+}
+
 export function activityDisclosureSections(activity: ActivityItem, t?: Translator): ActivityDisclosureSection[] {
   const sections: ActivityDisclosureSection[] = []
   if (activity.kind === 'command') {
@@ -260,11 +448,17 @@ export function activityDisclosureSections(activity: ActivityItem, t?: Translato
     else if (activity.image_urls?.length) sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: '' })
     return sections
   }
+  const showsDiff = activityShowsDiff(activity)
   const argumentsText = activity.arguments?.trim()
   const output = activity.output?.trim()
-  if (argumentsText && activity.kind !== 'fileRead') sections.push({ kind: 'arguments', label: t ? t('activity.arguments') : 'Arguments', content: argumentsText })
-  if (output) sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: output })
-  else if (activity.image_urls?.length) sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: '' })
+  if (argumentsText && !showsDiff && activity.kind !== 'fileRead') {
+    sections.push({ kind: 'arguments', label: t ? t('activity.arguments') : 'Arguments', content: argumentsText })
+  }
+  if (output && (!showsDiff || activity.failed)) {
+    sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: output })
+  } else if (activity.image_urls?.length) {
+    sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: '' })
+  }
   const detail = activity.detail?.trim()
   if (!sections.length && detail) sections.push({ kind: 'detail', label: null, content: detail })
   return sections

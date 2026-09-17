@@ -3,6 +3,7 @@ import type { ActivityItem, AgentSession } from '@padu/client'
 import {
   ACTIVITY_PREVIEW_LIMIT,
   activityActionLabel,
+  activityDiffSnapshot,
   activityDisclosureSections,
   activityDisplayTitle,
   activityFileChangeStats,
@@ -12,6 +13,8 @@ import {
   activityPreview,
   activityPreviewWindow,
   activityRowDetail,
+  activitySectionLanguage,
+  activityShowsDiff,
   activitySummary,
   activityTextRows,
   assistantResponseFooters,
@@ -23,7 +26,6 @@ import {
   userMessageRewindTurnCount,
   formatMessageTime,
   formatWorkingElapsed,
-  activitySectionLanguage,
 } from './transcript-presentation'
 
 describe('desktop transcript language', () => {
@@ -166,6 +168,84 @@ describe('desktop transcript language', () => {
     const commandItem = activity('command', true)
     expect(activitySectionLanguage(commandItem, 'output', 'raw text log')).toBeNull()
     expect(activitySectionLanguage(commandItem, 'output', '{"status":"ok"}')).toBe('json')
+  })
+
+  test('detects when an activity shows a diff instead of raw arguments', () => {
+    // 1. fileChange with diff in file_changes
+    const itemWithDiff = {
+      ...activity('fileChange', true),
+      file_changes: [{ path: 'src/lib.rs', diff: '@@ -1,1 +1,1 @@\n-old\n+new\n' }],
+    }
+    expect(activityShowsDiff(itemWithDiff)).toBe(true)
+
+    // 2. fileChange with oldString & newString in arguments
+    const itemWithArgs = {
+      ...activity('fileChange', true),
+      arguments: JSON.stringify({
+        filePath: 'src/lib.rs',
+        oldString: 'let x = 1;',
+        newString: 'let x = 2;',
+      }),
+    }
+    expect(activityShowsDiff(itemWithArgs)).toBe(true)
+
+    // 3. disclosure sections omit arguments and output when showing diff
+    expect(activityDisclosureSections(itemWithArgs)).toEqual([])
+
+    // 4. disclosure sections keep output when failed even if showing diff
+    const failedItem = {
+      ...itemWithArgs,
+      failed: true,
+      output: 'patch rejected',
+    }
+    expect(activityDisclosureSections(failedItem)).toEqual([
+      { kind: 'output', label: 'Output', content: 'patch rejected' },
+    ])
+
+    // 5. non-fileChange activities never show diff
+    const cmd = {
+      ...activity('command', true),
+      arguments: 'git diff',
+    }
+    expect(activityShowsDiff(cmd)).toBe(false)
+  })
+
+  test('parses diff snapshots from file changes and synthesizes from oldString/newString', () => {
+    // 1. From file_changes with unified diff
+    const itemWithHunks = {
+      ...activity('fileChange', true),
+      file_changes: [
+        {
+          path: 'src/main.rs',
+          diff: '@@ -10,3 +10,3 @@\n kept\n-old\n+new\n',
+        },
+      ],
+    }
+    const snapshot1 = activityDiffSnapshot(itemWithHunks)
+    expect(snapshot1.lines).toEqual([
+      { kind: 'hunkHeader', content: '@@ -10,3 +10,3 @@' },
+      { kind: 'context', content: 'kept', oldLine: 10, newLine: 10 },
+      { kind: 'deletion', content: 'old', oldLine: 11, newLine: null },
+      { kind: 'addition', content: 'new', oldLine: null, newLine: 11 },
+    ])
+    expect(snapshot1.hiddenRows).toBe(0)
+
+    // 2. Synthesize from arguments (oldString / newString)
+    const itemWithOldNew = {
+      ...activity('fileChange', true),
+      arguments: JSON.stringify({
+        oldString: 'same_prefix\nold_value\nsame_suffix',
+        newString: 'same_prefix\nnew_value\nsame_suffix',
+      }),
+    }
+    const snapshot2 = activityDiffSnapshot(itemWithOldNew)
+    expect(snapshot2.lines).toEqual([
+      { kind: 'hunkHeader', content: '' },
+      { kind: 'context', content: 'same_prefix' },
+      { kind: 'deletion', content: 'old_value' },
+      { kind: 'addition', content: 'new_value' },
+      { kind: 'context', content: 'same_suffix' },
+    ])
   })
 
   test('shows file edit stats only when every settled edit has counts', () => {
