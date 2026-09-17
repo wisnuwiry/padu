@@ -914,6 +914,9 @@ impl Padu {
                 // edit the session ever made.
                 this.activity_diffs.borrow_mut().remove(&id);
                 this.activity_diff_viewports.borrow_mut().remove(&id);
+                this.activity_section_flats
+                    .borrow_mut()
+                    .retain(|(activity_id, _), _| *activity_id != id);
             }
         });
     }
@@ -1032,6 +1035,38 @@ impl Padu {
             .borrow_mut()
             .insert(activity.id, diff.clone());
         diff
+    }
+
+    /// Flattened, syntax-highlighted text for one disclosure section, built on
+    /// first sight and reused while the section's own text is unchanged.
+    /// Re-lexing a long file read on every frame would be render work
+    /// proportional to the content rather than to what is on screen.
+    fn activity_section_flat(
+        &self,
+        id: Uuid,
+        kind: ActivityDisclosureSectionKind,
+        activity: &ActivityItem,
+        content: &str,
+        palette: &MarkdownPalette,
+    ) -> Option<Rc<md::render::FlatText>> {
+        let key = (id, kind);
+        if let Some((cached, cached_palette, flat)) = self.activity_section_flats.borrow().get(&key)
+            && cached.as_ref() == content
+            && *cached_palette == *palette
+        {
+            return Some(flat.clone());
+        }
+        let Some(lang) = activity_section_language(activity, kind, content)
+            .and_then(crate::md::highlight::lang_for_tag)
+        else {
+            self.activity_section_flats.borrow_mut().remove(&key);
+            return None;
+        };
+        let flat = Rc::new(md::render::highlight_flat(content, Some(lang), palette));
+        self.activity_section_flats
+            .borrow_mut()
+            .insert(key, (SharedString::from(content), *palette, flat.clone()));
+        Some(flat)
     }
 
     pub(super) fn toggle_turn_fold(
@@ -2453,11 +2488,15 @@ impl Padu {
                         );
                     }
                     if !content.is_empty() {
-                        let lang = activity_section_language(activity, section_kind, &content)
-                            .and_then(crate::md::highlight::lang_for_tag);
                         let is_scrollable = section_kind == ActivityDisclosureSectionKind::Output;
-                        let rendered_text = if let Some(lang) = lang {
-                            md::render::highlighted_code(content.clone(), Some(lang), &ctx)
+                        let rendered_text = if let Some(flat) = self.activity_section_flat(
+                            id,
+                            section_kind,
+                            activity,
+                            &content,
+                            &palette,
+                        ) {
+                            md::render::flat_text(&flat, &ctx)
                         } else {
                             md::render::plain_text(
                                 content.clone(),
