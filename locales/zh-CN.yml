@@ -374,12 +374,10 @@ settings.background_choose: 选择图片
 settings.background_remove: 移除
 settings.background_opacity: 不透明度
 settings.background_height: 图片高度
-settings.background_fit: 图片适应方式
-settings.background_cover: 覆盖
-settings.background_contain: 包含
 settings.background_preview_user: 可以帮我总结一下今天的会议记录吗？
 settings.background_preview_assistant: 当然，我会整理出主要决定和待办事项。
 settings.background_unsupported: 请选择受支持的图片格式
+settings.background_too_large: 请选择小于 2 MB 的图片
 settings.background_unavailable: 无法加载背景图片
 input.do_anything: 做什么都可以…
 input.search_models: 搜索模型…

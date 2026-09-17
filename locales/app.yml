@@ -770,18 +770,14 @@ settings.background_opacity:
   en: Opacity
 settings.background_height:
   en: Image height
-settings.background_fit:
-  en: Image fit
-settings.background_cover:
-  en: Cover
-settings.background_contain:
-  en: Contain
 settings.background_preview_user:
   en: Can you summarize today's meeting notes?
 settings.background_preview_assistant:
   en: Sure — I'll highlight the key decisions and action items.
 settings.background_unsupported:
   en: Choose a supported image format
+settings.background_too_large:
+  en: Choose an image smaller than 2 MB
 settings.background_unavailable:
   en: The background image could not be loaded
 

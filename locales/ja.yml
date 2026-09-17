@@ -378,12 +378,10 @@ settings.background_choose: 画像を選択
 settings.background_remove: 削除
 settings.background_opacity: 不透明度
 settings.background_height: 画像の高さ
-settings.background_fit: 画像の表示方法
-settings.background_cover: カバー
-settings.background_contain: 全体を表示
 settings.background_preview_user: 今日の会議メモを要約してくれる？
 settings.background_preview_assistant: もちろんです。主な決定事項と次のアクションをまとめます。
 settings.background_unsupported: 対応している画像形式を選択してください
+settings.background_too_large: 2 MB より小さい画像を選択してください
 settings.background_unavailable: 背景画像を読み込めませんでした
 
 input.do_anything: 何でも依頼できます…

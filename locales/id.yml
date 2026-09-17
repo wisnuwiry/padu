@@ -373,12 +373,10 @@ settings.background_choose: Pilih gambar
 settings.background_remove: Hapus
 settings.background_opacity: Opasitas
 settings.background_height: Tinggi gambar
-settings.background_fit: Penyesuaian gambar
-settings.background_cover: Isi
-settings.background_contain: Muat
 settings.background_preview_user: Bisa rangkum catatan rapat hari ini?
 settings.background_preview_assistant: Tentu — saya akan menyoroti keputusan utama dan tugas tindak lanjut.
 settings.background_unsupported: Pilih format gambar yang didukung
+settings.background_too_large: Pilih gambar yang lebih kecil dari 2 MB
 settings.background_unavailable: Gambar latar belakang tidak dapat dimuat
 input.do_anything: Lakukan apa saja…
 input.search_models: Cari model…
