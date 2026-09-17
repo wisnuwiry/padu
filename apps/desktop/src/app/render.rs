@@ -347,6 +347,7 @@ impl Render for Padu {
         let note_preview = self.render_note_preview(cx);
         let task_switcher = self.render_task_switcher(window, cx);
         let onboarding_modal = self.render_onboarding_modal(window, cx);
+        let whats_new_modal = self.render_whats_new_modal(window, cx);
         if self.settings_page.is_some() {
             let command_palette = self.render_command_palette(window, cx);
             let active_dialog = self.render_active_dialog(window, cx);
@@ -372,6 +373,7 @@ impl Render for Padu {
                 .children(note_preview)
                 .children(task_switcher)
                 .children(onboarding_modal)
+                .children(whats_new_modal)
                 .into_any_element();
             return self.render_window_frame(content, window, cx);
         }
@@ -552,6 +554,7 @@ impl Render for Padu {
             .children(note_preview)
             .children(task_switcher)
             .children(onboarding_modal)
+            .children(whats_new_modal)
             .into_any_element();
 
         self.render_window_frame(content, window, cx)

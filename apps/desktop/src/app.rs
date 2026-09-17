@@ -1302,6 +1302,10 @@ pub struct Padu {
     host_switch_pending: bool,
     host_switch_generation: u64,
     onboarding: onboarding::OnboardingState,
+    /// Post-update release notes. `Some` while the modal is open; the
+    /// full-width sidebar button shows while the persisted last-seen
+    /// version differs from the running version.
+    whats_new: Option<whats_new::WhatsNewState>,
     /// Goal operations accepted before the session's runtime exists. Goals
     /// attach to the provider thread, not to any turn, so `/goal` on a fresh
     /// task starts the provider and these drain once it installs.
@@ -1784,6 +1788,7 @@ mod transcript;
 mod transcript_search;
 mod transcript_view;
 mod usage_meter;
+mod whats_new;
 mod window_chrome;
 
 pub use autocomplete::init as init_composer_autocomplete;
@@ -1805,6 +1810,7 @@ use sidebar::{SidebarGroup, SidebarRow};
 use streaming::*;
 use transcript::*;
 use transcript_view::ConversationNavigationRail;
+pub use whats_new::init as init_whats_new_keys;
 
 /// Collapse provider- or page-supplied text into a label that cannot contain
 /// hard line breaks. GPUI's `truncate()` prevents wrapping, but explicit
@@ -2450,6 +2456,13 @@ impl Padu {
         let mut onboarding = onboarding::OnboardingState::new(cx);
         if !state.has_completed_onboarding {
             onboarding.open = true;
+        }
+        // Fresh installs have no recorded version: stamp the running version
+        // silently so the "what's new" button never appears for them. The
+        // stamp persists with the next regular save; even if it is lost, the
+        // next launch re-stamps instead of showing — never the reverse.
+        if state.last_seen_version.is_none() {
+            state.last_seen_version = Some(env!("CARGO_PKG_VERSION").to_string());
         }
         let project_paths = state
             .projects
@@ -3265,6 +3278,7 @@ impl Padu {
                 host_switch_pending: false,
                 host_switch_generation: 0,
                 onboarding,
+                whats_new: None,
                 pending_goal_operations: HashMap::new(),
                 goal_runtime_starts: HashSet::new(),
                 goal_observed_at: HashMap::new(),

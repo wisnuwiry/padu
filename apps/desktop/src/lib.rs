@@ -226,6 +226,7 @@ pub fn run() {
             crate::app::init_image_preview_keys(cx);
             crate::app::init_note_preview_keys(cx);
             crate::app::init_onboarding_keys(cx);
+            crate::app::init_whats_new_keys(cx);
             crate::app::init_sidebar_keys(cx);
             crate::app::init_right_panel_files_keys(cx);
             crate::app::init_right_panel_diff_keys(cx);
