@@ -603,6 +603,7 @@ activity.show_fewer: アクティビティを折りたたむ
 activity.action_think: 思考
 activity.action_run: 実行
 activity.action_edit: 編集
+activity.action_create: 作成
 activity.action_read: 読み込み
 activity.action_search: 検索
 activity.action_list: 一覧
@@ -644,6 +645,12 @@ activity.edit_failed_named_file: "%{file} の編集に失敗しました"
 activity.editing_files: ファイルを編集中
 activity.edited_files: ファイルを編集しました
 activity.edit_failed: ファイルの編集に失敗しました
+activity.creating_named_file: "%{file} を作成中"
+activity.created_named_file: "%{file} を作成しました"
+activity.create_failed_named_file: "%{file} の作成に失敗しました"
+activity.creating_files: ファイルを作成中
+activity.created_files: ファイルを作成しました
+activity.create_failed: ファイルの作成に失敗しました
 activity.file_count: "%{count} 個のファイル"
 activity.read_file: ファイルを読み込む
 activity.reading_named_file: "%{file} を読み込み中"

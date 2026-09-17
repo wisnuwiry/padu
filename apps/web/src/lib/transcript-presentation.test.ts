@@ -7,6 +7,7 @@ import {
   activityDisclosureSections,
   activityDisplayTitle,
   activityFileChangeStats,
+  activityIsFileCreation,
   cleanFileReadOutput,
   activityFilePath,
   activityGroupIsLive,
@@ -276,6 +277,23 @@ describe('desktop transcript language', () => {
       { kind: 'addition', content: 'new_value' },
       { kind: 'context', content: 'same_suffix' },
     ])
+  })
+
+  test('reads a file creation from the tool name, not the edit label', () => {
+    const create = {
+      ...activity('fileChange', true),
+      title: 'Run create_file',
+      file_changes: [{ path: 'src/new.rs', additions: 3, deletions: 0 }],
+    }
+    expect(activityIsFileCreation(create)).toBe(true)
+    expect(activityActionLabel(create)).toBe('Create')
+    expect(activityDisplayTitle(create)).toBe('Created new.rs')
+    expect(activityDisplayTitle({ ...create, complete: false })).toBe('Creating new.rs')
+
+    const edit = { ...create, title: 'edit_file' }
+    expect(activityIsFileCreation(edit)).toBe(false)
+    expect(activityActionLabel(edit)).toBe('Edit')
+    expect(activityDisplayTitle(edit)).toBe('Edited new.rs')
   })
 
   test('shows file edit stats only when every settled edit has counts', () => {

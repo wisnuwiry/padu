@@ -77,15 +77,33 @@ export function activityDisplayTitle(activity: ActivityItem, t?: Translator) {
           ? t ? t('activity.file_count', { count: changes.length }) : `${changes.length} files`
           : null
       if (!subject && !isGenericActivityTitle(activity)) return activity.title
-      if (!activity.complete) return t
-        ? t(subject ? 'activity.editing_named_file' : 'activity.editing_files', subject ? { file: subject } : undefined)
-        : subject ? `Editing ${subject}` : 'Editing files'
-      if (activity.failed) return t
-        ? t(subject ? 'activity.edit_failed_named_file' : 'activity.edit_failed', subject ? { file: subject } : undefined)
-        : subject ? `Failed to edit ${subject}` : 'Failed to edit files'
+      const creating = activityIsFileCreation(activity)
+      const params = subject ? { file: subject } : undefined
+      if (!activity.complete) {
+        return t
+          ? t(creating
+            ? (subject ? 'activity.creating_named_file' : 'activity.creating_files')
+            : (subject ? 'activity.editing_named_file' : 'activity.editing_files'), params)
+          : creating
+            ? (subject ? `Creating ${subject}` : 'Creating files')
+            : (subject ? `Editing ${subject}` : 'Editing files')
+      }
+      if (activity.failed) {
+        return t
+          ? t(creating
+            ? (subject ? 'activity.create_failed_named_file' : 'activity.create_failed')
+            : (subject ? 'activity.edit_failed_named_file' : 'activity.edit_failed'), params)
+          : creating
+            ? (subject ? `Failed to create ${subject}` : 'Failed to create files')
+            : (subject ? `Failed to edit ${subject}` : 'Failed to edit files')
+      }
       return t
-        ? t(subject ? 'activity.edited_named_file' : 'activity.edited_files', subject ? { file: subject } : undefined)
-        : subject ? `Edited ${subject}` : 'Edited files'
+        ? t(creating
+          ? (subject ? 'activity.created_named_file' : 'activity.created_files')
+          : (subject ? 'activity.edited_named_file' : 'activity.edited_files'), params)
+        : creating
+          ? (subject ? `Created ${subject}` : 'Created files')
+          : (subject ? `Edited ${subject}` : 'Edited files')
     }
     case 'fileRead': {
       const file = target ? pathName(target) : null
@@ -174,6 +192,26 @@ export function activityDisplayTitle(activity: ActivityItem, t?: Translator) {
   }
 }
 
+const FILE_CREATION_TOOLS = new Set([
+  'create',
+  'createfile',
+  'clientcreatefile',
+  'newfile',
+  'writetofile',
+])
+
+/// Mirrors `ActivityItem::creates_file`: `create_file` and `edit_file` both
+/// classify as a file change, so the tool name in the title is the intent.
+export function activityIsFileCreation(activity: ActivityItem): boolean {
+  if (activity.kind !== 'fileChange') return false
+  const compact = toolNameLeaf(activity.title)
+    .replace(/[\s_-]+/g, '')
+    .toLocaleLowerCase()
+    .replace(/^running/, '')
+    .replace(/^run/, '')
+  return FILE_CREATION_TOOLS.has(compact)
+}
+
 export function activityActionLabel(activity: ActivityItem, t?: Translator) {
   if (isAskUserQuestion(activity)) {
     return t ? t('activity.ask_questions') : 'Ask questions'
@@ -183,7 +221,7 @@ export function activityActionLabel(activity: ActivityItem, t?: Translator) {
     : activity.kind === 'command'
       ? 'activity.action_run'
       : activity.kind === 'fileChange'
-        ? 'activity.action_edit'
+        ? activityIsFileCreation(activity) ? 'activity.action_create' : 'activity.action_edit'
         : activity.kind === 'fileRead'
           ? 'activity.action_read'
           : activity.kind === 'fileSearch' || activity.kind === 'search'
@@ -197,6 +235,7 @@ export function activityActionLabel(activity: ActivityItem, t?: Translator) {
   return {
     'activity.action_think': 'Think',
     'activity.action_run': 'Run',
+    'activity.action_create': 'Create',
     'activity.action_edit': 'Edit',
     'activity.action_read': 'Read',
     'activity.action_search': 'Search',
@@ -614,12 +653,7 @@ export function activitySectionLanguage(
       }
       const trimmed = content.trim()
       if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
-        try {
-          JSON.parse(trimmed)
-          return 'json'
-        } catch {
-          return null
-        }
+        return 'json'
       }
       return null
     }

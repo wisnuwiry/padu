@@ -2712,6 +2712,43 @@ fn is_command_output_image(value: &serde_json::Value) -> bool {
         || (item_type == Some("file") && mime.is_some_and(|mime| mime.starts_with("image/")))
 }
 
+impl ActivityItem {
+    /// Whether this file change creates a file rather than editing one.
+    ///
+    /// `create_file` and `edit_file` both classify as a file change, so the
+    /// only thing carrying the intent is the tool name the title holds.
+    pub fn creates_file(&self) -> bool {
+        self.kind == ActivityKind::FileChange && is_file_creation_tool(&self.title)
+    }
+}
+
+/// The tool name behind a create, normalized so `create_file`,
+/// `Run create_file`, and `client_create_file` all match. Deliberately narrow:
+/// a plain write or replace may target an existing file and stays an edit.
+fn is_file_creation_tool(name: &str) -> bool {
+    let lower = name.trim().to_ascii_lowercase();
+    let leaf = lower
+        .rsplit("__")
+        .next()
+        .unwrap_or(&lower)
+        .rsplit([':', '.', '/'])
+        .next()
+        .unwrap_or(&lower);
+    let compact = leaf
+        .chars()
+        .filter(|character| !matches!(character, '_' | '-' | ' '))
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    let compact = compact
+        .strip_prefix("running")
+        .or_else(|| compact.strip_prefix("run"))
+        .unwrap_or(&compact);
+    matches!(
+        compact,
+        "create" | "createfile" | "clientcreatefile" | "newfile" | "writetofile"
+    )
+}
+
 fn fallback_activity_display_target(kind: ActivityKind, title: &str) -> Option<String> {
     let title = title.trim();
     if title.is_empty() || is_generic_activity_title(kind, title) {
@@ -4864,6 +4901,40 @@ mod tests {
         assert_eq!(
             activity.output.as_deref(),
             Some("export function useConversationBackground() {\n  return null;\n}")
+        );
+    }
+
+    #[test]
+    fn file_creations_are_read_from_the_tool_name() {
+        let change =
+            |title: &str| ActivityItem::new(None, ActivityKind::FileChange, title, None, true);
+
+        for title in [
+            "create_file",
+            "Run create_file",
+            "create",
+            "client_create_file",
+            "new_file",
+            "write_to_file",
+        ] {
+            assert!(change(title).creates_file(), "{title} should create");
+        }
+
+        for title in [
+            "edit_file",
+            "Run edit_file",
+            "str_replace",
+            "apply_patch",
+            "Write",
+            "read_file",
+        ] {
+            assert!(!change(title).creates_file(), "{title} should stay an edit");
+        }
+
+        // Only file changes carry the distinction.
+        assert!(
+            !ActivityItem::new(None, ActivityKind::Command, "create_file", None, true)
+                .creates_file()
         );
     }
 }

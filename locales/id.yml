@@ -584,6 +584,7 @@ activity.show_fewer: Tampilkan lebih sedikit aktivitas
 activity.action_think: Berpikir
 activity.action_run: Jalankan
 activity.action_edit: Edit
+activity.action_create: Buat
 activity.action_read: Baca
 activity.action_search: Cari
 activity.action_list: Daftar
@@ -625,6 +626,12 @@ activity.edit_failed_named_file: Gagal mengedit %{file}
 activity.editing_files: Mengedit berkas
 activity.edited_files: Telah mengedit berkas
 activity.edit_failed: Gagal mengedit berkas
+activity.creating_named_file: Membuat %{file}
+activity.created_named_file: Telah membuat %{file}
+activity.create_failed_named_file: Gagal membuat %{file}
+activity.creating_files: Membuat berkas
+activity.created_files: Telah membuat berkas
+activity.create_failed: Gagal membuat berkas
 activity.file_count: "%{count} berkas"
 activity.read_file: Baca berkas
 activity.reading_named_file: Membaca %{file}
