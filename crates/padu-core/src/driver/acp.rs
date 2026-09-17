@@ -324,10 +324,16 @@ enum AcpUserInputKind {
     Xai,
 }
 
-struct PendingAcpUserInput {
-    kind: AcpUserInputKind,
-    params: Value,
-    responder: Responder<Value>,
+enum PendingAcpUserInput {
+    Generic {
+        kind: AcpUserInputKind,
+        params: Value,
+        responder: Responder<Value>,
+    },
+    Permission {
+        request: RequestPermissionRequest,
+        responder: PermissionResponder,
+    },
 }
 
 type PendingAcpUserInputs = Arc<Mutex<HashMap<String, PendingAcpUserInput>>>;
@@ -456,12 +462,15 @@ async fn run_sdk_connection(
             {
                 let events = events.clone();
                 let pending_permissions = pending_permissions.clone();
+                let pending_user_inputs = pending_user_inputs.clone();
                 async move |request: RequestPermissionRequest, responder, _connection| {
                     handle_permission_request(
+                        provider,
                         request,
                         responder,
                         auto_approve,
                         &pending_permissions,
+                        &pending_user_inputs,
                         &events,
                     )
                 }
@@ -502,7 +511,7 @@ async fn run_sdk_connection(
                     }
                     pending.lock().insert(
                         request_id.clone(),
-                        PendingAcpUserInput {
+                        PendingAcpUserInput::Generic {
                             kind,
                             params,
                             responder,
@@ -514,11 +523,11 @@ async fn run_sdk_connection(
                             questions,
                         })
                         .is_err()
-                        && let Some(pending) = pending.lock().remove(&request_id)
+                        && let Some(PendingAcpUserInput::Generic {
+                            kind, responder, ..
+                        }) = pending.lock().remove(&request_id)
                     {
-                        let _ = pending
-                            .responder
-                            .respond(cancelled_user_input_response(pending.kind));
+                        let _ = responder.respond(cancelled_user_input_response(kind));
                     }
                     Ok(Handled::Yes)
                 }
@@ -589,12 +598,19 @@ async fn run_sdk_connection(
             while let Ok(command) = commands.recv().await {
                 match command {
                     CommandMessage::Prompt(text) => {
-                        let text = fork_context
+                        let mut text = fork_context
                             .take()
                             .map(|context| {
                                 crate::cursor_session::prompt_with_fork_context(&context, &text)
                             })
                             .unwrap_or(text);
+                        if provider == ProviderKind::Agy
+                            && (interaction_mode == InteractionMode::Plan
+                                || mode == RuntimeMode::Plan)
+                            && !text.trim_start().starts_with("/plan")
+                        {
+                            text = format!("/plan {text}");
+                        }
                         let _ = events.send(DriverEvent::TurnStarted);
                         if let Err(error) = send_prompt(
                             &connection,
@@ -625,6 +641,14 @@ async fn run_sdk_connection(
                                 ),
                             });
                             continue;
+                        }
+                        let mut text = text;
+                        if provider == ProviderKind::Agy
+                            && (interaction_mode == InteractionMode::Plan
+                                || mode == RuntimeMode::Plan)
+                            && !text.trim_start().starts_with("/plan")
+                        {
+                            text = format!("/plan {text}");
                         }
                         match send_prompt(
                             &connection,
@@ -672,15 +696,27 @@ async fn run_sdk_connection(
                         answers,
                     } => {
                         if let Some(pending) = pending_user_inputs.lock().remove(&request_id) {
-                            let response = match pending.kind {
-                                AcpUserInputKind::Cursor => {
-                                    cursor_user_input_response(&pending.params, &answers)
+                            match pending {
+                                PendingAcpUserInput::Generic {
+                                    kind,
+                                    params,
+                                    responder,
+                                } => {
+                                    let response = match kind {
+                                        AcpUserInputKind::Cursor => {
+                                            cursor_user_input_response(&params, &answers)
+                                        }
+                                        AcpUserInputKind::Xai => {
+                                            xai_user_input_response(&params, &answers)
+                                        }
+                                    };
+                                    let _ = responder.respond(response);
                                 }
-                                AcpUserInputKind::Xai => {
-                                    xai_user_input_response(&pending.params, &answers)
+                                PendingAcpUserInput::Permission { request, responder } => {
+                                    let response = agy_user_input_response(&request, &answers);
+                                    let _ = responder.respond(response);
                                 }
-                            };
-                            let _ = pending.responder.respond(response);
+                            }
                         }
                     }
                     CommandMessage::Options(options) => {
@@ -1056,6 +1092,16 @@ fn desired_mode(
             RuntimeMode::AutoAcceptEdits => "acceptEdits",
             RuntimeMode::Auto => "auto",
             RuntimeMode::FullAccess => "yolo",
+        }
+    } else if provider == ProviderKind::Agy {
+        if interaction_mode == InteractionMode::Plan || mode == RuntimeMode::Plan {
+            "default"
+        } else {
+            match mode {
+                RuntimeMode::Plan | RuntimeMode::Ask => "default",
+                RuntimeMode::AutoAcceptEdits => "auto_edit",
+                RuntimeMode::Auto | RuntimeMode::FullAccess => "yolo",
+            }
         }
     } else {
         if interaction_mode != InteractionMode::Plan && mode != RuntimeMode::Plan {
@@ -1741,9 +1787,18 @@ fn cancel_pending_permissions(pending: &PendingPermissions) {
 
 fn cancel_pending_user_inputs(pending: &PendingAcpUserInputs) {
     for (_, pending) in pending.lock().drain() {
-        let _ = pending
-            .responder
-            .respond(cancelled_user_input_response(pending.kind));
+        match pending {
+            PendingAcpUserInput::Generic {
+                kind, responder, ..
+            } => {
+                let _ = responder.respond(cancelled_user_input_response(kind));
+            }
+            PendingAcpUserInput::Permission { responder, .. } => {
+                let _ = responder.respond(RequestPermissionResponse::new(
+                    RequestPermissionOutcome::Cancelled,
+                ));
+            }
+        }
     }
 }
 
@@ -1991,15 +2046,172 @@ fn xai_user_input_response(params: &Value, submitted: &[UserInputAnswer]) -> Val
     response
 }
 
+fn is_agy_question_request(params: &Value, request: &RequestPermissionRequest) -> bool {
+    let is_interaction = params
+        .pointer("/toolCall/toolCallId")
+        .and_then(Value::as_str)
+        .is_some_and(|id| id.starts_with("interaction_"));
+    is_interaction && !request.options.is_empty()
+}
+
+fn agy_user_input_questions(
+    params: &Value,
+    request: &RequestPermissionRequest,
+) -> Vec<UserInputQuestion> {
+    if let Some(raw_questions) = params
+        .pointer("/toolCall/rawInput/questions")
+        .and_then(Value::as_array)
+        .filter(|q| !q.is_empty())
+    {
+        let mut questions = Vec::new();
+        for (idx, q) in raw_questions.iter().enumerate() {
+            let question_text = q
+                .get("question")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .unwrap_or("Please select an option:")
+                .to_owned();
+            let multi_select = q
+                .get("is_multi_select")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let mut options = Vec::new();
+            if let Some(raw_opts) = q.get("options").and_then(Value::as_array) {
+                for opt in raw_opts {
+                    if let Some(opt_str) = opt.as_str().map(str::trim).filter(|s| !s.is_empty()) {
+                        options.push(UserInputOption {
+                            label: opt_str.to_owned(),
+                            description: None,
+                        });
+                    }
+                }
+            }
+            if options.is_empty() {
+                options = request
+                    .options
+                    .iter()
+                    .map(|o| UserInputOption {
+                        label: o.name.clone(),
+                        description: None,
+                    })
+                    .collect();
+            }
+            questions.push(UserInputQuestion {
+                id: format!("question_{idx}"),
+                header: "Question".to_owned(),
+                question: question_text,
+                options,
+                multi_select,
+            });
+        }
+        if !questions.is_empty() {
+            return questions;
+        }
+    }
+
+    let question_text = params
+        .pointer("/toolCall/title")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .unwrap_or("Please select an option:")
+        .to_owned();
+
+    let options = request
+        .options
+        .iter()
+        .map(|option| UserInputOption {
+            label: option.name.clone(),
+            description: None,
+        })
+        .collect::<Vec<_>>();
+
+    if options.is_empty() {
+        return Vec::new();
+    }
+
+    vec![UserInputQuestion {
+        id: "question_0".to_owned(),
+        header: "Question".to_owned(),
+        question: question_text,
+        options,
+        multi_select: false,
+    }]
+}
+
+fn agy_user_input_response(
+    request: &RequestPermissionRequest,
+    submitted: &[UserInputAnswer],
+) -> RequestPermissionResponse {
+    let selected_label = submitted
+        .iter()
+        .find_map(|answer| answer.answers.first())
+        .map(String::as_str);
+
+    if let Some(selected) = selected_label {
+        let matched = request
+            .options
+            .iter()
+            .find(|opt| opt.name.trim().eq_ignore_ascii_case(selected.trim()))
+            .or_else(|| {
+                request
+                    .options
+                    .iter()
+                    .find(|opt| opt.option_id.to_string() == selected.trim())
+            })
+            .or_else(|| request.options.first());
+
+        if let Some(choice) = matched {
+            return RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
+                SelectedPermissionOutcome::new(choice.option_id.clone()),
+            ));
+        }
+    }
+
+    RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled)
+}
+
 fn handle_permission_request(
+    provider: ProviderKind,
     request: RequestPermissionRequest,
     responder: PermissionResponder,
     auto_approve: bool,
-    pending: &PendingPermissions,
+    pending_permissions: &PendingPermissions,
+    pending_user_inputs: &PendingAcpUserInputs,
     events: &impl DriverEventSink,
 ) -> agent_client_protocol::Result<()> {
     let request_id = responder.id().to_string();
     let params = serde_json::to_value(&request)?;
+
+    if provider == ProviderKind::Agy && is_agy_question_request(&params, &request) {
+        let questions = agy_user_input_questions(&params, &request);
+        if questions.is_empty() {
+            let _ = responder.respond(RequestPermissionResponse::new(
+                RequestPermissionOutcome::Cancelled,
+            ));
+            return Ok(());
+        }
+        pending_user_inputs.lock().insert(
+            request_id.clone(),
+            PendingAcpUserInput::Permission { request, responder },
+        );
+        if events
+            .send(DriverEvent::UserInputRequested {
+                request_id: request_id.clone(),
+                questions,
+            })
+            .is_err()
+            && let Some(PendingAcpUserInput::Permission { responder, .. }) =
+                pending_user_inputs.lock().remove(&request_id)
+        {
+            let _ = responder.respond(RequestPermissionResponse::new(
+                RequestPermissionOutcome::Cancelled,
+            ));
+        }
+        return Ok(());
+    }
+
     let options = request
         .options
         .iter()
@@ -2048,7 +2260,9 @@ fn handle_permission_request(
             .map(|kind| tr!("permission.agent_wants_to", action = kind))
             .unwrap_or_else(|| tr!("permission.agent_asks_for_permission"))
     });
-    pending.lock().insert(request_id.clone(), responder);
+    pending_permissions
+        .lock()
+        .insert(request_id.clone(), responder);
     if events
         .send(DriverEvent::Permission {
             request_id: request_id.clone(),
@@ -2057,7 +2271,7 @@ fn handle_permission_request(
             options,
         })
         .is_err()
-        && let Some(responder) = pending.lock().remove(&request_id)
+        && let Some(responder) = pending_permissions.lock().remove(&request_id)
     {
         let _ = responder.respond(RequestPermissionResponse::new(
             RequestPermissionOutcome::Cancelled,
@@ -2229,6 +2443,12 @@ fn tool_activity(update: &Value, events: &impl DriverEventSink, state: &mut AcpS
         .get("toolCallId")
         .and_then(Value::as_str)
         .map(str::to_owned);
+    if id
+        .as_deref()
+        .is_some_and(|id| id.starts_with("interaction_"))
+    {
+        return;
+    }
     let status = update
         .get("status")
         .and_then(Value::as_str)
@@ -2238,6 +2458,8 @@ fn tool_activity(update: &Value, events: &impl DriverEventSink, state: &mut AcpS
 
     let wire_kind = update.get("kind").and_then(Value::as_str);
     let wire_title = update.get("title").and_then(Value::as_str);
+    let clean_wire_title =
+        wire_title.map(|title| title.strip_prefix("Running ").unwrap_or(title).trim());
     let stored = id.as_ref().and_then(|id| {
         if complete {
             state.tools.remove(id)
@@ -2249,8 +2471,10 @@ fn tool_activity(update: &Value, events: &impl DriverEventSink, state: &mut AcpS
         .map(classify)
         .or_else(|| stored.as_ref().map(|(kind, _)| *kind))
         .unwrap_or(ActivityKind::Tool);
-    if matches!(kind, ActivityKind::Search | ActivityKind::Tool)
-        && let Some(wire_title) = wire_title
+    if matches!(
+        kind,
+        ActivityKind::Search | ActivityKind::Tool | ActivityKind::FileRead
+    ) && let Some(wire_title) = clean_wire_title
     {
         let named_kind = ActivityKind::from_tool_name(wire_title);
         if named_kind != ActivityKind::Tool {
@@ -2260,7 +2484,7 @@ fn tool_activity(update: &Value, events: &impl DriverEventSink, state: &mut AcpS
     let arguments = update.get("rawInput").filter(|value| !value.is_null());
     let title = activity::input_title(arguments)
         .or_else(|| {
-            wire_title
+            clean_wire_title
                 .filter(|title| !title.is_empty())
                 .map(str::to_owned)
         })
@@ -2588,6 +2812,175 @@ mod tests {
                 expected.map(str::to_owned)
             );
         }
+    }
+
+    #[test]
+    fn agy_access_modes_select_its_advertised_permission_profiles() {
+        let modes = SessionModeState::new(
+            "default",
+            vec![
+                SessionMode::new("default", "Default"),
+                SessionMode::new("auto_edit", "Auto Edit"),
+                SessionMode::new("yolo", "YOLO"),
+            ],
+        );
+        for (runtime_mode, interaction_mode, expected) in [
+            (RuntimeMode::Ask, InteractionMode::Build, None),
+            (
+                RuntimeMode::Ask,
+                InteractionMode::Plan,
+                None, // current is already "default"
+            ),
+            (
+                RuntimeMode::AutoAcceptEdits,
+                InteractionMode::Build,
+                Some("auto_edit"),
+            ),
+            (RuntimeMode::Auto, InteractionMode::Build, Some("yolo")),
+            (
+                RuntimeMode::FullAccess,
+                InteractionMode::Build,
+                Some("yolo"),
+            ),
+            (
+                RuntimeMode::Plan,
+                InteractionMode::Build,
+                None, // current is already "default"
+            ),
+        ] {
+            assert_eq!(
+                desired_mode(
+                    ProviderKind::Agy,
+                    Some(&modes),
+                    runtime_mode,
+                    interaction_mode,
+                )
+                .map(|mode| mode.to_string()),
+                expected.map(str::to_owned)
+            );
+        }
+
+        let modes_yolo = SessionModeState::new(
+            "yolo",
+            vec![
+                SessionMode::new("default", "Default"),
+                SessionMode::new("auto_edit", "Auto Edit"),
+                SessionMode::new("yolo", "YOLO"),
+            ],
+        );
+        assert_eq!(
+            desired_mode(
+                ProviderKind::Agy,
+                Some(&modes_yolo),
+                RuntimeMode::Ask,
+                InteractionMode::Plan,
+            )
+            .map(|mode| mode.to_string()),
+            Some("default".to_owned())
+        );
+    }
+
+    #[test]
+    fn agy_question_request_detection_and_response() {
+        let request: RequestPermissionRequest = serde_json::from_value(json!({
+            "sessionId": "session-1",
+            "toolCall": {
+                "toolCallId": "interaction_abc123",
+                "title": "Which database would you prefer?",
+                "rawInput": {
+                    "questions": [
+                        {
+                            "question": "Which database would you prefer?",
+                            "options": ["PostgreSQL", "SQLite", "MySQL"],
+                            "is_multi_select": false
+                        }
+                    ]
+                }
+            },
+            "options": [
+                { "optionId": "1", "name": "PostgreSQL", "kind": "allow_once" },
+                { "optionId": "2", "name": "SQLite", "kind": "allow_once" },
+                { "optionId": "3", "name": "MySQL", "kind": "allow_once" }
+            ]
+        }))
+        .unwrap();
+        let params = serde_json::to_value(&request).unwrap();
+
+        assert!(is_agy_question_request(&params, &request));
+
+        let questions = agy_user_input_questions(&params, &request);
+        assert_eq!(questions.len(), 1);
+        assert_eq!(questions[0].question, "Which database would you prefer?");
+        assert_eq!(questions[0].options.len(), 3);
+        assert_eq!(questions[0].options[0].label, "PostgreSQL");
+        assert_eq!(questions[0].options[1].label, "SQLite");
+        assert_eq!(questions[0].options[2].label, "MySQL");
+        assert!(!questions[0].multi_select);
+
+        let response = agy_user_input_response(
+            &request,
+            &[UserInputAnswer {
+                question_id: "question_0".into(),
+                answers: vec!["SQLite".into()],
+            }],
+        );
+
+        match response.outcome {
+            RequestPermissionOutcome::Selected(selected) => {
+                assert_eq!(selected.option_id.to_string(), "2");
+            }
+            _ => panic!("Expected Selected outcome"),
+        }
+    }
+
+    #[test]
+    fn agy_tool_activity_ignores_interaction_and_cleans_running_prefix() {
+        let (events, event_rx) = crossbeam_channel::unbounded();
+        let mut state = AcpStreamState::default();
+
+        let updates = [
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "interaction_xyz789",
+                "title": "Which fruit?",
+                "status": "pending"
+            }),
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "call_dir_1",
+                "title": "Running list_directory",
+                "kind": "read",
+                "status": "pending",
+                "rawInput": { "directory_path": "crates/padu-protocol" }
+            }),
+            json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call_dir_1",
+                "status": "completed",
+                "content": [{ "type": "content", "content": { "type": "text", "text": "{\"result\": [\"src/lib.rs\"]}" } }]
+            }),
+        ];
+
+        for update in updates {
+            let update = serde_json::from_value(update).unwrap();
+            handle_session_update(
+                ProviderKind::Agy,
+                SessionNotification::new("s", update),
+                &events,
+                &mut state,
+            )
+            .unwrap();
+        }
+
+        let seen = event_rx.try_iter().collect::<Vec<_>>();
+        assert_eq!(seen.len(), 2);
+        assert!(matches!(&seen[0], DriverEvent::RichActivity(item)
+            if item.kind == ActivityKind::FileList
+                && item.title == "list_directory"
+                && !item.complete
+                && item.display_target.as_deref() == Some("crates/padu-protocol")));
+        assert!(matches!(&seen[1], DriverEvent::RichActivity(item)
+            if item.kind == ActivityKind::FileList && item.complete));
     }
 
     #[test]

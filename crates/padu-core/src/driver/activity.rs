@@ -127,6 +127,9 @@ fn format_output(value: &Value) -> Option<String> {
     if let Some(content) = value.get("content").filter(|value| !value.is_null()) {
         return format_output(content);
     }
+    if let Some(result) = value.get("result").filter(|value| !value.is_null()) {
+        return format_output(result);
+    }
     if let Some(items) = value.as_array() {
         let text = items
             .iter()
