@@ -2434,30 +2434,67 @@ struct AcpStreamState {
     inlined_plan: bool,
 }
 
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn percent_decode_file_path(path: &str) -> String {
+    let bytes = path.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%'
+            && let (Some(high), Some(low)) = (
+                bytes.get(index + 1).copied().and_then(hex_value),
+                bytes.get(index + 2).copied().and_then(hex_value),
+            )
+        {
+            decoded.push(high << 4 | low);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).unwrap_or_else(|_| path.to_owned())
+}
+
 fn is_plan_file(path: &Path) -> bool {
-    let ext_matches = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown"));
+    let normalized = path.to_string_lossy().replace('\\', "/");
+    let file_name = normalized
+        .rsplit('/')
+        .next()
+        .unwrap_or(&normalized)
+        .to_ascii_lowercase();
+    let ext_matches = file_name.ends_with(".md") || file_name.ends_with(".markdown");
     if !ext_matches {
         return false;
     }
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let path_str = path.to_string_lossy().to_ascii_lowercase();
-    file_name.contains("plan")
-        || path_str.contains("/brain/")
-        || path_str.contains("\\brain\\")
-        || path_str.contains("/antigravity-acp/")
-        || path_str.contains("\\antigravity-acp\\")
-        || path_str.contains("/.gemini/")
-        || path_str.contains("\\.gemini\\")
+
+    if file_name.contains("plan") {
+        return true;
+    }
+
+    let normalized_lower = normalized.to_ascii_lowercase();
+    let segments: Vec<&str> = normalized_lower.split('/').collect();
+    let dir_segments = if segments.len() > 1 {
+        &segments[..segments.len() - 1]
+    } else {
+        &[]
+    };
+
+    dir_segments.iter().any(|&seg| {
+        seg == "brain" || seg == "antigravity-acp" || seg == "antigravity" || seg == ".gemini"
+    })
 }
 
 fn extract_plan_link_path(text: &str) -> Option<PathBuf> {
+    // 1. Scan for file:// URIs (e.g. file:///path/to/plan.md or [plan.md](file://...))
     let mut search_idx = 0;
     while let Some(start) = text[search_idx..].find("file://") {
         let actual_start = search_idx + start;
@@ -2468,7 +2505,17 @@ fn extract_plan_link_path(text: &str) -> Option<PathBuf> {
         let raw_url = &url_part[..end];
         let clean_url = raw_url.trim_end_matches(|c: char| c == '.' || c == ',');
         if let Ok(url) = url::Url::parse(clean_url) {
-            if let Ok(path) = url.to_file_path() {
+            let path = url.to_file_path().ok().or_else(|| {
+                // Fallback for Windows file URLs parsed across platforms
+                let decoded = percent_decode_file_path(url.path());
+                let trimmed = decoded.trim_start_matches('/');
+                if trimmed.len() >= 2 && trimmed.chars().nth(1) == Some(':') {
+                    Some(PathBuf::from(trimmed))
+                } else {
+                    Some(PathBuf::from(decoded))
+                }
+            });
+            if let Some(path) = path {
                 if is_plan_file(&path) {
                     return Some(path);
                 }
@@ -2476,6 +2523,27 @@ fn extract_plan_link_path(text: &str) -> Option<PathBuf> {
         }
         search_idx = actual_start + "file://".len();
     }
+
+    // 2. Scan for markdown links with direct filesystem paths: [...](path)
+    let mut search_idx = 0;
+    while let Some(start) = text[search_idx..].find("](") {
+        let actual_start = search_idx + start + 2;
+        let rest = &text[actual_start..];
+        if let Some(end) = rest.find(')') {
+            let target = rest[..end].trim();
+            if !target.starts_with("http://") && !target.starts_with("https://") {
+                let decoded = percent_decode_file_path(target);
+                let path = PathBuf::from(decoded);
+                if is_plan_file(&path) {
+                    return Some(path);
+                }
+            }
+            search_idx = actual_start + end + 1;
+        } else {
+            break;
+        }
+    }
+
     None
 }
 
@@ -3777,6 +3845,69 @@ mod tests {
 
         let non_plan_text = "Created [hello.rs](file:///Users/alice/project/hello.rs).";
         assert_eq!(extract_plan_link_path(non_plan_text), None);
+
+        let windows_file_url =
+            "Review in [plan.md](file:///C:/Users/alice/.gemini/antigravity-acp/brain/123/plan.md).";
+        let extracted_win = extract_plan_link_path(windows_file_url);
+        assert!(extracted_win.is_some());
+        let win_path_str = extracted_win.unwrap().to_string_lossy().replace('\\', "/");
+        assert!(win_path_str.ends_with("/plan.md"));
+        assert!(win_path_str.contains("Users/alice"));
+
+        let windows_raw_md_link =
+            r"Review in [plan.md](C:\Users\alice\.gemini\antigravity-acp\brain\123\plan.md).";
+        let extracted_raw_win = extract_plan_link_path(windows_raw_md_link);
+        assert!(extracted_raw_win.is_some());
+    }
+
+    #[test]
+    fn agy_is_plan_file_multiplatform_matrix() {
+        // macOS / Linux unix paths
+        assert!(is_plan_file(Path::new(
+            "/Users/alice/.gemini/antigravity-acp/brain/123/plan.md"
+        )));
+        assert!(is_plan_file(Path::new(
+            "/home/bob/.gemini/antigravity/brain/session/implementation_plan.markdown"
+        )));
+        assert!(is_plan_file(Path::new("/workspace/project/plan.md")));
+        assert!(is_plan_file(Path::new("/workspace/project/PLAN.MD")));
+        assert!(is_plan_file(Path::new(
+            "/workspace/project/step1_plan.markdown"
+        )));
+
+        // Windows backslash paths
+        assert!(is_plan_file(Path::new(
+            r"C:\Users\alice\.gemini\antigravity-acp\brain\123\plan.md"
+        )));
+        assert!(is_plan_file(Path::new(
+            r"C:\Users\alice\.gemini\antigravity-acp\brain\123\architecture.markdown"
+        )));
+        assert!(is_plan_file(Path::new(r"D:\Projects\app\PLAN.MD")));
+        assert!(is_plan_file(Path::new(
+            r"\\?\C:\Users\alice\.gemini\brain\123\plan.md"
+        )));
+
+        // Windows forward-slash paths
+        assert!(is_plan_file(Path::new(
+            "C:/Users/alice/.gemini/antigravity-acp/brain/123/plan.md"
+        )));
+        assert!(is_plan_file(Path::new("D:/Projects/app/custom_plan.md")));
+
+        // Non-markdown files (must be false even in brain)
+        assert!(!is_plan_file(Path::new(
+            r"C:\Users\alice\.gemini\brain\output.json"
+        )));
+        assert!(!is_plan_file(Path::new("/home/bob/.gemini/brain/script.py")));
+        assert!(!is_plan_file(Path::new("/Users/alice/project/plan.rs")));
+
+        // Ordinary markdown files outside brain directories without "plan" in name (must be false)
+        assert!(!is_plan_file(Path::new("/Users/alice/project/README.md")));
+        assert!(!is_plan_file(Path::new(
+            "/Users/alice/project/docs/brain.md"
+        )));
+        assert!(!is_plan_file(Path::new(
+            r"C:\Users\alice\project\docs\brain.md"
+        )));
     }
 
     #[test]
