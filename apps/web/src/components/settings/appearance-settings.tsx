@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { ControlMenu } from '@/components/control-menu'
 import {
   applyThemeChoice,
@@ -11,6 +12,8 @@ import {
   useI18n,
 } from '@/lib/i18n'
 import {
+  UnsupportedConversationBackgroundError,
+  OversizedConversationBackgroundError,
   chooseConversationBackground,
   clearConversationBackground,
   updateConversationBackground,
@@ -102,13 +105,19 @@ export function AppearanceSettings() {
           onChange={(event) => {
             const file = event.target.files?.[0]
             event.currentTarget.value = ''
-            if (file) void chooseConversationBackground(file).catch(() => undefined)
+            if (file) void chooseConversationBackground(file).catch((error: unknown) => {
+              toast.error(t(error instanceof UnsupportedConversationBackgroundError
+                ? 'settings.background_unsupported'
+                : error instanceof OversizedConversationBackgroundError
+                ? 'settings.background_too_large'
+                : 'settings.background_unavailable'))
+            })
           }}
         />
         <button className="rounded-md border px-3 py-2 text-xs outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring" type="button" onClick={() => fileInput.current?.click()}>
           {t('settings.background_choose')}
         </button>
-        {background.imageUrl && <button className="rounded-md px-2 py-1.5 text-left text-xs text-[var(--text-secondary)] hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring" type="button" onClick={() => void clearConversationBackground()}>{t('settings.background_remove')}</button>}
+        {background.imageUrl && <button className="rounded-md px-2 py-1.5 text-left text-xs text-[var(--text-secondary)] hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring" type="button" onClick={() => void clearConversationBackground().catch(() => toast.error(t('settings.background_unavailable')))}>{t('settings.background_remove')}</button>}
         {background.fileName && <span className="truncate text-xs text-[var(--text-secondary)]" title={background.fileName}>{background.fileName}</span>}
         <label className="space-y-1 text-xs">
           <span className="block text-[var(--text-secondary)]">{t('settings.background_opacity')} · {Math.round(background.opacity * 100)}%</span>
@@ -118,20 +127,13 @@ export function AppearanceSettings() {
           <span className="block text-[var(--text-secondary)]">{t('settings.background_height')} · {Math.round(background.heightPercent)}%</span>
           <input aria-label={t('settings.background_height')} className="w-full accent-[var(--accent)]" max="100" min="20" step="1" type="range" value={background.heightPercent} onChange={(event) => updateConversationBackground({ heightPercent: Number(event.target.value) })} />
         </label>
-        <label className="flex flex-col gap-1 text-xs">
-          <span className="text-[var(--text-secondary)]">{t('settings.background_fit')}</span>
-          <select className="rounded-md border bg-background px-2 py-1 outline-none focus-visible:ring-1 focus-visible:ring-ring" value={background.fit} onChange={(event) => updateConversationBackground({ fit: event.target.value as 'cover' | 'contain' })}>
-            <option value="cover">{t('settings.background_cover')}</option>
-            <option value="contain">{t('settings.background_contain')}</option>
-          </select>
-        </label>
       </div>
       <div className="relative aspect-[188/142] min-h-[260px] min-w-0 flex-1 overflow-hidden rounded-lg border bg-[var(--inset)]">
-        {background.imageUrl && <img alt="" aria-hidden="true" className="absolute inset-x-0 top-0 w-full rounded-lg object-cover object-top" src={background.imageUrl} style={{ height: `${background.heightPercent}%`, opacity: background.opacity, objectFit: background.fit }} />}
+        {background.imageUrl && <img alt="" aria-hidden="true" className="absolute inset-x-0 top-0 w-full rounded-lg object-cover object-top" src={background.imageUrl} style={{ height: `${background.heightPercent}%`, opacity: background.opacity }} />}
         <div className="absolute inset-x-0 bottom-0 z-[1] h-[58%] bg-gradient-to-b from-transparent to-background/95" />
         <div className="relative z-[2] flex h-full flex-col justify-end gap-3 p-6 text-xs">
           <div className="max-w-[72%] rounded-2xl rounded-tl-md bg-background/95 px-4 py-3 shadow-sm">
-            <div className="mb-1 text-[10px] font-medium text-[var(--text-tertiary)]">You</div>
+            <div className="mb-1 text-[10px] font-medium text-[var(--text-tertiary)]">{t('command_palette.you')}</div>
             {t('settings.background_preview_user')}
           </div>
           <div className="max-w-[78%] self-end rounded-2xl rounded-tr-md bg-card/95 px-4 py-3 shadow-sm">

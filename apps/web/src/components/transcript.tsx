@@ -82,6 +82,21 @@ type MessageEdit = {
   attachments: MessageAttachment[]
 }
 
+function ConversationBackgroundLayer() {
+  const background = useConversationBackground()
+  if (!background.imageUrl || background.loading) return null
+  return (
+    <img
+      alt=""
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-x-0 bottom-0 z-0 w-full object-cover object-bottom"
+      draggable={false}
+      src={background.imageUrl}
+      style={{ height: `${background.heightPercent}%`, opacity: background.opacity }}
+    />
+  )
+}
+
 export function Transcript({
   session,
   backgroundWork = [],
@@ -114,7 +129,6 @@ export function Transcript({
   rewindingTurnCount?: number
 }) {
   const { locale, t } = useI18n()
-  const background = useConversationBackground()
   const root = useRef<HTMLDivElement>(null)
   const transcript = useRef<VirtuosoHandle>(null)
   const transcriptScroller = useRef<HTMLElement | null>(null)
@@ -211,16 +225,7 @@ export function Transcript({
   return (
     <TranscriptLinkContext.Provider value={onOpenLink ?? (() => false)}>
       <div className="relative min-h-0 flex-1" ref={root}>
-      {background.imageUrl && !background.loading && (
-        <img
-          alt=""
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-0 w-full object-cover object-bottom"
-          draggable={false}
-          src={background.imageUrl}
-          style={{ height: `${background.heightPercent}%`, opacity: background.opacity, objectFit: background.fit }}
-        />
-      )}
+      <ConversationBackgroundLayer />
       <div className="relative z-[1] h-full min-h-0">
       {empty ? (
         <div className="absolute inset-0 grid place-items-center pb-8">

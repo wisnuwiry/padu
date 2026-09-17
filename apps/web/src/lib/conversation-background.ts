@@ -1,13 +1,10 @@
 import { useSyncExternalStore } from 'react'
 
-export type ConversationBackgroundFit = 'cover' | 'contain'
-
 export type ConversationBackground = {
   imageUrl: string | null
   fileName: string | null
   opacity: number
   heightPercent: number
-  fit: ConversationBackgroundFit
   loading: boolean
 }
 
@@ -20,13 +17,14 @@ const defaults: ConversationBackground = {
   fileName: null,
   opacity: 0.18,
   heightPercent: 50,
-  fit: 'cover',
   loading: true,
 }
 
 let snapshot = readSettings()
 const listeners = new Set<() => void>()
 let objectUrl: string | null = null
+let generation = 0
+let mutationQueue: Promise<void> = Promise.resolve()
 
 function readSettings(): ConversationBackground {
   if (typeof window === 'undefined') return defaults
@@ -37,8 +35,8 @@ function readSettings(): ConversationBackground {
     return {
       ...defaults,
       ...parsed,
-      opacity: clamp(Number(parsed.opacity ?? defaults.opacity), 0, 1),
-      heightPercent: clamp(Number(parsed.heightPercent ?? defaults.heightPercent), 20, 100),
+      opacity: clamp(Number(parsed.opacity ?? defaults.opacity), 0, 1, defaults.opacity),
+      heightPercent: clamp(Number(parsed.heightPercent ?? defaults.heightPercent), 20, 100, defaults.heightPercent),
       loading: true,
     }
   } catch {
@@ -46,31 +44,49 @@ function readSettings(): ConversationBackground {
   }
 }
 
-function clamp(value: number, min: number, max: number) {
-  return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : min
+function clamp(value: number, min: number, max: number, fallback: number) {
+  return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback
+}
+
+function replaceObjectUrl(next: string | null) {
+  const previous = objectUrl
+  objectUrl = next
+  if (previous && previous !== next) URL.revokeObjectURL(previous)
+}
+
+function enqueueMutation(operation: () => Promise<void>) {
+  const pending = mutationQueue.then(operation).catch((error: unknown) => {
+    snapshot = { ...snapshot, loading: false }
+    emit()
+    throw error
+  })
+  mutationQueue = pending.catch(() => {})
+  return pending
 }
 
 function emit() {
   for (const listener of listeners) listener()
 }
 
-function saveSettings(next: Partial<ConversationBackground>) {
-  snapshot = {
+function saveSettings(next: Partial<ConversationBackground>) {  snapshot = {
     ...snapshot,
     ...next,
-    opacity: clamp(next.opacity ?? snapshot.opacity, 0, 1),
-    heightPercent: clamp(next.heightPercent ?? snapshot.heightPercent, 20, 100),
+    opacity: clamp(next.opacity ?? snapshot.opacity, 0, 1, defaults.opacity),
+    heightPercent: clamp(next.heightPercent ?? snapshot.heightPercent, 20, 100, defaults.heightPercent),
     loading: false,
   }
-  if (typeof window !== 'undefined') {
-    window.localStorage.setItem(SETTINGS_KEY, JSON.stringify({
-      fileName: snapshot.fileName,
-      opacity: snapshot.opacity,
-      heightPercent: snapshot.heightPercent,
-      fit: snapshot.fit,
-    }))
+  try {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+        fileName: snapshot.fileName,
+        opacity: snapshot.opacity,
+        heightPercent: snapshot.heightPercent,
+      }))
+    }
+  } catch {
+  } finally {
+    emit()
   }
-  emit()
 }
 
 function openDatabase(): Promise<IDBDatabase> {
@@ -84,33 +100,47 @@ function openDatabase(): Promise<IDBDatabase> {
 
 async function readImage(): Promise<Blob | null> {
   const db = await openDatabase()
-  return new Promise((resolve, reject) => {
-    const request = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).get(IMAGE_KEY)
-    request.onsuccess = () => resolve((request.result as Blob | undefined) ?? null)
-    request.onerror = () => reject(request.error)
-  })
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, 'readonly')
+      const request = transaction.objectStore(STORE_NAME).get(IMAGE_KEY)
+      request.onsuccess = () => resolve((request.result as Blob | undefined) ?? null)
+      request.onerror = () => reject(request.error)
+      transaction.onabort = () => reject(transaction.error ?? new Error('Background image transaction aborted'))
+    })
+  } finally {
+    db.close()
+  }
 }
 
 async function writeImage(file: Blob | null) {
   const db = await openDatabase()
-  return new Promise<void>((resolve, reject) => {
-    const request = db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).put(file, IMAGE_KEY)
-    request.onsuccess = () => resolve()
-    request.onerror = () => reject(request.error)
-  })
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, 'readwrite')
+      transaction.oncomplete = () => resolve()
+      transaction.onabort = () => reject(transaction.error ?? new Error('Background image transaction aborted'))
+      transaction.onerror = () => reject(transaction.error)
+      transaction.objectStore(STORE_NAME).put(file, IMAGE_KEY)
+    })
+  } finally {
+    db.close()
+  }
 }
 
 export async function loadConversationBackground() {
   if (typeof window === 'undefined') return
+  const currentGeneration = ++generation
+  await mutationQueue
+  if (currentGeneration !== generation) return
   try {
     const blob = await readImage()
-    if (blob) {
-      objectUrl = URL.createObjectURL(blob)
-      snapshot = { ...snapshot, imageUrl: objectUrl, loading: false }
-    } else {
-      snapshot = { ...snapshot, imageUrl: null, loading: false }
-    }
+    if (currentGeneration !== generation) return
+    replaceObjectUrl(blob ? URL.createObjectURL(blob) : null)
+    snapshot = { ...snapshot, imageUrl: objectUrl, loading: false }
   } catch {
+    if (currentGeneration !== generation) return
+    replaceObjectUrl(null)
     snapshot = { ...snapshot, imageUrl: null, loading: false }
   }
   emit()
@@ -128,32 +158,65 @@ const SUPPORTED_TYPES = new Set([
   'image/x-portable-anymap',
 ])
 
+export class UnsupportedConversationBackgroundError extends Error {
+  constructor() {
+    super('Unsupported image format')
+    this.name = 'UnsupportedConversationBackgroundError'
+  }
+}
+
+export class OversizedConversationBackgroundError extends Error {
+  constructor() {
+    super('Image exceeds the 2 MB background limit')
+    this.name = 'OversizedConversationBackgroundError'
+  }
+}
+
+export const MAX_BACKGROUND_IMAGE_BYTES = 2 * 1024 * 1024
+
 export async function chooseConversationBackground(file: File) {
-  if (!SUPPORTED_TYPES.has(file.type)) throw new Error('Unsupported image format')
-  await writeImage(file)
-  if (objectUrl) URL.revokeObjectURL(objectUrl)
-  objectUrl = URL.createObjectURL(file)
-  saveSettings({ imageUrl: objectUrl, fileName: file.name })
+  if (!SUPPORTED_TYPES.has(file.type)) throw new UnsupportedConversationBackgroundError()
+  if (file.size > MAX_BACKGROUND_IMAGE_BYTES) throw new OversizedConversationBackgroundError()
+  generation += 1
+  await enqueueMutation(async () => {
+    const nextUrl = URL.createObjectURL(file)
+    try {
+      await writeImage(file)
+    } catch (error) {
+      URL.revokeObjectURL(nextUrl)
+      throw error
+    }
+    replaceObjectUrl(nextUrl)
+    saveSettings({ imageUrl: objectUrl, fileName: file.name })
+  })
 }
 
 export async function clearConversationBackground() {
-  await writeImage(null)
-  if (objectUrl) URL.revokeObjectURL(objectUrl)
-  objectUrl = null
-  saveSettings({ imageUrl: null, fileName: null })
+  generation += 1
+  await enqueueMutation(async () => {
+    await writeImage(null)
+    replaceObjectUrl(null)
+    saveSettings({ imageUrl: null, fileName: null })
+  })
 }
 
-export function updateConversationBackground(settings: Partial<Pick<ConversationBackground, 'opacity' | 'heightPercent' | 'fit'>>) {
+export function updateConversationBackground(settings: Partial<Pick<ConversationBackground, 'opacity' | 'heightPercent'>>) {
   saveSettings(settings)
+}
+
+export function subscribeConversationBackground(listener: () => void) {
+  listeners.add(listener)
+  return () => { listeners.delete(listener) }
+}
+
+export function getConversationBackgroundSnapshot() {
+  return snapshot
 }
 
 export function useConversationBackground() {
   return useSyncExternalStore(
-    (listener) => {
-      listeners.add(listener)
-      return () => listeners.delete(listener)
-    },
-    () => snapshot,
+    subscribeConversationBackground,
+    getConversationBackgroundSnapshot,
     () => defaults,
   )
 }
