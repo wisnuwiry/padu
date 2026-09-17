@@ -1985,6 +1985,7 @@ function ActivitySection({
                 overflow: 'wrap',
                 preferredHighlighter: 'shiki-js',
                 disableFileHeader: true,
+                disableLineNumbers: true,
                 themeType,
               }}
             />
