@@ -197,7 +197,7 @@ describe('desktop transcript language', () => {
     const emptyNotice =
       '<path>/apps/web/src/lib/conversation-background.ts</path>\n<type>file</type>\n<content>\n\nShowing lines 12-25 of 228. Use offset=26 to continue.)\n</content>'
     expect(cleanFileReadOutput(emptyNotice)).toBe('')
-    expect(activityDisclosureSections({ ...item, output: emptyNotice, detail: undefined })).toEqual([])
+    expect(activityDisclosureSections({ ...item, output: emptyNotice, detail: null })).toEqual([])
   })
 
   test('detects when an activity shows a diff instead of raw arguments', () => {
