@@ -1809,7 +1809,7 @@ impl ActivityKind {
             Self::FileChange
         } else if matches!(
             compact.as_str(),
-            "read" | "fileread" | "readfile" | "readtextfile" | "viewfile"
+            "read" | "fileread" | "readfile" | "readtextfile" | "viewfile" | "view"
         ) {
             Self::FileRead
         } else if matches!(
