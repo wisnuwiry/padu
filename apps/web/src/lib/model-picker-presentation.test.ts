@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { ProviderModel } from '@padu/client'
 import {
+  modelPickerSubtitle,
   nextModelPickerHighlight,
   selectedModelPickerIndex,
   type ModelPickerRow,
@@ -31,5 +32,12 @@ describe('model picker presentation', () => {
     expect(nextModelPickerHighlight(null, 4, 'next')).toBe(0)
     expect(nextModelPickerHighlight(null, 4, 'previous')).toBe(3)
     expect(nextModelPickerHighlight(3, 4, 'next')).toBe(0)
+  })
+
+  test('deduplicates the provider name in subtitle', () => {
+    expect(modelPickerSubtitle('DeepSeek', 'DeepSeek')).toBe('DeepSeek')
+    expect(modelPickerSubtitle('DeepSeek', 'deepseek')).toBe('DeepSeek')
+    expect(modelPickerSubtitle('DeepSeek', 'OpenAI')).toBe('OpenAI · DeepSeek')
+    expect(modelPickerSubtitle('Claude', null)).toBe('Claude')
   })
 })
