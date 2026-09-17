@@ -43,7 +43,6 @@ pub const DEFAULT_BACKGROUND_HEIGHT: f32 = 50.0;
 pub enum ConversationBackgroundFit {
     #[default]
     Cover,
-    Contain,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
