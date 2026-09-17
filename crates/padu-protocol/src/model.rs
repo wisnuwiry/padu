@@ -1761,6 +1761,7 @@ impl ActivityKind {
             .rsplit([':', '.', '/'])
             .next()
             .unwrap_or(&normalized);
+        let leaf = leaf.strip_prefix("running_").unwrap_or(leaf);
         let compact = leaf.replace('_', "");
 
         if matches!(
@@ -1785,6 +1786,8 @@ impl ActivityKind {
         } else if matches!(
             compact.as_str(),
             "applypatch"
+                | "clientcreatefile"
+                | "clienteditfile"
                 | "create"
                 | "createfile"
                 | "delete"
@@ -1809,13 +1812,20 @@ impl ActivityKind {
             Self::FileChange
         } else if matches!(
             compact.as_str(),
-            "read" | "fileread" | "readfile" | "readtextfile" | "viewfile" | "view"
+            "clientviewfile"
+                | "fileread"
+                | "read"
+                | "readfile"
+                | "readtextfile"
+                | "view"
+                | "viewfile"
         ) {
             Self::FileRead
         } else if matches!(
             compact.as_str(),
             "filesearch"
                 | "find"
+                | "findfile"
                 | "findfiles"
                 | "glob"
                 | "grep"
@@ -1829,6 +1839,7 @@ impl ActivityKind {
             "directorylist"
                 | "filelist"
                 | "list"
+                | "listdir"
                 | "listdirectory"
                 | "listfiles"
                 | "ls"
@@ -2740,8 +2751,10 @@ fn extract_activity_display_target(
     source: &serde_json::Value,
 ) -> Option<String> {
     let keys: &[&str] = match kind {
-        ActivityKind::Command => &["command", "cmd"],
+        ActivityKind::Command => &["commandLine", "command_line", "command", "cmd"],
         ActivityKind::FileRead => &[
+            "absolutePath",
+            "absolute_path",
             "filePath",
             "file_path",
             "path",
@@ -2751,7 +2764,14 @@ fn extract_activity_display_target(
             "notebook_path",
         ],
         ActivityKind::FileSearch => &["pattern", "query", "regex", "glob"],
-        ActivityKind::FileList => &["path", "directory", "dir", "root"],
+        ActivityKind::FileList => &[
+            "directoryPath",
+            "directory_path",
+            "path",
+            "directory",
+            "dir",
+            "root",
+        ],
         ActivityKind::Search => &["query", "queries"],
         ActivityKind::Tool => &["title"],
         _ => return None,
