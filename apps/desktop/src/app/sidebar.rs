@@ -2307,6 +2307,11 @@ impl Padu {
                         .items_center()
                         .gap(px(5.0))
                         .child(dot)
+                        .child(icon(
+                            provider_icon(session.provider),
+                            12.0,
+                            provider_color(&theme, session.provider),
+                        ))
                         .child(title)
                         .when(working, |element| {
                             element.child(motion::spin_slow(icon(
@@ -2363,6 +2368,11 @@ impl Padu {
                         .overflow_hidden()
                         .line_height(sp(18.0))
                         .child(dot)
+                        .child(icon(
+                            provider_icon(session.provider),
+                            12.0,
+                            provider_color(&theme, session.provider),
+                        ))
                         .child(title)
                         .when(working, |element| {
                             element.child(motion::spin_slow(icon(
@@ -2574,6 +2584,7 @@ impl Padu {
     ) -> impl IntoElement {
         let theme = Theme::current(cx);
         let session = self.selected_session();
+        let provider = session.map(|session| session.provider);
         let title = session
             .map(localized_session_title)
             .unwrap_or_else(|| tr!("session.new_task"));
@@ -2641,6 +2652,13 @@ impl Padu {
                         .flex()
                         .items_center()
                         .gap(px(7.0))
+                        .children(provider.map(|provider| {
+                            icon(
+                                provider_icon(provider),
+                                14.0,
+                                provider_color(&theme, provider),
+                            )
+                        }))
                         .child(
                             div()
                                 .min_w_0()
