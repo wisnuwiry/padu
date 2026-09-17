@@ -258,6 +258,8 @@ impl Padu {
                 if self.daemon.is_remote() {
                     self.show_toast(tr!("errors.remote_host_path"));
                     cx.notify();
+                } else if path.is_file() {
+                    crate::platform::open_with_default_app(&path, cx);
                 } else {
                     crate::platform::reveal_in_file_manager(&path, cx);
                 }
