@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Kbd } from '@/components/ui/kbd'
 import { Tooltip } from '@/components/ui/tooltip'
 import { PanelResizeHandle } from '@/components/panel-resize-handle'
-import { PaduIcon } from '@/components/padu-icon'
+import { PaduIcon, ProviderIcon } from '@/components/padu-icon'
 import { DeleteSessionDialog } from '@/components/delete-session-dialog'
 import { displayHost } from '@/lib/connection'
 import { displayTitle, type TaskState } from '@/lib/daemon-api'
@@ -758,6 +758,7 @@ function SessionRow({
                   )}
                 />
               </span>
+              <ProviderIcon className="size-3" provider={item.session.provider} />
               <span
                 className={cn(
                   'min-w-0 flex-1 truncate text-[13px] leading-tight text-[var(--text-secondary)] group-hover:text-foreground',
@@ -826,6 +827,7 @@ function SessionRow({
                   )}
                 />
               </span>
+              <ProviderIcon className="size-3" provider={item.session.provider} />
               <span
                 className={cn(
                   'min-w-0 flex-1 truncate text-[13.5px] text-foreground',

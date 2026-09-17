@@ -46,7 +46,7 @@ import { StartupScreen } from '@/components/startup-screen'
 import type { SettingsPageId } from '@/components/settings-view'
 import { Transcript } from '@/components/transcript'
 import { addContentToNewNote } from '@/components/notes-page'
-import { PaduIcon } from '@/components/padu-icon'
+import { PaduIcon, ProviderIcon } from '@/components/padu-icon'
 import {
   useComposerDrafts,
   useComposerFiles,
@@ -1802,6 +1802,7 @@ function TaskHeader({
         </Button>
       </Tooltip>
       <div className={cn('flex min-w-0 items-center gap-2', isFullscreenConversation && 'max-w-56 shrink-0')}>
+        {session && <ProviderIcon className="size-3.5" provider={session.provider} />}
         <h1 className="min-w-0 truncate text-[13px] font-medium">{title}</h1>
         {preset && (
           <span className="max-w-44 truncate rounded-md bg-accent px-1.5 py-1 text-[11px] font-medium text-[var(--text-secondary)]">
