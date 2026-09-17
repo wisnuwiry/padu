@@ -3,15 +3,20 @@ import type { ActivityItem, AgentSession } from '@padu/client'
 import {
   ACTIVITY_PREVIEW_LIMIT,
   activityActionLabel,
+  activityDiffSnapshot,
   activityDisclosureSections,
   activityDisplayTitle,
   activityFileChangeStats,
+  activityIsFileCreation,
+  cleanFileReadOutput,
   activityFilePath,
   activityGroupIsLive,
   activityHeaderTitle,
   activityPreview,
   activityPreviewWindow,
   activityRowDetail,
+  activitySectionLanguage,
+  activityShowsDiff,
   activitySummary,
   activityTextRows,
   assistantResponseFooters,
@@ -146,6 +151,149 @@ describe('desktop transcript language', () => {
       { kind: 'command', label: 'Command', content: 'bun test' },
       { kind: 'output', label: 'Output', content: '12 pass' },
     ])
+  })
+
+  test('shows only output for file read activities and detects language', () => {
+    const item = {
+      ...activity('fileRead', true),
+      arguments: '{"filePath":"src/main.rs"}',
+      display_target: 'src/main.rs',
+      output: 'fn main() {\n  println!("hi");\n}',
+      detail: 'Completed',
+    }
+    expect(activityDisclosureSections(item)).toEqual([
+      { kind: 'output', label: 'Output', content: 'fn main() {\n  println!("hi");\n}' },
+    ])
+    expect(activitySectionLanguage(item, 'output', item.output)).toBe('rs')
+    expect(activitySectionLanguage(item, 'command', 'cargo check')).toBe('shell')
+    expect(activitySectionLanguage(item, 'arguments', '{"a":1}')).toBe('json')
+    const commandItem = activity('command', true)
+    expect(activitySectionLanguage(commandItem, 'output', 'raw text log')).toBeNull()
+    expect(activitySectionLanguage(commandItem, 'output', '{"status":"ok"}')).toBe('json')
+  })
+
+  test('cleans xml envelope tags and pagination notices from file read output', () => {
+    const raw =
+      '<path>/Users/wisnusaputra/Documents/Personal/Project/2026/padu/apps/web/src/lib/conversation-background.ts</path>\n<type>file</type>\n<content>\n12: export function useConversationBackground() {\n13:   return null;\n14: }\n\nShowing lines 12-25 of 228. Use offset=26 to continue.)\n</content>'
+    expect(cleanFileReadOutput(raw)).toBe(
+      'export function useConversationBackground() {\n  return null;\n}'
+    )
+
+    const item = {
+      ...activity('fileRead', true),
+      arguments: '{"filePath":"/apps/web/src/lib/conversation-background.ts"}',
+      display_target: '/apps/web/src/lib/conversation-background.ts',
+      output: raw,
+      detail: 'Completed',
+    }
+    expect(activityDisclosureSections(item)).toEqual([
+      {
+        kind: 'output',
+        label: 'Output',
+        content: 'export function useConversationBackground() {\n  return null;\n}',
+      },
+    ])
+
+    // Output with only notices and tags results in no output section
+    const emptyNotice =
+      '<path>/apps/web/src/lib/conversation-background.ts</path>\n<type>file</type>\n<content>\n\nShowing lines 12-25 of 228. Use offset=26 to continue.)\n</content>'
+    expect(cleanFileReadOutput(emptyNotice)).toBe('')
+    expect(activityDisclosureSections({ ...item, output: emptyNotice, detail: null })).toEqual([])
+  })
+
+  test('detects when an activity shows a diff instead of raw arguments', () => {
+    // 1. fileChange with diff in file_changes
+    const itemWithDiff = {
+      ...activity('fileChange', true),
+      file_changes: [{ path: 'src/lib.rs', diff: '@@ -1,1 +1,1 @@\n-old\n+new\n' }],
+    }
+    expect(activityShowsDiff(itemWithDiff)).toBe(true)
+
+    // 2. fileChange with oldString & newString in arguments
+    const itemWithArgs = {
+      ...activity('fileChange', true),
+      arguments: JSON.stringify({
+        filePath: 'src/lib.rs',
+        oldString: 'let x = 1;',
+        newString: 'let x = 2;',
+      }),
+    }
+    expect(activityShowsDiff(itemWithArgs)).toBe(true)
+
+    // 3. disclosure sections omit arguments and output when showing diff
+    expect(activityDisclosureSections(itemWithArgs)).toEqual([])
+
+    // 4. disclosure sections keep output when failed even if showing diff
+    const failedItem = {
+      ...itemWithArgs,
+      failed: true,
+      output: 'patch rejected',
+    }
+    expect(activityDisclosureSections(failedItem)).toEqual([
+      { kind: 'output', label: 'Output', content: 'patch rejected' },
+    ])
+
+    // 5. non-fileChange activities never show diff
+    const cmd = {
+      ...activity('command', true),
+      arguments: 'git diff',
+    }
+    expect(activityShowsDiff(cmd)).toBe(false)
+  })
+
+  test('parses diff snapshots from file changes and synthesizes from oldString/newString', () => {
+    // 1. From file_changes with unified diff
+    const itemWithHunks = {
+      ...activity('fileChange', true),
+      file_changes: [
+        {
+          path: 'src/main.rs',
+          diff: '@@ -10,3 +10,3 @@\n kept\n-old\n+new\n',
+        },
+      ],
+    }
+    const snapshot1 = activityDiffSnapshot(itemWithHunks)
+    expect(snapshot1.lines).toEqual([
+      { kind: 'hunkHeader', content: '@@ -10,3 +10,3 @@' },
+      { kind: 'context', content: 'kept', oldLine: 10, newLine: 10 },
+      { kind: 'deletion', content: 'old', oldLine: 11, newLine: null },
+      { kind: 'addition', content: 'new', oldLine: null, newLine: 11 },
+    ])
+    expect(snapshot1.hiddenRows).toBe(0)
+
+    // 2. Synthesize from arguments (oldString / newString)
+    const itemWithOldNew = {
+      ...activity('fileChange', true),
+      arguments: JSON.stringify({
+        oldString: 'same_prefix\nold_value\nsame_suffix',
+        newString: 'same_prefix\nnew_value\nsame_suffix',
+      }),
+    }
+    const snapshot2 = activityDiffSnapshot(itemWithOldNew)
+    expect(snapshot2.lines).toEqual([
+      { kind: 'hunkHeader', content: '' },
+      { kind: 'context', content: 'same_prefix' },
+      { kind: 'deletion', content: 'old_value' },
+      { kind: 'addition', content: 'new_value' },
+      { kind: 'context', content: 'same_suffix' },
+    ])
+  })
+
+  test('reads a file creation from the tool name, not the edit label', () => {
+    const create = {
+      ...activity('fileChange', true),
+      title: 'Run create_file',
+      file_changes: [{ path: 'src/new.rs', additions: 3, deletions: 0 }],
+    }
+    expect(activityIsFileCreation(create)).toBe(true)
+    expect(activityActionLabel(create)).toBe('Create')
+    expect(activityDisplayTitle(create)).toBe('Created new.rs')
+    expect(activityDisplayTitle({ ...create, complete: false })).toBe('Creating new.rs')
+
+    const edit = { ...create, title: 'edit_file' }
+    expect(activityIsFileCreation(edit)).toBe(false)
+    expect(activityActionLabel(edit)).toBe('Edit')
+    expect(activityDisplayTitle(edit)).toBe('Edited new.rs')
   })
 
   test('shows file edit stats only when every settled edit has counts', () => {

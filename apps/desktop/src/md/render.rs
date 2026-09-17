@@ -1266,6 +1266,34 @@ pub fn plain_text(
     text_element(&flat, key, ctx)
 }
 
+/// Flattened, syntax-highlighted code for one element. Exposed beside the
+/// per-frame cache so an owning view can hold the shaped runs across frames
+/// instead of re-lexing unchanged content on every render.
+pub fn highlight_flat(
+    code: impl Into<SharedString>,
+    lang: Option<Lang>,
+    palette: &Palette,
+) -> FlatText {
+    let code: SharedString = code.into();
+    let mut code_font = font(MONO_FAMILY);
+    code_font.weight = FontWeight::NORMAL;
+    FlatText {
+        runs: code_runs(&code, lang, &code_font, palette),
+        text: code,
+        links: Vec::new(),
+        code_ranges: Vec::new(),
+        mention_ranges: Vec::new(),
+        file_link_ranges: Vec::new(),
+    }
+}
+
+/// Paint a [`FlatText`] the caller built earlier — a cached [`highlight_flat`]
+/// result — as a selectable element. The caller owns invalidation.
+pub fn flat_text(flat: &Rc<FlatText>, ctx: &Ctx) -> AnyElement {
+    let key = ctx.next_key();
+    text_element(flat, key, ctx)
+}
+
 /// A zero-size canvas that clears the frame's registry. Paint it *before* any
 /// transcript text so the registry holds exactly this frame's visible elements.
 pub fn frame_reset(selection: TranscriptSelection) -> impl IntoElement {

@@ -77,15 +77,33 @@ export function activityDisplayTitle(activity: ActivityItem, t?: Translator) {
           ? t ? t('activity.file_count', { count: changes.length }) : `${changes.length} files`
           : null
       if (!subject && !isGenericActivityTitle(activity)) return activity.title
-      if (!activity.complete) return t
-        ? t(subject ? 'activity.editing_named_file' : 'activity.editing_files', subject ? { file: subject } : undefined)
-        : subject ? `Editing ${subject}` : 'Editing files'
-      if (activity.failed) return t
-        ? t(subject ? 'activity.edit_failed_named_file' : 'activity.edit_failed', subject ? { file: subject } : undefined)
-        : subject ? `Failed to edit ${subject}` : 'Failed to edit files'
+      const creating = activityIsFileCreation(activity)
+      const params = subject ? { file: subject } : undefined
+      if (!activity.complete) {
+        return t
+          ? t(creating
+            ? (subject ? 'activity.creating_named_file' : 'activity.creating_files')
+            : (subject ? 'activity.editing_named_file' : 'activity.editing_files'), params)
+          : creating
+            ? (subject ? `Creating ${subject}` : 'Creating files')
+            : (subject ? `Editing ${subject}` : 'Editing files')
+      }
+      if (activity.failed) {
+        return t
+          ? t(creating
+            ? (subject ? 'activity.create_failed_named_file' : 'activity.create_failed')
+            : (subject ? 'activity.edit_failed_named_file' : 'activity.edit_failed'), params)
+          : creating
+            ? (subject ? `Failed to create ${subject}` : 'Failed to create files')
+            : (subject ? `Failed to edit ${subject}` : 'Failed to edit files')
+      }
       return t
-        ? t(subject ? 'activity.edited_named_file' : 'activity.edited_files', subject ? { file: subject } : undefined)
-        : subject ? `Edited ${subject}` : 'Edited files'
+        ? t(creating
+          ? (subject ? 'activity.created_named_file' : 'activity.created_files')
+          : (subject ? 'activity.edited_named_file' : 'activity.edited_files'), params)
+        : creating
+          ? (subject ? `Created ${subject}` : 'Created files')
+          : (subject ? `Edited ${subject}` : 'Edited files')
     }
     case 'fileRead': {
       const file = target ? pathName(target) : null
@@ -174,6 +192,26 @@ export function activityDisplayTitle(activity: ActivityItem, t?: Translator) {
   }
 }
 
+const FILE_CREATION_TOOLS = new Set([
+  'create',
+  'createfile',
+  'clientcreatefile',
+  'newfile',
+  'writetofile',
+])
+
+/// Mirrors `ActivityItem::creates_file`: `create_file` and `edit_file` both
+/// classify as a file change, so the tool name in the title is the intent.
+export function activityIsFileCreation(activity: ActivityItem): boolean {
+  if (activity.kind !== 'fileChange') return false
+  const compact = toolNameLeaf(activity.title)
+    .replace(/[\s_-]+/g, '')
+    .toLocaleLowerCase()
+    .replace(/^running/, '')
+    .replace(/^run/, '')
+  return FILE_CREATION_TOOLS.has(compact)
+}
+
 export function activityActionLabel(activity: ActivityItem, t?: Translator) {
   if (isAskUserQuestion(activity)) {
     return t ? t('activity.ask_questions') : 'Ask questions'
@@ -183,7 +221,7 @@ export function activityActionLabel(activity: ActivityItem, t?: Translator) {
     : activity.kind === 'command'
       ? 'activity.action_run'
       : activity.kind === 'fileChange'
-        ? 'activity.action_edit'
+        ? activityIsFileCreation(activity) ? 'activity.action_create' : 'activity.action_edit'
         : activity.kind === 'fileRead'
           ? 'activity.action_read'
           : activity.kind === 'fileSearch' || activity.kind === 'search'
@@ -197,6 +235,7 @@ export function activityActionLabel(activity: ActivityItem, t?: Translator) {
   return {
     'activity.action_think': 'Think',
     'activity.action_run': 'Run',
+    'activity.action_create': 'Create',
     'activity.action_edit': 'Edit',
     'activity.action_read': 'Read',
     'activity.action_search': 'Search',
@@ -250,6 +289,315 @@ export type ActivityDisclosureSection = {
   content: string
 }
 
+export function activityShowsDiff(activity: ActivityItem): boolean {
+  if (activity.kind !== 'fileChange') return false
+  if (activity.file_changes?.some((change) => Boolean(change.diff))) return true
+  if (!activity.arguments) return false
+  try {
+    const parsed = JSON.parse(activity.arguments)
+    if (parsed && typeof parsed === 'object') {
+      const hasOld = extractStringKey(parsed, [
+        'oldString', 'old_string', 'oldStr', 'old_str', 'oldText', 'old_text', 'oldContent', 'old_content', 'oldSource', 'old_source',
+      ]) !== null
+      const hasNew = extractStringKey(parsed, [
+        'newString', 'new_string', 'newStr', 'new_str', 'newText', 'new_text', 'newContent', 'new_content', 'newSource', 'new_source',
+      ]) !== null
+      if (hasOld && hasNew) return true
+    }
+  } catch {
+    // ignore
+  }
+  return false
+}
+
+export type ActivityDiffLineKind = 'fileHeader' | 'hunkHeader' | 'gap' | 'context' | 'addition' | 'deletion'
+
+export interface ActivityDiffLine {
+  kind: ActivityDiffLineKind
+  content: string
+  oldLine?: number | null
+  newLine?: number | null
+  filePath?: string
+  additions?: number
+  deletions?: number
+}
+
+export interface ActivityDiffSnapshot {
+  lines: ActivityDiffLine[]
+  hiddenRows: number
+}
+
+const MAX_ACTIVITY_DIFF_ROWS = 400
+
+export function activityDiffSnapshot(activity: ActivityItem): ActivityDiffSnapshot {
+  if (activity.kind !== 'fileChange') {
+    return { lines: [], hiddenRows: 0 }
+  }
+
+  const lines: ActivityDiffLine[] = []
+
+  // 1. Try from activity.file_changes
+  const changesWithDiff = activity.file_changes?.filter((change) => Boolean(change.diff)) ?? []
+  if (changesWithDiff.length > 0) {
+    const showFileHeaders = changesWithDiff.length > 1
+    for (const change of changesWithDiff) {
+      if (showFileHeaders) {
+        lines.push({
+          kind: 'fileHeader',
+          content: change.path,
+          filePath: change.path,
+          additions: change.additions ?? 0,
+          deletions: change.deletions ?? 0,
+        })
+      }
+
+      const diffText = change.diff ?? ''
+      let oldLine = 0
+      let newLine = 0
+      let positioned = true
+
+      for (const raw of diffText.split('\n')) {
+        if (!raw) continue
+        if (raw.startsWith('@@')) {
+          const match = /^@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/.exec(raw)
+          if (match) {
+            positioned = true
+            oldLine = parseInt(match[1]!, 10)
+            newLine = parseInt(match[2]!, 10)
+            lines.push({
+              kind: 'hunkHeader',
+              content: raw.trim(),
+            })
+          } else {
+            positioned = false
+            lines.push({
+              kind: 'hunkHeader',
+              content: '',
+            })
+          }
+          continue
+        }
+
+        const marker = raw[0]
+        const content = raw.slice(1)
+        if (marker === ' ') {
+          lines.push({
+            kind: 'context',
+            content,
+            oldLine: positioned ? oldLine : null,
+            newLine: positioned ? newLine : null,
+          })
+          oldLine++
+          newLine++
+        } else if (marker === '-') {
+          lines.push({
+            kind: 'deletion',
+            content,
+            oldLine: positioned ? oldLine : null,
+            newLine: null,
+          })
+          oldLine++
+        } else if (marker === '+') {
+          lines.push({
+            kind: 'addition',
+            content,
+            oldLine: null,
+            newLine: positioned ? newLine : null,
+          })
+          newLine++
+        }
+      }
+    }
+  } else if (activity.arguments) {
+    // 2. Synthesize from arguments (oldString & newString)
+    try {
+      const parsed = JSON.parse(activity.arguments)
+      if (parsed && typeof parsed === 'object') {
+        const oldStr = extractStringKey(parsed, [
+          'oldString', 'old_string', 'oldStr', 'old_str', 'oldText', 'old_text', 'oldContent', 'old_content', 'oldSource', 'old_source',
+        ])
+        const newStr = extractStringKey(parsed, [
+          'newString', 'new_string', 'newStr', 'new_str', 'newText', 'new_text', 'newContent', 'new_content', 'newSource', 'new_source',
+        ])
+        if (oldStr !== null && newStr !== null) {
+          const oldLines = oldStr.split('\n')
+          const newLines = newStr.split('\n')
+
+          let prefixCount = 0
+          while (
+            prefixCount < oldLines.length &&
+            prefixCount < newLines.length &&
+            oldLines[prefixCount] === newLines[prefixCount]
+          ) {
+            prefixCount++
+          }
+
+          let suffixCount = 0
+          while (
+            suffixCount < (oldLines.length - prefixCount) &&
+            suffixCount < (newLines.length - prefixCount) &&
+            oldLines[oldLines.length - 1 - suffixCount] === newLines[newLines.length - 1 - suffixCount]
+          ) {
+            suffixCount++
+          }
+
+          lines.push({ kind: 'hunkHeader', content: '' })
+
+          for (let i = 0; i < prefixCount; i++) {
+            lines.push({ kind: 'context', content: oldLines[i]! })
+          }
+          for (let i = prefixCount; i < oldLines.length - suffixCount; i++) {
+            lines.push({ kind: 'deletion', content: oldLines[i]! })
+          }
+          for (let i = prefixCount; i < newLines.length - suffixCount; i++) {
+            lines.push({ kind: 'addition', content: newLines[i]! })
+          }
+          for (let i = oldLines.length - suffixCount; i < oldLines.length; i++) {
+            lines.push({ kind: 'context', content: oldLines[i]! })
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const hiddenRows = Math.max(0, lines.length - MAX_ACTIVITY_DIFF_ROWS)
+  return {
+    lines: lines.slice(0, MAX_ACTIVITY_DIFF_ROWS),
+    hiddenRows,
+  }
+}
+
+function extractStringKey(obj: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const val = obj[key]
+    if (typeof val === 'string') return val
+  }
+  return null
+}
+
+export function cleanFileReadOutput(raw: string): string {
+  let text = raw
+  const contentMatch = text.match(/<content>([\s\S]*?)<\/content>/)
+  if (contentMatch && contentMatch[1] !== undefined) {
+    text = contentMatch[1]
+  } else {
+    const entriesMatch = text.match(/<entries>([\s\S]*?)<\/entries>/)
+    if (entriesMatch && entriesMatch[1] !== undefined) {
+      text = entriesMatch[1]
+    } else {
+      const start = text.indexOf('<content>')
+      if (start !== -1) {
+        text = text.slice(start + '<content>'.length)
+      }
+      const end = text.lastIndexOf('</content>')
+      if (end !== -1) {
+        text = text.slice(0, end)
+      }
+    }
+  }
+
+  const lines = text.split('\n')
+  const result: string[] = []
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (
+      (trimmed.startsWith('<path>') && trimmed.includes('</path>')) ||
+      (trimmed.startsWith('<type>') && trimmed.includes('</type>')) ||
+      trimmed === '<content>' ||
+      trimmed === '</content>' ||
+      trimmed === '<entries>' ||
+      trimmed === '</entries>' ||
+      trimmed.startsWith('<system-reminder>') ||
+      trimmed.endsWith('</system-reminder>')
+    ) {
+      continue
+    }
+
+    if (isFileReadNotice(trimmed)) {
+      continue
+    }
+
+    result.push(stripLineNumberPrefix(line))
+  }
+
+  while (result.length > 0 && result[0]!.trim() === '') {
+    result.shift()
+  }
+  while (result.length > 0 && result[result.length - 1]!.trim() === '') {
+    result.pop()
+  }
+
+  return result.join('\n')
+}
+
+function isFileReadNotice(trimmed: string): boolean {
+  let s = trimmed
+  if (s.startsWith('(')) s = s.slice(1)
+  if (s.endsWith(')')) s = s.slice(0, -1)
+  s = s.trim()
+
+  if (
+    s.startsWith('End of file') ||
+    s.startsWith('Showing lines') ||
+    s.startsWith('Output capped at') ||
+    s.startsWith('Use offset=')
+  ) {
+    return true
+  }
+
+  if (
+    trimmed.includes('to continue.)') ||
+    trimmed.includes('to continue)') ||
+    trimmed.includes('Use offset=')
+  ) {
+    return true
+  }
+
+  if (trimmed.includes('Showing lines') && trimmed.includes('of')) {
+    return true
+  }
+
+  if (/^\d+\s+entries$/i.test(s)) {
+    return true
+  }
+
+  if (trimmed.startsWith('(') && (trimmed.includes('lines') || trimmed.includes('offset')) && trimmed.endsWith(')')) {
+    return true
+  }
+
+  return false
+}
+
+function stripLineNumberPrefix(line: string): string {
+  const trimmed = line.trimStart()
+  const colonIndex = trimmed.indexOf(':')
+  if (colonIndex > 0) {
+    const num = trimmed.slice(0, colonIndex)
+    if (/^\d+$/.test(num)) {
+      const rest = trimmed.slice(colonIndex + 1)
+      return rest.startsWith(' ') ? rest.slice(1) : rest
+    }
+  }
+  const pipeIndex = trimmed.indexOf('│ ')
+  if (pipeIndex > 0) {
+    const num = trimmed.slice(0, pipeIndex).trim()
+    if (/^\d+$/.test(num)) {
+      return trimmed.slice(pipeIndex + 2)
+    }
+  }
+  const vbarIndex = trimmed.indexOf('| ')
+  if (vbarIndex > 0) {
+    const num = trimmed.slice(0, vbarIndex).trim()
+    if (/^\d+$/.test(num)) {
+      return trimmed.slice(vbarIndex + 2)
+    }
+  }
+  return line
+}
+
 export function activityDisclosureSections(activity: ActivityItem, t?: Translator): ActivityDisclosureSection[] {
   const sections: ActivityDisclosureSection[] = []
   if (activity.kind === 'command') {
@@ -260,14 +608,58 @@ export function activityDisclosureSections(activity: ActivityItem, t?: Translato
     else if (activity.image_urls?.length) sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: '' })
     return sections
   }
+  const showsDiff = activityShowsDiff(activity)
   const argumentsText = activity.arguments?.trim()
-  const output = activity.output?.trim()
-  if (argumentsText) sections.push({ kind: 'arguments', label: t ? t('activity.arguments') : 'Arguments', content: argumentsText })
-  if (output) sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: output })
-  else if (activity.image_urls?.length) sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: '' })
+  const rawOutput = activity.output?.trim()
+  const output = (activity.kind === 'fileRead' || (rawOutput && (rawOutput.includes('<content>') || (rawOutput.includes('<path>') && rawOutput.includes('</path>'))))) && !activity.failed
+    ? (rawOutput ? cleanFileReadOutput(rawOutput) : '')
+    : rawOutput
+  if (argumentsText && !showsDiff && activity.kind !== 'fileRead') {
+    sections.push({ kind: 'arguments', label: t ? t('activity.arguments') : 'Arguments', content: argumentsText })
+  }
+  if (output && (!showsDiff || activity.failed)) {
+    sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: output })
+  } else if (activity.image_urls?.length) {
+    sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: '' })
+  }
   const detail = activity.detail?.trim()
   if (!sections.length && detail) sections.push({ kind: 'detail', label: null, content: detail })
   return sections
+}
+
+export function activitySectionLanguage(
+  activity: ActivityItem,
+  sectionKind: ActivityDisclosureSection['kind'],
+  content: string,
+): string | null {
+  switch (sectionKind) {
+    case 'command':
+      return 'shell'
+    case 'arguments': {
+      const trimmed = content.trim()
+      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+        return 'json'
+      }
+      return null
+    }
+    case 'output': {
+      if (activity.kind === 'fileRead') {
+        const target = activity.display_target?.trim()
+        if (target) {
+          const ext = target.split('/').at(-1)?.split('.').at(-1)?.toLowerCase()
+          if (ext) return ext
+        }
+        return null
+      }
+      const trimmed = content.trim()
+      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+        return 'json'
+      }
+      return null
+    }
+    default:
+      return null
+  }
 }
 
 export function activityPreview(activity: ActivityItem, t?: Translator) {
@@ -622,8 +1014,9 @@ function toolNameLeaf(name: string) {
 }
 
 function isAskUserQuestion(activity: ActivityItem) {
-  return activity.kind === 'tool'
-    && toolNameLeaf(activity.title).replace(/[\s_-]+/g, '').toLocaleLowerCase() === 'askuserquestion'
+  if (activity.kind !== 'tool') return false
+  const compact = toolNameLeaf(activity.title).replace(/[\s_-]+/g, '').toLocaleLowerCase()
+  return compact === 'askuserquestion' || compact === 'askquestion'
 }
 
 function humanizeToolName(name: string) {

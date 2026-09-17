@@ -1761,6 +1761,7 @@ impl ActivityKind {
             .rsplit([':', '.', '/'])
             .next()
             .unwrap_or(&normalized);
+        let leaf = leaf.strip_prefix("running_").unwrap_or(leaf);
         let compact = leaf.replace('_', "");
 
         if matches!(
@@ -1785,6 +1786,8 @@ impl ActivityKind {
         } else if matches!(
             compact.as_str(),
             "applypatch"
+                | "clientcreatefile"
+                | "clienteditfile"
                 | "create"
                 | "createfile"
                 | "delete"
@@ -1809,13 +1812,20 @@ impl ActivityKind {
             Self::FileChange
         } else if matches!(
             compact.as_str(),
-            "read" | "fileread" | "readfile" | "readtextfile" | "viewfile"
+            "clientviewfile"
+                | "fileread"
+                | "read"
+                | "readfile"
+                | "readtextfile"
+                | "view"
+                | "viewfile"
         ) {
             Self::FileRead
         } else if matches!(
             compact.as_str(),
             "filesearch"
                 | "find"
+                | "findfile"
                 | "findfiles"
                 | "glob"
                 | "grep"
@@ -1829,6 +1839,7 @@ impl ActivityKind {
             "directorylist"
                 | "filelist"
                 | "list"
+                | "listdir"
                 | "listdirectory"
                 | "listfiles"
                 | "ls"
@@ -2371,8 +2382,138 @@ impl ActivityItem {
                 .output
                 .take()
                 .and_then(normalize_command_activity_output);
+        } else if (self.kind == ActivityKind::FileRead
+            || self.output.as_deref().is_some_and(|s| {
+                s.contains("<content>") || (s.contains("<path>") && s.contains("</path>"))
+            }))
+            && !self.failed
+        {
+            self.output = self
+                .output
+                .take()
+                .map(|s| clean_file_read_output(&s))
+                .filter(|s| !s.is_empty());
         }
     }
+}
+
+pub fn clean_file_read_output(raw: &str) -> String {
+    let mut text = raw;
+
+    if let Some(content) = extract_tag_content(text, "content") {
+        text = content;
+    } else if let Some(entries) = extract_tag_content(text, "entries") {
+        text = entries;
+    } else {
+        if let Some(start) = text.find("<content>") {
+            text = &text[start + "<content>".len()..];
+        }
+        if let Some(end) = text.rfind("</content>") {
+            text = &text[..end];
+        }
+    }
+
+    let mut lines = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if (trimmed.starts_with("<path>") && trimmed.contains("</path>"))
+            || (trimmed.starts_with("<type>") && trimmed.contains("</type>"))
+            || trimmed == "<content>"
+            || trimmed == "</content>"
+            || trimmed == "<entries>"
+            || trimmed == "</entries>"
+            || trimmed == "<system-reminder>"
+            || trimmed == "</system-reminder>"
+            || trimmed.starts_with("<system-reminder>")
+            || trimmed.ends_with("</system-reminder>")
+        {
+            continue;
+        }
+
+        if is_file_read_notice(trimmed) {
+            continue;
+        }
+
+        lines.push(strip_line_number_prefix(line.trim_end()));
+    }
+
+    while lines.first().is_some_and(|l| l.is_empty()) {
+        lines.remove(0);
+    }
+    while lines.last().is_some_and(|l| l.is_empty()) {
+        lines.pop();
+    }
+    lines.join("\n")
+}
+
+fn extract_tag_content<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = text.find(&open)? + open.len();
+    let end = text[start..].find(&close)? + start;
+    Some(&text[start..end])
+}
+
+fn is_file_read_notice(trimmed: &str) -> bool {
+    let s = trimmed.strip_prefix('(').unwrap_or(trimmed);
+    let s = s.strip_suffix(')').unwrap_or(s).trim();
+
+    if s.starts_with("End of file")
+        || s.starts_with("Showing lines")
+        || s.starts_with("Output capped at")
+        || s.starts_with("Use offset=")
+    {
+        return true;
+    }
+
+    if trimmed.contains("to continue.)")
+        || trimmed.contains("to continue)")
+        || trimmed.contains("Use offset=")
+    {
+        return true;
+    }
+
+    if trimmed.contains("Showing lines") && trimmed.contains("of") {
+        return true;
+    }
+
+    if let Some((count, rest)) = s.split_once(' ') {
+        if rest.trim() == "entries"
+            && !count.is_empty()
+            && count.chars().all(|c| c.is_ascii_digit())
+        {
+            return true;
+        }
+    }
+
+    if trimmed.starts_with('(')
+        && (trimmed.contains("lines") || trimmed.contains("offset"))
+        && trimmed.ends_with(')')
+    {
+        return true;
+    }
+
+    false
+}
+
+fn strip_line_number_prefix(line: &str) -> &str {
+    let trimmed = line.trim_start();
+    if let Some((num, rest)) = trimmed.split_once(':') {
+        if !num.is_empty() && num.chars().all(|c| c.is_ascii_digit()) {
+            return rest.strip_prefix(' ').unwrap_or(rest);
+        }
+    }
+    if let Some((num, rest)) = trimmed.split_once("│ ") {
+        if !num.trim().is_empty() && num.trim().chars().all(|c| c.is_ascii_digit()) {
+            return rest;
+        }
+    }
+    if let Some((num, rest)) = trimmed.split_once("| ") {
+        if !num.trim().is_empty() && num.trim().chars().all(|c| c.is_ascii_digit()) {
+            return rest;
+        }
+    }
+    line
 }
 
 fn normalize_command_activity_command(source: String) -> Option<String> {
@@ -2571,6 +2712,43 @@ fn is_command_output_image(value: &serde_json::Value) -> bool {
         || (item_type == Some("file") && mime.is_some_and(|mime| mime.starts_with("image/")))
 }
 
+impl ActivityItem {
+    /// Whether this file change creates a file rather than editing one.
+    ///
+    /// `create_file` and `edit_file` both classify as a file change, so the
+    /// only thing carrying the intent is the tool name the title holds.
+    pub fn creates_file(&self) -> bool {
+        self.kind == ActivityKind::FileChange && is_file_creation_tool(&self.title)
+    }
+}
+
+/// The tool name behind a create, normalized so `create_file`,
+/// `Run create_file`, and `client_create_file` all match. Deliberately narrow:
+/// a plain write or replace may target an existing file and stays an edit.
+fn is_file_creation_tool(name: &str) -> bool {
+    let lower = name.trim().to_ascii_lowercase();
+    let leaf = lower
+        .rsplit("__")
+        .next()
+        .unwrap_or(&lower)
+        .rsplit([':', '.', '/'])
+        .next()
+        .unwrap_or(&lower);
+    let compact = leaf
+        .chars()
+        .filter(|character| !matches!(character, '_' | '-' | ' '))
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    let compact = compact
+        .strip_prefix("running")
+        .or_else(|| compact.strip_prefix("run"))
+        .unwrap_or(&compact);
+    matches!(
+        compact,
+        "create" | "createfile" | "clientcreatefile" | "newfile" | "writetofile"
+    )
+}
+
 fn fallback_activity_display_target(kind: ActivityKind, title: &str) -> Option<String> {
     let title = title.trim();
     if title.is_empty() || is_generic_activity_title(kind, title) {
@@ -2610,8 +2788,10 @@ fn extract_activity_display_target(
     source: &serde_json::Value,
 ) -> Option<String> {
     let keys: &[&str] = match kind {
-        ActivityKind::Command => &["command", "cmd"],
+        ActivityKind::Command => &["commandLine", "command_line", "command", "cmd"],
         ActivityKind::FileRead => &[
+            "absolutePath",
+            "absolute_path",
             "filePath",
             "file_path",
             "path",
@@ -2621,7 +2801,14 @@ fn extract_activity_display_target(
             "notebook_path",
         ],
         ActivityKind::FileSearch => &["pattern", "query", "regex", "glob"],
-        ActivityKind::FileList => &["path", "directory", "dir", "root"],
+        ActivityKind::FileList => &[
+            "directoryPath",
+            "directory_path",
+            "path",
+            "directory",
+            "dir",
+            "root",
+        ],
         ActivityKind::Search => &["query", "queries"],
         ActivityKind::Tool => &["title"],
         _ => return None,
@@ -4693,5 +4880,61 @@ mod tests {
         assert!(projection.transcript_blocks.is_empty());
         assert!(projection.turns.is_empty());
         assert!(projection.queued_messages.is_empty());
+    }
+
+    #[test]
+    fn cleans_file_read_output_envelopes_and_notices() {
+        let raw = "<path>/Users/wisnusaputra/Documents/Personal/Project/2026/padu/apps/web/src/lib/conversation-background.ts</path>\n<type>file</type>\n<content>\n12: export function useConversationBackground() {\n13:   return null;\n14: }\n\nShowing lines 12-25 of 228. Use offset=26 to continue.)\n</content>";
+        let cleaned = clean_file_read_output(raw);
+        assert_eq!(
+            cleaned,
+            "export function useConversationBackground() {\n  return null;\n}"
+        );
+
+        // Empty file read with only notice is emptied
+        let raw_empty = "<path>/file.ts</path>\n<type>file</type>\n<content>\n\nShowing lines 12-25 of 228. Use offset=26 to continue.)\n</content>";
+        assert_eq!(clean_file_read_output(raw_empty), "");
+
+        // ActivityItem refreshes file read output on construction or refresh
+        let activity = ActivityItem::new(None, ActivityKind::FileRead, "read", None, true)
+            .with_output(Some(raw.into()));
+        assert_eq!(
+            activity.output.as_deref(),
+            Some("export function useConversationBackground() {\n  return null;\n}")
+        );
+    }
+
+    #[test]
+    fn file_creations_are_read_from_the_tool_name() {
+        let change =
+            |title: &str| ActivityItem::new(None, ActivityKind::FileChange, title, None, true);
+
+        for title in [
+            "create_file",
+            "Run create_file",
+            "create",
+            "client_create_file",
+            "new_file",
+            "write_to_file",
+        ] {
+            assert!(change(title).creates_file(), "{title} should create");
+        }
+
+        for title in [
+            "edit_file",
+            "Run edit_file",
+            "str_replace",
+            "apply_patch",
+            "Write",
+            "read_file",
+        ] {
+            assert!(!change(title).creates_file(), "{title} should stay an edit");
+        }
+
+        // Only file changes carry the distinction.
+        assert!(
+            !ActivityItem::new(None, ActivityKind::Command, "create_file", None, true)
+                .creates_file()
+        );
     }
 }

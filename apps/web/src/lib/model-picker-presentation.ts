@@ -25,3 +25,14 @@ export function nextModelPickerHighlight(
     ? (current + 1) % length
     : (current - 1 + length) % length
 }
+
+export function modelPickerSubtitle(
+  providerShortName: string,
+  subProvider?: string | null,
+): string {
+  const trimmed = subProvider?.trim()
+  if (!trimmed || trimmed.toLowerCase() === providerShortName.toLowerCase()) {
+    return providerShortName
+  }
+  return `${trimmed} · ${providerShortName}`
+}

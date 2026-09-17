@@ -585,6 +585,7 @@ activity.show_fewer: 收起活动列表
 activity.action_think: 思考
 activity.action_run: 运行
 activity.action_edit: 编辑
+activity.action_create: 创建
 activity.action_read: 读取
 activity.action_search: 搜索
 activity.action_list: 列出
@@ -626,6 +627,12 @@ activity.edit_failed_named_file: 编辑 %{file} 失败
 activity.editing_files: 正在编辑文件
 activity.edited_files: 已编辑文件
 activity.edit_failed: 编辑文件失败
+activity.creating_named_file: 正在创建 %{file}
+activity.created_named_file: 已创建 %{file}
+activity.create_failed_named_file: 创建 %{file} 失败
+activity.creating_files: 正在创建文件
+activity.created_files: 已创建文件
+activity.create_failed: 创建文件失败
 activity.file_count: "%{count} 个文件"
 activity.read_file: 读取文件
 activity.reading_named_file: 正在读取 %{file}

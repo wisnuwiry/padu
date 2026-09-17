@@ -1171,13 +1171,15 @@ fn tool_name_leaf(name: &str) -> &str {
 }
 
 fn is_ask_user_question(activity: &ActivityItem) -> bool {
-    activity.kind == crate::model::ActivityKind::Tool
-        && tool_name_leaf(&activity.title)
-            .chars()
-            .filter(|character| !matches!(*character, '_' | '-' | ' '))
-            .flat_map(char::to_lowercase)
-            .collect::<String>()
-            == "askuserquestion"
+    if activity.kind != crate::model::ActivityKind::Tool {
+        return false;
+    }
+    let compact = tool_name_leaf(&activity.title)
+        .chars()
+        .filter(|character| !matches!(*character, '_' | '-' | ' '))
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    compact == "askuserquestion" || compact == "askquestion"
 }
 
 fn humanize_tool_name(name: &str) -> String {
@@ -1297,12 +1299,25 @@ pub(super) fn activity_display_title(activity: &ActivityItem) -> String {
             {
                 return activity.title.clone();
             }
-            match (activity.complete, activity.failed, subject) {
+            let creating = activity.creates_file();
+            match (activity.complete, activity.failed, subject.as_deref()) {
+                (false, _, Some(file)) if creating => {
+                    tr!("activity.creating_named_file", file = file)
+                }
                 (false, _, Some(file)) => tr!("activity.editing_named_file", file = file),
+                (true, false, Some(file)) if creating => {
+                    tr!("activity.created_named_file", file = file)
+                }
                 (true, false, Some(file)) => tr!("activity.edited_named_file", file = file),
+                (true, true, Some(file)) if creating => {
+                    tr!("activity.create_failed_named_file", file = file)
+                }
                 (true, true, Some(file)) => tr!("activity.edit_failed_named_file", file = file),
+                (false, _, None) if creating => tr!("activity.creating_files"),
                 (false, _, None) => tr!("activity.editing_files"),
+                (true, false, None) if creating => tr!("activity.created_files"),
                 (true, false, None) => tr!("activity.edited_files"),
+                (true, true, None) if creating => tr!("activity.create_failed"),
                 (true, true, None) => tr!("activity.edit_failed"),
             }
         }
@@ -1434,6 +1449,7 @@ pub(super) fn activity_action_label(activity: &ActivityItem) -> String {
     match activity.kind {
         ActivityKind::Reasoning => tr!("activity.action_think"),
         ActivityKind::Command => tr!("activity.action_run"),
+        ActivityKind::FileChange if activity.creates_file() => tr!("activity.action_create"),
         ActivityKind::FileChange => tr!("activity.action_edit"),
         ActivityKind::FileRead => tr!("activity.action_read"),
         ActivityKind::FileSearch | ActivityKind::Search => tr!("activity.action_search"),
@@ -1623,13 +1639,15 @@ pub(super) fn activity_disclosure_sections(
     }
     // An edit renders as a diff, which says everything the raw arguments would
     // and reads. What the tool replied is only worth the room when it failed.
+    // A file read only shows the read content, not the filePath arguments
+    // which are already displayed in the activity header.
     let shows_diff = activity_shows_diff(activity);
     if let Some(arguments) = activity
         .arguments
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .filter(|_| !shows_diff)
+        .filter(|_| !shows_diff && activity.kind != ActivityKind::FileRead)
     {
         sections.push(ActivityDisclosureSection {
             kind: ActivityDisclosureSectionKind::Arguments,
@@ -1641,11 +1659,23 @@ pub(super) fn activity_disclosure_sections(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
+        .map(|value| {
+            if (activity.kind == ActivityKind::FileRead
+                || value.contains("<content>")
+                || (value.contains("<path>") && value.contains("</path>")))
+                && !activity.failed
+            {
+                padu_protocol::clean_file_read_output(value)
+            } else {
+                value.to_owned()
+            }
+        })
+        .filter(|value| !value.is_empty())
         .filter(|_| !shows_diff || activity.failed)
     {
         sections.push(ActivityDisclosureSection {
             kind: ActivityDisclosureSectionKind::Output,
-            content: output.to_owned(),
+            content: output,
         });
     } else if !activity.image_urls.is_empty() {
         sections.push(ActivityDisclosureSection {
@@ -1666,6 +1696,41 @@ pub(super) fn activity_disclosure_sections(
         });
     }
     sections
+}
+
+pub(super) fn activity_section_language(
+    activity: &ActivityItem,
+    section_kind: ActivityDisclosureSectionKind,
+    content: &str,
+) -> Option<&'static str> {
+    match section_kind {
+        ActivityDisclosureSectionKind::Command => Some("shell"),
+        ActivityDisclosureSectionKind::Arguments => {
+            let trimmed = content.trim();
+            if (trimmed.starts_with('{') && trimmed.ends_with('}'))
+                || (trimmed.starts_with('[') && trimmed.ends_with(']'))
+            {
+                Some("json")
+            } else {
+                None
+            }
+        }
+        ActivityDisclosureSectionKind::Output => {
+            if activity.kind == ActivityKind::FileRead {
+                let target = activity.display_target.as_deref().unwrap_or_default();
+                let lang = super::right_panel::file_highlighter_language(target);
+                if lang != "text" { Some(lang) } else { None }
+            } else {
+                let trimmed = content.trim();
+                (trimmed.starts_with('{') && trimmed.ends_with('}'))
+                    .then(|| "json")
+                    .or_else(|| {
+                        (trimmed.starts_with('[') && trimmed.ends_with(']')).then_some("json")
+                    })
+            }
+        }
+        ActivityDisclosureSectionKind::Detail => None,
+    }
 }
 
 pub(super) fn activity_preview(activity: &ActivityItem) -> String {
@@ -1853,6 +1918,75 @@ mod message_time_tests {
     }
 
     #[test]
+    fn file_read_disclosure_shows_only_output_and_detects_language() {
+        let activity = ActivityItem::new(
+            Some("read-1".into()),
+            crate::model::ActivityKind::FileRead,
+            "read",
+            Some("Completed".into()),
+            true,
+        )
+        .with_activity_source(Some(&serde_json::json!({"filePath": "src/main.rs"})))
+        .with_arguments(Some(r#"{"filePath":"src/main.rs"}"#.into()))
+        .with_output(Some("fn main() {\n    println!(\"hi\");\n}".into()));
+
+        assert_eq!(
+            activity_disclosure_sections(&activity),
+            vec![ActivityDisclosureSection {
+                kind: ActivityDisclosureSectionKind::Output,
+                content: "fn main() {\n    println!(\"hi\");\n}".into(),
+            }]
+        );
+        assert_eq!(
+            activity_section_language(
+                &activity,
+                ActivityDisclosureSectionKind::Output,
+                "fn main() {}"
+            ),
+            Some("rust")
+        );
+        assert_eq!(
+            activity_section_language(
+                &activity,
+                ActivityDisclosureSectionKind::Command,
+                "cargo check"
+            ),
+            Some("shell")
+        );
+        assert_eq!(
+            activity_section_language(
+                &activity,
+                ActivityDisclosureSectionKind::Arguments,
+                r#"{"key": "value"}"#
+            ),
+            Some("json")
+        );
+        let command = ActivityItem::new(
+            Some("cmd-1".into()),
+            crate::model::ActivityKind::Command,
+            "cargo test",
+            Some("Completed".into()),
+            true,
+        );
+        assert_eq!(
+            activity_section_language(
+                &command,
+                ActivityDisclosureSectionKind::Output,
+                r#"{"status":"ok"}"#
+            ),
+            Some("json")
+        );
+        assert_eq!(
+            activity_section_language(
+                &command,
+                ActivityDisclosureSectionKind::Output,
+                "raw text log"
+            ),
+            None
+        );
+    }
+
+    #[test]
     fn activity_display_title_prefers_the_human_facing_tool_argument() {
         let titled = ActivityItem::new(
             Some("tool-1".into()),
@@ -2009,6 +2143,42 @@ mod message_time_tests {
 
         assert_eq!(activity_display_title(&activity), "Edited 2 files");
         assert_eq!(activity_file_change_stats(&activity), Some((2, 2)));
+    }
+
+    #[test]
+    fn file_creations_read_as_create_not_edit() {
+        let mut activity = ActivityItem::new(
+            Some("create-1".into()),
+            crate::model::ActivityKind::FileChange,
+            "create_file",
+            None,
+            false,
+        );
+        activity.file_changes = vec![crate::model::ActivityFileChange {
+            path: "src/new.rs".into(),
+            additions: Some(3),
+            deletions: None,
+            status: None,
+            diff: None,
+        }];
+
+        assert_eq!(activity_action_label(&activity), "Create");
+        assert_eq!(activity_display_title(&activity), "Creating new.rs");
+
+        activity.complete = true;
+        assert_eq!(activity_display_title(&activity), "Created new.rs");
+
+        activity.failed = true;
+        assert_eq!(activity_display_title(&activity), "Failed to create new.rs");
+
+        let edit = ActivityItem::new(
+            Some("edit-1".into()),
+            crate::model::ActivityKind::FileChange,
+            "edit_file",
+            None,
+            true,
+        );
+        assert_eq!(activity_action_label(&edit), "Edit");
     }
 
     #[test]

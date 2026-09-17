@@ -19,12 +19,27 @@ pub(super) fn tool_activity(
     complete: bool,
 ) -> ActivityItem {
     let raw_arguments = arguments;
-    let arguments = arguments
-        .filter(|value| !value.is_null())
-        .and_then(format_json);
+    let arguments = if kind == ActivityKind::FileRead {
+        None
+    } else {
+        arguments
+            .filter(|value| !value.is_null())
+            .and_then(format_json)
+    };
     let formatted_output = output
         .filter(|value| !value.is_null())
-        .and_then(format_output);
+        .and_then(format_output)
+        .map(|out| {
+            if (kind == ActivityKind::FileRead
+                || out.contains("<content>")
+                || (out.contains("<path>") && out.contains("</path>")))
+                && !failed
+            {
+                padu_protocol::clean_file_read_output(&out)
+            } else {
+                out
+            }
+        });
     let mut image_urls = Vec::new();
     if let Some(value) = output {
         collect_image_urls(value, &mut image_urls);
@@ -111,6 +126,9 @@ fn format_output(value: &Value) -> Option<String> {
     }
     if let Some(content) = value.get("content").filter(|value| !value.is_null()) {
         return format_output(content);
+    }
+    if let Some(result) = value.get("result").filter(|value| !value.is_null()) {
+        return format_output(result);
     }
     if let Some(items) = value.as_array() {
         let text = items

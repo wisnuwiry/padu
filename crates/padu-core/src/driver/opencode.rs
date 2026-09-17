@@ -1303,13 +1303,30 @@ fn tool_activity(part: &Value, events: &impl DriverEventSink, state: &mut OpenCo
         || part
             .pointer("/state/error")
             .is_some_and(|error| !error.is_null());
-    let output = part
+    let raw_output = part
         .pointer("/state/error")
         .filter(|value| !value.is_null())
         .or_else(|| {
             part.pointer("/state/output")
                 .filter(|value| !value.is_null())
         });
+    let raw_text = raw_output.and_then(extract_text_from_output_value);
+    let is_read = kind == ActivityKind::FileRead
+        || raw_text.as_deref().is_some_and(|s| {
+            s.contains("<content>") || (s.contains("<path>") && s.contains("</path>"))
+        })
+        || part
+            .pointer("/state/metadata/display/text")
+            .is_some_and(|t| {
+                t.as_str()
+                    .is_some_and(|s| s.contains("<content>") || s.contains("<path>"))
+            });
+    let normalized_output = if !failed && is_read {
+        normalize_opencode_read_output(raw_output, part)
+    } else {
+        None
+    };
+    let output = normalized_output.as_ref().or(raw_output);
     let item = activity::tool_activity(
         id,
         kind,
@@ -1321,6 +1338,62 @@ fn tool_activity(part: &Value, events: &impl DriverEventSink, state: &mut OpenCo
         complete,
     );
     let _ = events.send(DriverEvent::RichActivity(item));
+}
+
+fn extract_text_from_output_value(value: &Value) -> Option<String> {
+    if let Some(s) = value.as_str() {
+        return (!s.trim().is_empty()).then(|| s.to_owned());
+    }
+    if let Some(content) = value.get("content") {
+        if let Some(s) = content.as_str() {
+            return (!s.trim().is_empty()).then(|| s.to_owned());
+        }
+        if let Some(arr) = content.as_array() {
+            let mut parts = Vec::new();
+            for item in arr {
+                if let Some(text) = item.get("text").and_then(Value::as_str) {
+                    parts.push(text);
+                } else if let Some(s) = item.as_str() {
+                    parts.push(s);
+                }
+            }
+            if !parts.is_empty() {
+                return Some(parts.join("\n"));
+            }
+        }
+    }
+    if let Some(text) = value.get("text").and_then(Value::as_str) {
+        return (!text.trim().is_empty()).then(|| text.to_owned());
+    }
+    if let Some(output) = value.get("output").and_then(Value::as_str) {
+        return (!output.trim().is_empty()).then(|| output.to_owned());
+    }
+    None
+}
+
+fn normalize_opencode_read_output(raw_output: Option<&Value>, part: &Value) -> Option<Value> {
+    if let Some(entries) = part
+        .pointer("/state/metadata/display/entries")
+        .and_then(Value::as_array)
+        .filter(|entries| !entries.is_empty())
+    {
+        let lines = entries
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Some(Value::String(lines));
+    }
+
+    let text = part
+        .pointer("/state/metadata/display/text")
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty())
+        .map(str::to_owned)
+        .or_else(|| raw_output.and_then(extract_text_from_output_value))?;
+
+    let cleaned = padu_protocol::clean_file_read_output(&text);
+    Some(Value::String(cleaned))
 }
 
 #[cfg(test)]
@@ -2081,5 +2154,81 @@ mod tests {
         reader.join().unwrap();
         assert!(control.is_cancelled());
         assert!(control.socket.lock().is_none());
+    }
+
+    #[test]
+    fn normalizes_opencode_read_output_from_metadata_or_xml_content() {
+        // 1. From metadata.display.text with full XML envelope and pagination notice
+        let part_with_xml_metadata = json!({
+            "state": {
+                "metadata": {
+                    "display": {
+                        "text": "<path>/Users/wisnusaputra/Documents/Personal/Project/2026/padu/apps/web/src/lib/conversation-background.ts</path>\n<type>file</type>\n<content>\n45: export function useConversationBackground() {\n46:   return null;\n47: }\n\n(Showing lines 45-234 of 764. Use offset=235 to continue.)\n</content>"
+                    }
+                }
+            }
+        });
+        let normalized = normalize_opencode_read_output(None, &part_with_xml_metadata);
+        assert_eq!(
+            normalized,
+            Some(Value::String(
+                "export function useConversationBackground() {\n  return null;\n}".into()
+            ))
+        );
+
+        // 2. From metadata.display.entries (directory)
+        let part_with_entries = json!({
+            "state": {
+                "metadata": {
+                    "display": {
+                        "entries": ["src/", "Cargo.toml"]
+                    }
+                }
+            }
+        });
+        let normalized = normalize_opencode_read_output(None, &part_with_entries);
+        assert_eq!(normalized, Some(Value::String("src/\nCargo.toml".into())));
+
+        // 3. Fallback: Parse XML with line numbers from raw_output
+        let raw_xml = Value::String(
+            "<path>/app/src/main.rs</path>\n<type>file</type>\n<content>\n1: fn main() {\n2:     println!(\"hello\");\n3: }\n\n(End of file - total 3 lines)\n</content>\n<system-reminder>\nfoo\n</system-reminder>".into()
+        );
+        let part_empty = json!({"state": {}});
+        let normalized = normalize_opencode_read_output(Some(&raw_xml), &part_empty);
+        assert_eq!(
+            normalized,
+            Some(Value::String(
+                "fn main() {\n    println!(\"hello\");\n}".into()
+            ))
+        );
+
+        // 4. Fallback: Directory entries XML
+        let raw_dir_xml = Value::String(
+            "<path>/app</path>\n<type>directory</type>\n<entries>\nsrc/\nCargo.toml\n\n(2 entries)\n</entries>".into()
+        );
+        let normalized = normalize_opencode_read_output(Some(&raw_dir_xml), &part_empty);
+        assert_eq!(normalized, Some(Value::String("src/\nCargo.toml".into())));
+
+        // 5. Plain output without tags is preserved
+        let raw_plain = Value::String("fn main() {\n    println!(\"hi\");\n}".into());
+        let normalized = normalize_opencode_read_output(Some(&raw_plain), &part_empty);
+        assert_eq!(
+            normalized,
+            Some(Value::String(
+                "fn main() {\n    println!(\"hi\");\n}".into()
+            ))
+        );
+
+        // 6. Pagination notice without leading parenthesis and structured output
+        let raw_structured = json!({
+            "content": "<path>/apps/web/src/lib/conversation-background.ts</path>\n<type>file</type>\n<content>\n12: export function useConversationBackground() {\n13:   return null;\n14: }\n\nShowing lines 12-25 of 228. Use offset=26 to continue.)\n</content>"
+        });
+        let normalized = normalize_opencode_read_output(Some(&raw_structured), &part_empty);
+        assert_eq!(
+            normalized,
+            Some(Value::String(
+                "export function useConversationBackground() {\n  return null;\n}".into()
+            ))
+        );
     }
 }

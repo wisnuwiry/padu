@@ -64,7 +64,7 @@ export function MarkdownCodeBlock({ language, code }: { language?: string; code:
 /// A representative filename for a fenced language tag. Diffs infers the
 /// highlighting language from the extension, and `FileTypeIcon` derives the
 /// icon from the same path, so one mapping feeds both.
-function snippetFilename(language?: string): string {
+export function snippetFilename(language?: string): string {
   switch (language?.toLowerCase()) {
     case 'js': case 'javascript': case 'jsx': case 'mjs': case 'cjs': return 'snippet.jsx'
     case 'ts': case 'typescript': case 'mts': case 'cts': return 'snippet.ts'

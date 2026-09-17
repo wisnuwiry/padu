@@ -6,7 +6,7 @@ import type {
   ReviewDiffSource,
 } from '@padu/client'
 import { ContextMenu } from '@base-ui/react/context-menu'
-import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { Virtuoso, type ListItem, type VirtuosoHandle } from 'react-virtuoso'
 import { MarkdownView, TranscriptLinkContext } from '@/components/markdown-view'
@@ -25,6 +25,7 @@ import type {
 import {
   ACTIVITY_PREVIEW_LIMIT,
   activityActionLabel,
+  activityDiffSnapshot,
   activityDisclosureSections,
   activityDisplayTitle,
   activityFileChangeStats,
@@ -34,6 +35,8 @@ import {
   activityPreview,
   activityPreviewWindow,
   activityRowDetail,
+  activitySectionLanguage,
+  activityShowsDiff,
   activityTextRows,
   assistantResponseFooters,
   fencedCode,
@@ -47,6 +50,9 @@ import {
   userMessageRewindTurnCount,
 } from '@/lib/transcript-presentation'
 import type { AssistantResponseFooter, Translator } from '@/lib/transcript-presentation'
+import { File } from '@pierre/diffs/react'
+import { snippetFilename } from './markdown-code-block'
+import { useResolvedTheme } from '@/lib/theme'
 import {
   activeNavigationTurn,
   firstVisibleTranscriptItem,
@@ -1592,9 +1598,10 @@ function ActivityRow({
   t: Translator
   onOpenBackgroundWork?: (key: BackgroundWorkKey) => void
 }) {
+  const showsDiff = !activity.reasoning && activityShowsDiff(activity)
   const sections = activity.reasoning ? [] : activityDisclosureSections(activity, t)
   const reasoningContent = activity.reasoning?.content.trim() ?? ''
-  const hasDetail = Boolean(reasoningContent || sections.length)
+  const hasDetail = Boolean(reasoningContent || sections.length || showsDiff)
   const [expanded, setExpanded] = useState(Boolean(activity.reasoning && !activity.complete))
   const iconName = activityIcon(activity)
   const filePath = activityFilePath(activity)
@@ -1602,9 +1609,7 @@ function ActivityRow({
   const actionLabel = activityActionLabel(activity, t)
   const rowDetail = activityRowDetail(activity, t) || preview
   const fileStats = activityFileChangeStats(activity)
-  const scrollContent = reasoningContent || (activity.kind === 'command'
-    ? sections.find((section) => section.kind === 'output')?.content ?? ''
-    : '')
+  const scrollContent = reasoningContent || (sections.find((section) => section.kind === 'output')?.content ?? '')
   const detailScroll = useRef<HTMLDivElement>(null)
   const detailFollowsTail = useRef(true)
   const [detailEdges, setDetailEdges] = useState({ atTop: true, atBottom: true })
@@ -1689,24 +1694,152 @@ function ActivityRow({
             </ActivityScrollableContent>
           </div>
         ) : (
-          <div className="flex min-w-0 flex-col gap-2 overflow-hidden border-t px-3 py-2 font-mono text-[10.5px] leading-4 text-[var(--text-secondary)]">
-            {sections.map((section) => (
-              <ActivitySection
-                edges={detailEdges}
-                key={section.kind}
-                scrollable={activity.kind === 'command' && section.kind === 'output'}
-                section={section}
-                t={t}
-                viewportRef={detailScroll}
-                onScroll={updateDetailEdges}
-              />
-            ))}
-            {activity.image_urls?.map((url, index) => (
-              <ActivityImage key={`${url}-${index}`} reference={url} t={t} />
-            ))}
-          </div>
+          <>
+            {showsDiff && <ActivityDiffView activity={activity} t={t} />}
+            {(sections.length > 0 || activity.image_urls?.length) && (
+              <div className="flex min-w-0 flex-col gap-2 overflow-hidden border-t px-3 py-2 font-mono text-[10.5px] leading-4 text-[var(--text-secondary)]">
+                {sections.map((section) => (
+                  <ActivitySection
+                    activity={activity}
+                    edges={detailEdges}
+                    key={section.kind}
+                    scrollable={section.kind === 'output'}
+                    section={section}
+                    t={t}
+                    viewportRef={detailScroll}
+                    onScroll={updateDetailEdges}
+                  />
+                ))}
+                {activity.image_urls?.map((url, index) => (
+                  <ActivityImage key={`${url}-${index}`} reference={url} t={t} />
+                ))}
+              </div>
+            )}
+          </>
         )
       )}
+    </div>
+  )
+}
+
+function ActivityDiffView({
+  activity,
+  t,
+}: {
+  activity: ActivityItem
+  t: Translator
+}) {
+  const diff = useMemo(() => activityDiffSnapshot(activity), [activity])
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [edges, setEdges] = useState({ atTop: true, atBottom: true })
+
+  const updateEdges = useCallback((viewport: HTMLDivElement) => {
+    const atTop = viewport.scrollTop <= 1
+    const atBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 1
+    setEdges((current) => (
+      current.atTop === atTop && current.atBottom === atBottom
+        ? current
+        : { atTop, atBottom }
+    ))
+  }, [])
+
+  useEffect(() => {
+    const viewport = scrollRef.current
+    if (viewport) updateEdges(viewport)
+  }, [diff, updateEdges])
+
+  if (!diff.lines.length) return null
+
+  return (
+    <div className="border-t">
+      <ActivityScrollableContent
+        className="max-h-[300px] flex flex-col font-mono text-[11.5px] leading-5 select-text"
+        edges={edges}
+        viewportRef={scrollRef}
+        onScroll={updateEdges}
+      >
+        {diff.lines.map((line, index) => {
+          if (line.kind === 'fileHeader') {
+            return (
+              <div
+                key={index}
+                className="flex h-6 w-full min-w-0 shrink-0 items-center gap-1.5 border-b border-border bg-muted/40 px-2.5 font-medium text-[var(--text-secondary)]"
+              >
+                <span className="min-w-0 flex-1 truncate">{line.filePath}</span>
+                {line.additions !== undefined && (
+                  <span className="shrink-0 font-normal text-[var(--success)]">+{line.additions}</span>
+                )}
+                {line.deletions !== undefined && (
+                  <span className="shrink-0 font-normal text-destructive">-{line.deletions}</span>
+                )}
+              </div>
+            )
+          }
+
+          if (line.kind === 'hunkHeader' || line.kind === 'gap') {
+            return (
+              <div
+                key={index}
+                className="flex h-5 w-full min-w-0 shrink-0 items-center bg-muted/30 text-[var(--text-ghost)] text-[11px]"
+              >
+                <div className="flex h-full w-[38px] shrink-0 items-center justify-center border-r border-border">
+                  ⋯
+                </div>
+                {line.content && (
+                  <div className="min-w-0 pl-3 truncate text-[var(--text-ghost)]">
+                    {line.content}
+                  </div>
+                )}
+              </div>
+            )
+          }
+
+          const isAddition = line.kind === 'addition'
+          const isDeletion = line.kind === 'deletion'
+          const shownLine = line.newLine ?? line.oldLine
+          const marker = isAddition ? '+' : isDeletion ? '-' : ' '
+
+          return (
+            <div
+              key={index}
+              className={cn(
+                'flex w-full min-w-0 min-h-5 items-start',
+                isAddition && 'bg-[var(--success)]/10 dark:bg-[var(--success)]/15',
+                isDeletion && 'bg-destructive/10 dark:bg-destructive/15',
+              )}
+            >
+              <div
+                className={cn(
+                  'flex h-full w-[38px] shrink-0 items-start justify-end border-r border-border pr-2 select-none',
+                  isAddition && 'bg-[var(--success)]/10 dark:bg-[var(--success)]/15 text-[var(--success)]',
+                  isDeletion && 'bg-destructive/10 dark:bg-destructive/15 text-destructive',
+                  !isAddition && !isDeletion && 'text-[var(--text-tertiary)]',
+                )}
+              >
+                {shownLine != null ? shownLine : marker}
+              </div>
+              <div
+                className={cn(
+                  'min-w-0 flex-1 pl-2 pr-3 whitespace-pre overflow-x-auto',
+                  isAddition && 'text-foreground',
+                  isDeletion && 'text-foreground',
+                  !isAddition && !isDeletion && 'text-[var(--text-secondary)]',
+                )}
+              >
+                {line.content || ' '}
+              </div>
+            </div>
+          )
+        })}
+
+        {diff.hiddenRows > 0 && (
+          <div className="w-full min-w-0 px-3 py-1 text-[11px] text-[var(--text-tertiary)]">
+            {diff.hiddenRows === 1
+              ? t('diff.rows_hidden_one')
+              : t('diff.rows_hidden', { count: diff.hiddenRows })}
+          </div>
+        )}
+      </ActivityScrollableContent>
     </div>
   )
 }
@@ -1766,6 +1899,7 @@ function backgroundWorkStatusClass(status: BackgroundWorkStatus) {
 }
 
 function ActivitySection({
+  activity,
   edges,
   scrollable,
   section,
@@ -1773,6 +1907,7 @@ function ActivitySection({
   viewportRef,
   onScroll,
 }: {
+  activity: ActivityItem
   edges: ActivityScrollEdges
   scrollable: boolean
   section: ReturnType<typeof activityDisclosureSections>[number]
@@ -1782,6 +1917,9 @@ function ActivitySection({
 }) {
   const [copied, setCopied] = useState(false)
   const copiedTimeout = useRef<number | null>(null)
+  const themeType = useResolvedTheme()
+  const lang = activitySectionLanguage(activity, section.kind, section.content)
+
   useEffect(() => () => {
     if (copiedTimeout.current !== null) window.clearTimeout(copiedTimeout.current)
   }, [])
@@ -1832,7 +1970,27 @@ function ActivitySection({
         </div>
       ) : null}
       {section.content && (
-        scrollable ? (
+        lang ? (
+          <div className="max-h-72 min-w-0 overflow-auto rounded-md bg-muted/30">
+            <File
+              className="padu-code-surface bg-transparent"
+              disableWorkerPool
+              file={{
+                name: activity.kind === 'fileRead' && activity.display_target?.trim()
+                  ? activity.display_target.trim().split('/').at(-1)!
+                  : snippetFilename(lang),
+                contents: section.content,
+              }}
+              options={{
+                overflow: 'wrap',
+                preferredHighlighter: 'shiki-js',
+                disableFileHeader: true,
+                disableLineNumbers: true,
+                themeType,
+              }}
+            />
+          </div>
+        ) : scrollable ? (
           <ActivityScrollableContent
             className="py-1 pr-2"
             edges={edges}

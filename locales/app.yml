@@ -1220,6 +1220,8 @@ activity.action_run:
   en: Run
 activity.action_edit:
   en: Edit
+activity.action_create:
+  en: Create
 activity.action_read:
   en: Read
 activity.action_search:
@@ -1302,6 +1304,18 @@ activity.edited_files:
   en: Edited files
 activity.edit_failed:
   en: Failed to edit files
+activity.creating_named_file:
+  en: Creating %{file}
+activity.created_named_file:
+  en: Created %{file}
+activity.create_failed_named_file:
+  en: Failed to create %{file}
+activity.creating_files:
+  en: Creating files
+activity.created_files:
+  en: Created files
+activity.create_failed:
+  en: Failed to create files
 activity.file_count:
   en: "%{count} files"
 activity.read_file:

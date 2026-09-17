@@ -1707,6 +1707,16 @@ pub struct Padu {
     /// Viewports for those diffs. Separate from `activity_scroll_viewports`
     /// because a failed edit shows both its diff and the error it returned.
     activity_diff_viewports: RefCell<HashMap<Uuid, ActivityScrollViewport>>,
+    /// Syntax-highlighted disclosure text, keyed by activity and section, with
+    /// the source and palette it was built from. An expanded file read or
+    /// command output is re-lexed only when its own text or the theme changes,
+    /// never once per frame.
+    activity_section_flats: RefCell<
+        HashMap<
+            (Uuid, ActivityDisclosureSectionKind),
+            (SharedString, MarkdownPalette, Rc<md::render::FlatText>),
+        >,
+    >,
     /// One allocation for every transcript markdown context to share. The
     /// callback knows about the active workspace; the renderer deliberately
     /// does not.
@@ -3473,6 +3483,7 @@ impl Padu {
                 activity_scroll_viewports: RefCell::new(HashMap::new()),
                 activity_diffs: RefCell::new(HashMap::new()),
                 activity_diff_viewports: RefCell::new(HashMap::new()),
+                activity_section_flats: RefCell::new(HashMap::new()),
                 markdown_link_handler,
                 transcript_selection: TranscriptSelection::default(),
                 transcript_focus: cx.focus_handle(),

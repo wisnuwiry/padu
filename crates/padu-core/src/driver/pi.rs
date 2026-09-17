@@ -1706,12 +1706,7 @@ mod tests {
         assert_eq!(started.title, "Inspect Pi source");
         assert_eq!(started.kind, ActivityKind::FileRead);
         assert_eq!(started.display_target.as_deref(), Some("src/main.rs"));
-        assert!(
-            started
-                .arguments
-                .as_deref()
-                .is_some_and(|arguments| arguments.contains("src/main.rs"))
-        );
+        assert!(started.arguments.is_none());
         assert!(!started.complete);
         let DriverEvent::RichActivity(completed) = event_rx.recv().unwrap() else {
             panic!("expected a completed rich Pi tool activity");
