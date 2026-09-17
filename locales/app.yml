@@ -336,6 +336,24 @@ about.sponsor_description:
   en: Support the development of Padu on GitHub Sponsors
 about.open_in_browser:
   en: Open in Browser
+whats_new.button:
+  en: What's new in v%{version}
+whats_new.tooltip:
+  en: See what changed in this update
+whats_new.title:
+  en: What's new
+whats_new.subtitle:
+  en: Here's what changed in this update
+whats_new.dismiss:
+  en: Close release notes
+whats_new.done:
+  en: Done
+whats_new.view_full_changelog:
+  en: View full changelog
+whats_new.empty:
+  en: Release notes for this version were not bundled with this build. See the full changelog online.
+about.view_changelog:
+  en: Changelog
 keybindings.section_general:
   en: General & Window
 keybindings.section_navigation:

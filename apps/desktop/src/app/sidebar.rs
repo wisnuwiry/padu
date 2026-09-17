@@ -1162,7 +1162,21 @@ impl Padu {
         .into_any_element()
     }
 
+    /// Bottom sidebar: the full-width "what's new" button (only while an
+    /// update is unseen) directly on top of the settings icon row.
     fn render_sidebar_footer(&self, cx: &mut Context<Self>) -> Div {
+        let show_whats_new = self.should_show_whats_new();
+        div()
+            .flex_none()
+            .flex()
+            .flex_col()
+            .when(show_whats_new, |footer| {
+                footer.child(self.render_whats_new_button(cx))
+            })
+            .child(self.render_sidebar_footer_row(cx))
+    }
+
+    fn render_sidebar_footer_row(&self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
         let checking_updates = self.updater_checking;
         div()

@@ -446,6 +446,11 @@ struct AppState {
     window_state: Option<PersistedWindowState>,
     #[serde(default)]
     has_completed_onboarding: bool,
+    /// Last app version whose release notes the user has seen. `None` means
+    /// the version has never been recorded (fresh install): callers must
+    /// stamp the current version silently instead of showing what's new.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_seen_version: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -506,6 +511,11 @@ pub struct PersistedState {
     pub window_state: Option<PersistedWindowState>,
     #[serde(default)]
     pub has_completed_onboarding: bool,
+    /// Last app version whose release notes the user has seen. `None` means
+    /// the version has never been recorded (fresh install): callers must
+    /// stamp the current version silently instead of showing what's new.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_seen_version: Option<String>,
     #[serde(default = "default_computer_use_enabled")]
     pub computer_use_enabled: bool,
     #[serde(default)]
@@ -530,7 +540,27 @@ pub struct PersistedState {
     dirty_sessions: HashSet<Uuid>,
 }
 
+/// Whether the full-width "what's new" affordance should be shown for
+/// `current_version` given the last version whose notes the user has seen.
+///
+/// A missing record means a fresh install (or a profile predating version
+/// tracking): the caller must stamp the current version silently instead of
+/// showing anything. Any recorded version that differs — older *or* newer —
+/// counts as unseen, so downgrades surface the current notes once rather
+/// than nagging.
+pub fn should_show_whats_new(last_seen_version: Option<&str>, current_version: &str) -> bool {
+    match last_seen_version {
+        None => false,
+        Some(seen) => seen != current_version,
+    }
+}
+
 impl PersistedState {
+    /// Whether the "what's new" affordance should be shown for `current_version`.
+    pub fn shows_whats_new_for(&self, current_version: &str) -> bool {
+        should_show_whats_new(self.last_seen_version.as_deref(), current_version)
+    }
+
     pub fn session_mut(&mut self, id: Uuid) -> Option<&mut AgentSession> {
         let session = self.sessions.iter_mut().find(|session| session.id == id)?;
         self.dirty_sessions.insert(id);
@@ -583,6 +613,7 @@ impl PersistedState {
             markdown_preview: false,
             window_state: None,
             has_completed_onboarding: false,
+            last_seen_version: None,
             computer_use_enabled: false,
             computer_use_allowed_apps: Vec::new(),
             disabled_providers: Vec::new(),
@@ -728,6 +759,7 @@ impl PersistedState {
             markdown_preview: self.markdown_preview,
             window_state: self.window_state,
             has_completed_onboarding: self.has_completed_onboarding,
+            last_seen_version: self.last_seen_version.clone(),
         }
     }
 
@@ -813,6 +845,7 @@ impl PersistedState {
         self.markdown_preview = app_state.markdown_preview;
         self.window_state = app_state.window_state;
         self.has_completed_onboarding = app_state.has_completed_onboarding;
+        self.last_seen_version = app_state.last_seen_version;
     }
 
     fn persistable_selected_session(&self) -> Option<Uuid> {
@@ -1344,6 +1377,40 @@ mod tests {
         assert_eq!(state.sidebar_ordering, SidebarOrdering::Newest);
         assert_eq!(state.last_runtime_mode, RuntimeMode::FullAccess);
         assert!(!state.has_completed_onboarding);
+        assert_eq!(state.last_seen_version, None);
+    }
+
+    #[test]
+    fn whats_new_shows_only_for_recorded_older_versions() {
+        // Fresh install (never recorded): never show; the caller stamps silently.
+        assert!(!should_show_whats_new(None, "0.1.5"));
+        // Same version: already seen.
+        assert!(!should_show_whats_new(Some("0.1.5"), "0.1.5"));
+        // Older recorded version: updated, show once.
+        assert!(should_show_whats_new(Some("0.1.4"), "0.1.5"));
+        // Newer recorded version (downgrade): show current notes once, not nag.
+        assert!(should_show_whats_new(Some("0.2.0"), "0.1.5"));
+
+        let mut state = PersistedState::empty();
+        assert!(!state.shows_whats_new_for("0.1.5"));
+        state.last_seen_version = Some("0.1.4".to_string());
+        assert!(state.shows_whats_new_for("0.1.5"));
+        state.last_seen_version = Some("0.1.5".to_string());
+        assert!(!state.shows_whats_new_for("0.1.5"));
+    }
+
+    #[test]
+    fn last_seen_version_round_trips_through_app_state() {
+        let mut state = PersistedState::empty();
+        state.last_seen_version = Some("0.1.4".to_string());
+
+        let encoded = serde_json::to_vec(&state.app_state()).unwrap();
+        let decoded: AppState = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded.last_seen_version.as_deref(), Some("0.1.4"));
+
+        let mut restored = PersistedState::empty();
+        restored.apply_app_state(decoded);
+        assert_eq!(restored.last_seen_version.as_deref(), Some("0.1.4"));
     }
 
     #[test]
