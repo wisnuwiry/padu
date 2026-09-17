@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::slider::slider;
 
 /// Sizes offered by the font-size dropdowns. A hand-edited `app.json` may
 /// hold values outside this list; they render as-is and simply select
@@ -152,112 +153,127 @@ fn render_background_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) 
                 .w_full()
                 .flex()
                 .items_start()
-                .justify_between()
-                .gap(px(14.0))
+                .gap(px(16.0))
                 .child(
                     div()
-                        .w(px(150.0))
+                        .w(px(190.0))
+                        .flex_none()
                         .flex()
                         .flex_col()
-                        .gap(px(8.0))
+                        .gap(px(12.0))
                         .child(choose)
-                        .children(remove),
+                        .children(remove)
+                        .child(div().w_full().h(px(1.0)).my(px(2.0)).bg(theme.border))
+                        .child(background_adjuster(
+                            "background-opacity",
+                            tr!("settings.background_opacity"),
+                            opacity as f32,
+                            0.0,
+                            100.0,
+                            theme,
+                            {
+                                let weak = cx.entity().downgrade();
+                                move |value, cx| {
+                                    let _ = weak.update(cx, |this, cx| {
+                                        this.set_conversation_background_opacity(value / 100.0, cx)
+                                    });
+                                }
+                            },
+                        ))
+                        .child(background_adjuster(
+                            "background-height",
+                            tr!("settings.background_height"),
+                            height as f32,
+                            20.0,
+                            100.0,
+                            theme,
+                            {
+                                let weak = cx.entity().downgrade();
+                                move |value, cx| {
+                                    let _ = weak.update(cx, |this, cx| {
+                                        this.set_conversation_background_height(value, cx)
+                                    });
+                                }
+                            },
+                        )),
                 )
-                .child(div().flex_1().child(preview)),
+                .child(div().flex_1().min_w_0().child(preview)),
         )
-        .child(background_adjuster(
-            "background-opacity",
-            tr!("settings.background_opacity"),
-            opacity,
-            0,
-            100,
-            theme,
-            {
-                let weak = cx.entity().downgrade();
-                move |value, cx| {
-                    let _ = weak.update(cx, |this, cx| {
-                        this.set_conversation_background_opacity(value as f32 / 100.0, cx)
-                    });
-                }
-            },
-        ))
-        .child(background_adjuster(
-            "background-height",
-            tr!("settings.background_height"),
-            height,
-            20,
-            100,
-            theme,
-            {
-                let weak = cx.entity().downgrade();
-                move |value, cx| {
-                    let _ = weak.update(cx, |this, cx| {
-                        this.set_conversation_background_height(value as f32, cx)
-                    });
-                }
-            },
-        ))
         .into_any_element()
 }
 
 fn background_adjuster(
     id_prefix: &'static str,
     label: String,
-    value: i32,
-    min: i32,
-    max: i32,
+    value: f32,
+    min: f32,
+    max: f32,
     theme: Theme,
-    on_change: impl Fn(i32, &mut App) + 'static,
+    on_change: impl Fn(f32, &mut App) + 'static,
 ) -> AnyElement {
-    let on_change: Rc<dyn Fn(i32, &mut App)> = Rc::new(on_change);
-    let mut buttons = Vec::new();
-    for (id, delta) in [("decrease", -1), ("increase", 1)] {
-        let next = (value + delta).clamp(min, max);
-        let on_change = on_change.clone();
-        buttons.push(
-            div()
-                .id(SharedString::from(format!("{id_prefix}-{id}")))
-                .tab_index(0)
-                .px(px(7.0))
-                .py(px(3.0))
-                .border_1()
-                .border_color(theme.border)
-                .rounded(px(4.0))
-                .cursor_pointer()
-                .focus_visible(|style| style.border_color(theme.accent))
-                .child(if delta < 0 { "−" } else { "+" })
-                .on_click({
-                    let on_change = on_change.clone();
-                    move |_, _, cx| on_change(next, cx)
-                })
-                .on_key_down(move |event: &KeyDownEvent, _, cx| {
-                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                        on_change(next, cx);
-                    }
-                }),
-        );
-    }
+    let value = value.clamp(min, max);
+    let value_label = format!("{value:.0}%");
+    let on_change: Rc<dyn Fn(f32, &mut App)> = Rc::new(on_change);
+    let slider_id = format!("{id_prefix}-slider");
+    let slider_on_change = on_change.clone();
+
     div()
         .w_full()
         .flex()
-        .items_center()
-        .justify_between()
-        .gap(px(8.0))
+        .flex_col()
+        .gap(px(4.0))
         .child(
             div()
-                .flex_1()
-                .min_w_0()
-                .text_size(sp(12.0))
-                .text_color(theme.text_secondary)
-                .child(label),
+                .w_full()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_secondary)
+                        .child(label),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(12.0))
+                        .text_color(theme.text)
+                        .child(value_label),
+                ),
         )
-        .children(buttons)
         .child(
             div()
-                .w(px(42.0))
-                .text_size(sp(12.0))
-                .text_color(theme.text)
-                .child(format!("{value}%")),
+                .id(slider_id)
+                .w_full()
+                .tab_index(0)
+                .cursor_pointer()
+                .rounded(px(4.0))
+                .focus_visible(|style| style.bg(theme.overlay))
+                .on_key_down(move |event: &KeyDownEvent, _, cx| {
+                    let next = match event.keystroke.key.as_str() {
+                        "left" => Some((value - 1.0).max(min)),
+                        "right" => Some((value + 1.0).min(max)),
+                        "home" => Some(min),
+                        "end" => Some(max),
+                        _ => None,
+                    };
+                    if let Some(next) = next {
+                        slider_on_change(next, cx);
+                        cx.stop_propagation();
+                    }
+                })
+                .child(
+                    slider(format!("{id_prefix}-control"), value)
+                        .range(min..=max)
+                        .step(1.0)
+                        .colors(theme.accent, theme.border, theme.text)
+                        .on_change({
+                            let on_change = on_change.clone();
+                            move |value, cx| on_change(value, cx)
+                        }),
+                ),
         )
         .into_any_element()
 }

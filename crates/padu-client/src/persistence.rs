@@ -38,20 +38,12 @@ pub const DEFAULT_RIGHT_PANEL_WIDTH: f32 = 460.0;
 pub const DEFAULT_BACKGROUND_OPACITY: f32 = 0.18;
 pub const DEFAULT_BACKGROUND_HEIGHT: f32 = 50.0;
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ConversationBackgroundFit {
-    #[default]
-    Cover,
-}
-
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct ConversationBackgroundSettings {
     pub image_path: Option<PathBuf>,
     pub opacity: f32,
     pub height_percent: f32,
-    pub fit: ConversationBackgroundFit,
 }
 
 impl Default for ConversationBackgroundSettings {
@@ -60,7 +52,6 @@ impl Default for ConversationBackgroundSettings {
             image_path: None,
             opacity: DEFAULT_BACKGROUND_OPACITY,
             height_percent: DEFAULT_BACKGROUND_HEIGHT,
-            fit: ConversationBackgroundFit::Cover,
         }
     }
 }
