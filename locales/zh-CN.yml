@@ -157,6 +157,15 @@ about.github_description: 源代码、发行说明与问题跟踪
 about.sponsor: 赞助支持
 about.sponsor_description: 在 GitHub Sponsors 上支持 Padu 的开发
 about.open_in_browser: 在浏览器中打开
+whats_new.button: v%{version} 新功能
+whats_new.tooltip: 查看此更新的内容
+whats_new.title: 新功能
+whats_new.subtitle: 以下是此更新的内容
+whats_new.dismiss: 关闭发行说明
+whats_new.done: 完成
+whats_new.view_full_changelog: 查看完整更新日志
+whats_new.empty: 此版本未附带发行说明。请在线查看完整更新日志。
+about.view_changelog: 更新日志
 keybindings.section_general: 通用与窗口
 keybindings.section_navigation: 导航与面板
 keybindings.section_chat: 对话与输入

@@ -161,6 +161,15 @@ about.github_description: ソースコード、リリースノート、課題ト
 about.sponsor: スポンサー
 about.sponsor_description: GitHub Sponsors で Padu の開発を支援する
 about.open_in_browser: ブラウザで開く
+whats_new.button: v%{version} の新機能
+whats_new.tooltip: このアップデートの変更内容を見る
+whats_new.title: 新機能
+whats_new.subtitle: このアップデートの変更内容
+whats_new.dismiss: リリースノートを閉じる
+whats_new.done: 完了
+whats_new.view_full_changelog: 完全な変更履歴を見る
+whats_new.empty: このバージョンのリリースノートはこのビルドに含まれていません。オンラインで完全な変更履歴をご覧ください。
+about.view_changelog: 変更履歴
 keybindings.section_general: 一般とウィンドウ
 keybindings.section_navigation: ナビゲーションとパネル
 keybindings.section_chat: チャットと入力

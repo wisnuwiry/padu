@@ -156,6 +156,15 @@ about.github_description: Kode sumber, catatan rilis, dan pelacak masalah
 about.sponsor: Sponsor
 about.sponsor_description: Dukung pengembangan Padu di GitHub Sponsors
 about.open_in_browser: Buka di Peramban
+whats_new.button: Yang baru di v%{version}
+whats_new.tooltip: Lihat perubahan dalam pembaruan ini
+whats_new.title: Yang baru
+whats_new.subtitle: Berikut perubahan dalam pembaruan ini
+whats_new.dismiss: Tutup catatan rilis
+whats_new.done: Selesai
+whats_new.view_full_changelog: Lihat catatan rilis lengkap
+whats_new.empty: Catatan rilis untuk versi ini tidak disertakan dalam build ini. Lihat catatan rilis lengkap secara daring.
+about.view_changelog: Catatan Rilis
 keybindings.section_general: Umum & Jendela
 keybindings.section_navigation: Navigasi & Panel
 keybindings.section_chat: Obrolan & Komposer
