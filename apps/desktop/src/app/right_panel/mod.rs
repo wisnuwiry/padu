@@ -28,11 +28,9 @@ mod tests {
         let project_file = workspace.join("src/app/right_panel.rs");
         let project_file_with_line = format!("{}:1596", project_file.display());
         let project_file_with_column = format!("{}:1596:8", project_file.display());
-        let relative_project_file = Path::new("src")
-            .join("app")
-            .join("right_panel.rs")
-            .to_string_lossy()
-            .into_owned();
+        // Workspace-relative paths are protocol values with `/` separators,
+        // even on Windows where `Path::join` would render `\`.
+        let relative_project_file = "src/app/right_panel.rs".to_owned();
 
         assert_eq!(
             transcript_link_route(&project_file_with_line, Some(workspace)),
