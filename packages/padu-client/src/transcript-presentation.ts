@@ -262,12 +262,52 @@ export function activityDisclosureSections(activity: ActivityItem, t?: Translato
   }
   const argumentsText = activity.arguments?.trim()
   const output = activity.output?.trim()
-  if (argumentsText) sections.push({ kind: 'arguments', label: t ? t('activity.arguments') : 'Arguments', content: argumentsText })
+  if (argumentsText && activity.kind !== 'fileRead') sections.push({ kind: 'arguments', label: t ? t('activity.arguments') : 'Arguments', content: argumentsText })
   if (output) sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: output })
   else if (activity.image_urls?.length) sections.push({ kind: 'output', label: t ? t('activity.output') : 'Output', content: '' })
   const detail = activity.detail?.trim()
   if (!sections.length && detail) sections.push({ kind: 'detail', label: null, content: detail })
   return sections
+}
+
+export function activitySectionLanguage(
+  activity: ActivityItem,
+  sectionKind: ActivityDisclosureSection['kind'],
+  content: string,
+): string | null {
+  switch (sectionKind) {
+    case 'command':
+      return 'shell'
+    case 'arguments': {
+      const trimmed = content.trim()
+      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+        return 'json'
+      }
+      return null
+    }
+    case 'output': {
+      if (activity.kind === 'fileRead') {
+        const target = activity.display_target?.trim()
+        if (target) {
+          const ext = target.split('/').at(-1)?.split('.').at(-1)?.toLowerCase()
+          if (ext) return ext
+        }
+        return null
+      }
+      const trimmed = content.trim()
+      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+        try {
+          JSON.parse(trimmed)
+          return 'json'
+        } catch {
+          return null
+        }
+      }
+      return null
+    }
+    default:
+      return null
+  }
 }
 
 export function activityPreview(activity: ActivityItem, t?: Translator) {

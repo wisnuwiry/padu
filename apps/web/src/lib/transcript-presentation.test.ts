@@ -23,6 +23,7 @@ import {
   userMessageRewindTurnCount,
   formatMessageTime,
   formatWorkingElapsed,
+  activitySectionLanguage,
 } from './transcript-presentation'
 
 describe('desktop transcript language', () => {
@@ -146,6 +147,25 @@ describe('desktop transcript language', () => {
       { kind: 'command', label: 'Command', content: 'bun test' },
       { kind: 'output', label: 'Output', content: '12 pass' },
     ])
+  })
+
+  test('shows only output for file read activities and detects language', () => {
+    const item = {
+      ...activity('fileRead', true),
+      arguments: '{"filePath":"src/main.rs"}',
+      display_target: 'src/main.rs',
+      output: 'fn main() {\n  println!("hi");\n}',
+      detail: 'Completed',
+    }
+    expect(activityDisclosureSections(item)).toEqual([
+      { kind: 'output', label: 'Output', content: 'fn main() {\n  println!("hi");\n}' },
+    ])
+    expect(activitySectionLanguage(item, 'output', item.output)).toBe('rs')
+    expect(activitySectionLanguage(item, 'command', 'cargo check')).toBe('shell')
+    expect(activitySectionLanguage(item, 'arguments', '{"a":1}')).toBe('json')
+    const commandItem = activity('command', true)
+    expect(activitySectionLanguage(commandItem, 'output', 'raw text log')).toBeNull()
+    expect(activitySectionLanguage(commandItem, 'output', '{"status":"ok"}')).toBe('json')
   })
 
   test('shows file edit stats only when every settled edit has counts', () => {

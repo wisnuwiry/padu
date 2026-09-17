@@ -34,6 +34,7 @@ import {
   activityPreview,
   activityPreviewWindow,
   activityRowDetail,
+  activitySectionLanguage,
   activityTextRows,
   assistantResponseFooters,
   fencedCode,
@@ -47,6 +48,9 @@ import {
   userMessageRewindTurnCount,
 } from '@/lib/transcript-presentation'
 import type { AssistantResponseFooter, Translator } from '@/lib/transcript-presentation'
+import { File } from '@pierre/diffs/react'
+import { snippetFilename } from './markdown-code-block'
+import { useResolvedTheme } from '@/lib/theme'
 import {
   activeNavigationTurn,
   firstVisibleTranscriptItem,
@@ -1602,9 +1606,7 @@ function ActivityRow({
   const actionLabel = activityActionLabel(activity, t)
   const rowDetail = activityRowDetail(activity, t) || preview
   const fileStats = activityFileChangeStats(activity)
-  const scrollContent = reasoningContent || (activity.kind === 'command'
-    ? sections.find((section) => section.kind === 'output')?.content ?? ''
-    : '')
+  const scrollContent = reasoningContent || (sections.find((section) => section.kind === 'output')?.content ?? '')
   const detailScroll = useRef<HTMLDivElement>(null)
   const detailFollowsTail = useRef(true)
   const [detailEdges, setDetailEdges] = useState({ atTop: true, atBottom: true })
@@ -1692,9 +1694,10 @@ function ActivityRow({
           <div className="flex min-w-0 flex-col gap-2 overflow-hidden border-t px-3 py-2 font-mono text-[10.5px] leading-4 text-[var(--text-secondary)]">
             {sections.map((section) => (
               <ActivitySection
+                activity={activity}
                 edges={detailEdges}
                 key={section.kind}
-                scrollable={activity.kind === 'command' && section.kind === 'output'}
+                scrollable={section.kind === 'output'}
                 section={section}
                 t={t}
                 viewportRef={detailScroll}
@@ -1766,6 +1769,7 @@ function backgroundWorkStatusClass(status: BackgroundWorkStatus) {
 }
 
 function ActivitySection({
+  activity,
   edges,
   scrollable,
   section,
@@ -1773,6 +1777,7 @@ function ActivitySection({
   viewportRef,
   onScroll,
 }: {
+  activity: ActivityItem
   edges: ActivityScrollEdges
   scrollable: boolean
   section: ReturnType<typeof activityDisclosureSections>[number]
@@ -1782,6 +1787,9 @@ function ActivitySection({
 }) {
   const [copied, setCopied] = useState(false)
   const copiedTimeout = useRef<number | null>(null)
+  const themeType = useResolvedTheme()
+  const lang = activitySectionLanguage(activity, section.kind, section.content)
+
   useEffect(() => () => {
     if (copiedTimeout.current !== null) window.clearTimeout(copiedTimeout.current)
   }, [])
@@ -1832,7 +1840,26 @@ function ActivitySection({
         </div>
       ) : null}
       {section.content && (
-        scrollable ? (
+        lang ? (
+          <div className="max-h-72 min-w-0 overflow-auto rounded-md bg-muted/30">
+            <File
+              className="padu-code-surface bg-transparent"
+              disableWorkerPool
+              file={{
+                name: activity.kind === 'fileRead' && activity.display_target?.trim()
+                  ? activity.display_target.trim().split('/').at(-1)!
+                  : snippetFilename(lang),
+                contents: section.content,
+              }}
+              options={{
+                overflow: 'wrap',
+                preferredHighlighter: 'shiki-js',
+                disableFileHeader: true,
+                themeType,
+              }}
+            />
+          </div>
+        ) : scrollable ? (
           <ActivityScrollableContent
             className="py-1 pr-2"
             edges={edges}
