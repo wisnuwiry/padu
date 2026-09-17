@@ -1171,13 +1171,15 @@ fn tool_name_leaf(name: &str) -> &str {
 }
 
 fn is_ask_user_question(activity: &ActivityItem) -> bool {
-    activity.kind == crate::model::ActivityKind::Tool
-        && tool_name_leaf(&activity.title)
-            .chars()
-            .filter(|character| !matches!(*character, '_' | '-' | ' '))
-            .flat_map(char::to_lowercase)
-            .collect::<String>()
-            == "askuserquestion"
+    if activity.kind != crate::model::ActivityKind::Tool {
+        return false;
+    }
+    let compact = tool_name_leaf(&activity.title)
+        .chars()
+        .filter(|character| !matches!(*character, '_' | '-' | ' '))
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    compact == "askuserquestion" || compact == "askquestion"
 }
 
 fn humanize_tool_name(name: &str) -> String {

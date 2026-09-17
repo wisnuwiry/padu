@@ -980,8 +980,9 @@ function toolNameLeaf(name: string) {
 }
 
 function isAskUserQuestion(activity: ActivityItem) {
-  return activity.kind === 'tool'
-    && toolNameLeaf(activity.title).replace(/[\s_-]+/g, '').toLocaleLowerCase() === 'askuserquestion'
+  if (activity.kind !== 'tool') return false
+  const compact = toolNameLeaf(activity.title).replace(/[\s_-]+/g, '').toLocaleLowerCase()
+  return compact === 'askuserquestion' || compact === 'askquestion'
 }
 
 function humanizeToolName(name: string) {
