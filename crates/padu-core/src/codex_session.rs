@@ -110,18 +110,7 @@ fn app_server_request(binary: &Path, request: Value) -> anyhow::Result<Value> {
 }
 
 fn title_from_prompt(prompt: &str) -> Option<String> {
-    let mut title = prompt
-        .split_whitespace()
-        .take(7)
-        .collect::<Vec<_>>()
-        .join(" ");
-    if title.is_empty() {
-        return None;
-    }
-    if title.chars().count() > 54 {
-        title = format!("{}…", title.chars().take(53).collect::<String>());
-    }
-    Some(title)
+    crate::model::prompt_fallback_title(prompt)
 }
 
 fn parse_session_summaries(response: &Value, limit: usize) -> Vec<ProviderSessionSummary> {
@@ -146,9 +135,7 @@ fn parse_session_summaries(response: &Value, limit: usize) -> Vec<ProviderSessio
             let title = thread
                 .get("name")
                 .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|title| !title.is_empty())
-                .map(str::to_owned)
+                .and_then(crate::model::normalize_session_title)
                 .or_else(|| {
                     thread
                         .get("preview")

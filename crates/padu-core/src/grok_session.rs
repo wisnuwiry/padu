@@ -52,10 +52,8 @@ fn provider_summary(value: &Value) -> Option<ProviderSessionSummary> {
             value
                 .get(key)
                 .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|title| !title.is_empty())
+                .and_then(crate::model::normalize_session_title)
         })
-        .map(str::to_owned)
         .unwrap_or_else(|| {
             cwd.file_name()
                 .and_then(|name| name.to_str())
@@ -132,9 +130,7 @@ pub fn generated_title_in(grok_home: &Path, session_id: &str) -> anyhow::Result<
     Ok(summary
         .get("generated_title")
         .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|title| !title.is_empty())
-        .map(str::to_owned))
+        .and_then(crate::model::normalize_session_title))
 }
 
 pub fn fork_session_at_turn(

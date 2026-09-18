@@ -67,9 +67,7 @@ fn timestamp(value: Option<&str>) -> u64 {
 
 fn session_title(provider: ProviderKind, title: Option<&str>, session_id: &str) -> String {
     title
-        .map(str::trim)
-        .filter(|title| !title.is_empty())
-        .map(str::to_owned)
+        .and_then(crate::model::normalize_session_title)
         .unwrap_or_else(|| {
             let short_id = session_id.chars().take(8).collect::<String>();
             format!("{} session {short_id}", provider.short_name())
