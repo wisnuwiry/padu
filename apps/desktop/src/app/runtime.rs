@@ -1522,6 +1522,17 @@ impl Padu {
         changed
     }
 
+    pub(super) fn drain_agy_auth_url_events(&mut self) -> bool {
+        let mut changed = false;
+        while let Ok((provider, url)) = self.agy_auth_url_events.try_recv() {
+            if provider == ProviderKind::Agy {
+                self.agy_auth_url = Some(url);
+                changed = true;
+            }
+        }
+        changed
+    }
+
     pub(super) fn drain_provider_detection_events(&mut self) -> bool {
         let mut changed = false;
         let mut installed_providers = Vec::new();
@@ -3529,6 +3540,7 @@ impl Padu {
             | self.drain_provider_version_events()
             | self.drain_provider_detection_events()
             | self.drain_agy_install_progress_events()
+            | self.drain_agy_auth_url_events()
             | self.drain_computer_permission_events()
             | self.drain_plan_usage_events()
             | self.drain_task_state_sync_events(cx)

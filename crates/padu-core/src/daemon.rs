@@ -274,7 +274,10 @@ impl Backend for PaduBackend {
                 let path = crate::model::provider_probe(ProviderKind::Agy, binary_override)
                     .path
                     .ok_or_else(|| anyhow!("Antigravity ACP server is not installed"))?;
-                crate::driver::authenticate_agy(&path, &self.default_cwd)?;
+                let progress_events = events.clone();
+                crate::driver::authenticate_agy(&path, &self.default_cwd, move |url| {
+                    progress_events.send_provider_auth_url(ProviderKind::Agy, url);
+                })?;
                 Ok(ResponsePayload::Ack)
             }
             Command::RemoveAgyAcp => {

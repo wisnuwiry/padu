@@ -36,6 +36,7 @@ struct ClientInner {
     task_state_subscribers: Mutex<Vec<Sender<u64>>>,
     provider_install_subscribers:
         Mutex<Vec<Sender<(padu_protocol::model::ProviderKind, String, u8)>>>,
+    provider_auth_url_subscribers: Mutex<Vec<Sender<(padu_protocol::model::ProviderKind, String)>>>,
     last_sequences: Mutex<HashMap<(Uuid, Uuid), LastSequence>>,
     disconnected: AtomicBool,
 }
@@ -113,6 +114,7 @@ impl DaemonClient {
             pending_events: Mutex::new(HashMap::new()),
             task_state_subscribers: Mutex::new(Vec::new()),
             provider_install_subscribers: Mutex::new(Vec::new()),
+            provider_auth_url_subscribers: Mutex::new(Vec::new()),
             last_sequences: Mutex::new(last_sequences),
             disconnected: AtomicBool::new(false),
         });
@@ -168,6 +170,14 @@ impl DaemonClient {
     ) -> Receiver<(padu_protocol::model::ProviderKind, String, u8)> {
         let (events, receiver) = unbounded();
         self.inner.provider_install_subscribers.lock().push(events);
+        receiver
+    }
+
+    pub fn subscribe_provider_auth_url(
+        &self,
+    ) -> Receiver<(padu_protocol::model::ProviderKind, String)> {
+        let (events, receiver) = unbounded();
+        self.inner.provider_auth_url_subscribers.lock().push(events);
         receiver
     }
 
@@ -365,6 +375,12 @@ fn run_client(
                             .retain(|subscriber| {
                                 subscriber.send((provider, phase.clone(), percent)).is_ok()
                             });
+                    }
+                    ServerMessage::ProviderAuthUrl { provider, url } => {
+                        inner
+                            .provider_auth_url_subscribers
+                            .lock()
+                            .retain(|subscriber| subscriber.send((provider, url.clone())).is_ok());
                     }
                     ServerMessage::ShuttingDown => break,
                     ServerMessage::Hello { .. } | ServerMessage::Rejected { .. } => {}

@@ -73,6 +73,9 @@ export class PaduClient {
   private providerInstallProgressListeners = new Set<
     (progress: { provider: string; phase: string; percent: number }) => void
   >();
+  private providerAuthUrlListeners = new Set<
+    (auth: { provider: string; url: string }) => void
+  >();
   private connectionStateListeners = new Set<ConnectionStateListener>();
   private sequences = new Map<string, LastSequence>();
   private connectionGeneration = 0;
@@ -301,6 +304,13 @@ export class PaduClient {
     return () => this.providerInstallProgressListeners.delete(listener);
   }
 
+  subscribeProviderAuthUrl(
+    listener: (auth: { provider: string; url: string }) => void,
+  ): () => void {
+    this.providerAuthUrlListeners.add(listener);
+    return () => this.providerAuthUrlListeners.delete(listener);
+  }
+
   /** Observes connection changes, including remote socket closure. */
   subscribeConnectionState(listener: ConnectionStateListener): () => void {
     this.connectionStateListeners.add(listener);
@@ -385,6 +395,15 @@ export class PaduClient {
           provider: message.provider,
           phase: message.phase,
           percent: message.percent,
+        });
+      }
+      return;
+    }
+    if (message.type === "providerAuthUrl") {
+      for (const listener of this.providerAuthUrlListeners) {
+        listener({
+          provider: message.provider,
+          url: message.url,
         });
       }
       return;

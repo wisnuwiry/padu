@@ -3,4 +3,4 @@ import type { ProviderKind } from "./ProviderKind";
 import type { ResponseOutcome } from "./ResponseOutcome";
 import type { SequencedEvent } from "./SequencedEvent";
 
-export type ServerMessage = { "type": "hello", protocolVersion: number, daemonVersion: string, } | { "type": "rejected", message: string, } | { "type": "response", requestId: string, outcome: ResponseOutcome, } | { "type": "event" } & SequencedEvent | { "type": "taskStateChanged", revision: number, } | { "type": "providerInstallProgress", provider: ProviderKind, phase: string, percent: number, } | { "type": "shuttingDown" };
+export type ServerMessage = { "type": "hello", protocolVersion: number, daemonVersion: string, } | { "type": "rejected", message: string, } | { "type": "response", requestId: string, outcome: ResponseOutcome, } | { "type": "event" } & SequencedEvent | { "type": "taskStateChanged", revision: number, } | { "type": "providerInstallProgress", provider: ProviderKind, phase: string, percent: number, } | { "type": "providerAuthUrl", provider: ProviderKind, url: string, } | { "type": "shuttingDown" };

@@ -243,9 +243,20 @@ impl AcpDriver {
 fn sdk_agent(
     binary: &Path,
     cwd: &Path,
+    launch: AcpLaunch,
+    computer_use: Option<&super::support::HeadlessComputerUseConfig>,
+    stderr_lines: Arc<Mutex<Vec<String>>>,
+) -> anyhow::Result<AcpAgent> {
+    sdk_agent_with_stderr_callback(binary, cwd, launch, computer_use, stderr_lines, None)
+}
+
+fn sdk_agent_with_stderr_callback(
+    binary: &Path,
+    cwd: &Path,
     mut launch: AcpLaunch,
     computer_use: Option<&super::support::HeadlessComputerUseConfig>,
     stderr_lines: Arc<Mutex<Vec<String>>>,
+    on_stderr: Option<Arc<dyn Fn(&str) + Send + Sync>>,
 ) -> anyhow::Result<AcpAgent> {
     let binary = binary
         .to_str()
@@ -291,6 +302,9 @@ fn sdk_agent(
     Ok(AcpAgent::new(config).with_debug(move |line, direction| {
         if direction != LineDirection::Stderr || line.trim().is_empty() {
             return;
+        }
+        if let Some(callback) = on_stderr.as_ref() {
+            callback(line);
         }
         let mut lines = stderr_lines.lock();
         if lines.len() == 128 {
@@ -944,12 +958,63 @@ pub(crate) fn resolve_agy_model_id(
 }
 
 pub fn agy_auth_status(binary: &Path) -> anyhow::Result<bool> {
-    let output = crate::command_env::command(binary)
+    // 1. Check local token files in GEMINI_HOME or ~/.gemini
+    let gemini_home = std::env::var_os("GEMINI_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|h| h.join(".gemini")));
+    if let Some(home) = gemini_home {
+        if home.join("antigravity-acp").join("acp_token.json").exists()
+            || home
+                .join("antigravity-acp")
+                .join("acp_business_token.json")
+                .exists()
+            || home
+                .join("antigravity")
+                .join("acp")
+                .join("acp_token.json")
+                .exists()
+            || home.join("oauth_creds.json").exists()
+        {
+            return Ok(true);
+        }
+    }
+
+    // 2. On macOS, check macOS Keychain for the antigravity-acp account
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(output) = std::process::Command::new("security")
+            .args([
+                "find-generic-password",
+                "-s",
+                "gemini",
+                "-a",
+                "antigravity-acp",
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output()
+        {
+            if output.status.success() {
+                return Ok(true);
+            }
+        }
+    }
+
+    // 3. Fallback to CLI command if a custom wrapper or binary supports it
+    if let Ok(output) = crate::command_env::command(binary)
         .args(["auth", "status"])
         .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .output()
-        .map_err(|error| anyhow!("could not query Antigravity authentication: {error}"))?;
-    Ok(output.status.success())
+    {
+        if output.status.success() {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
 
 pub fn logout_agy(binary: &Path, cwd: &Path) -> anyhow::Result<()> {
@@ -988,13 +1053,32 @@ pub fn logout_agy(binary: &Path, cwd: &Path) -> anyhow::Result<()> {
     .map_err(|error| anyhow!("Antigravity sign-out failed: {error}"))
 }
 
-pub fn authenticate_agy(binary: &Path, cwd: &Path) -> anyhow::Result<()> {
-    let agent = sdk_agent(
+pub fn authenticate_agy(
+    binary: &Path,
+    cwd: &Path,
+    on_auth_url: impl Fn(String) + Send + Sync + 'static,
+) -> anyhow::Result<()> {
+    let on_auth_url = Arc::new(on_auth_url);
+    let auth_callback = {
+        let on_auth_url = on_auth_url.clone();
+        Arc::new(move |line: &str| {
+            if let Some(start) = line
+                .find("https://accounts.google.com/o/oauth2")
+                .or_else(|| line.find("https://"))
+            {
+                let rest = &line[start..];
+                let url = rest.split_whitespace().next().unwrap_or(rest);
+                on_auth_url(url.to_string());
+            }
+        })
+    };
+    let agent = sdk_agent_with_stderr_callback(
         binary,
         cwd,
         launch_for(ProviderKind::Agy, None)?,
         None,
         Arc::new(Mutex::new(Vec::new())),
+        Some(auth_callback),
     )?;
     let request = Client.builder().name("padu").connect_with(
         agent,
@@ -1013,7 +1097,7 @@ pub fn authenticate_agy(binary: &Path, cwd: &Path) -> anyhow::Result<()> {
     smol::block_on(smol::future::race(
         async move { request.await.map_err(anyhow::Error::new) },
         async move {
-            smol::Timer::after(Duration::from_secs(30)).await;
+            smol::Timer::after(Duration::from_secs(300)).await;
             Err(anyhow!("Antigravity sign-in timed out"))
         },
     ))

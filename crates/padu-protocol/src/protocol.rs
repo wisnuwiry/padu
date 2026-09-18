@@ -388,6 +388,11 @@ pub enum ServerMessage {
         phase: String,
         percent: u8,
     },
+    /// Live provider authentication URL emitted during an interactive sign-in flow.
+    ProviderAuthUrl {
+        provider: ProviderKind,
+        url: String,
+    },
     ShuttingDown,
 }
 

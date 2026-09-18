@@ -907,6 +907,18 @@ providers.agy_downloading:
 
 providers.agy_working:
   en: Working…
+providers.agy_signing_in:
+  en: Signing in…
+providers.agy_signing_out:
+  en: Signing out…
+providers.agy_removing:
+  en: Removing…
+providers.agy_cancelling:
+  en: Cancelling…
+providers.agy_copy_link:
+  en: Copy link
+providers.agy_copy_link_tooltip:
+  en: Copy sign-in link to clipboard if browser did not open automatically
 providers.agy_sign_in:
   en: Sign in with Google
 providers.agy_sign_out:

@@ -88,6 +88,14 @@ impl EventSink {
         self.hub
             .broadcast_provider_install_progress(provider, phase.into(), percent);
     }
+
+    pub fn send_provider_auth_url(
+        &self,
+        provider: crate::model::ProviderKind,
+        url: impl Into<String>,
+    ) {
+        self.hub.broadcast_provider_auth_url(provider, url.into());
+    }
 }
 
 #[derive(Default)]
@@ -329,6 +337,14 @@ impl Hub {
             phase,
             percent,
         };
+        self.state
+            .lock()
+            .subscribers
+            .retain(|_, subscriber| subscriber.send(message.clone()).is_ok());
+    }
+
+    fn broadcast_provider_auth_url(&self, provider: crate::model::ProviderKind, url: String) {
+        let message = ServerMessage::ProviderAuthUrl { provider, url };
         self.state
             .lock()
             .subscribers

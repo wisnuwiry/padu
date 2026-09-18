@@ -260,13 +260,12 @@ impl Padu {
     }
 
     pub(crate) fn install_agy_acp(&mut self, cx: &mut Context<Self>) {
-        if self.agy_installing {
+        if self.agy_is_busy() {
             return;
         }
 
         self.invalidate_agy_auth_status();
-        self.agy_installing = true;
-        self.agy_install_cancelling = false;
+        self.agy_action = AgyActionState::Installing;
         self.agy_install_percent = 0;
         cx.notify();
 
@@ -285,9 +284,8 @@ impl Padu {
                 .await;
 
             let _ = this.update(cx, |this, cx| {
-                let cancelled = this.agy_install_cancelling;
-                this.agy_installing = false;
-                this.agy_install_cancelling = false;
+                let cancelled = this.agy_is_cancelling_install();
+                this.agy_action = AgyActionState::Idle;
                 match result {
                     Ok(padu_client::ResponsePayload::ProviderInstalled { path, .. }) => {
                         let display_path = path.display().to_string();
@@ -343,10 +341,10 @@ impl Padu {
     }
 
     pub(crate) fn cancel_agy_install(&mut self, cx: &mut Context<Self>) {
-        if !self.agy_installing || self.agy_install_cancelling {
+        if self.agy_action != AgyActionState::Installing {
             return;
         }
-        self.agy_install_cancelling = true;
+        self.agy_action = AgyActionState::CancellingInstall;
         cx.notify();
         let daemon = self.daemon.client();
         cx.spawn(async move |_this, cx| {
@@ -406,11 +404,12 @@ impl Padu {
     }
 
     fn authenticate_agy(&mut self, cx: &mut Context<Self>) {
-        if self.agy_installing || self.agy_auth_checking {
+        if self.agy_is_busy() || self.agy_auth_checking {
             return;
         }
         self.invalidate_agy_auth_status();
-        self.agy_installing = true;
+        self.agy_auth_url = None;
+        self.agy_action = AgyActionState::SigningIn;
         cx.notify();
         let daemon = self.daemon.client();
         cx.spawn(async move |this, cx| {
@@ -426,7 +425,8 @@ impl Padu {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.agy_installing = false;
+                this.agy_action = AgyActionState::Idle;
+                this.agy_auth_url = None;
                 match result {
                     Ok(padu_client::ResponsePayload::Ack) => {
                         this.agy_authenticated = true;
@@ -445,12 +445,19 @@ impl Padu {
         .detach();
     }
 
+    pub(crate) fn copy_agy_auth_url(&mut self, cx: &mut Context<Self>) {
+        if let Some(url) = &self.agy_auth_url {
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string(url.clone()));
+            self.show_success_toast(tr!("common.copied"));
+        }
+    }
+
     pub(crate) fn logout_agy(&mut self, cx: &mut Context<Self>) {
-        if self.agy_installing {
+        if self.agy_is_busy() {
             return;
         }
         self.invalidate_agy_auth_status();
-        self.agy_installing = true;
+        self.agy_action = AgyActionState::SigningOut;
         cx.notify();
         let daemon = self.daemon.client();
         cx.spawn(async move |this, cx| {
@@ -465,7 +472,7 @@ impl Padu {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.agy_installing = false;
+                this.agy_action = AgyActionState::Idle;
                 if let Ok(padu_client::ResponsePayload::Ack) = result {
                     this.agy_authenticated = false;
                     this.show_success_toast(tr!("providers.agy_signed_out"));
@@ -479,11 +486,11 @@ impl Padu {
     }
 
     pub(crate) fn remove_agy_download(&mut self, cx: &mut Context<Self>) {
-        if self.agy_installing {
+        if self.agy_is_busy() {
             return;
         }
         self.invalidate_agy_auth_status();
-        self.agy_installing = true;
+        self.agy_action = AgyActionState::Removing;
         cx.notify();
         let daemon = self.daemon.client();
         cx.spawn(async move |this, cx| {
@@ -498,7 +505,7 @@ impl Padu {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
-                this.agy_installing = false;
+                this.agy_action = AgyActionState::Idle;
                 match result {
                     Ok(padu_client::ResponsePayload::Ack) => {
                         this.state
@@ -602,63 +609,7 @@ impl Padu {
                     .items_center()
                     .gap(px(8.0))
                     .when(kind == ProviderKind::Agy && !installed, |element| {
-                        let installing = self.agy_installing;
-                        element.child(
-                            div()
-                                .id("install-agy-acp")
-                                .tab_index(0)
-                                .focus_visible(|style| style.border_color(theme.accent))
-                                .h(px(29.0))
-                                .px(px(10.0))
-                                .rounded(px(7.0))
-                                .border_1()
-                                .border_color(theme.border_strong)
-                                .flex()
-                                .items_center()
-                                .gap(px(6.0))
-                                .cursor(gpui::CursorStyle::PointingHand)
-                                .text_size(sp(12.5))
-                                .text_color(theme.text_secondary)
-                                .hover(|element| element.bg(theme.overlay))
-                                .when(installing, |element| {
-                                    element.child(crate::ui::motion::spin(icon(
-                                        "icons/loader-circle.svg",
-                                        12.0,
-                                        theme.text_secondary,
-                                    )))
-                                })
-                                .child(if installing {
-                                    SharedString::from(tr!(
-                                        "providers.agy_downloading",
-                                        percent = self.agy_install_percent
-                                    ))
-                                } else {
-                                    SharedString::from(tr!("providers.agy_install_acp"))
-                                })
-                                .when(installing, |element| {
-                                    element.child(icon("icons/x.svg", 12.0, theme.text_secondary))
-                                })
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    if installing {
-                                        this.cancel_agy_install(cx);
-                                    } else {
-                                        this.install_agy_acp(cx);
-                                    }
-                                }))
-                                .on_key_down(cx.listener(
-                                    move |this, event: &KeyDownEvent, _, cx| {
-                                        if matches!(event.keystroke.key.as_str(), "enter" | "space")
-                                        {
-                                            if installing {
-                                                this.cancel_agy_install(cx);
-                                            } else {
-                                                this.install_agy_acp(cx);
-                                            }
-                                            cx.stop_propagation();
-                                        }
-                                    },
-                                )),
-                        )
+                        element.child(self.render_agy_install_control(&theme, cx))
                     })
                     .child(
                         TextField::new(
@@ -671,167 +622,7 @@ impl Padu {
                     .when(override_value.is_some(), |element| element.child(reset)),
             )
             .when(kind == ProviderKind::Agy && installed, |element| {
-                let installing = self.agy_installing;
-                let checking = self.agy_auth_checking;
-                element.child(
-                    div()
-                        .mt(px(6.0))
-                        .flex()
-                        .items_center()
-                        .gap(px(6.0))
-                        .child(
-                            div()
-                                .id("agy-sign-in")
-                                .tab_index(0)
-                                .focus_visible(|style| style.border_color(theme.accent))
-                                .h(px(29.0))
-                                .px(px(9.0))
-                                .rounded(px(7.0))
-                                .border_1()
-                                .border_color(theme.border_strong)
-                                .flex()
-                                .items_center()
-                                .cursor(if installing || checking {
-                                    gpui::CursorStyle::Arrow
-                                } else {
-                                    gpui::CursorStyle::PointingHand
-                                })
-                                .opacity(if installing || checking { 0.65 } else { 1.0 })
-                                .text_size(sp(12.5))
-                                .text_color(theme.text_secondary)
-                                .hover(|element| element.bg(theme.overlay))
-                                .child(if installing {
-                                    tr!("providers.agy_working")
-                                } else if checking {
-                                    tr!("common.checking")
-                                } else if self.agy_authenticated {
-                                    tr!("providers.agy_sign_out")
-                                } else {
-                                    tr!("providers.agy_sign_in")
-                                })
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    if !this.agy_installing && !this.agy_auth_checking {
-                                        if this.agy_authenticated {
-                                            this.confirm_sign_out_agy(window, cx);
-                                        } else {
-                                            this.authenticate_agy(cx);
-                                        }
-                                    }
-                                }))
-                                .on_key_down(cx.listener(
-                                    move |this, event: &KeyDownEvent, window, cx| {
-                                        if !this.agy_installing
-                                            && !this.agy_auth_checking
-                                            && matches!(
-                                                event.keystroke.key.as_str(),
-                                                "enter" | "space"
-                                            )
-                                        {
-                                            if this.agy_authenticated {
-                                                this.confirm_sign_out_agy(window, cx);
-                                            } else {
-                                                this.authenticate_agy(cx);
-                                            }
-                                            cx.stop_propagation();
-                                        }
-                                    },
-                                )),
-                        )
-                        .child(
-                            div()
-                                .id("agy-reinstall")
-                                .tab_index(0)
-                                .focus_visible(|style| style.border_color(theme.accent))
-                                .h(px(29.0))
-                                .px(px(9.0))
-                                .rounded(px(7.0))
-                                .border_1()
-                                .border_color(theme.border_strong)
-                                .flex()
-                                .items_center()
-                                .cursor(if installing {
-                                    gpui::CursorStyle::Arrow
-                                } else {
-                                    gpui::CursorStyle::PointingHand
-                                })
-                                .opacity(if installing { 0.65 } else { 1.0 })
-                                .text_size(sp(12.5))
-                                .text_color(theme.text_secondary)
-                                .hover(|element| element.bg(theme.overlay))
-                                .child(if installing {
-                                    tr!(
-                                        "providers.agy_downloading",
-                                        percent = self.agy_install_percent
-                                    )
-                                } else {
-                                    tr!("providers.agy_reinstall")
-                                })
-                                .when(installing, |element| {
-                                    element.child(icon("icons/x.svg", 12.0, theme.text_secondary))
-                                })
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    if this.agy_installing {
-                                        this.cancel_agy_install(cx);
-                                    } else {
-                                        this.confirm_reinstall_agy(window, cx);
-                                    }
-                                }))
-                                .on_key_down(cx.listener(
-                                    move |this, event: &KeyDownEvent, window, cx| {
-                                        if matches!(event.keystroke.key.as_str(), "enter" | "space")
-                                        {
-                                            if this.agy_installing {
-                                                this.cancel_agy_install(cx);
-                                            } else {
-                                                this.confirm_reinstall_agy(window, cx);
-                                            }
-                                            cx.stop_propagation();
-                                        }
-                                    },
-                                )),
-                        )
-                        .child(
-                            div()
-                                .id("agy-remove-download")
-                                .tab_index(0)
-                                .focus_visible(|style| style.border_color(theme.accent))
-                                .h(px(29.0))
-                                .px(px(9.0))
-                                .rounded(px(7.0))
-                                .border_1()
-                                .border_color(theme.border_strong)
-                                .flex()
-                                .items_center()
-                                .cursor(if installing {
-                                    gpui::CursorStyle::Arrow
-                                } else {
-                                    gpui::CursorStyle::PointingHand
-                                })
-                                .opacity(if installing { 0.65 } else { 1.0 })
-                                .text_size(sp(12.5))
-                                .text_color(theme.warning)
-                                .hover(|element| element.bg(theme.overlay))
-                                .child(tr!("providers.agy_remove_download"))
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    if !this.agy_installing {
-                                        this.confirm_remove_agy(window, cx);
-                                    }
-                                }))
-                                .on_key_down(cx.listener(
-                                    move |this, event: &KeyDownEvent, window, cx| {
-                                        if !this.agy_installing
-                                            && matches!(
-                                                event.keystroke.key.as_str(),
-                                                "enter" | "space"
-                                            )
-                                        {
-                                            this.confirm_remove_agy(window, cx);
-                                            cx.stop_propagation();
-                                        }
-                                    },
-                                )),
-                        ),
-                )
+                element.child(self.render_agy_expanded_controls(&theme, cx))
             })
             .child(
                 div()
@@ -839,6 +630,282 @@ impl Padu {
                     .text_color(theme.text_ghost)
                     .child(SharedString::from(caption)),
             )
+    }
+
+    fn render_settings_action_button(
+        &self,
+        id: impl Into<gpui::ElementId>,
+        label: impl Into<SharedString>,
+        leading_icon: Option<AnyElement>,
+        trailing_icon: Option<AnyElement>,
+        disabled: bool,
+        text_color: Hsla,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+        on_action: impl Fn(&mut Padu, &mut Window, &mut Context<Padu>) + 'static + Copy,
+    ) -> Stateful<Div> {
+        div()
+            .id(id.into())
+            .tab_index(0)
+            .focus_visible(|style| style.border_color(theme.accent))
+            .h(px(29.0))
+            .px(px(9.0))
+            .rounded(px(7.0))
+            .border_1()
+            .border_color(theme.border_strong)
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .cursor(if disabled {
+                gpui::CursorStyle::Arrow
+            } else {
+                gpui::CursorStyle::PointingHand
+            })
+            .opacity(if disabled { 0.65 } else { 1.0 })
+            .text_size(sp(12.5))
+            .text_color(text_color)
+            .when(!disabled, |element| {
+                element.hover(|el| el.bg(theme.overlay))
+            })
+            .children(leading_icon)
+            .child(label.into())
+            .children(trailing_icon)
+            .on_click(cx.listener(move |this, _, window, cx| {
+                if !disabled {
+                    on_action(this, window, cx);
+                }
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if !disabled && matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    on_action(this, window, cx);
+                    cx.stop_propagation();
+                }
+            }))
+    }
+
+    fn render_agy_install_control(&self, theme: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
+        let installing = self.agy_is_installing();
+        let cancelling = self.agy_is_cancelling_install();
+        let leading_icon = if installing {
+            Some(
+                crate::ui::motion::spin(icon(
+                    "icons/loader-circle.svg",
+                    12.0,
+                    theme.text_secondary,
+                ))
+                .into_any_element(),
+            )
+        } else {
+            None
+        };
+        let trailing_icon = if installing && !cancelling {
+            Some(icon("icons/x.svg", 12.0, theme.text_secondary).into_any_element())
+        } else {
+            None
+        };
+        let label = if cancelling {
+            SharedString::from(tr!("providers.agy_cancelling"))
+        } else if installing {
+            SharedString::from(tr!(
+                "providers.agy_downloading",
+                percent = self.agy_install_percent
+            ))
+        } else {
+            SharedString::from(tr!("providers.agy_install_acp"))
+        };
+
+        self.render_settings_action_button(
+            "install-agy-acp",
+            label,
+            leading_icon,
+            trailing_icon,
+            cancelling,
+            theme.text_secondary,
+            theme,
+            cx,
+            |this, _, cx| {
+                if this.agy_is_installing() {
+                    this.cancel_agy_install(cx);
+                } else {
+                    this.install_agy_acp(cx);
+                }
+            },
+        )
+    }
+
+    fn render_agy_expanded_controls(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
+        let mut controls = div().mt(px(6.0)).flex().items_center().gap(px(6.0));
+
+        controls = controls.child(self.render_agy_auth_control(theme, cx));
+
+        if self.agy_is_signing_in() {
+            controls = controls.child(self.render_agy_copy_link_control(theme, cx));
+        }
+
+        controls = controls.child(self.render_agy_reinstall_control(theme, cx));
+        controls = controls.child(self.render_agy_remove_control(theme, cx));
+
+        controls
+    }
+
+    fn render_agy_auth_control(&self, theme: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
+        let signing_in = self.agy_is_signing_in();
+        let signing_out = self.agy_is_signing_out();
+        let checking = self.agy_auth_checking && self.agy_action == AgyActionState::Idle;
+        let busy = signing_in || signing_out || checking;
+
+        let leading_icon = if busy {
+            Some(
+                crate::ui::motion::spin(icon(
+                    "icons/loader-circle.svg",
+                    12.0,
+                    theme.text_secondary,
+                ))
+                .into_any_element(),
+            )
+        } else {
+            None
+        };
+
+        let label = if signing_in {
+            tr!("providers.agy_signing_in")
+        } else if signing_out {
+            tr!("providers.agy_signing_out")
+        } else if checking {
+            tr!("common.checking")
+        } else if self.agy_authenticated {
+            tr!("providers.agy_sign_out")
+        } else {
+            tr!("providers.agy_sign_in")
+        };
+
+        self.render_settings_action_button(
+            "agy-sign-in",
+            label,
+            leading_icon,
+            None,
+            busy || self.agy_is_busy(),
+            theme.text_secondary,
+            theme,
+            cx,
+            |this, window, cx| {
+                if !this.agy_is_busy() && !this.agy_auth_checking {
+                    if this.agy_authenticated {
+                        this.confirm_sign_out_agy(window, cx);
+                    } else {
+                        this.authenticate_agy(cx);
+                    }
+                }
+            },
+        )
+    }
+
+    fn render_agy_copy_link_control(&self, theme: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
+        let has_url = self.agy_auth_url.is_some();
+        let button = self.render_settings_action_button(
+            "agy-copy-auth-link",
+            tr!("providers.agy_copy_link"),
+            Some(icon("icons/copy.svg", 12.0, theme.text_secondary).into_any_element()),
+            None,
+            !has_url,
+            theme.text_secondary,
+            theme,
+            cx,
+            |this, _, cx| {
+                this.copy_agy_auth_url(cx);
+            },
+        );
+
+        button.tooltip(Tooltip::text(tr!("providers.agy_copy_link_tooltip")))
+    }
+
+    fn render_agy_reinstall_control(&self, theme: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
+        let installing = self.agy_is_installing();
+        let cancelling = self.agy_is_cancelling_install();
+        let busy = self.agy_is_busy();
+
+        let leading_icon = if installing {
+            Some(
+                crate::ui::motion::spin(icon(
+                    "icons/loader-circle.svg",
+                    12.0,
+                    theme.text_secondary,
+                ))
+                .into_any_element(),
+            )
+        } else {
+            None
+        };
+        let trailing_icon = if installing && !cancelling {
+            Some(icon("icons/x.svg", 12.0, theme.text_secondary).into_any_element())
+        } else {
+            None
+        };
+
+        let label = if cancelling {
+            SharedString::from(tr!("providers.agy_cancelling"))
+        } else if installing {
+            SharedString::from(tr!(
+                "providers.agy_downloading",
+                percent = self.agy_install_percent
+            ))
+        } else {
+            SharedString::from(tr!("providers.agy_reinstall"))
+        };
+
+        self.render_settings_action_button(
+            "agy-reinstall",
+            label,
+            leading_icon,
+            trailing_icon,
+            cancelling || (busy && !installing),
+            theme.text_secondary,
+            theme,
+            cx,
+            |this, window, cx| {
+                if this.agy_is_installing() {
+                    this.cancel_agy_install(cx);
+                } else if !this.agy_is_busy() {
+                    this.confirm_reinstall_agy(window, cx);
+                }
+            },
+        )
+    }
+
+    fn render_agy_remove_control(&self, theme: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
+        let removing = self.agy_is_removing();
+        let busy = self.agy_is_busy();
+
+        let leading_icon = if removing {
+            Some(
+                crate::ui::motion::spin(icon("icons/loader-circle.svg", 12.0, theme.warning))
+                    .into_any_element(),
+            )
+        } else {
+            None
+        };
+
+        let label = if removing {
+            SharedString::from(tr!("providers.agy_removing"))
+        } else {
+            SharedString::from(tr!("providers.agy_remove_download"))
+        };
+
+        self.render_settings_action_button(
+            "agy-remove-download",
+            label,
+            leading_icon,
+            None,
+            busy,
+            theme.warning,
+            theme,
+            cx,
+            |this, window, cx| {
+                if !this.agy_is_busy() {
+                    this.confirm_remove_agy(window, cx);
+                }
+            },
+        )
     }
 
     fn toggle_provider_expanded(
@@ -854,6 +921,9 @@ impl Padu {
             self.expanded_provider_settings = None;
         } else {
             self.expanded_provider_settings = Some(provider);
+            if provider == ProviderKind::Agy {
+                self.refresh_agy_auth_status(cx);
+            }
             let override_value = self
                 .state
                 .provider_binary_overrides
