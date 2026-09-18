@@ -44,7 +44,7 @@ import { cn } from '@/lib/utils'
 import { Sidebar } from '@/components/sidebar'
 import { StartupScreen } from '@/components/startup-screen'
 import type { SettingsPageId } from '@/components/settings-view'
-import { Transcript } from '@/components/transcript'
+import { ConversationBackgroundLayer, Transcript } from '@/components/transcript'
 import { addContentToNewNote } from '@/components/notes-page'
 import { PaduIcon, ProviderIcon } from '@/components/padu-icon'
 import {
@@ -2207,8 +2207,9 @@ function NewTaskCanvas({
   const { t } = useI18n()
   const projectless = isProjectlessProject(project)
   return (
-    <div className="flex min-h-0 flex-1 items-center justify-center px-8 pb-12">
-      <div className="text-center">
+    <div className="relative flex min-h-0 flex-1 items-center justify-center px-8 pb-12">
+      <ConversationBackgroundLayer />
+      <div className="relative z-10 text-center">
         <PaduIcon
           className="mx-auto size-10 text-foreground dark:text-white sm:size-12 lg:size-14"
           name="logo"
@@ -2258,8 +2259,9 @@ function NoProjectState({
 }) {
   const { t } = useI18n()
   return (
-    <div className="flex min-h-0 flex-1 items-center justify-center px-8 pb-12">
-      <div className="max-w-sm text-center">
+    <div className="relative flex min-h-0 flex-1 items-center justify-center px-8 pb-12">
+      <ConversationBackgroundLayer />
+      <div className="relative z-10 max-w-sm text-center">
         <PaduIcon className="mx-auto size-10 text-ring sm:size-12 lg:size-14" name="logo" />
         <h2 className="mt-4 text-xl font-medium">{t('onboarding.open_project_to_begin')}</h2>
         <p className="mt-2 text-[12.5px] leading-[19px] text-[var(--text-tertiary)]">

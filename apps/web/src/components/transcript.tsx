@@ -88,7 +88,7 @@ type MessageEdit = {
   attachments: MessageAttachment[]
 }
 
-function ConversationBackgroundLayer() {
+export function ConversationBackgroundLayer() {
   const background = useConversationBackground()
   if (!background.imageUrl || background.loading) return null
   return (
