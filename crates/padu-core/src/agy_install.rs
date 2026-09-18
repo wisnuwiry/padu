@@ -28,6 +28,12 @@ pub fn base_dir() -> PathBuf {
         .join("antigravity")
 }
 
+/// Path to the cached identity file for the Antigravity ACP server
+/// (~/.padu/providers/antigravity/account_identity.json).
+pub fn account_identity_file() -> PathBuf {
+    base_dir().join("account_identity.json")
+}
+
 /// Directory holding the installed binaries for the current version.
 pub fn install_dir() -> PathBuf {
     base_dir().join(VERSION)
@@ -134,6 +140,10 @@ pub fn remove() -> anyhow::Result<()> {
         let _ = fs::remove_dir_all(&temp);
     }
     let base = base_dir();
+    let identity = account_identity_file();
+    if identity.exists() {
+        let _ = fs::remove_file(&identity);
+    }
     if base.exists() {
         let _ = fs::remove_dir(&base);
     }
