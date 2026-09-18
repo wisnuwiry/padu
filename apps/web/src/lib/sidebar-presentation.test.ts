@@ -6,6 +6,7 @@ import {
   formatWorkingElapsed,
   groupSessions,
   nextSidebarUpdateDelay,
+  readSidebarShowProvider,
   sessionHasStarted,
   sessionTimeLabel,
   sidebarRows,
@@ -217,6 +218,13 @@ describe('desktop sidebar presentation', () => {
     const rows = sidebarRows(groups, new Set())
     expect(rows[0]?.kind).toBe('search')
     expect(rows[0]?.key).toBe('search')
+  })
+
+  test('readSidebarShowProvider defaults to true and reads from storage', () => {
+    expect(readSidebarShowProvider(null)).toBe(true)
+    expect(readSidebarShowProvider({ getItem: () => null })).toBe(true)
+    expect(readSidebarShowProvider({ getItem: () => 'false' })).toBe(false)
+    expect(readSidebarShowProvider({ getItem: () => 'true' })).toBe(true)
   })
 })
 

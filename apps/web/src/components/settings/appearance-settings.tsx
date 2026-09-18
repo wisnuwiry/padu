@@ -22,10 +22,11 @@ import {
   useConversationBackground,
 } from '@/lib/conversation-background'
 import { cn } from '@/lib/utils'
-import { SettingText } from './shared'
+import { SettingText, Toggle, useStoredBoolean } from './shared'
 
 export function AppearanceSettings() {
   const { language, locale, setLanguage, t } = useI18n()
+  const [showProvider, setShowProvider] = useStoredBoolean('padu.sidebar_show_provider', true)
   const [theme, setTheme] = useState<ThemeChoice>(() => typeof window === 'undefined'
     ? 'system'
     : readThemeChoice(window.localStorage))
@@ -97,7 +98,21 @@ export function AppearanceSettings() {
         />
       </div>
     </div>
-  <section className="mt-[15px] w-full rounded-[13px] bg-[var(--raised)] px-5 py-4">
+    <section className="mt-[15px] w-full rounded-[13px] bg-[var(--raised)] px-5 py-4">
+      <SettingText title={t('settings.sidebar')} description={t('settings.sidebar_description')} />
+      <div className="mt-3 flex min-h-[60px] items-center justify-between gap-6 border-t border-[var(--border)] pt-3">
+        <SettingText
+          title={t('settings.sidebar_show_provider')}
+          description={t('settings.sidebar_show_provider_description')}
+        />
+        <Toggle
+          checked={showProvider}
+          label={t('settings.sidebar_show_provider')}
+          onChange={setShowProvider}
+        />
+      </div>
+    </section>
+    <section className="mt-[15px] w-full rounded-[13px] bg-[var(--raised)] px-5 py-4">
     <SettingText title={t('settings.background')} description={t('settings.background_description')} />
     <div className="mt-3 flex w-full items-start gap-4">
       <div className="flex w-[190px] shrink-0 flex-col gap-3">

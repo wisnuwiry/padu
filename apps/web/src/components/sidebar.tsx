@@ -11,6 +11,7 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { PanelResizeHandle } from '@/components/panel-resize-handle'
 import { PaduIcon, ProviderIcon } from '@/components/padu-icon'
 import { DeleteSessionDialog } from '@/components/delete-session-dialog'
+import { useStoredBoolean } from '@/components/settings/shared'
 import { displayHost } from '@/lib/connection'
 import { displayTitle, type TaskState } from '@/lib/daemon-api'
 import { useDaemon } from '@/lib/daemon-context'
@@ -83,6 +84,7 @@ export function Sidebar({
   onNotes,
 }: SidebarProps) {
   const { t } = useI18n()
+  const [showProvider] = useStoredBoolean('padu.sidebar_show_provider', true)
   const [grouping, setGrouping] = useState<SidebarGrouping>(() => {
     if (typeof window !== 'undefined') {
       const saved = window.localStorage.getItem('padu:sidebar_grouping')
@@ -464,6 +466,7 @@ export function Sidebar({
                     item={row.item}
                     nowSeconds={nowSeconds}
                     selected={selectedSessionId === row.item.session.id}
+                    showProvider={showProvider}
                     t={t}
                     onRemove={(sessionId) => {
                       const session = taskState.sessions.find((s) => s.id === sessionId)
@@ -612,6 +615,7 @@ function SessionRow({
   nowSeconds,
   selected,
   groupedByProject,
+  showProvider = true,
   onSelect,
   onRename,
   onRemove,
@@ -623,6 +627,7 @@ function SessionRow({
   nowSeconds: number
   selected: boolean
   groupedByProject?: boolean
+  showProvider?: boolean
   onSelect: (sessionId: string) => void
   onRename: (sessionId: string, title: string) => Promise<void>
   onRemove: (sessionId: string) => void | Promise<void>
@@ -758,7 +763,7 @@ function SessionRow({
                   )}
                 />
               </span>
-              <ProviderIcon className="size-3" provider={item.session.provider} />
+              {showProvider && <ProviderIcon className="size-3" provider={item.session.provider} />}
               <span
                 className={cn(
                   'min-w-0 flex-1 truncate text-[13px] leading-tight text-[var(--text-secondary)] group-hover:text-foreground',
@@ -827,7 +832,7 @@ function SessionRow({
                   )}
                 />
               </span>
-              <ProviderIcon className="size-3" provider={item.session.provider} />
+              {showProvider && <ProviderIcon className="size-3" provider={item.session.provider} />}
               <span
                 className={cn(
                   'min-w-0 flex-1 truncate text-[13.5px] text-foreground',

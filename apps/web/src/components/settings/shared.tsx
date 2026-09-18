@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { PaduIcon } from '@/components/padu-icon'
 import { useCopyFeedback } from '@/hooks/use-copy-feedback'
@@ -86,10 +86,27 @@ export function DetailRow({
 }
 
 export function useStoredBoolean(key: string, fallback: boolean) {
-  const [value, setValue] = useState(() => typeof window === 'undefined' ? fallback : window.localStorage.getItem(key) !== 'false')
+  const read = () => {
+    if (typeof window === 'undefined') return fallback
+    const item = window.localStorage.getItem(key)
+    return item === null ? fallback : item !== 'false'
+  }
+  const [value, setValue] = useState(read)
+
+  useEffect(() => {
+    const handler = () => setValue(read())
+    window.addEventListener('padu:preference-updated', handler)
+    window.addEventListener('storage', handler)
+    return () => {
+      window.removeEventListener('padu:preference-updated', handler)
+      window.removeEventListener('storage', handler)
+    }
+  }, [key, fallback])
+
   const update = (next: boolean) => {
     setValue(next)
     window.localStorage.setItem(key, String(next))
+    window.dispatchEvent(new CustomEvent('padu:preference-updated', { detail: { key, value: next } }))
   }
   return [value, update] as const
 }
