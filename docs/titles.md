@@ -28,7 +28,13 @@ A provider title therefore never overwrites a name the user typed.
 
 [`set_title_from_prompt`](../crates/padu-protocol/src/model.rs#L964) takes the
 **first seven words** of the first prompt, capped at 54 characters, and writes
-them into `auto_title`. It is called once per session from
+them into `auto_title`. Both the prompt text and every provider title go
+through [`normalize_session_title`](../crates/padu-protocol/src/model.rs),
+which strips markdown (fences, inline code, emphasis, links) and a `Title:`
+prefix, then humanizes code-like tokens (`snake_case`, `kebab-case`,
+`camelCase`, file paths) before capping at 80 characters. Provider
+placeholders such as `New session - …` normalize to `None` so they never
+replace the local fallback. It is called once per session from
 [runtime.rs:2949](../apps/desktop/src/app/runtime.rs#L2949) and no-ops if the session
 already has a second message, a user title, or any `auto_title`.
 
@@ -43,8 +49,11 @@ fast it replaces that placeholder, not merely on whether it eventually does.
 
 Every provider funnels into `DriverEvent::AutoTitleUpdated(Option<String>)`,
 consumed once in [streaming.rs:258](../apps/desktop/src/app/streaming.rs#L258) →
-`set_auto_title`, which trims, maps empty to `None`, and is the universal
-last-stage normalizer. `AutoTitleUpdated` is in the `force_save` set
+`set_auto_title`, which normalizes via `normalize_session_title` (markdown
+stripped, code-like tokens humanized, empty/placeholder mapped to `None`)
+and is the universal last-stage normalizer. The web client mirrors this in
+[`event-reducer.ts`](../packages/padu-client/src/event-reducer.ts) so both
+surfaces agree. `AutoTitleUpdated` is in the `force_save` set
 ([runtime.rs](../apps/desktop/src/app/runtime.rs)), so a title persists the moment it lands.
 
 What differs is how the title reaches that event:
@@ -171,9 +180,10 @@ read-only turn.
 
 The result is emitted as `AutoTitleUpdated` **before** being written back to
 Codex with `thread/name/set`, so the sidebar updates even if that write fails.
-Output is cleaned by `normalize_codex_title` — it decodes JSON or `{title}`,
-drops code fences, strips a `Title:` prefix, trims quotes and markdown emphasis,
-collapses whitespace, and caps at 80 characters.
+Output is cleaned by the shared `normalize_session_title` — it decodes JSON
+or `{title}`, drops code fences, strips a `Title:` prefix, trims quotes and
+markdown emphasis, humanizes code-like tokens, collapses whitespace, and caps
+at 80 characters.
 
 ### Amp
 
@@ -251,7 +261,7 @@ In order of preference:
 4. **Only if the agent genuinely never generates one**, generate it, following
    the Codex shape: cheapest model, lowest effort, an ephemeral session, the
    raw user prompt as the only input, a structured output schema, a timeout,
-   once per session, never on resume. Reuse `normalize_codex_title`.
+   once per session, never on resume. Reuse `normalize_session_title`.
 
 Whatever the path, failure must be silent and the fallback must hold. A missing
 title is a cosmetic gap; a driver that errors or blocks on one is not.
