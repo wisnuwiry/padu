@@ -16,6 +16,25 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.1.7] - 2026-09-18
+
+### Added
+
+- **Sidebar Provider Toggle**: Added appearance setting to show/hide provider icons in the sidebar, synced across desktop, web, and persistence layer.
+- **Conversation Backgrounds in Empty View**: Show conversation background in empty and onboarding views on desktop and web.
+- **Provider Account Line**: Show signed-in user and subscription plan in expanded provider settings, with background plan-usage refresh.
+- **Cleaner Session Titles**: Normalize auto titles — strip markdown, humanize code paths/casing, drop provider placeholders.
+- **Antigravity Auth Flow**: Capture auth URL with copy-link control and modularized settings UI.
+
+### Improved
+
+- **Composer Responsiveness**: Wrapping toolbar clusters, truncated trigger chips, and clamped overlays to prevent overflow.
+- **Antigravity Identity**: Read identity from Antigravity's own OAuth token files on all platforms instead of macOS keychain.
+
+### Fixed
+
+- **Title Propagation**: Route driver, catalog, and resume titles through shared normalizer in core, client reducer, and web.
+
 ## [0.1.6] - 2026-09-18
 
 ### Added
