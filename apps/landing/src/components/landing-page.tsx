@@ -142,7 +142,7 @@ export function LandingPage({ eyebrow, title, subtitle }: LandingPageProps) {
         <main className="p-6 md:p-20 md:pt-32 max-w-5xl mx-auto">
           <div className="space-y-32">
             <ArchitectureCarousel />
-            <EcosystemBentoSection />
+            {/* <EcosystemBentoSection /> */}
             <MultiProviderSection />
             <FAQ />
           </div>
