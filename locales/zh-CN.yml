@@ -377,6 +377,10 @@ settings.code_font_size_description: 文件编辑器、差分视图、代码块�
 settings.theme_system: 跟随系统
 settings.theme_light: 浅色
 settings.theme_dark: 深色
+settings.sidebar: 侧边栏
+settings.sidebar_description: 自定义侧边栏外观和会话列表
+settings.sidebar_show_provider: 显示提供商
+settings.sidebar_show_provider_description: 在侧边栏的会话项中显示提供商图标
 settings.background: 背景
 settings.background_description: 在对话消息后添加柔和的图片
 settings.background_choose: 选择图片

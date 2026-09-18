@@ -776,6 +776,14 @@ settings.theme_light:
   en: Light
 settings.theme_dark:
   en: Dark
+settings.sidebar:
+  en: Sidebar
+settings.sidebar_description:
+  en: Customize sidebar appearance and conversation display
+settings.sidebar_show_provider:
+  en: Show provider
+settings.sidebar_show_provider_description:
+  en: Display provider icons on conversation items in the sidebar
 settings.background:
   en: Background
 settings.background_description:
