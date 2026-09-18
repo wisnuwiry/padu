@@ -182,6 +182,16 @@ describe('reduceRuntimeEvent', () => {
     )
     expect(exited.session.messages.filter((message) => message.role === 'assistant')).toHaveLength(1)
   })
+  test('automatic titles strip markdown and humanize code tokens', () => {
+    expect(apply(runningSession(), 'autoTitleUpdated', 'Title: **Repair title updates.**').auto_title)
+      .toBe('Repair title updates')
+    expect(apply(runningSession(), 'autoTitleUpdated', '`fix_auth_bug`').auto_title)
+      .toBe('fix auth bug')
+    expect(apply(runningSession(), 'autoTitleUpdated', 'New session - ').auto_title)
+      .toBeNull()
+    expect(apply(runningSession(), 'autoTitleUpdated', '   ').auto_title)
+      .toBeNull()
+  })
 })
 
 function apply(session: AgentSession, kind: string, payload: unknown) {

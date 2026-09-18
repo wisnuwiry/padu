@@ -248,18 +248,7 @@ fn message_text(entry: &Map<String, Value>) -> Option<String> {
 }
 
 fn title_from_prompt(prompt: &str) -> Option<String> {
-    let mut title = prompt
-        .split_whitespace()
-        .take(7)
-        .collect::<Vec<_>>()
-        .join(" ");
-    if title.is_empty() {
-        return None;
-    }
-    if title.chars().count() > 54 {
-        title = format!("{}…", title.chars().take(53).collect::<String>());
-    }
-    Some(title)
+    crate::model::prompt_fallback_title(prompt)
 }
 
 fn session_summary_from_path(path: &Path) -> anyhow::Result<ProviderSessionSummary> {
@@ -302,7 +291,7 @@ fn session_summary_from_path(path: &Path) -> anyhow::Result<ProviderSessionSumma
         .next_back();
     let title = custom_title
         .or(ai_title)
-        .map(str::to_owned)
+        .and_then(crate::model::normalize_session_title)
         .or_else(|| first_prompt.as_deref().and_then(title_from_prompt))
         .ok_or_else(|| anyhow!("Claude session {session_id} has no user prompt"))?;
     let file_timestamp = modified_at(path);

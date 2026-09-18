@@ -237,15 +237,7 @@ fn active_chain(session: &ParsedSession, provider: ProviderKind) -> Vec<&NativeE
 }
 
 fn title_from_prompt(prompt: &str) -> String {
-    let mut title = prompt
-        .split_whitespace()
-        .take(8)
-        .collect::<Vec<_>>()
-        .join(" ");
-    if title.chars().count() > 58 {
-        title = format!("{}…", title.chars().take(57).collect::<String>());
-    }
-    title
+    crate::model::prompt_fallback_title(prompt).unwrap_or_default()
 }
 
 fn summary_from_session(
@@ -261,8 +253,8 @@ fn summary_from_session(
         .filter(|title| !title.is_empty());
     let title = session
         .title
-        .clone()
-        .filter(|title| !title.trim().is_empty())
+        .as_deref()
+        .and_then(crate::model::normalize_session_title)
         .or(first_prompt)?;
     let cursor = match provider {
         ProviderKind::Pi => ProviderResumeCursor::Pi {

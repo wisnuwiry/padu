@@ -259,9 +259,7 @@ fn title_from_thread_list(threads: &Value, thread_id: &str) -> Option<String> {
                 thread
                     .get("title")
                     .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|title| !title.is_empty())
-                    .map(str::to_owned)
+                    .and_then(crate::model::normalize_session_title)
             })
             .flatten()
     })

@@ -56,10 +56,7 @@ fn catalog_title(state: &Value, session_id: &str, cwd: &Path) -> String {
             state
                 .get(key)
                 .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(|value| value.lines().next().unwrap_or(value))
-                .map(|value| value.chars().take(120).collect::<String>())
+                .and_then(crate::model::normalize_session_title)
         })
         .or_else(|| {
             cwd.file_name()

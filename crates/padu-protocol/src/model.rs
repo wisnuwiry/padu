@@ -1192,26 +1192,17 @@ impl AgentSession {
         {
             return;
         }
-        let mut title = prompt
-            .split_whitespace()
-            .take(7)
-            .collect::<Vec<_>>()
-            .join(" ");
-        if !title.is_empty() {
-            if title.chars().count() > 54 {
-                title = format!("{}…", title.chars().take(53).collect::<String>());
-            }
+        if let Some(title) = prompt_fallback_title(prompt) {
             self.auto_title = Some(title);
         }
     }
 
     /// Replaces the provider-owned title without disturbing an explicit user
-    /// title. Returns whether the stored fallback changed.
+    /// title. The incoming value is normalized (markdown stripped, code-like
+    /// tokens humanized) so every provider path lands clean. Returns whether
+    /// the stored fallback changed.
     pub fn set_auto_title(&mut self, title: Option<String>) -> bool {
-        let title = title.and_then(|title| {
-            let title = title.trim();
-            (!title.is_empty()).then(|| title.to_owned())
-        });
+        let title = title.as_deref().and_then(normalize_session_title);
         if self.auto_title == title {
             return false;
         }
@@ -1616,6 +1607,352 @@ impl AgentSession {
         fork.queued_messages.clear();
         Some(fork)
     }
+}
+
+/// Maximum characters kept for a provider-supplied automatic title.
+pub const AUTO_TITLE_MAX_CHARS: usize = 80;
+/// Words kept for the local prompt-derived fallback title.
+pub const PROMPT_TITLE_WORDS: usize = 7;
+/// Characters kept for the local prompt-derived fallback title.
+pub const PROMPT_TITLE_MAX_CHARS: usize = 54;
+
+/// Normalizes an automatically generated session title: trims, decodes a JSON
+/// `{title}` envelope, keeps the first meaningful line, strips markdown
+/// (fences, inline code, emphasis, links) and a `Title:` prefix, humanizes
+/// code-like tokens (`snake_case`, `kebab-case`, `camelCase`, file paths),
+/// and caps the result at [`AUTO_TITLE_MAX_CHARS`].
+///
+/// Returns `None` when nothing title-worthy remains, including provider
+/// placeholders such as `New session - …` which must not replace the local
+/// prompt fallback.
+pub fn normalize_session_title(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let decoded;
+    let mut candidate = raw;
+    if raw.starts_with('{') || raw.starts_with('"') {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) {
+            match value {
+                serde_json::Value::String(title) => {
+                    decoded = title;
+                    candidate = &decoded;
+                }
+                serde_json::Value::Object(object) => {
+                    if let Some(title) = object.get("title").and_then(|title| title.as_str()) {
+                        decoded = title.to_owned();
+                        candidate = &decoded;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut line = candidate.lines().map(str::trim).find(|line| {
+        !line.is_empty() && !line.starts_with("```") && !line.eq_ignore_ascii_case("json")
+    })?;
+    // Provider placeholders must not replace the local prompt fallback. Check
+    // before humanization turns `New session - …` into `New session …`.
+    let lowered_line = line.to_ascii_lowercase();
+    if lowered_line == "new task" || lowered_line == "new session" {
+        return None;
+    }
+    for prefix in ["new session -", "new session:"] {
+        if lowered_line.starts_with(prefix) {
+            let rest = line[prefix.len()..]
+                .trim()
+                .trim_start_matches(['-', ':'])
+                .trim();
+            if rest.is_empty() {
+                return None;
+            }
+            line = rest;
+            break;
+        }
+    }
+    let title = clean_and_humanize_title(line)?;
+    let lowered = title.to_ascii_lowercase();
+    if lowered == "new task" || lowered == "new session" {
+        return None;
+    }
+    if !title.chars().any(|character| character.is_alphanumeric()) {
+        return None;
+    }
+    Some(truncate_title(title, AUTO_TITLE_MAX_CHARS))
+}
+
+/// Derives the local prompt fallback title: the normalized, humanized prompt
+/// capped at [`PROMPT_TITLE_WORDS`] words and [`PROMPT_TITLE_MAX_CHARS`]
+/// characters. Prompts that are only code still produce a humanized title
+/// instead of raw fences.
+pub fn prompt_fallback_title(prompt: &str) -> Option<String> {
+    let cleaned = clean_and_humanize_title(prompt)?;
+    let words = cleaned
+        .split_whitespace()
+        .take(PROMPT_TITLE_WORDS)
+        .collect::<Vec<_>>()
+        .join(" ");
+    if words.is_empty() {
+        return None;
+    }
+    let mut title = words;
+    if title.chars().count() > PROMPT_TITLE_MAX_CHARS {
+        title = format!(
+            "{}…",
+            title
+                .chars()
+                .take(PROMPT_TITLE_MAX_CHARS - 1)
+                .collect::<String>()
+        );
+    }
+    Some(title)
+}
+
+fn clean_and_humanize_title(text: &str) -> Option<String> {
+    let without_fences = text.replace("```", " ");
+    let without_links = strip_markdown_links(&without_fences);
+    // Drop inline-code, emphasis, and strikethrough markers but keep the
+    // words they wrap; underscores and dashes are humanized per token below.
+    let without_markers = without_links
+        .chars()
+        .filter(|character| !matches!(character, '`' | '*' | '~'))
+        .collect::<String>();
+    let mut cleaned = without_markers.trim().to_owned();
+    for prefix in ["title:", "session title:"] {
+        if cleaned
+            .get(..prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+        {
+            cleaned = cleaned[prefix.len()..].trim().to_owned();
+            break;
+        }
+    }
+    cleaned = strip_leading_list_markers(&cleaned);
+    // A leading slash-command (`/fix …`) or mention is an instruction, not
+    // part of the name.
+    if let Some(first) = cleaned.split_whitespace().next() {
+        if (first.starts_with('/') || first.starts_with('@')) && first.len() > 1 {
+            let stripped = first[1..].trim();
+            if stripped.is_empty() {
+                cleaned = cleaned
+                    .split_whitespace()
+                    .skip(1)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+            } else {
+                let mut parts = cleaned.split_whitespace();
+                parts.next();
+                let rest = parts.collect::<Vec<_>>().join(" ");
+                cleaned = if rest.is_empty() {
+                    stripped.to_owned()
+                } else {
+                    format!("{stripped} {rest}")
+                };
+            }
+        }
+    }
+    let mut words = Vec::new();
+    for token in cleaned.split_whitespace() {
+        humanize_title_token(token, &mut words);
+    }
+    let mut title = words.join(" ");
+    title = title
+        .trim()
+        .trim_matches(|character| matches!(character, '"' | '\'' | '#' | '_' | '`'))
+        .trim_end_matches(['.', ',', ':', ';'])
+        .trim()
+        .to_owned();
+    (!title.is_empty()).then_some(title)
+}
+
+/// Turns one whitespace-separated token into title words: unwraps quotes and
+/// brackets, keeps the last path segment, drops call parens and file
+/// extensions, then splits `snake_case`, `kebab-case`, and `camelCase`.
+fn humanize_title_token(token: &str, words: &mut Vec<String>) {
+    let mut token = token
+        .trim()
+        .trim_matches(|character| {
+            matches!(
+                character,
+                '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>'
+            )
+        })
+        .trim();
+    if token.is_empty() {
+        return;
+    }
+    if token.starts_with('/') || token.starts_with('@') {
+        token = token[1..].trim();
+        if token.is_empty() {
+            return;
+        }
+    }
+    if token.contains('/') || token.contains('\\') {
+        token = token
+            .rsplit(['/', '\\'])
+            .find(|segment| !segment.trim().is_empty())
+            .unwrap_or(token)
+            .trim();
+    }
+    while token.ends_with("()") && token.len() > 2 {
+        token = token[..token.len() - 2].trim();
+    }
+    token = token.trim_matches(['(', ')', '[', ']', '{', '}', '<', '>', '"', '\'', '`']);
+    if token.is_empty() {
+        return;
+    }
+    // Drop a trailing file extension (`auth.rs` → `auth`) when the suffix
+    // looks like one: short and alphabetic.
+    if let Some(dot) = token.rfind('.') {
+        let (stem, suffix) = token.split_at(dot);
+        let suffix = &suffix[1..];
+        if !stem.is_empty()
+            && !suffix.is_empty()
+            && suffix.len() <= 4
+            && suffix
+                .chars()
+                .all(|character| character.is_ascii_alphabetic())
+            && stem.chars().any(|character| character.is_alphanumeric())
+        {
+            token = stem.trim();
+        }
+    }
+    if token.is_empty() {
+        return;
+    }
+    let mut spaced = String::with_capacity(token.len() + 4);
+    for character in token.chars() {
+        if matches!(character, '_' | '-' | '.' | '/' | '\\') {
+            spaced.push(' ');
+        } else if character == ':' {
+            spaced.push(' ');
+        } else {
+            spaced.push(character);
+        }
+    }
+    let split_camel = split_camel_case(&spaced);
+    for word in split_camel.split_whitespace() {
+        let word = word
+            .trim()
+            .trim_matches(|character| {
+                matches!(
+                    character,
+                    '"' | '\'' | '(' | ')' | '[' | ']' | '{' | '}' | ':' | ';' | ',' | '.'
+                )
+            })
+            .trim();
+        if !word.is_empty() {
+            words.push(word.to_owned());
+        }
+    }
+}
+
+fn split_camel_case(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut output = String::with_capacity(text.len() + 4);
+    for (index, &character) in chars.iter().enumerate() {
+        if index > 0 && character.is_uppercase() {
+            let previous = chars[index - 1];
+            let next = chars.get(index + 1).copied();
+            let lower_to_upper =
+                (previous.is_lowercase() || previous.is_numeric()) && character.is_uppercase();
+            let acronym_boundary =
+                previous.is_uppercase() && next.is_some_and(|next| next.is_lowercase());
+            if lower_to_upper || acronym_boundary {
+                output.push(' ');
+            }
+        }
+        output.push(character);
+    }
+    output
+}
+
+/// Replaces markdown links and images with their visible text:
+/// `[label](url)` → `label`, `![alt](url)` → `alt`.
+fn strip_markdown_links(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let chars: Vec<char> = text.chars().collect();
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] == '[' {
+            if let Some(close) = chars[index..]
+                .iter()
+                .position(|&character| character == ']')
+            {
+                let after = index + close + 1;
+                if after < chars.len() && chars[after] == '(' {
+                    if let Some(end) = chars[after..]
+                        .iter()
+                        .position(|&character| character == ')')
+                    {
+                        output
+                            .push_str(&chars[index + 1..index + close].iter().collect::<String>());
+                        index = after + end + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        if chars[index] == '!' && chars.get(index + 1) == Some(&'[') {
+            // Handled above through the `[` branch on the next pass; keep
+            // the `!` out of the output.
+            index += 1;
+            continue;
+        }
+        output.push(chars[index]);
+        index += 1;
+    }
+    output
+}
+
+fn strip_leading_list_markers(text: &str) -> String {
+    let mut cleaned = text.trim().to_owned();
+    loop {
+        let trimmed = cleaned.trim_start().to_owned();
+        let without_bullets = trimmed
+            .trim_start_matches(['#', '>', '-', '*', '+', '•', '❯', '»'])
+            .trim_start();
+        if without_bullets.len() != trimmed.len() {
+            cleaned = without_bullets.to_owned();
+            continue;
+        }
+        // Ordered list markers: `1. …`, `2) …`.
+        let bytes = trimmed.as_bytes();
+        let mut digits = 0;
+        while digits < bytes.len() && bytes[digits].is_ascii_digit() {
+            digits += 1;
+        }
+        if digits > 0 && digits < bytes.len() && (bytes[digits] == b'.' || bytes[digits] == b')') {
+            cleaned = trimmed[digits + 1..].trim_start().to_owned();
+            continue;
+        }
+        cleaned = trimmed;
+        break;
+    }
+    cleaned
+}
+
+fn truncate_title(title: String, max_chars: usize) -> String {
+    if title.chars().count() <= max_chars {
+        return title;
+    }
+    let mut truncated: String = title.chars().take(max_chars).collect();
+    // Avoid leaving a half-word: backtrack to the last space when the cut
+    // lands inside one.
+    if title
+        .chars()
+        .nth(max_chars)
+        .is_some_and(|next| next.is_alphanumeric())
+        && truncated
+            .chars()
+            .next_back()
+            .is_some_and(|last| last.is_alphanumeric())
+        && let Some(space) = truncated.rfind(' ')
+    {
+        truncated.truncate(space);
+    }
+    truncated.trim_end().to_owned()
 }
 
 fn strip_legacy_codex_citations(text: &str) -> String {
@@ -4225,6 +4562,89 @@ mod tests {
         assert_eq!(session.display_title(), "My title");
         assert!(!session.set_title("   "));
         assert_eq!(session.display_title(), "My title");
+    }
+
+    #[test]
+    fn auto_titles_strip_markdown_code_and_wrappers() {
+        assert_eq!(
+            normalize_session_title("Title: **Repair title updates.**").as_deref(),
+            Some("Repair title updates")
+        );
+        assert_eq!(
+            normalize_session_title("\"Fix Provider Task Titles\"").as_deref(),
+            Some("Fix Provider Task Titles")
+        );
+        assert_eq!(
+            normalize_session_title("```\n`Fix the parser`\n```").as_deref(),
+            Some("Fix the parser")
+        );
+        assert_eq!(
+            normalize_session_title("# Fix the `parser`").as_deref(),
+            Some("Fix the parser")
+        );
+        assert_eq!(
+            normalize_session_title("See [the parser](https://example.com) now").as_deref(),
+            Some("See the parser now")
+        );
+        assert_eq!(
+            normalize_session_title("{\"title\": \"  Fix it  \"}").as_deref(),
+            Some("Fix it")
+        );
+        assert_eq!(normalize_session_title("```\n\n```"), None);
+        assert_eq!(normalize_session_title("   "), None);
+    }
+
+    #[test]
+    fn auto_titles_humanize_code_like_tokens() {
+        assert_eq!(
+            normalize_session_title("fix_auth_bug").as_deref(),
+            Some("fix auth bug")
+        );
+        assert_eq!(
+            normalize_session_title("fix-auth-bug").as_deref(),
+            Some("fix auth bug")
+        );
+        assert_eq!(
+            normalize_session_title("fixAuthBug").as_deref(),
+            Some("fix Auth Bug")
+        );
+        assert_eq!(
+            normalize_session_title("Investigate src/auth.rs").as_deref(),
+            Some("Investigate auth")
+        );
+        assert_eq!(
+            normalize_session_title("/fix the parser").as_deref(),
+            Some("fix the parser")
+        );
+    }
+
+    #[test]
+    fn auto_titles_reject_placeholders_and_cap_length() {
+        assert_eq!(normalize_session_title("New session - "), None);
+        assert_eq!(
+            normalize_session_title("New session - Fix the parser").as_deref(),
+            Some("Fix the parser")
+        );
+        assert_eq!(normalize_session_title("New task"), None);
+        let long = format!("{} end", "word ".repeat(30));
+        let title = normalize_session_title(&long).expect("long titles truncate");
+        assert!(title.chars().count() <= AUTO_TITLE_MAX_CHARS);
+        assert!(!title.ends_with("end") || title.chars().count() <= AUTO_TITLE_MAX_CHARS);
+    }
+
+    #[test]
+    fn prompt_fallback_humanizes_code_prompts() {
+        let project = Project::from_path(PathBuf::from("/tmp/padu"));
+        let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+        session.set_title_from_prompt("```rust\nfix_auth_bug in src/auth.rs\n```");
+        assert_eq!(
+            session.auto_title.as_deref(),
+            Some("rust fix auth bug in auth")
+        );
+
+        let mut slash = AgentSession::new(project.id, ProviderKind::Codex);
+        slash.set_title_from_prompt("/fix the **parser** now");
+        assert_eq!(slash.auto_title.as_deref(), Some("fix the parser now"));
     }
 
     #[test]

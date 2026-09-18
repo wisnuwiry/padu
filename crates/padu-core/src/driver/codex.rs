@@ -1318,40 +1318,11 @@ fn generate_codex_title(binary: &Path, cwd: &Path, prompt: &str) -> anyhow::Resu
     result
 }
 
+/// Normalizes a Codex-generated title. Delegates to the shared session-title
+/// normalizer so every automatic title strips markdown and humanizes
+/// code-like tokens the same way.
 fn normalize_codex_title(raw: &str) -> Option<String> {
-    let raw = raw.trim();
-    let decoded = serde_json::from_str::<Value>(raw)
-        .ok()
-        .and_then(|value| match value {
-            Value::String(title) => Some(title),
-            Value::Object(object) => object
-                .get("title")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
-            _ => None,
-        });
-    let candidate = decoded.as_deref().unwrap_or(raw);
-    let line = candidate
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty() && !line.starts_with("```") && *line != "json")?;
-    let line = line
-        .strip_prefix("Title:")
-        .or_else(|| line.strip_prefix("title:"))
-        .unwrap_or(line)
-        .trim();
-    let title = line
-        .trim_matches(|character| matches!(character, '"' | '\'' | '`' | '#' | '*' | '_'))
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    let title = title.trim_end_matches(['.', ',', ':', ';']).trim();
-    if title.is_empty() {
-        return None;
-    }
-    let title = title.chars().take(80).collect::<String>();
-    let title = title.trim_end().to_owned();
-    (!title.is_empty()).then_some(title)
+    crate::model::normalize_session_title(raw)
 }
 
 fn wait_for_thread_id(thread_id: &Mutex<Option<String>>) -> Option<String> {
