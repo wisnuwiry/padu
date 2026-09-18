@@ -709,6 +709,21 @@ impl TerminalView {
         &self.working_directory
     }
 
+    pub fn is_ready(&self) -> bool {
+        self.session.is_some()
+    }
+
+    pub fn send_command(&mut self, command: &str) {
+        if let Some(session) = &self.session {
+            let mut bytes = command.as_bytes().to_vec();
+            if !bytes.ends_with(b"\n") {
+                bytes.push(b'\n');
+            }
+            session.write(bytes);
+            session.dirty.store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+
     pub fn set_panel_width(&mut self, width: f32) {
         self.panel_width = width;
     }
