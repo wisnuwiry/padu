@@ -35,6 +35,7 @@ import type {
   WorkspaceOperation,
   WorkspaceResult,
 } from '@padu/client'
+import { normalizeSessionTitle, promptFallbackTitle } from '@padu/client/event-reducer'
 
 export type TaskState = Extract<ResponsePayload, { type: 'taskState' }>
 export type DaemonDirectory = Extract<WorkspaceResult, { type: 'directory' }>
@@ -781,7 +782,7 @@ export function createResumedSession(
   const hasHistory = history.messages.length > 0 || history.turns.length > 0
   return {
     ...createSession(projectId, summary.cursor.provider, false),
-    auto_title: summary.title,
+    auto_title: normalizeSessionTitle(summary.title) ?? null,
     runtime_mode: runtimeMode,
     provider_cursor: summary.cursor,
     created_at: createdAt,
@@ -871,10 +872,7 @@ export function unixTime() {
 }
 
 function promptTitle(prompt: string): string | null {
-  let title = prompt.trim().split(/\s+/).slice(0, 7).join(' ')
-  if (!title) return null
-  if ([...title].length > 54) title = `${[...title].slice(0, 53).join('')}…`
-  return title
+  return promptFallbackTitle(prompt)
 }
 
 function upsertProject(projects: Project[], project?: Project): Project[] {

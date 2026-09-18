@@ -44,6 +44,7 @@ import {
 } from './provider-probe-cache'
 import {
   reduceRuntimeEvent,
+  promptFallbackTitle,
   type PendingPermission,
   type PendingUserInput,
 } from './event-reducer'
@@ -846,7 +847,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             && !optimisticSession.auto_title
             && !optimisticSession.messages.some((message) => message.role === 'user')
           ) {
-            optimisticSession.auto_title = objective.split(/\s+/u).filter(Boolean).slice(0, 7).join(' ') || null
+            optimisticSession.auto_title = promptFallbackTitle(objective)
           }
           optimisticSession.messages.push({
             id: crypto.randomUUID(),
