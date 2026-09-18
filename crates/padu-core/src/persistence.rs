@@ -1189,6 +1189,7 @@ impl StateStore {
                     name,
                     path: PathBuf::from(path),
                     created_at: created_at as u64,
+                    scripts: Vec::new(),
                 })
             })
             .collect();
