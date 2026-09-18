@@ -615,6 +615,95 @@ pub fn parse_cli_version(output: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// Icon identifier for a project script/action.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ProjectScriptIcon {
+    #[default]
+    Play,
+    Test,
+    Lint,
+    Configure,
+    Build,
+    Debug,
+}
+
+impl ProjectScriptIcon {
+    pub const ALL: [Self; 6] = [
+        Self::Play,
+        Self::Test,
+        Self::Lint,
+        Self::Configure,
+        Self::Build,
+        Self::Debug,
+    ];
+
+    pub fn id(&self) -> &'static str {
+        match self {
+            Self::Play => "play",
+            Self::Test => "test",
+            Self::Lint => "lint",
+            Self::Configure => "configure",
+            Self::Build => "build",
+            Self::Debug => "debug",
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Play => "Play",
+            Self::Test => "Test",
+            Self::Lint => "Lint",
+            Self::Configure => "Configure",
+            Self::Build => "Build",
+            Self::Debug => "Debug",
+        }
+    }
+
+    pub fn icon_path(&self) -> &'static str {
+        match self {
+            Self::Play => "icons/play.svg",
+            Self::Test => "icons/flask.svg",
+            Self::Lint => "icons/list-checks.svg",
+            Self::Configure => "icons/wrench.svg",
+            Self::Build => "icons/hammer.svg",
+            Self::Debug => "icons/bug.svg",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Self {
+        match id {
+            "test" => Self::Test,
+            "lint" => Self::Lint,
+            "configure" => Self::Configure,
+            "build" => Self::Build,
+            "debug" => Self::Debug,
+            _ => Self::Play,
+        }
+    }
+}
+
+/// Project-scoped custom command/action.
+#[derive(Clone, Debug, Deserialize, Serialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectScript {
+    pub id: String,
+    pub name: String,
+    pub command: String,
+    #[serde(default)]
+    pub icon: ProjectScriptIcon,
+    #[serde(default)]
+    pub run_on_worktree_create: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub async_run: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_url: Option<String>,
+    #[serde(default)]
+    pub auto_open_preview: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keybinding: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 pub struct Project {
     pub id: Uuid,
@@ -623,6 +712,8 @@ pub struct Project {
     /// When the project was added, unix seconds.
     #[serde(default)]
     pub created_at: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scripts: Vec<ProjectScript>,
 }
 
 /// Filesystem context a task runs in.
@@ -692,6 +783,7 @@ impl Project {
             name,
             path,
             created_at: unix_time(),
+            scripts: Vec::new(),
         }
     }
 
