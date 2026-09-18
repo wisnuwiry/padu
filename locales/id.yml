@@ -464,6 +464,7 @@ providers.agy_sign_out_title: Keluar dari Antigravity
 providers.agy_sign_out_confirm: Sesi Google OAuth Antigravity Anda akan dikeluarkan.
 providers.agy_remove_title: Hapus server Antigravity ACP
 providers.agy_remove_confirm: Server ACP yang diunduh dan jalur konfigurasinya akan dihapus.
+providers.account_plan: "%{user} • %{plan}"
 computer_use.allow_apps: Izinkan Padu menggunakan aplikasi
 computer_use.availability: Penggunaan Komputer tersedia dengan Codex, OpenCode, Grok, dan Pi
 computer_use.macos_access: Akses macOS

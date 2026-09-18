@@ -6,6 +6,11 @@ use ts_rs::TS;
 #[serde(rename_all = "camelCase")]
 pub struct PlanUsage {
     pub plan_label: Option<String>,
+    /// Logged-in account identity (email preferred, else username or account
+    /// id) when the provider payload exposes one. `None` means unknown, and
+    /// clients hide the account row rather than guessing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_label: Option<String>,
     pub windows: Vec<PlanWindow>,
 }
 

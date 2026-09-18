@@ -320,6 +320,7 @@ impl Padu {
                             path = display_path
                         ));
                         this.refresh_provider_detection(Some(ProviderKind::Agy), cx);
+                        this.refresh_agy_auth_status(cx);
                     }
                     Ok(response) => {
                         this.show_toast(format!(
@@ -370,7 +371,7 @@ impl Padu {
         let daemon = self.daemon.client();
         cx.notify();
         cx.spawn(async move |this, cx| {
-            let authenticated = cx
+            let status = cx
                 .background_executor()
                 .spawn(async move {
                     match daemon.request(
@@ -378,9 +379,10 @@ impl Padu {
                         uuid::Uuid::nil(),
                         padu_client::Command::CheckAgyAuth,
                     ) {
-                        Ok(padu_client::ResponsePayload::AgyAuthStatus { authenticated }) => {
-                            Some(authenticated)
-                        }
+                        Ok(padu_client::ResponsePayload::AgyAuthStatus {
+                            authenticated,
+                            account_label,
+                        }) => Some((authenticated, account_label)),
                         _ => None,
                     }
                 })
@@ -388,8 +390,9 @@ impl Padu {
             let _ = this.update(cx, |this, cx| {
                 if this.agy_auth_check_generation == generation {
                     this.agy_auth_checking = false;
-                    if let Some(authenticated) = authenticated {
+                    if let Some((authenticated, account_label)) = status {
                         this.agy_authenticated = authenticated;
+                        this.agy_account = account_label;
                     }
                     cx.notify();
                 }
@@ -401,6 +404,7 @@ impl Padu {
     fn invalidate_agy_auth_status(&mut self) {
         self.agy_auth_check_generation = self.agy_auth_check_generation.wrapping_add(1);
         self.agy_auth_checking = false;
+        self.agy_account = None;
     }
 
     fn authenticate_agy(&mut self, cx: &mut Context<Self>) {
@@ -431,6 +435,10 @@ impl Padu {
                     Ok(padu_client::ResponsePayload::Ack) => {
                         this.agy_authenticated = true;
                         this.show_success_toast(tr!("providers.agy_signed_in"));
+                        // The fresh credential now carries the Google
+                        // identity; refresh so the account row appears
+                        // without reopening the settings row.
+                        this.refresh_agy_auth_status(cx);
                     }
                     Ok(response) => this.show_toast(format!(
                         "Antigravity sign-in returned an unexpected response: {response:?}"
@@ -475,6 +483,7 @@ impl Padu {
                 this.agy_action = AgyActionState::Idle;
                 if let Ok(padu_client::ResponsePayload::Ack) = result {
                     this.agy_authenticated = false;
+                    this.agy_account = None;
                     this.show_success_toast(tr!("providers.agy_signed_out"));
                 } else if let Err(error) = result {
                     this.show_toast(tr!("providers.agy_sign_out_failed", error = error));
@@ -624,12 +633,40 @@ impl Padu {
             .when(kind == ProviderKind::Agy && installed, |element| {
                 element.child(self.render_agy_expanded_controls(&theme, cx))
             })
+            .when_some(self.provider_account_label(kind), |element, label| {
+                element.child(
+                    div()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_secondary)
+                        .child(SharedString::from(label)),
+                )
+            })
             .child(
                 div()
                     .text_size(sp(12.5))
                     .text_color(theme.text_ghost)
                     .child(SharedString::from(caption)),
             )
+    }
+
+    /// Compact "user • plan" account line for the expanded provider row.
+    /// Antigravity exposes identity but no plan, so its row shows the Google
+    /// account alone. Returns `None` when neither identity nor plan is known,
+    /// so the row hides instead of showing a placeholder. Reads only cached
+    /// snapshots; refreshing happens off-thread when the row expands.
+    fn provider_account_label(&self, kind: ProviderKind) -> Option<String> {
+        if kind == ProviderKind::Agy {
+            return self.agy_account.clone();
+        }
+        let usage = self.plan_usage.get(&kind)?;
+        match (&usage.account_label, &usage.plan_label) {
+            (Some(account), Some(plan)) => {
+                Some(tr!("providers.account_plan", user = account, plan = plan))
+            }
+            (Some(account), None) => Some(account.clone()),
+            (None, Some(plan)) => Some(plan.clone()),
+            (None, None) => None,
+        }
     }
 
     fn render_settings_action_button(
@@ -923,6 +960,13 @@ impl Padu {
             self.expanded_provider_settings = Some(provider);
             if provider == ProviderKind::Agy {
                 self.refresh_agy_auth_status(cx);
+            }
+            // Providers with an account-level plan fetcher refresh their
+            // cached snapshot here; the expanded row reads only that cache
+            // and hides the account line until it lands.
+            if super::super::usage_meter::PLAN_USAGE_PROVIDERS.contains(&provider) {
+                self.plan_usage_stale.insert(provider);
+                self.maybe_refresh_plan_usage(cx);
             }
             let override_value = self
                 .state

@@ -83,14 +83,20 @@ pub fn fetch_claude_plan_usage(cli_version: Option<&str>) -> anyhow::Result<Plan
     // changes unchanged — verified live: a keychain saying `max_5x` against a
     // profile reporting `max_20x`. The profile's organization tier is the
     // account's current plan, so it wins; the credential label stays as the
-    // fallback when the profile is unreachable.
-    if let Some(label) = fetch_claude_profile_plan_label(&credentials.access_token, &user_agent) {
-        usage.plan_label = Some(label);
+    // fallback when the profile is unreachable. The same profile response
+    // also carries the logged-in account identity when present.
+    if let Some(profile) = fetch_claude_profile(&credentials.access_token, &user_agent) {
+        if let Some(label) = profile_plan_label(&profile) {
+            usage.plan_label = Some(label);
+        }
+        if let Some(account) = profile_account_label(&profile) {
+            usage.account_label = Some(account);
+        }
     }
     Ok(usage)
 }
 
-fn fetch_claude_profile_plan_label(access_token: &str, user_agent: &str) -> Option<String> {
+fn fetch_claude_profile(access_token: &str, user_agent: &str) -> Option<Value> {
     let (status, body) = http_get(
         CLAUDE_PROFILE_URL,
         &[
@@ -103,7 +109,20 @@ fn fetch_claude_profile_plan_label(access_token: &str, user_agent: &str) -> Opti
     if status != 200 {
         return None;
     }
-    profile_plan_label(&serde_json::from_str(&body).ok()?)
+    serde_json::from_str(&body).ok()
+}
+
+/// Logged-in Claude identity from the profile response, preferring the
+/// account email and degrading through login/name fields. Anything blank or
+/// missing yields `None` so callers hide the account row.
+fn profile_account_label(body: &Value) -> Option<String> {
+    let account = body.get("account")?;
+    ["email_address", "email", "login", "name"]
+        .into_iter()
+        .filter_map(|key| account.get(key).and_then(Value::as_str))
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+        .map(str::to_owned)
 }
 
 /// "Max (20x)" from the profile's organization: `organization_type`
@@ -158,7 +177,80 @@ pub fn fetch_codex_plan_usage() -> anyhow::Result<PlanUsage> {
         other => return Err(anyhow!(tr!("usage_error.http_status", status = other))),
     }
     let body: Value = serde_json::from_str(&body).context(tr!("usage_error.invalid_json"))?;
-    parse_codex_plan_usage(&body).ok_or_else(|| anyhow!(tr!("usage_error.no_rate_limit_windows")))
+    let mut usage = parse_codex_plan_usage(&body)
+        .ok_or_else(|| anyhow!(tr!("usage_error.no_rate_limit_windows")))?;
+    // `~/.codex/auth.json` is the only local identity: prefer an explicit
+    // email, then the JWT `id_token` claim, then the raw account id. The
+    // usage endpoint itself carries quota, not identity.
+    usage.account_label = codex_account_label(&auth).or_else(|| usage_body_account_label(&body));
+    Ok(usage)
+}
+
+/// Identity from the Codex auth blob. Direct email fields win; ChatGPT also
+/// stores an `id_token` JWT whose payload commonly carries the login email;
+/// the opaque account id is the last resort. Never errors — unknown means
+/// the settings row simply hides.
+fn codex_account_label(auth: &Value) -> Option<String> {
+    let direct = [
+        "/tokens/email",
+        "/tokens/user_email",
+        "/email",
+        "/user/email",
+        "/user/email_address",
+    ]
+    .into_iter()
+    .filter_map(|pointer| auth.pointer(pointer).and_then(Value::as_str))
+    .map(str::trim)
+    .find(|value| !value.is_empty())
+    .map(str::to_owned);
+    if direct.is_some() {
+        return direct;
+    }
+    if let Some(email) = auth
+        .pointer("/tokens/id_token")
+        .and_then(Value::as_str)
+        .and_then(jwt_payload_email)
+    {
+        return Some(email);
+    }
+    auth.pointer("/tokens/account_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+/// Best-effort `email` claim from an unsigned JWT payload. Signature is
+/// irrelevant here — this only labels local settings UI, never auth.
+pub(crate) fn jwt_payload_email(token: &str) -> Option<String> {
+    use base64::Engine as _;
+    let payload = token.split('.').nth(1)?;
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .ok()
+        .or_else(|| {
+            base64::engine::general_purpose::STANDARD
+                .decode(payload)
+                .ok()
+        })?;
+    let claims: Value = serde_json::from_slice(&decoded).ok()?;
+    ["email", "email_address", "upn", "preferred_username"]
+        .into_iter()
+        .filter_map(|key| claims.get(key).and_then(Value::as_str))
+        .map(str::trim)
+        .find(|value| !value.is_empty() && value.contains('@'))
+        .map(str::to_owned)
+}
+
+/// Defensive identity from a usage response envelope, for backends that
+/// inline the account next to quota. Returns `None` for today's Codex shape.
+fn usage_body_account_label(body: &Value) -> Option<String> {
+    ["/email", "/account/email", "/user/email", "/account_id"]
+        .into_iter()
+        .filter_map(|pointer| body.pointer(pointer).and_then(Value::as_str))
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+        .map(str::to_owned)
 }
 
 /// Fetch OpenCode Go's rolling, weekly, and monthly subscription limits.
@@ -260,6 +352,10 @@ fn parse_opencode_go_plan_usage(body: &Value) -> Option<PlanUsage> {
     }
     Some(PlanUsage {
         plan_label: Some("Go".to_owned()),
+        // Today's Go `/usage` envelope carries quota only; keep the
+        // defensive lookup so a future identity field surfaces without a
+        // second code change, and the row hides until then.
+        account_label: usage_body_account_label(body),
         windows,
     })
 }
@@ -412,6 +508,24 @@ fn parse_grok_billing(billing: &Value) -> anyhow::Result<PlanUsage> {
     }
     Ok(PlanUsage {
         plan_label,
+        // Verified billing shapes carry the tier but no email; degrade
+        // through likely identity keys and hide when absent.
+        account_label: ["/email", "/account/email", "/user/email", "/username"]
+            .into_iter()
+            .filter_map(|pointer| {
+                billing
+                    .pointer(pointer)
+                    .and_then(Value::as_str)
+                    .or_else(|| {
+                        billing
+                            .get("config")
+                            .and_then(|config| config.pointer(pointer))
+                            .and_then(Value::as_str)
+                    })
+            })
+            .map(str::trim)
+            .find(|value| !value.is_empty())
+            .map(str::to_owned),
         windows,
     })
 }
@@ -449,6 +563,8 @@ fn parse_codex_plan_usage(body: &Value) -> Option<PlanUsage> {
     }
     Some(PlanUsage {
         plan_label: openai_plan_label(body.get("plan_type").and_then(Value::as_str)),
+        // Quota endpoint only; the caller overlays identity from auth.json.
+        account_label: None,
         windows,
     })
 }
@@ -655,6 +771,9 @@ fn parse_plan_usage(body: &Value, credentials: &OauthCredentials) -> PlanUsage {
             credentials.subscription_type.as_deref(),
             credentials.rate_limit_tier.as_deref(),
         ),
+        // The OAuth blob holds tokens, not identity; the profile fetch in
+        // `fetch_claude_plan_usage` overlays the account email when reachable.
+        account_label: None,
         windows,
     }
 }
@@ -868,6 +987,76 @@ mod tests {
         .unwrap();
         assert_eq!(profile_plan_label(&body).as_deref(), Some("Max (20x)"));
         assert_eq!(profile_plan_label(&serde_json::json!({})), None);
+    }
+
+    #[test]
+    fn the_profile_account_names_the_logged_in_user() {
+        let body: Value = serde_json::from_str(
+            r#"{
+                "account": {"email_address": "dev@example.com", "has_claude_max": true},
+                "organization": {
+                    "organization_type": "claude_max",
+                    "rate_limit_tier": "default_claude_max_20x"
+                }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            profile_account_label(&body).as_deref(),
+            Some("dev@example.com")
+        );
+        let login_only: Value =
+            serde_json::from_str(r#"{"account": {"login": "dev-handle"}}"#).unwrap();
+        assert_eq!(
+            profile_account_label(&login_only).as_deref(),
+            Some("dev-handle")
+        );
+        assert_eq!(
+            profile_account_label(&serde_json::json!({"account": {}})),
+            None
+        );
+        assert_eq!(profile_account_label(&serde_json::json!({})), None);
+    }
+
+    #[test]
+    fn codex_identity_prefers_email_then_jwt_then_account_id() {
+        use base64::Engine as _;
+        // Direct email field wins.
+        let direct: Value = serde_json::json!({
+            "tokens": {"access_token": "x", "account_id": "acc-1", "email": "dev@example.com"}
+        });
+        assert_eq!(
+            codex_account_label(&direct).as_deref(),
+            Some("dev@example.com")
+        );
+        // Otherwise the id_token JWT payload's email claim is decoded.
+        let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(serde_json::json!({"email": "jwt@example.com"}).to_string());
+        let jwt = format!("header.{claims}.signature");
+        let via_jwt: Value = serde_json::json!({"tokens": {"access_token": "x", "id_token": jwt}});
+        assert_eq!(
+            codex_account_label(&via_jwt).as_deref(),
+            Some("jwt@example.com")
+        );
+        // Opaque account id is the last resort, not an error.
+        let id_only: Value =
+            serde_json::json!({"tokens": {"access_token": "x", "account_id": "acc-9"}});
+        assert_eq!(codex_account_label(&id_only).as_deref(), Some("acc-9"));
+        assert_eq!(
+            codex_account_label(&serde_json::json!({"tokens": {}})),
+            None
+        );
+    }
+
+    #[test]
+    fn quota_only_bodies_report_no_account() {
+        assert_eq!(
+            usage_body_account_label(&serde_json::json!({
+                "plan_type": "plus",
+                "rate_limit": {"primary_window": {"used_percent": 1}}
+            })),
+            None
+        );
     }
 
     #[test]

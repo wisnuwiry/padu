@@ -473,6 +473,7 @@ providers.agy_sign_out_title: Antigravity からログアウト
 providers.agy_sign_out_confirm: Antigravity の Google OAuth セッションがログアウトされます。
 providers.agy_remove_title: Antigravity ACP サーバーを削除
 providers.agy_remove_confirm: ダウンロードした ACP サーバーと設定されたパスが削除されます。
+providers.account_plan: "%{user} • %{plan}"
 
 computer_use.allow_apps: Padu にアプリの操作を許可
 computer_use.availability: コンピュータ操作は Codex、OpenCode、Grok、Pi で利用できます

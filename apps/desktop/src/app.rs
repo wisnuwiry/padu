@@ -1187,6 +1187,9 @@ pub struct Padu {
     pub(crate) agy_action: AgyActionState,
     /// Whether the current Agy ACP credential is authenticated.
     pub(crate) agy_authenticated: bool,
+    /// Google account identity reported with the Agy auth status, when the
+    /// local credential exposes one. `None` hides the settings account row.
+    pub(crate) agy_account: Option<String>,
     /// Whether an asynchronous Agy auth-status check is in flight.
     pub(crate) agy_auth_checking: bool,
     /// Generation used to discard stale Agy auth-status results.
@@ -3258,6 +3261,7 @@ impl Padu {
                 provider_detection_remaining: 0,
                 agy_action: AgyActionState::Idle,
                 agy_authenticated: false,
+                agy_account: None,
                 agy_auth_checking: false,
                 agy_auth_check_generation: 0,
                 agy_install_percent: 0,

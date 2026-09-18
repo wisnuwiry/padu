@@ -958,22 +958,17 @@ pub(crate) fn resolve_agy_model_id(
 }
 
 pub fn agy_auth_status(binary: &Path) -> anyhow::Result<bool> {
-    // 1. Check local token files in GEMINI_HOME or ~/.gemini
+    // 1. Check Antigravity's own token files in GEMINI_HOME or ~/.gemini.
+    // Deliberately scoped to the `antigravity*` stores: the root
+    // `oauth_creds.json` is Gemini CLI's global credential and must not
+    // mark Antigravity as signed in on its own.
     let gemini_home = std::env::var_os("GEMINI_HOME")
         .map(std::path::PathBuf::from)
         .or_else(|| dirs::home_dir().map(|h| h.join(".gemini")));
     if let Some(home) = gemini_home {
-        if home.join("antigravity-acp").join("acp_token.json").exists()
-            || home
-                .join("antigravity-acp")
-                .join("acp_business_token.json")
-                .exists()
-            || home
-                .join("antigravity")
-                .join("acp")
-                .join("acp_token.json")
-                .exists()
-            || home.join("oauth_creds.json").exists()
+        if agy_token_files()
+            .iter()
+            .any(|relative| home.join(relative).exists())
         {
             return Ok(true);
         }
@@ -1015,6 +1010,84 @@ pub fn agy_auth_status(binary: &Path) -> anyhow::Result<bool> {
     }
 
     Ok(false)
+}
+
+/// Antigravity's own credential files, relative to `GEMINI_HOME` or
+/// `~/.gemini`, in lookup order. `antigravity-cli/antigravity-oauth-token`
+/// (`{token, auth_method, id_token}`) is the live store verified against a
+/// signed-in install; the `jetski` and `antigravity-acp` variants cover
+/// sibling distributions. The Gemini-global root `oauth_creds.json` is
+/// deliberately absent: it belongs to Gemini CLI, not Antigravity.
+fn agy_token_files() -> [&'static str; 5] {
+    [
+        "antigravity-cli/antigravity-oauth-token",
+        "jetski-standalone-oauth-token",
+        "antigravity-acp/acp_token.json",
+        "antigravity-acp/acp_business_token.json",
+        "antigravity/acp/acp_token.json",
+    ]
+}
+
+/// Logged-in Google identity for Antigravity, decoded from Antigravity's own
+/// OAuth token files — no keychain access, so macOS never prompts and the
+/// same code runs on every platform. Anything blank or missing yields `None`
+/// and the settings row hides instead of guessing. Blocking file reads —
+/// daemon only.
+pub fn agy_account_label() -> Option<String> {
+    let home = std::env::var_os("GEMINI_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|h| h.join(".gemini")))?;
+    agy_token_files()
+        .iter()
+        .filter_map(|relative| std::fs::read_to_string(home.join(relative)).ok())
+        .find_map(|payload| agy_account_from_token_blob(&payload))
+}
+
+/// Identity from one Antigravity credential blob: explicit email fields win,
+/// then the OAuth `id_token` JWT's email claim. Pure for testing; callers
+/// feed it token-file payloads verbatim.
+fn agy_account_from_token_blob(payload: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(payload.trim()).ok()?;
+    let candidates = [
+        "/email",
+        "/email_address",
+        "/account/email",
+        "/account/email_address",
+        "/user/email",
+        "/user/email_address",
+        "/id_token",
+        "/idToken",
+        "/tokens/id_token",
+    ];
+    for pointer in candidates {
+        let Some(text) = value.pointer(pointer).and_then(Value::as_str) else {
+            continue;
+        };
+        let text = text.trim();
+        if text.is_empty() {
+            continue;
+        }
+        // Raw JWTs carry no `@`; only the decoded email claim counts.
+        if text.contains('@') {
+            return Some(text.to_owned());
+        }
+        if pointer.contains("token")
+            && let Some(email) = crate::usage::jwt_payload_email(text)
+        {
+            return Some(email);
+        }
+    }
+    // Nested credential envelopes (e.g. keychain blobs wrapping the OAuth
+    // response one level deeper) get one recursive look.
+    for key in ["credentials", "oauth", "tokens", "account", "user"] {
+        if let Some(nested) = value.get(key)
+            && let Ok(rewritten) = serde_json::to_string(nested)
+            && let Some(account) = agy_account_from_token_blob(&rewritten)
+        {
+            return Some(account);
+        }
+    }
+    None
 }
 
 pub fn logout_agy(binary: &Path, cwd: &Path) -> anyhow::Result<()> {
@@ -2945,6 +3018,47 @@ mod tests {
             assert_eq!(key, "ANTIGRAVITY_HARNESS_PATH");
             assert!(!val.is_empty());
         }
+    }
+
+    #[test]
+    fn agy_identity_prefers_email_then_jwt_then_nothing() {
+        assert_eq!(
+            agy_account_from_token_blob(r#"{"email": "dev@example.com"}"#).as_deref(),
+            Some("dev@example.com")
+        );
+        // Nested envelopes get one recursive look.
+        assert_eq!(
+            agy_account_from_token_blob(
+                r#"{"credentials": {"account": {"email_address": "nested@example.com"}}}"#
+            )
+            .as_deref(),
+            Some("nested@example.com")
+        );
+        // OAuth id_token JWTs decode to their email claim.
+        use base64::Engine as _;
+        let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(serde_json::json!({"email": "jwt@example.com"}).to_string());
+        let blob = format!(r#"{{"id_token": "header.{claims}.signature"}}"#);
+        assert_eq!(
+            agy_account_from_token_blob(&blob).as_deref(),
+            Some("jwt@example.com")
+        );
+        // The live antigravity-cli envelope carries the JWT beside the
+        // opaque access token, which must never surface as the identity.
+        let live = format!(
+            r#"{{"token": "ya29.opaque", "auth_method": "oauth", "id_token": "header.{claims}.signature"}}"#
+        );
+        assert_eq!(
+            agy_account_from_token_blob(&live).as_deref(),
+            Some("jwt@example.com")
+        );
+        // Token-only blobs without identity stay hidden, not errors.
+        assert_eq!(
+            agy_account_from_token_blob(r#"{"access_token": "ya29.abc"}"#),
+            None
+        );
+        assert_eq!(agy_account_from_token_blob("not json"), None);
+        assert_eq!(agy_account_from_token_blob("{}"), None);
     }
 
     #[test]
