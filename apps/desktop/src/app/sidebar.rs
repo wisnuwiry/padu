@@ -2321,11 +2321,13 @@ impl Padu {
                         .items_center()
                         .gap(px(5.0))
                         .child(dot)
-                        .child(icon(
-                            provider_icon(session.provider),
-                            12.0,
-                            provider_color(&theme, session.provider),
-                        ))
+                        .when(self.state.sidebar_show_provider, |element| {
+                            element.child(icon(
+                                provider_icon(session.provider),
+                                12.0,
+                                provider_color(&theme, session.provider),
+                            ))
+                        })
                         .child(title)
                         .when(working, |element| {
                             element.child(motion::spin_slow(icon(
@@ -2382,11 +2384,13 @@ impl Padu {
                         .overflow_hidden()
                         .line_height(sp(18.0))
                         .child(dot)
-                        .child(icon(
-                            provider_icon(session.provider),
-                            12.0,
-                            provider_color(&theme, session.provider),
-                        ))
+                        .when(self.state.sidebar_show_provider, |element| {
+                            element.child(icon(
+                                provider_icon(session.provider),
+                                12.0,
+                                provider_color(&theme, session.provider),
+                            ))
+                        })
                         .child(title)
                         .when(working, |element| {
                             element.child(motion::spin_slow(icon(
