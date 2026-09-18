@@ -31,6 +31,7 @@ pub(crate) enum ConfirmAction {
     DeletePath { path: PathBuf },
     DeleteNote { note_id: Uuid },
     DeleteHost { profile_id: String },
+    DeleteProjectScript { project_id: Uuid, script_id: String },
     ReinstallAgy,
     RemoveAgy,
     SignOutAgy,
@@ -251,6 +252,32 @@ impl Padu {
         cx.notify();
     }
 
+    pub(crate) fn confirm_delete_project_script(
+        &mut self,
+        project_id: Uuid,
+        script_id: String,
+        script_name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let cancel_focus = cx.focus_handle();
+        let confirm_focus = cx.focus_handle();
+        let previous_focus = window.focused(cx);
+        self.confirm_dialog = Some(ConfirmDialogState {
+            title: tr!("actions.delete_confirm_title", name = &script_name).into(),
+            message: tr!("actions.delete_confirm_description").into(),
+            confirm_label: tr!("actions.delete_confirm_button").into(),
+            cancel_label: tr!("actions.cancel").into(),
+            variant: ConfirmVariant::Danger,
+            icon_name: Some("icons/trash.svg"),
+            action: ConfirmAction::DeleteProjectScript { project_id, script_id },
+            cancel_focus,
+            confirm_focus,
+            previous_focus,
+        });
+        cx.notify();
+    }
+
     pub(crate) fn close_confirm_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(dialog) = self.confirm_dialog.take() {
             if let Some(prev) = dialog.previous_focus {
@@ -297,6 +324,9 @@ impl Padu {
                 if was_active {
                     self.switch_to_host(None, cx);
                 }
+            }
+            ConfirmAction::DeleteProjectScript { project_id, script_id } => {
+                self.delete_project_script(project_id, &script_id, cx);
             }
         }
 
