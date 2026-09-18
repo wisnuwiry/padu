@@ -389,6 +389,79 @@ fn render_theme_section(
         .into_any_element()
 }
 
+fn render_sidebar_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) -> AnyElement {
+    let show_provider = padu.state.sidebar_show_provider;
+    let toggle = toggle_switch(
+        "sidebar-show-provider-toggle",
+        show_provider,
+        false,
+        theme,
+        cx,
+        move |this, _, cx| this.set_sidebar_show_provider(!show_provider, cx),
+    );
+
+    div()
+        .mt(px(15.0))
+        .w_full()
+        .rounded(px(13.0))
+        .overflow_hidden()
+        .bg(theme.raised)
+        .child(
+            div()
+                .w_full()
+                .px(px(20.0))
+                .py(px(14.0))
+                .child(
+                    div()
+                        .text_size(sp(13.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(tr!("settings.sidebar")),
+                )
+                .child(
+                    div()
+                        .mt(px(5.0))
+                        .text_size(sp(12.5))
+                        .line_height(sp(18.0))
+                        .text_color(theme.text_secondary)
+                        .child(tr!("settings.sidebar_description")),
+                ),
+        )
+        .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+        .child(
+            div()
+                .w_full()
+                .min_h(px(60.0))
+                .px(px(20.0))
+                .py(px(12.0))
+                .flex()
+                .items_center()
+                .gap(px(24.0))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(
+                            div()
+                                .text_size(sp(13.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text)
+                                .child(tr!("settings.sidebar_show_provider")),
+                        )
+                        .child(
+                            div()
+                                .mt(px(5.0))
+                                .text_size(sp(12.5))
+                                .line_height(sp(18.0))
+                                .text_color(theme.text_secondary)
+                                .child(tr!("settings.sidebar_show_provider_description")),
+                        ),
+                )
+                .child(toggle),
+        )
+        .into_any_element()
+}
+
 impl Padu {
     pub(super) fn render_appearance_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
@@ -595,8 +668,18 @@ impl Padu {
             .flex()
             .flex_col()
             .child(appearance_card)
+            .child(render_sidebar_section(self, theme, cx))
             .child(render_background_section(self, theme, cx))
             .into_any_element()
+    }
+
+    fn set_sidebar_show_provider(&mut self, show: bool, cx: &mut Context<Self>) {
+        if self.state.sidebar_show_provider == show {
+            return;
+        }
+        self.state.sidebar_show_provider = show;
+        self.save();
+        cx.notify();
     }
 
     fn set_ui_font_size(&mut self, size: f32, window: &mut Window, cx: &mut Context<Self>) {

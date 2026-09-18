@@ -128,6 +128,13 @@ export function readSidebarOrdering(): SidebarOrdering {
     : 'newest'
 }
 
+export function readSidebarShowProvider(storage?: Pick<Storage, 'getItem'> | null): boolean {
+  const store = storage ?? (typeof window !== 'undefined' ? window.localStorage : null)
+  if (!store) return true
+  const item = store.getItem('padu.sidebar_show_provider')
+  return item === null ? true : item !== 'false'
+}
+
 /**
  * Sessions in the order the sidebar renders them: grouped (pinned, then
  * per-project or per-date groups) with the user's grouping/ordering applied.

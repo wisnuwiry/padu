@@ -381,6 +381,10 @@ settings.code_font_size_description: ファイルエディタ、差分表示、�
 settings.theme_system: システム
 settings.theme_light: ライト
 settings.theme_dark: ダーク
+settings.sidebar: サイドバー
+settings.sidebar_description: サイドバーの表示と会話リストをカスタマイズします
+settings.sidebar_show_provider: プロバイダーを表示
+settings.sidebar_show_provider_description: サイドバーの会話項目にプロバイダーのアイコンを表示します
 settings.background: 背景
 settings.background_description: 会話メッセージの背後に画像を追加します
 settings.background_choose: 画像を選択

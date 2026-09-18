@@ -376,6 +376,10 @@ settings.code_font_size_description: Ukuran teks di editor berkas, diff, blok ko
 settings.theme_system: Sistem
 settings.theme_light: Terang
 settings.theme_dark: Gelap
+settings.sidebar: Bilah sisi
+settings.sidebar_description: Sesuaikan tampilan bilah sisi dan daftar percakapan
+settings.sidebar_show_provider: Tampilkan penyedia
+settings.sidebar_show_provider_description: Tampilkan ikon penyedia pada item percakapan di bilah sisi
 settings.background: Latar belakang
 settings.background_description: Tambahkan gambar lembut di belakang pesan percakapan
 settings.background_choose: Pilih gambar
