@@ -326,6 +326,37 @@ describe("PaduClient", () => {
     expect(progressUpdates).toHaveLength(2);
   });
 
+  test("notifies subscribers of provider auth URL", async () => {
+    const { client, sockets } = fixture();
+    const socket = await connect(client, sockets);
+
+    const authUpdates: Array<{ provider: string; url: string }> = [];
+    const unsubscribe = client.subscribeProviderAuthUrl((event) => {
+      authUpdates.push(event);
+    });
+
+    socket.receive({
+      type: "providerAuthUrl",
+      provider: "agy",
+      url: "https://accounts.google.com/o/oauth2/auth?client_id=xyz",
+    });
+
+    expect(authUpdates).toEqual([
+      {
+        provider: "agy",
+        url: "https://accounts.google.com/o/oauth2/auth?client_id=xyz",
+      },
+    ]);
+
+    unsubscribe();
+    socket.receive({
+      type: "providerAuthUrl",
+      provider: "agy",
+      url: "https://example.com/another",
+    });
+    expect(authUpdates).toHaveLength(1);
+  });
+
   test("requestWithTimeout rejects when timeout expires", async () => {
     const { client, sockets } = fixture();
     await connect(client, sockets);
