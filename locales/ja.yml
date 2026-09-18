@@ -1072,6 +1072,38 @@ right_panel.add_tab: パネルタブを追加
 right_panel.hide: 右パネルを隠す
 right_panel.close_tab: "%{title} を閉じる"
 
+actions.run: "%{name} を実行"
+actions.add: アクションを追加
+actions.edit: "%{name} を編集"
+actions.edit_title: アクションを編集
+actions.add_title: アクションを追加
+actions.description: アクションはトップバーやショートカットから実行できるプロジェクト固有のコマンドです。
+actions.name: 名前
+actions.name_placeholder: テスト
+actions.name_required: 名前を入力してください。
+actions.command: コマンド
+actions.command_placeholder: bun test
+actions.command_required: コマンドを入力してください。
+actions.keybinding: ショートカット
+actions.keybinding_placeholder: キーを押してください
+actions.keybinding_help: ショートカットを押してください。Backspaceでクリアできます。
+actions.preview_url: プレビューURL (任意)
+actions.preview_url_placeholder: http://localhost:5173
+actions.preview_url_help: このアクションの実行時にアプリ内プレビューでこのURLを開きます。
+actions.run_on_worktree_create: ワークツリー作成時に自動実行
+actions.wait_for_setup: エージェント開始前に完了を待機
+actions.auto_open_preview: アクション実行時にプレビューを自動表示
+actions.delete: 削除
+actions.delete_confirm_title: アクション "%{name}" を削除しますか？
+actions.delete_confirm_description: この操作は取り消せません。
+actions.delete_confirm_button: アクションを削除
+actions.cancel: キャンセル
+actions.save_changes: 変更を保存
+actions.save_action: アクションを保存
+actions.from_file: "%{file} からインポート"
+actions.setup_suffix: (セットアップ)
+actions.running: "%{name} を実行中"
+
 open_in.open: "プロジェクトを %{app} で開く"
 open_in.choose: プロジェクトを開くアプリを選択…
 

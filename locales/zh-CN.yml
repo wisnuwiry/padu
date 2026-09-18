@@ -1034,6 +1034,37 @@ right_panel.tabs: 右侧面板标签页
 right_panel.add_tab: 添加面板标签页
 right_panel.hide: 隐藏右侧面板
 right_panel.close_tab: 关闭%{title}
+actions.run: 运行 %{name}
+actions.add: 添加动作
+actions.edit: 编辑 %{name}
+actions.edit_title: 编辑动作
+actions.add_title: 添加动作
+actions.description: 动作是可以在顶栏或通过快捷键运行的项目级自定义命令。
+actions.name: 名称
+actions.name_placeholder: 测试
+actions.name_required: 名称不能为空。
+actions.command: 命令
+actions.command_placeholder: bun test
+actions.command_required: 命令不能为空。
+actions.keybinding: 快捷键
+actions.keybinding_placeholder: 按下快捷键
+actions.keybinding_help: 按下快捷键。按退格键清除。快捷键在整个环境中生效。
+actions.preview_url: 预览网址（可选）
+actions.preview_url_placeholder: http://localhost:5173
+actions.preview_url_help: 运行此动作时在内置预览中打开此网址。
+actions.run_on_worktree_create: 创建工作树时自动运行
+actions.wait_for_setup: 在智能体启动前等待其完成
+actions.auto_open_preview: 运行此动作时自动打开预览
+actions.delete: 删除
+actions.delete_confirm_title: 删除动作 "%{name}"？
+actions.delete_confirm_description: 此操作不可撤回。
+actions.delete_confirm_button: 删除动作
+actions.cancel: 取消
+actions.save_changes: 保存修改
+actions.save_action: 保存动作
+actions.from_file: 来自 %{file}
+actions.setup_suffix: (初始化)
+actions.running: 正在运行 %{name}
 open_in.open: 用%{app}打开项目
 open_in.choose: 选择打开项目的应用…
 environment.title: 环境

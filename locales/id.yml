@@ -1033,6 +1033,37 @@ right_panel.tabs: Tab panel kanan
 right_panel.add_tab: Tambah tab panel
 right_panel.hide: Sembunyikan panel kanan
 right_panel.close_tab: Tutup %{title}
+actions.run: Jalankan %{name}
+actions.add: Tambah aksi
+actions.edit: Edit %{name}
+actions.edit_title: Edit Aksi
+actions.add_title: Tambah Aksi
+actions.description: Aksi adalah perintah khusus proyek yang dapat dijalankan dari bilah atas atau pintasan.
+actions.name: Nama
+actions.name_placeholder: Test
+actions.name_required: Nama wajib diisi.
+actions.command: Perintah
+actions.command_placeholder: bun test
+actions.command_required: Perintah wajib diisi.
+actions.keybinding: Pintasan
+actions.keybinding_placeholder: Tekan pintasan
+actions.keybinding_help: Tekan pintasan. Tekan Backspace untuk menghapus.
+actions.preview_url: URL Pratinjau (opsional)
+actions.preview_url_placeholder: http://localhost:5173
+actions.preview_url_help: Buka URL ini di pratinjau dalam aplikasi saat aksi ini berjalan.
+actions.run_on_worktree_create: Jalankan otomatis saat pembuatan worktree
+actions.wait_for_setup: Tunggu hingga selesai sebelum agen dimulai
+actions.auto_open_preview: Buka pratinjau otomatis saat aksi ini berjalan
+actions.delete: Hapus
+actions.delete_confirm_title: Hapus aksi "%{name}"?
+actions.delete_confirm_description: Tindakan ini tidak dapat dibatalkan.
+actions.delete_confirm_button: Hapus aksi
+actions.cancel: Batal
+actions.save_changes: Simpan perubahan
+actions.save_action: Simpan aksi
+actions.from_file: Dari %{file}
+actions.setup_suffix: (setup)
+actions.running: Menjalankan %{name}
 open_in.open: Buka proyek di %{app}
 open_in.choose: Buka proyek di…
 environment.title: Lingkungan

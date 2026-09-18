@@ -2140,6 +2140,69 @@ right_panel.hide:
 right_panel.close_tab:
   en: Close %{title}
 
+actions.run:
+  en: Run %{name}
+actions.add:
+  en: Add action
+actions.edit:
+  en: Edit %{name}
+actions.edit_title:
+  en: Edit Action
+actions.add_title:
+  en: Add Action
+actions.description:
+  en: Actions are project-scoped commands you can run from the top bar or keybindings.
+actions.name:
+  en: Name
+actions.name_placeholder:
+  en: Test
+actions.name_required:
+  en: Name is required.
+actions.command:
+  en: Command
+actions.command_placeholder:
+  en: bun test
+actions.command_required:
+  en: Command is required.
+actions.keybinding:
+  en: Keybinding
+actions.keybinding_placeholder:
+  en: Press shortcut
+actions.keybinding_help:
+  en: Press a shortcut. Use Backspace to clear. Shortcuts are environment-wide. Projects using the same action share its shortcut.
+actions.preview_url:
+  en: Preview URL (optional)
+actions.preview_url_placeholder:
+  en: http://localhost:5173
+actions.preview_url_help:
+  en: Open this URL in the in-app preview when this action runs.
+actions.run_on_worktree_create:
+  en: Run automatically on worktree creation
+actions.wait_for_setup:
+  en: Wait for it to finish before the agent starts
+actions.auto_open_preview:
+  en: Open preview automatically when this action runs
+actions.delete:
+  en: Delete
+actions.delete_confirm_title:
+  en: Delete action "%{name}"?
+actions.delete_confirm_description:
+  en: This action cannot be undone.
+actions.delete_confirm_button:
+  en: Delete action
+actions.cancel:
+  en: Cancel
+actions.save_changes:
+  en: Save changes
+actions.save_action:
+  en: Save action
+actions.from_file:
+  en: From %{file}
+actions.setup_suffix:
+  en: (setup)
+actions.running:
+  en: Running %{name}
+
 open_in.open:
   en: Open project in %{app}
 open_in.choose:
