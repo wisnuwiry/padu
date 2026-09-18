@@ -19,16 +19,123 @@ struct ReleaseAsset {
     executable_bytes: u64,
 }
 
-pub fn remove() -> anyhow::Result<()> {
-    let root = dirs::home_dir()
+/// Base directory for the Antigravity provider runtime (~/.padu/providers/antigravity).
+pub fn base_dir() -> PathBuf {
+    dirs::home_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join(".padu")
         .join("providers")
         .join("antigravity")
-        .join(VERSION);
+}
+
+/// Directory holding the installed binaries for the current version.
+pub fn install_dir() -> PathBuf {
+    base_dir().join(VERSION)
+}
+
+/// Persistent runfiles cache directory for Bazel hermetic Python extraction
+/// (~/.padu/providers/antigravity/runfiles).
+///
+/// Pointing `RULES_PYTHON_EXTRACT_ROOT` to this directory allows `agy_acp_server.exe`
+/// to extract its ~900MB dependency tree once and reuse it across all sessions
+/// instead of extracting a new ~900MB folder on every launch.
+pub fn runfiles_cache_dir() -> PathBuf {
+    base_dir().join("runfiles")
+}
+
+/// Isolated temporary directory for Antigravity runtime scratch files
+/// (~/.padu/providers/antigravity/tmp).
+///
+/// Overriding `TEMP`, `TMP`, and `TMPDIR` with this directory ensures any
+/// session-specific temp files are isolated to Padu's directory rather than
+/// polluting `C:\Users\<user>\AppData\Local\Temp`.
+pub fn isolated_temp_dir() -> PathBuf {
+    base_dir().join("tmp")
+}
+
+/// Ensure that both the persistent runfiles cache and the isolated temp directories exist.
+pub fn ensure_runtime_dirs() -> anyhow::Result<(PathBuf, PathBuf)> {
+    let runfiles = runfiles_cache_dir();
+    let temp = isolated_temp_dir();
+    fs::create_dir_all(&runfiles).context("could not create Antigravity runfiles directory")?;
+    fs::create_dir_all(&temp).context("could not create Antigravity isolated temp directory")?;
+    Ok((runfiles, temp))
+}
+
+/// Scavenge and remove stale Antigravity temporary directories left behind
+/// by aborted sessions, crashes, or previous unpackings.
+///
+/// Cleans:
+/// 1. Unlocked folders in `isolated_temp_dir()` (~/.padu/providers/antigravity/tmp).
+/// 2. Orphaned Antigravity runfiles directories in the system temp directory
+///    (`std::env::temp_dir()`, e.g. `C:\Users\<user>\AppData\Local\Temp`),
+///    identified by Bazel runfiles markers (`Bazel.runfiles_*` or folders containing
+///    both `google3` and `pywin32_system32` / `grpc`).
+///
+/// Directories locked by active processes (or DLLs in use) fail deletion safely
+/// and are skipped.
+pub fn cleanup_stale_antigravity_temp_dirs() {
+    // 1. Clean Padu's isolated temp directory
+    let isolated = isolated_temp_dir();
+    if isolated.exists() {
+        if let Ok(entries) = fs::read_dir(&isolated) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let _ = fs::remove_dir_all(&path);
+                } else {
+                    let _ = fs::remove_file(&path);
+                }
+            }
+        }
+    }
+
+    // 2. Scan std::env::temp_dir() for orphaned Antigravity/Bazel runfiles
+    let sys_temp = std::env::temp_dir();
+    if let Ok(entries) = fs::read_dir(&sys_temp) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let file_name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default();
+
+            // Bazel runfiles extracted by Hermetic Python or old Antigravity folders
+            let is_bazel_runfiles = file_name.starts_with("Bazel.runfiles_")
+                || file_name.starts_with("_bazel_")
+                || file_name.starts_with("antigravity_tmp_");
+
+            // Look for distinctive Python module markers extracted by agy_acp_server
+            let is_agy_extracted_bundle = path.join("google3").exists()
+                && (path.join("pywin32_system32").exists() || path.join("grpc").exists());
+
+            if is_bazel_runfiles || is_agy_extracted_bundle {
+                let _ = fs::remove_dir_all(&path);
+            }
+        }
+    }
+}
+
+pub fn remove() -> anyhow::Result<()> {
+    let root = install_dir();
     if root.exists() {
         fs::remove_dir_all(&root)
             .context("could not remove the downloaded Antigravity ACP server")?;
+    }
+    let runfiles = runfiles_cache_dir();
+    if runfiles.exists() {
+        let _ = fs::remove_dir_all(&runfiles);
+    }
+    let temp = isolated_temp_dir();
+    if temp.exists() {
+        let _ = fs::remove_dir_all(&temp);
+    }
+    let base = base_dir();
+    if base.exists() {
+        let _ = fs::remove_dir(&base);
     }
     Ok(())
 }
@@ -39,13 +146,9 @@ pub fn install(
 ) -> anyhow::Result<PathBuf> {
     let asset = distribution()?;
     progress(0, "Downloading");
-    let root = dirs::home_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join(".padu")
-        .join("providers")
-        .join("antigravity")
-        .join(VERSION);
+    let root = install_dir();
     fs::create_dir_all(&root).context("could not create the Antigravity provider directory")?;
+    let _ = ensure_runtime_dirs();
 
     let archive = root.join("agy-acp-server.zip.download");
     let extract = root.join("extract");
@@ -469,5 +572,26 @@ mod tests {
         assert!(missing.is_err());
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn runtime_directories_paths_and_creation() {
+        let (runfiles, temp) = ensure_runtime_dirs().expect("runtime dirs should be created");
+        assert!(runfiles.exists());
+        assert!(temp.exists());
+        assert!(runfiles.ends_with("runfiles"));
+        assert!(temp.ends_with("tmp"));
+    }
+
+    #[test]
+    fn cleanup_stale_antigravity_temp_dirs_removes_orphans() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("Bazel.runfiles_test_{}", uuid::Uuid::new_v4()));
+        let _ = fs::create_dir_all(&temp_dir);
+        assert!(temp_dir.exists());
+
+        cleanup_stale_antigravity_temp_dirs();
+
+        assert!(!temp_dir.exists());
     }
 }
