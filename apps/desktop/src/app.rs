@@ -1280,6 +1280,10 @@ pub struct Padu {
     /// executor. Render only reads this; empty means not resolved yet (or
     /// nothing to offer) and hides the control.
     open_in_apps: Rc<Vec<crate::platform::ExternalApp>>,
+    cached_file_scripts: std::collections::HashMap<
+        std::path::PathBuf,
+        (Vec<crate::app::project_actions::FileScript>, &'static str),
+    >,
     model_picker_tab: ModelPickerTab,
     /// Keyboard cursor over the model picker's filtered rows. `None` means the
     /// keyboard has not moved yet, so `enter` takes the first row.
@@ -1314,6 +1318,8 @@ pub struct Padu {
     goal_dialog_request: Option<dialogs::goal::GoalDialogRequest>,
     host_dialog: Option<dialogs::host::HostDialogState>,
     host_dialog_request: Option<dialogs::host::HostDialogRequest>,
+    project_action_dialog: Option<dialogs::project_action::ProjectActionDialogState>,
+    project_action_dialog_request: Option<dialogs::project_action::ProjectActionDialogRequest>,
     host_switch_pending: bool,
     host_switch_generation: u64,
     onboarding: onboarding::OnboardingState,
@@ -1791,6 +1797,7 @@ mod note_preview;
 mod notes;
 mod notes_utils;
 mod onboarding;
+pub(crate) mod project_actions;
 mod render;
 pub(crate) mod right_panel;
 mod runtime;
@@ -3303,6 +3310,7 @@ impl Padu {
                 computer_use_app_icons: RefCell::new(HashMap::new()),
                 computer_use_app_icon_loads: RefCell::new(HashSet::new()),
                 open_in_apps: Rc::new(Vec::new()),
+                cached_file_scripts: std::collections::HashMap::new(),
                 model_picker_tab,
                 model_picker_highlight: None,
                 model_picker_scroll: ScrollHandle::new(),
@@ -3321,6 +3329,8 @@ impl Padu {
                 goal_dialog_request: None,
                 host_dialog: None,
                 host_dialog_request: None,
+                project_action_dialog: None,
+                project_action_dialog_request: None,
                 host_switch_pending: false,
                 host_switch_generation: 0,
                 onboarding,
