@@ -392,7 +392,9 @@ fn run_auth(provider: ProviderKind, json: bool) -> anyhow::Result<()> {
 
     match provider {
         ProviderKind::Agy => {
-            padu_core::driver::authenticate_agy(&binary, &cwd)?;
+            padu_core::driver::authenticate_agy(&binary, &cwd, |url| {
+                println!("\nPlease open the following link to authenticate:\n{url}\n");
+            })?;
             if json {
                 println!(
                     "{}",
