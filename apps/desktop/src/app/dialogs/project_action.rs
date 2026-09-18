@@ -62,10 +62,8 @@ impl Padu {
         script: Option<ProjectScript>,
         cx: &mut Context<Self>,
     ) {
-        self.project_action_dialog_request = Some(ProjectActionDialogRequest {
-            project_id,
-            script,
-        });
+        self.project_action_dialog_request =
+            Some(ProjectActionDialogRequest { project_id, script });
         cx.notify();
     }
 
@@ -77,7 +75,10 @@ impl Padu {
     ) {
         let existing = request.script;
         let script_id = existing.as_ref().map(|s| s.id.clone());
-        let initial_name = existing.as_ref().map(|s| s.name.clone()).unwrap_or_default();
+        let initial_name = existing
+            .as_ref()
+            .map(|s| s.name.clone())
+            .unwrap_or_default();
         let initial_command = existing
             .as_ref()
             .map(|s| s.command.clone())
@@ -108,8 +109,7 @@ impl Padu {
             .unwrap_or(false);
 
         let name_input = cx.new(|cx| {
-            let mut input =
-                TextInput::new(window, cx).placeholder(tr!("actions.name_placeholder"));
+            let mut input = TextInput::new(window, cx).placeholder(tr!("actions.name_placeholder"));
             if !initial_name.is_empty() {
                 input.set_content(initial_name, cx);
             }
@@ -222,15 +222,17 @@ impl Padu {
         };
 
         let preview_url = {
-            let url = dialog.preview_url_input.read(cx).content().trim().to_owned();
+            let url = dialog
+                .preview_url_input
+                .read(cx)
+                .content()
+                .trim()
+                .to_owned();
             if url.is_empty() { None } else { Some(url) }
         };
 
         let project_id = dialog.project_id;
-        let script_id = dialog
-            .script_id
-            .clone()
-            .unwrap_or_else(|| slug_id(&name));
+        let script_id = dialog.script_id.clone().unwrap_or_else(|| slug_id(&name));
         let is_editing = dialog.script_id.is_some();
 
         let script = ProjectScript {
@@ -317,12 +319,16 @@ impl Padu {
 
         let card = div()
             .key_context(DIALOG_CONTEXT)
-            .on_action(cx.listener(|this, _: &ConfirmProjectActionDialog, window, cx| {
-                this.project_action_dialog_save(window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &DismissProjectActionDialog, window, cx| {
-                this.close_project_action_dialog(window, cx);
-            }))
+            .on_action(
+                cx.listener(|this, _: &ConfirmProjectActionDialog, window, cx| {
+                    this.project_action_dialog_save(window, cx);
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &DismissProjectActionDialog, window, cx| {
+                    this.close_project_action_dialog(window, cx);
+                }),
+            )
             .id("project-action-dialog-card")
             .w(px(480.0))
             .max_h(px(640.0))
@@ -838,7 +844,13 @@ impl Padu {
 fn slug_id(name: &str) -> String {
     let slug: String = name
         .chars()
-        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect();
     let trimmed = slug.trim_matches('-');
     if trimmed.is_empty() {

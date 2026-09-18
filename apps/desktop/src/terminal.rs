@@ -720,7 +720,9 @@ impl TerminalView {
                 bytes.push(b'\n');
             }
             session.write(bytes);
-            session.dirty.store(true, std::sync::atomic::Ordering::Release);
+            session
+                .dirty
+                .store(true, std::sync::atomic::Ordering::Release);
         }
     }
 

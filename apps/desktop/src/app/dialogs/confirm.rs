@@ -270,7 +270,10 @@ impl Padu {
             cancel_label: tr!("actions.cancel").into(),
             variant: ConfirmVariant::Danger,
             icon_name: Some("icons/trash.svg"),
-            action: ConfirmAction::DeleteProjectScript { project_id, script_id },
+            action: ConfirmAction::DeleteProjectScript {
+                project_id,
+                script_id,
+            },
             cancel_focus,
             confirm_focus,
             previous_focus,
@@ -325,7 +328,10 @@ impl Padu {
                     self.switch_to_host(None, cx);
                 }
             }
-            ConfirmAction::DeleteProjectScript { project_id, script_id } => {
+            ConfirmAction::DeleteProjectScript {
+                project_id,
+                script_id,
+            } => {
                 self.delete_project_script(project_id, &script_id, cx);
             }
         }

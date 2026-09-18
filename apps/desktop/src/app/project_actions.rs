@@ -54,7 +54,13 @@ pub fn read_project_file_scripts(project_path: &Path) -> (Vec<FileScript>, &'sta
 fn slug_id(name: &str) -> String {
     let slug: String = name
         .chars()
-        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect();
     let trimmed = slug.trim_matches('-');
     if trimmed.is_empty() {
@@ -96,7 +102,9 @@ impl Padu {
         scripts.first().cloned()
     }
 
-    pub(crate) fn active_terminal_view(&self) -> Option<gpui::Entity<crate::terminal::TerminalView>> {
+    pub(crate) fn active_terminal_view(
+        &self,
+    ) -> Option<gpui::Entity<crate::terminal::TerminalView>> {
         if let Some(index) = self.right_panel_active_surface {
             if let Some(surface) = self.right_panel_surfaces.get(index) {
                 if let Some(terminal_id) = surface.terminal_id() {
@@ -222,7 +230,13 @@ impl Padu {
     ) {
         if let Some(project) = self.state.projects.iter_mut().find(|p| p.id == project_id) {
             project.scripts.retain(|s| s.id != script_id);
-            if self.state.last_invoked_script.get(&project_id).map(|s| s.as_str()) == Some(script_id) {
+            if self
+                .state
+                .last_invoked_script
+                .get(&project_id)
+                .map(|s| s.as_str())
+                == Some(script_id)
+            {
                 self.state.last_invoked_script.remove(&project_id);
             }
             let _ = self.save();
@@ -260,12 +274,13 @@ impl Padu {
         let project_id = project.id;
         let scripts = project.scripts.clone();
 
-        let (file_scripts, config_filename) = if let Some(cached) = self.cached_file_scripts.get(&project.path) {
-            cached.clone()
-        } else {
-            self.detect_file_scripts(project.path.clone(), cx);
-            (Vec::new(), "")
-        };
+        let (file_scripts, config_filename) =
+            if let Some(cached) = self.cached_file_scripts.get(&project.path) {
+                cached.clone()
+            } else {
+                self.detect_file_scripts(project.path.clone(), cx);
+                (Vec::new(), "")
+            };
 
         let importable_scripts: Vec<FileScript> = file_scripts
             .into_iter()
