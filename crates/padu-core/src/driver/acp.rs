@@ -966,16 +966,9 @@ pub fn agy_auth_status(binary: &Path) -> anyhow::Result<bool> {
         .map(std::path::PathBuf::from)
         .or_else(|| dirs::home_dir().map(|h| h.join(".gemini")));
     if let Some(home) = gemini_home {
-        if home.join("antigravity-acp").join("acp_token.json").exists()
-            || home
-                .join("antigravity-acp")
-                .join("acp_business_token.json")
-                .exists()
-            || home
-                .join("antigravity")
-                .join("acp")
-                .join("acp_token.json")
-                .exists()
+        if agy_token_files()
+            .iter()
+            .any(|relative| home.join(relative).exists())
         {
             return Ok(true);
         }
@@ -1019,61 +1012,40 @@ pub fn agy_auth_status(binary: &Path) -> anyhow::Result<bool> {
     Ok(false)
 }
 
-/// Logged-in Google identity for Antigravity, from Antigravity's own
-/// credential stores (the same `antigravity*` files and keychain item
-/// `agy_auth_status` probes). The Gemini-global `oauth_creds.json` is
-/// deliberately excluded: it belongs to Gemini CLI, not Antigravity, and
-/// reading it reports the wrong user when the two disagree. Token blobs
-/// vary by install (OAuth `id_token` JWT, explicit email fields, keychain
-/// payload), so parsing is defensive: anything blank or missing yields
-/// `None` and the settings row hides instead of guessing. Blocking
-/// file/keychain reads — daemon only.
+/// Antigravity's own credential files, relative to `GEMINI_HOME` or
+/// `~/.gemini`, in lookup order. `antigravity-cli/antigravity-oauth-token`
+/// (`{token, auth_method, id_token}`) is the live store verified against a
+/// signed-in install; the `jetski` and `antigravity-acp` variants cover
+/// sibling distributions. The Gemini-global root `oauth_creds.json` is
+/// deliberately absent: it belongs to Gemini CLI, not Antigravity.
+fn agy_token_files() -> [&'static str; 5] {
+    [
+        "antigravity-cli/antigravity-oauth-token",
+        "jetski-standalone-oauth-token",
+        "antigravity-acp/acp_token.json",
+        "antigravity-acp/acp_business_token.json",
+        "antigravity/acp/acp_token.json",
+    ]
+}
+
+/// Logged-in Google identity for Antigravity, decoded from Antigravity's own
+/// OAuth token files — no keychain access, so macOS never prompts and the
+/// same code runs on every platform. Anything blank or missing yields `None`
+/// and the settings row hides instead of guessing. Blocking file reads —
+/// daemon only.
 pub fn agy_account_label() -> Option<String> {
-    let gemini_home = std::env::var_os("GEMINI_HOME")
+    let home = std::env::var_os("GEMINI_HOME")
         .map(std::path::PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|h| h.join(".gemini")));
-    if let Some(home) = gemini_home {
-        for relative in [
-            "antigravity-acp/acp_token.json",
-            "antigravity-acp/acp_business_token.json",
-            "antigravity/acp/acp_token.json",
-        ] {
-            if let Ok(payload) = std::fs::read_to_string(home.join(relative))
-                && let Some(account) = agy_account_from_token_blob(&payload)
-            {
-                return Some(account);
-            }
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        if let Ok(output) = std::process::Command::new("/usr/bin/security")
-            .args([
-                "find-generic-password",
-                "-s",
-                "gemini",
-                "-a",
-                "antigravity-acp",
-                "-w",
-            ])
-            .stdin(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .output()
-            && output.status.success()
-            && let Some(account) =
-                agy_account_from_token_blob(&String::from_utf8_lossy(&output.stdout))
-        {
-            return Some(account);
-        }
-    }
-
-    None
+        .or_else(|| dirs::home_dir().map(|h| h.join(".gemini")))?;
+    agy_token_files()
+        .iter()
+        .filter_map(|relative| std::fs::read_to_string(home.join(relative)).ok())
+        .find_map(|payload| agy_account_from_token_blob(&payload))
 }
 
 /// Identity from one Antigravity credential blob: explicit email fields win,
 /// then the OAuth `id_token` JWT's email claim. Pure for testing; callers
-/// feed it file or keychain payloads verbatim.
+/// feed it token-file payloads verbatim.
 fn agy_account_from_token_blob(payload: &str) -> Option<String> {
     let value: Value = serde_json::from_str(payload.trim()).ok()?;
     let candidates = [
@@ -3069,6 +3041,15 @@ mod tests {
         let blob = format!(r#"{{"id_token": "header.{claims}.signature"}}"#);
         assert_eq!(
             agy_account_from_token_blob(&blob).as_deref(),
+            Some("jwt@example.com")
+        );
+        // The live antigravity-cli envelope carries the JWT beside the
+        // opaque access token, which must never surface as the identity.
+        let live = format!(
+            r#"{{"token": "ya29.opaque", "auth_method": "oauth", "id_token": "header.{claims}.signature"}}"#
+        );
+        assert_eq!(
+            agy_account_from_token_blob(&live).as_deref(),
             Some("jwt@example.com")
         );
         // Token-only blobs without identity stay hidden, not errors.
