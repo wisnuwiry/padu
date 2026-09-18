@@ -465,6 +465,7 @@ providers.agy_sign_out_title: 退出 Antigravity
 providers.agy_sign_out_confirm: 您的 Antigravity Google OAuth 会话将被退出。
 providers.agy_remove_title: 删除 Antigravity ACP 服务
 providers.agy_remove_confirm: 已下载的 ACP 服务及其配置路径将被移除。
+providers.account_plan: "%{user} • %{plan}"
 computer_use.allow_apps: 允许 Padu 操作其他应用
 computer_use.availability: Codex、OpenCode、Grok 和 Pi 支持电脑操作功能
 computer_use.macos_access: macOS 权限

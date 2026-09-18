@@ -955,6 +955,8 @@ providers.agy_remove_title:
   en: Remove Antigravity ACP server
 providers.agy_remove_confirm:
   en: The downloaded ACP server and its configured path will be removed.
+providers.account_plan:
+  en: "%{user} • %{plan}"
 
 computer_use.allow_apps:
   en: Let Padu use apps
