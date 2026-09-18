@@ -203,6 +203,13 @@ export async function checkAgyAuth(client: PaduClient): Promise<boolean> {
   return expectResponse(await client.request({ type: 'checkAgyAuth' }), 'agyAuthStatus').authenticated
 }
 
+export async function fetchAgyAccount(client: PaduClient): Promise<string | null> {
+  return (
+    expectResponse(await client.request({ type: 'checkAgyAuth' }), 'agyAuthStatus').accountLabel ??
+    null
+  )
+}
+
 export async function logoutAgy(client: PaduClient): Promise<void> {
   expectResponse(await client.request({ type: 'logoutAgy' }), 'ack')
 }

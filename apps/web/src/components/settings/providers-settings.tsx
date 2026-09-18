@@ -1,5 +1,5 @@
-import { useQueryClient } from '@tanstack/react-query'
-import type { DaemonSettings, ProviderKind } from '@padu/client'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import type { DaemonSettings, PlanUsage, ProviderKind } from '@padu/client'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { ProviderIcon, PROVIDERS, PaduIcon } from '@/components/padu-icon'
@@ -10,6 +10,8 @@ import {
   cancelAgyInstall,
   checkAgyAuth,
   daemonKeys,
+  fetchAgyAccount,
+  fetchPlanUsage,
   installAgyAcp,
   logoutAgy,
   removeAgyAcp,
@@ -31,10 +33,12 @@ export function ProvidersSettings() {
   const [installingAgy, setInstallingAgy] = useState(false)
   const [agyInstallPercent, setAgyInstallPercent] = useState(0)
   const [agyAuthenticated, setAgyAuthenticated] = useState(false)
+  const [agyAccount, setAgyAccount] = useState<string | null>(null)
   const agyCancelRequested = useRef(false)
   useEffect(() => {
     if (!client) return
     void checkAgyAuth(client).then(setAgyAuthenticated).catch(() => setAgyAuthenticated(false))
+    void fetchAgyAccount(client).then(setAgyAccount).catch(() => setAgyAccount(null))
     return client.subscribeProviderInstallProgress((progress) => {
       if (progress.provider === 'agy') setAgyInstallPercent(progress.percent)
     })
@@ -188,6 +192,9 @@ export function ProvidersSettings() {
                             await installAgyAcp(client)
                             await queryClient.invalidateQueries({ queryKey: daemonKeys.settings(config.address) })
                             await queryClient.invalidateQueries({ queryKey: daemonKeys.providers(config.address) })
+                            await fetchAgyAccount(client)
+                              .then(setAgyAccount)
+                              .catch(() => setAgyAccount(null))
                           } catch (error) {
                             if (agyCancelRequested.current) return
                             // The button already communicates the active download;
@@ -222,11 +229,15 @@ export function ProvidersSettings() {
                               if (agyAuthenticated) {
                                 await logoutAgy(client)
                                 setAgyAuthenticated(false)
+                                setAgyAccount(null)
                                 toast.success(t('providers.agy_signed_out'))
                               } else {
                                 await authenticateAgy(client)
                                 setAgyAuthenticated(true)
                                 toast.success(t('providers.agy_signed_in'))
+                                await fetchAgyAccount(client)
+                                  .then(setAgyAccount)
+                                  .catch(() => setAgyAccount(null))
                               }
                             } catch (error) {
                               toast(errorMessage(error))
@@ -254,6 +265,9 @@ export function ProvidersSettings() {
                               await installAgyAcp(client)
                               await queryClient.invalidateQueries({ queryKey: daemonKeys.settings(config.address) })
                               await queryClient.invalidateQueries({ queryKey: daemonKeys.providers(config.address) })
+                              await fetchAgyAccount(client)
+                                .then(setAgyAccount)
+                                .catch(() => setAgyAccount(null))
                             } catch (error) {
                               if (agyCancelRequested.current) return
                               toast(errorMessage(error))
@@ -277,6 +291,7 @@ export function ProvidersSettings() {
                             try {
                               await removeAgyAcp(client)
                               setAgyAuthenticated(false)
+                              setAgyAccount(null)
                               toast.success(t('providers.agy_removed'))
                               await queryClient.invalidateQueries({ queryKey: daemonKeys.settings(config.address) })
                               await queryClient.invalidateQueries({ queryKey: daemonKeys.providers(config.address) })
@@ -312,9 +327,19 @@ export function ProvidersSettings() {
                       </button>
                     )}
                   </div>
+                  {provider.id === 'agy' && agyAccount && (
+                    <p className="truncate text-[10px] text-[var(--text-secondary)]" title={agyAccount}>
+                      {agyAccount}
+                    </p>
+                  )}
                   <p className="truncate text-[10px] text-[var(--text-ghost)]" title={providerProbeCaption(provider.command, probe, Boolean(settings.data.provider_binary_overrides?.[provider.id]), t)}>
                     {providerProbeCaption(provider.command, probe, Boolean(settings.data.provider_binary_overrides?.[provider.id]), t)}
                   </p>
+                  <ProviderAccountLine
+                    provider={provider.id}
+                    settings={settings.data}
+                    version={probe?.version ?? null}
+                  />
                 </div>
               )}
             </div>
@@ -364,4 +389,41 @@ function providerCheckedLabel(updatedAt: number, t: Translator) {
   if (minutes < 60) return t('providers.checked_minutes_ago', { count: minutes })
   const hours = Math.floor(minutes / 60)
   return t('providers.checked_hours_ago', { count: hours })
+}
+
+/// Providers whose daemon `fetchPlanUsage` returns an account snapshot.
+/// Everything else renders no account line — unknown means hidden, never a
+/// placeholder. Mirrors the desktop's `PLAN_USAGE_PROVIDERS` refresh on row
+/// expand.
+const PLAN_USAGE_PROVIDERS: ProviderKind[] = ['claude', 'codex', 'openCode', 'grok']
+
+function ProviderAccountLine({
+  provider,
+  settings,
+  version,
+}: {
+  provider: ProviderKind
+  settings: DaemonSettings
+  version: string | null
+}) {
+  const { t } = useI18n()
+  const { client, config } = useDaemon()
+  const plan = useQuery<PlanUsage | null>({
+    queryKey: daemonKeys.planUsage(config?.address ?? 'disconnected', provider),
+    queryFn: () => fetchPlanUsage(client!, provider, settings, version),
+    enabled: PLAN_USAGE_PROVIDERS.includes(provider) && Boolean(client && config),
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+  const usage = plan.data
+  const label =
+    usage?.accountLabel && usage?.planLabel
+      ? t('providers.account_plan', { user: usage.accountLabel, plan: usage.planLabel })
+      : (usage?.accountLabel ?? usage?.planLabel ?? null)
+  if (!label) return null
+  return (
+    <p className="truncate text-[10px] text-[var(--text-secondary)]" title={label}>
+      {label}
+    </p>
+  )
 }
