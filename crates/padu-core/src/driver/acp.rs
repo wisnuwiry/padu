@@ -958,7 +958,10 @@ pub(crate) fn resolve_agy_model_id(
 }
 
 pub fn agy_auth_status(binary: &Path) -> anyhow::Result<bool> {
-    // 1. Check local token files in GEMINI_HOME or ~/.gemini
+    // 1. Check Antigravity's own token files in GEMINI_HOME or ~/.gemini.
+    // Deliberately scoped to the `antigravity*` stores: the root
+    // `oauth_creds.json` is Gemini CLI's global credential and must not
+    // mark Antigravity as signed in on its own.
     let gemini_home = std::env::var_os("GEMINI_HOME")
         .map(std::path::PathBuf::from)
         .or_else(|| dirs::home_dir().map(|h| h.join(".gemini")));
@@ -973,7 +976,6 @@ pub fn agy_auth_status(binary: &Path) -> anyhow::Result<bool> {
                 .join("acp")
                 .join("acp_token.json")
                 .exists()
-            || home.join("oauth_creds.json").exists()
         {
             return Ok(true);
         }
@@ -1017,11 +1019,15 @@ pub fn agy_auth_status(binary: &Path) -> anyhow::Result<bool> {
     Ok(false)
 }
 
-/// Logged-in Google identity for Antigravity, from the same credential
-/// stores `agy_auth_status` probes. Token blobs vary by install (OAuth
-/// `id_token` JWT, explicit email fields, keychain payload), so parsing is
-/// defensive: anything blank or missing yields `None` and the settings row
-/// hides instead of guessing. Blocking file/keychain reads — daemon only.
+/// Logged-in Google identity for Antigravity, from Antigravity's own
+/// credential stores (the same `antigravity*` files and keychain item
+/// `agy_auth_status` probes). The Gemini-global `oauth_creds.json` is
+/// deliberately excluded: it belongs to Gemini CLI, not Antigravity, and
+/// reading it reports the wrong user when the two disagree. Token blobs
+/// vary by install (OAuth `id_token` JWT, explicit email fields, keychain
+/// payload), so parsing is defensive: anything blank or missing yields
+/// `None` and the settings row hides instead of guessing. Blocking
+/// file/keychain reads — daemon only.
 pub fn agy_account_label() -> Option<String> {
     let gemini_home = std::env::var_os("GEMINI_HOME")
         .map(std::path::PathBuf::from)
@@ -1031,7 +1037,6 @@ pub fn agy_account_label() -> Option<String> {
             "antigravity-acp/acp_token.json",
             "antigravity-acp/acp_business_token.json",
             "antigravity/acp/acp_token.json",
-            "oauth_creds.json",
         ] {
             if let Ok(payload) = std::fs::read_to_string(home.join(relative))
                 && let Some(account) = agy_account_from_token_blob(&payload)
