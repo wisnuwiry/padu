@@ -1017,6 +1017,102 @@ pub fn agy_auth_status(binary: &Path) -> anyhow::Result<bool> {
     Ok(false)
 }
 
+/// Logged-in Google identity for Antigravity, from the same credential
+/// stores `agy_auth_status` probes. Token blobs vary by install (OAuth
+/// `id_token` JWT, explicit email fields, keychain payload), so parsing is
+/// defensive: anything blank or missing yields `None` and the settings row
+/// hides instead of guessing. Blocking file/keychain reads — daemon only.
+pub fn agy_account_label() -> Option<String> {
+    let gemini_home = std::env::var_os("GEMINI_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|h| h.join(".gemini")));
+    if let Some(home) = gemini_home {
+        for relative in [
+            "antigravity-acp/acp_token.json",
+            "antigravity-acp/acp_business_token.json",
+            "antigravity/acp/acp_token.json",
+            "oauth_creds.json",
+        ] {
+            if let Ok(payload) = std::fs::read_to_string(home.join(relative))
+                && let Some(account) = agy_account_from_token_blob(&payload)
+            {
+                return Some(account);
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(output) = std::process::Command::new("/usr/bin/security")
+            .args([
+                "find-generic-password",
+                "-s",
+                "gemini",
+                "-a",
+                "antigravity-acp",
+                "-w",
+            ])
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output()
+            && output.status.success()
+            && let Some(account) =
+                agy_account_from_token_blob(&String::from_utf8_lossy(&output.stdout))
+        {
+            return Some(account);
+        }
+    }
+
+    None
+}
+
+/// Identity from one Antigravity credential blob: explicit email fields win,
+/// then the OAuth `id_token` JWT's email claim. Pure for testing; callers
+/// feed it file or keychain payloads verbatim.
+fn agy_account_from_token_blob(payload: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(payload.trim()).ok()?;
+    let candidates = [
+        "/email",
+        "/email_address",
+        "/account/email",
+        "/account/email_address",
+        "/user/email",
+        "/user/email_address",
+        "/id_token",
+        "/idToken",
+        "/tokens/id_token",
+    ];
+    for pointer in candidates {
+        let Some(text) = value.pointer(pointer).and_then(Value::as_str) else {
+            continue;
+        };
+        let text = text.trim();
+        if text.is_empty() {
+            continue;
+        }
+        // Raw JWTs carry no `@`; only the decoded email claim counts.
+        if text.contains('@') {
+            return Some(text.to_owned());
+        }
+        if pointer.contains("token")
+            && let Some(email) = crate::usage::jwt_payload_email(text)
+        {
+            return Some(email);
+        }
+    }
+    // Nested credential envelopes (e.g. keychain blobs wrapping the OAuth
+    // response one level deeper) get one recursive look.
+    for key in ["credentials", "oauth", "tokens", "account", "user"] {
+        if let Some(nested) = value.get(key)
+            && let Ok(rewritten) = serde_json::to_string(nested)
+            && let Some(account) = agy_account_from_token_blob(&rewritten)
+        {
+            return Some(account);
+        }
+    }
+    None
+}
+
 pub fn logout_agy(binary: &Path, cwd: &Path) -> anyhow::Result<()> {
     let agent = sdk_agent(
         binary,
@@ -2945,6 +3041,38 @@ mod tests {
             assert_eq!(key, "ANTIGRAVITY_HARNESS_PATH");
             assert!(!val.is_empty());
         }
+    }
+
+    #[test]
+    fn agy_identity_prefers_email_then_jwt_then_nothing() {
+        assert_eq!(
+            agy_account_from_token_blob(r#"{"email": "dev@example.com"}"#).as_deref(),
+            Some("dev@example.com")
+        );
+        // Nested envelopes get one recursive look.
+        assert_eq!(
+            agy_account_from_token_blob(
+                r#"{"credentials": {"account": {"email_address": "nested@example.com"}}}"#
+            )
+            .as_deref(),
+            Some("nested@example.com")
+        );
+        // OAuth id_token JWTs decode to their email claim.
+        use base64::Engine as _;
+        let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(serde_json::json!({"email": "jwt@example.com"}).to_string());
+        let blob = format!(r#"{{"id_token": "header.{claims}.signature"}}"#);
+        assert_eq!(
+            agy_account_from_token_blob(&blob).as_deref(),
+            Some("jwt@example.com")
+        );
+        // Token-only blobs without identity stay hidden, not errors.
+        assert_eq!(
+            agy_account_from_token_blob(r#"{"access_token": "ya29.abc"}"#),
+            None
+        );
+        assert_eq!(agy_account_from_token_blob("not json"), None);
+        assert_eq!(agy_account_from_token_blob("{}"), None);
     }
 
     #[test]

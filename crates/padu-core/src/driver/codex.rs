@@ -2133,6 +2133,9 @@ fn codex_plan_usage(snapshot: Option<&Value>) -> Option<crate::usage::PlanUsage>
         plan_label: crate::usage::openai_plan_label(
             snapshot.get("planType").and_then(Value::as_str),
         ),
+        // Stream snapshots carry quota, not identity; the settings row keeps
+        // whatever the usage endpoint fetch already cached.
+        account_label: None,
         windows,
     })
 }

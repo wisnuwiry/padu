@@ -251,7 +251,16 @@ impl Backend for PaduBackend {
                         .path
                         .map(|path| crate::driver::agy_auth_status(&path).unwrap_or(false))
                         .unwrap_or(false);
-                Ok(ResponsePayload::AgyAuthStatus { authenticated })
+                // Identity comes from the credential stores, not the probe:
+                // signed-out means no account, and a missing email just hides
+                // the settings row rather than failing the check.
+                let account_label = authenticated
+                    .then(crate::driver::agy_account_label)
+                    .flatten();
+                Ok(ResponsePayload::AgyAuthStatus {
+                    authenticated,
+                    account_label,
+                })
             }
             Command::LogoutAgy => {
                 let settings = self.settings.get();

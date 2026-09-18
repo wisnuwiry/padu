@@ -13,7 +13,7 @@ mod pi;
 mod support;
 mod title_refresh;
 
-pub use acp::{agy_auth_status, authenticate_agy, logout_agy};
+pub use acp::{agy_account_label, agy_auth_status, authenticate_agy, logout_agy};
 pub(crate) use acp::{catalog_agent, discover_agy_models};
 
 use std::path::PathBuf;
