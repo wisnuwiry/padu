@@ -255,6 +255,17 @@ impl WorkspaceNavigation {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
+pub(crate) enum AgyActionState {
+    #[default]
+    Idle,
+    Installing,
+    CancellingInstall,
+    SigningIn,
+    SigningOut,
+    Removing,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SettingsPage {
     General,
@@ -1172,19 +1183,20 @@ pub struct Padu {
     /// Providers the running re-detection has not answered for yet; empty
     /// means no re-detection is in flight.
     provider_detection_remaining: usize,
-    /// Whether the Agy ACP server installation request is in flight.
-    agy_installing: bool,
-    /// Whether the user requested cancellation of the current Agy install.
-    agy_install_cancelling: bool,
+    /// The current lifecycle/operation state of Antigravity ACP (install, auth, logout, remove).
+    pub(crate) agy_action: AgyActionState,
     /// Whether the current Agy ACP credential is authenticated.
-    agy_authenticated: bool,
+    pub(crate) agy_authenticated: bool,
     /// Whether an asynchronous Agy auth-status check is in flight.
-    agy_auth_checking: bool,
+    pub(crate) agy_auth_checking: bool,
     /// Generation used to discard stale Agy auth-status results.
-    agy_auth_check_generation: u64,
+    pub(crate) agy_auth_check_generation: u64,
     /// Latest daemon-reported Agy download percentage.
-    agy_install_percent: u8,
+    pub(crate) agy_install_percent: u8,
+    /// The latest OAuth sign-in URL emitted by the ACP server (for copy-to-clipboard fallback).
+    pub(crate) agy_auth_url: Option<String>,
     agy_install_progress_events: Receiver<(ProviderKind, String, u8)>,
+    agy_auth_url_events: Receiver<(ProviderKind, String)>,
     /// When provider detection last completed, for the page's "Checked" label.
     provider_detection_checked_at: Option<Instant>,
     /// The provider row expanded on the Providers page, if any. The binary
@@ -2091,6 +2103,7 @@ impl Padu {
 
     fn apply_new_daemon(&mut self, daemon: padu_client::DaemonSupervisor, cx: &mut Context<Self>) {
         self.agy_install_progress_events = daemon.client().subscribe_provider_install_progress();
+        self.agy_auth_url_events = daemon.client().subscribe_provider_auth_url();
         self.daemon = daemon.clone();
         self.store = StateStore::remote(daemon.clone());
         self.composer_draft_store = ComposerDraftStore::remote(daemon.clone());
@@ -2171,6 +2184,33 @@ impl Padu {
             timer_started: None,
             hovered: false,
         });
+    }
+
+    pub(crate) fn agy_is_installing(&self) -> bool {
+        matches!(
+            self.agy_action,
+            AgyActionState::Installing | AgyActionState::CancellingInstall
+        )
+    }
+
+    pub(crate) fn agy_is_cancelling_install(&self) -> bool {
+        self.agy_action == AgyActionState::CancellingInstall
+    }
+
+    pub(crate) fn agy_is_signing_in(&self) -> bool {
+        self.agy_action == AgyActionState::SigningIn
+    }
+
+    pub(crate) fn agy_is_signing_out(&self) -> bool {
+        self.agy_action == AgyActionState::SigningOut
+    }
+
+    pub(crate) fn agy_is_removing(&self) -> bool {
+        self.agy_action == AgyActionState::Removing
+    }
+
+    pub(crate) fn agy_is_busy(&self) -> bool {
+        self.agy_action != AgyActionState::Idle
     }
 
     /// Arm one wake-up for the moment a time-derived label next changes —
@@ -2576,6 +2616,7 @@ impl Padu {
         let (provider_version_tx, provider_version_events) = unbounded();
         let (provider_detection_tx, provider_detection_events) = unbounded();
         let agy_install_progress_events = daemon.client().subscribe_provider_install_progress();
+        let agy_auth_url_events = daemon.client().subscribe_provider_auth_url();
         let (computer_permission_tx, computer_permission_events) = unbounded();
         let (plan_usage_tx, plan_usage_events) = unbounded();
         let (event_wake_tx, event_wake_events) = smol::channel::bounded(1);
@@ -3215,13 +3256,14 @@ impl Padu {
                 provider_detection_tx,
                 provider_detection_events,
                 provider_detection_remaining: 0,
-                agy_installing: false,
-                agy_install_cancelling: false,
+                agy_action: AgyActionState::Idle,
                 agy_authenticated: false,
                 agy_auth_checking: false,
                 agy_auth_check_generation: 0,
                 agy_install_percent: 0,
+                agy_auth_url: None,
                 agy_install_progress_events,
+                agy_auth_url_events,
                 provider_detection_checked_at: None,
                 expanded_provider_settings: None,
                 provider_path_input,
