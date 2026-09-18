@@ -2723,9 +2723,15 @@ impl Padu {
 
     pub(super) fn render_empty_state(&self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
-        if self.selected_project().is_none() {
-            return div()
-                .flex_1()
+        let conversation_background =
+            crate::app::conversation_background::render_conversation_background(
+                self.conversation_background_image(),
+                &self.state.conversation_background,
+                &theme,
+            );
+        let content = if self.selected_project().is_none() {
+            div()
+                .size_full()
                 .flex()
                 .flex_col()
                 .items_center()
@@ -2817,110 +2823,120 @@ impl Padu {
                                     }
                                 })),
                         ),
-                );
-        }
-        let selected_project_id = self.state.selected_project;
-        let projectless_selected = self.selected_project().is_some_and(Project::is_projectless);
-        let project_name = self
-            .selected_project()
-            .map(|project| {
-                if project.is_projectless() {
-                    tr!("project.without_a_project")
-                } else {
-                    project.display_name()
-                }
-            })
-            .unwrap_or_else(|| tr!("project.your_project"));
-        let project_options = self
-            .state
-            .projects
-            .iter()
-            .filter(|project| !project.is_projectless())
-            .filter(|project| Some(project.id) == selected_project_id)
-            .chain(
-                self.state
-                    .projects
-                    .iter()
-                    .filter(|project| !project.is_projectless())
-                    .filter(|project| Some(project.id) != selected_project_id),
-            )
-            .map(|project| (project.id, project.display_name()))
-            .collect::<Vec<_>>();
-        let weak = cx.entity().downgrade();
-        let handle = self.menu_handle("empty-state-project", cx);
-        let project_selector = dropdown_menu(
-            ProjectNameSelector::new("empty-state-project", project_name)
-                .selected(handle.is_open()),
-            "empty-state-project-menu",
-            &handle,
-            MenuAlign::BelowLeft,
-            move |_| {
-                let mut items = project_options
-                    .clone()
-                    .into_iter()
-                    .map(|(project_id, project_name)| {
-                        let weak = weak.clone();
-                        MenuItem::new(project_name, move |_, cx| {
-                            if Some(project_id) == selected_project_id {
-                                return;
-                            }
-                            let _ = weak.update(cx, |this, cx| this.select_project(project_id, cx));
+                )
+        } else {
+            let selected_project_id = self.state.selected_project;
+            let projectless_selected = self.selected_project().is_some_and(Project::is_projectless);
+            let project_name = self
+                .selected_project()
+                .map(|project| {
+                    if project.is_projectless() {
+                        tr!("project.without_a_project")
+                    } else {
+                        project.display_name()
+                    }
+                })
+                .unwrap_or_else(|| tr!("project.your_project"));
+            let project_options = self
+                .state
+                .projects
+                .iter()
+                .filter(|project| !project.is_projectless())
+                .filter(|project| Some(project.id) == selected_project_id)
+                .chain(
+                    self.state
+                        .projects
+                        .iter()
+                        .filter(|project| !project.is_projectless())
+                        .filter(|project| Some(project.id) != selected_project_id),
+                )
+                .map(|project| (project.id, project.display_name()))
+                .collect::<Vec<_>>();
+            let weak = cx.entity().downgrade();
+            let handle = self.menu_handle("empty-state-project", cx);
+            let project_selector = dropdown_menu(
+                ProjectNameSelector::new("empty-state-project", project_name)
+                    .selected(handle.is_open()),
+                "empty-state-project-menu",
+                &handle,
+                MenuAlign::BelowLeft,
+                move |_| {
+                    let mut items = project_options
+                        .clone()
+                        .into_iter()
+                        .map(|(project_id, project_name)| {
+                            let weak = weak.clone();
+                            MenuItem::new(project_name, move |_, cx| {
+                                if Some(project_id) == selected_project_id {
+                                    return;
+                                }
+                                let _ =
+                                    weak.update(cx, |this, cx| this.select_project(project_id, cx));
+                            })
+                            .selected(Some(project_id) == selected_project_id)
                         })
-                        .selected(Some(project_id) == selected_project_id)
-                    })
-                    .collect::<Vec<_>>();
-                if !items.is_empty() {
-                    items.push(MenuItem::Separator);
-                }
-                let add_project_weak = weak.clone();
-                items.push(
-                    MenuItem::new(tr!("project.new_project"), move |_, cx| {
-                        let _ = add_project_weak.update(cx, |this, cx| this.add_project(cx));
-                    })
-                    .icon("icons/folder-new.svg"),
-                );
-                let projectless_weak = weak.clone();
-                items.push(
-                    MenuItem::new(tr!("project.no_project"), move |_, cx| {
-                        let _ = projectless_weak.update(cx, |this, cx| {
-                            if !this.selected_project().is_some_and(Project::is_projectless) {
-                                this.create_projectless_session(cx);
-                            }
-                        });
-                    })
-                    .icon("icons/x.svg")
-                    .selected(projectless_selected),
-                );
-                items
-            },
-        );
+                        .collect::<Vec<_>>();
+                    if !items.is_empty() {
+                        items.push(MenuItem::Separator);
+                    }
+                    let add_project_weak = weak.clone();
+                    items.push(
+                        MenuItem::new(tr!("project.new_project"), move |_, cx| {
+                            let _ = add_project_weak.update(cx, |this, cx| this.add_project(cx));
+                        })
+                        .icon("icons/folder-new.svg"),
+                    );
+                    let projectless_weak = weak.clone();
+                    items.push(
+                        MenuItem::new(tr!("project.no_project"), move |_, cx| {
+                            let _ = projectless_weak.update(cx, |this, cx| {
+                                if !this.selected_project().is_some_and(Project::is_projectless) {
+                                    this.create_projectless_session(cx);
+                                }
+                            });
+                        })
+                        .icon("icons/x.svg")
+                        .selected(projectless_selected),
+                    );
+                    items
+                },
+            );
+            div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .px_8()
+                .pb(px(52.0))
+                .child(icon("icons/logo.svg", 56.0, theme.text))
+                .child(
+                    div()
+                        .mt(px(14.0))
+                        .flex()
+                        .items_baseline()
+                        .text_size(sp(20.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .when(projectless_selected, |element| {
+                            element.child(tr_cow!("onboarding.what_should_we_build"))
+                        })
+                        .when(!projectless_selected, |element| {
+                            element
+                                .child(tr_cow!("onboarding.what_should_we_build_in"))
+                                .child(project_selector)
+                                .child(tr_cow!("onboarding.question_mark"))
+                        }),
+                )
+        };
+
         div()
+            .relative()
             .flex_1()
-            .flex()
-            .flex_col()
-            .items_center()
-            .justify_center()
-            .px_8()
-            .pb(px(52.0))
-            .child(icon("icons/logo.svg", 56.0, theme.text))
-            .child(
-                div()
-                    .mt(px(14.0))
-                    .flex()
-                    .items_baseline()
-                    .text_size(sp(20.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.text)
-                    .when(projectless_selected, |element| {
-                        element.child(tr_cow!("onboarding.what_should_we_build"))
-                    })
-                    .when(!projectless_selected, |element| {
-                        element
-                            .child(tr_cow!("onboarding.what_should_we_build_in"))
-                            .child(project_selector)
-                            .child(tr_cow!("onboarding.question_mark"))
-                    }),
-            )
+            .min_h_0()
+            .w_full()
+            .children(conversation_background)
+            .child(content)
     }
 }
 
