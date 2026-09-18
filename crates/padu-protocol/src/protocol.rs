@@ -437,6 +437,10 @@ pub enum ResponsePayload {
     },
     AgyAuthStatus {
         authenticated: bool,
+        /// Google account identity when the local credential exposes one;
+        /// `None` means unknown and clients hide the account row.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        account_label: Option<String>,
     },
     ProviderProbe {
         probe: ProviderProbe,
