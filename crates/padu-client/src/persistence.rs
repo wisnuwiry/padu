@@ -94,6 +94,10 @@ fn default_sidebar_visibility() -> bool {
     true
 }
 
+pub fn default_sidebar_show_provider() -> bool {
+    true
+}
+
 fn default_right_panel_visibility() -> bool {
     false
 }
@@ -312,6 +316,8 @@ pub struct AppSettings {
     pub notifications_enabled: bool,
     #[serde(default = "default_notification_sound_enabled")]
     pub notification_sound_enabled: bool,
+    #[serde(default = "default_sidebar_show_provider")]
+    pub sidebar_show_provider: bool,
     #[serde(default)]
     pub conversation_background: ConversationBackgroundSettings,
 }
@@ -331,6 +337,7 @@ impl Default for AppSettings {
             active_host_id: None,
             notifications_enabled: default_notifications_enabled(),
             notification_sound_enabled: default_notification_sound_enabled(),
+            sidebar_show_provider: default_sidebar_show_provider(),
             conversation_background: ConversationBackgroundSettings::default(),
         }
     }
@@ -501,6 +508,8 @@ pub struct PersistedState {
     pub sidebar_grouping: SidebarGrouping,
     #[serde(default)]
     pub sidebar_ordering: SidebarOrdering,
+    #[serde(default = "default_sidebar_show_provider")]
+    pub sidebar_show_provider: bool,
     #[serde(default = "default_right_panel_width")]
     pub right_panel_width: f32,
     /// Whether markdown files in the right panel open as a rendered preview
@@ -609,6 +618,7 @@ impl PersistedState {
             sidebar_width: DEFAULT_SIDEBAR_WIDTH,
             sidebar_grouping: SidebarGrouping::Project,
             sidebar_ordering: SidebarOrdering::Newest,
+            sidebar_show_provider: default_sidebar_show_provider(),
             right_panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             markdown_preview: false,
             window_state: None,
@@ -733,6 +743,7 @@ impl PersistedState {
             active_host_id: self.active_host_id.clone(),
             notifications_enabled: self.notifications_enabled,
             notification_sound_enabled: self.notification_sound_enabled,
+            sidebar_show_provider: self.sidebar_show_provider,
             conversation_background: self.conversation_background.clone(),
         }
     }
@@ -776,6 +787,7 @@ impl PersistedState {
         self.active_host_id = settings.active_host_id;
         self.notifications_enabled = settings.notifications_enabled;
         self.notification_sound_enabled = settings.notification_sound_enabled;
+        self.sidebar_show_provider = settings.sidebar_show_provider;
         self.conversation_background = settings.conversation_background.sanitized();
     }
 
@@ -1523,6 +1535,33 @@ mod tests {
         assert!(state.hosts.is_empty());
         assert!(state.is_local_host());
         assert_eq!(state.active_host_display_name("MacBook"), "MacBook");
+    }
+
+    #[test]
+    fn sidebar_show_provider_round_trips_and_defaults() {
+        let default_state = PersistedState::empty();
+        assert!(default_state.sidebar_show_provider);
+
+        let default_app_settings = AppSettings::default();
+        assert!(default_app_settings.sidebar_show_provider);
+
+        let deserialized_state: PersistedState = serde_json::from_str(
+            r#"{"version":1,"projects":[],"sessions":[],"last_provider":"codex"}"#,
+        )
+        .unwrap();
+        assert!(deserialized_state.sidebar_show_provider);
+
+        let deserialized_settings: AppSettings = serde_json::from_str(r#"{}"#).unwrap();
+        assert!(deserialized_settings.sidebar_show_provider);
+
+        let mut custom_state = PersistedState::empty();
+        custom_state.sidebar_show_provider = false;
+        let settings = custom_state.app_settings();
+        assert!(!settings.sidebar_show_provider);
+
+        let mut applied_state = PersistedState::empty();
+        applied_state.apply_app_settings(settings);
+        assert!(!applied_state.sidebar_show_provider);
     }
 }
 
