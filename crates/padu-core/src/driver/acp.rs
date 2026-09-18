@@ -25,7 +25,7 @@ use agent_client_protocol::{
     AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo, Handled, LineDirection, Responder,
     UntypedMessage,
 };
-use anyhow::{Context as _, anyhow};
+use anyhow::{Context as _, anyhow, bail};
 use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
 
@@ -87,6 +87,16 @@ fn launch_for(provider: ProviderKind, reasoning_effort: Option<&str>) -> anyhow:
                         harness.to_string_lossy().into_owned(),
                     ));
                 }
+            }
+            if let Ok((runfiles_cache, isolated_temp)) = crate::agy_install::ensure_runtime_dirs() {
+                env.push((
+                    "RULES_PYTHON_EXTRACT_ROOT".into(),
+                    runfiles_cache.to_string_lossy().into_owned(),
+                ));
+                let temp_str = isolated_temp.to_string_lossy().into_owned();
+                env.push(("TEMP".into(), temp_str.clone()));
+                env.push(("TMP".into(), temp_str.clone()));
+                env.push(("TMPDIR".into(), temp_str));
             }
             Ok(AcpLaunch {
                 // The official registry distribution requires an empty UID flag on
@@ -258,6 +268,7 @@ fn sdk_agent_with_stderr_callback(
     stderr_lines: Arc<Mutex<Vec<String>>>,
     on_stderr: Option<Arc<dyn Fn(&str) + Send + Sync>>,
 ) -> anyhow::Result<AcpAgent> {
+    crate::command_env::ensure_job_object_for_process_tree();
     let binary = binary
         .to_str()
         .ok_or_else(|| anyhow!("the ACP executable path is not valid UTF-8"))?;
@@ -832,7 +843,7 @@ pub(crate) fn discover_agy_models(binary: &Path) -> Vec<ProviderModel> {
     let result = smol::block_on(smol::future::race(
         async move { request.await.map_err(anyhow::Error::new) },
         async move {
-            smol::Timer::after(Duration::from_secs(10)).await;
+            smol::Timer::after(Duration::from_secs(30)).await;
             Err(anyhow!("Antigravity model discovery timed out"))
         },
     ));
@@ -1091,39 +1102,83 @@ fn agy_account_from_token_blob(payload: &str) -> Option<String> {
 }
 
 pub fn logout_agy(binary: &Path, cwd: &Path) -> anyhow::Result<()> {
-    let agent = sdk_agent(
-        binary,
-        cwd,
-        launch_for(ProviderKind::Agy, None)?,
-        None,
-        Arc::new(Mutex::new(Vec::new())),
-    )?;
-    let request = Client.builder().name("padu").connect_with(
-        agent,
-        async move |connection: ConnectionTo<Agent>| {
-            let _initialize = connection
-                .send_request(
-                    InitializeRequest::new(ProtocolVersion::V1)
-                        .client_capabilities(ClientCapabilities::new().terminal(false))
-                        .client_info(Implementation::new("padu", env!("CARGO_PKG_VERSION"))),
-                )
-                .block_task()
-                .await?;
-            connection
-                .send_request(LogoutRequest::new())
-                .block_task()
-                .await?;
-            Ok(())
-        },
-    );
-    smol::block_on(smol::future::race(
-        async move { request.await.map_err(anyhow::Error::new) },
-        async move {
-            smol::Timer::after(Duration::from_secs(10)).await;
-            Err(anyhow!("Antigravity sign-out timed out"))
-        },
-    ))
-    .map_err(|error| anyhow!("Antigravity sign-out failed: {error}"))
+    // 1. Best-effort ACP RPC logout with 45-second timeout (giving Windows cold starts ample time)
+    if let Ok(launch) = launch_for(ProviderKind::Agy, None) {
+        if let Ok(agent) = sdk_agent(binary, cwd, launch, None, Arc::new(Mutex::new(Vec::new()))) {
+            let request = Client.builder().name("padu").connect_with(
+                agent,
+                async move |connection: ConnectionTo<Agent>| {
+                    let _initialize = connection
+                        .send_request(
+                            InitializeRequest::new(ProtocolVersion::V1)
+                                .client_capabilities(ClientCapabilities::new().terminal(false))
+                                .client_info(Implementation::new(
+                                    "padu",
+                                    env!("CARGO_PKG_VERSION"),
+                                )),
+                        )
+                        .block_task()
+                        .await?;
+                    connection
+                        .send_request(LogoutRequest::new())
+                        .block_task()
+                        .await?;
+                    Ok(())
+                },
+            );
+            let _ = smol::block_on(smol::future::race(
+                async move { request.await.map_err(anyhow::Error::new) },
+                async move {
+                    smol::Timer::after(Duration::from_secs(45)).await;
+                    Err(anyhow!("Antigravity sign-out timed out"))
+                },
+            ));
+        }
+    }
+
+    // 2. Deterministically remove all local token files on disk
+    let gemini_home = std::env::var_os("GEMINI_HOME").map(PathBuf::from);
+    let home = dirs::home_dir();
+    let mut candidate_roots = Vec::new();
+    if let Some(gemini_home) = gemini_home {
+        candidate_roots.push(gemini_home);
+    }
+    if let Some(home) = home {
+        candidate_roots.push(home.join(".gemini"));
+    }
+
+    for root in candidate_roots {
+        for relative in agy_token_files() {
+            let path = root.join(relative);
+            if path.exists() {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+    }
+
+    // 3. Purge macOS Keychain entry if on macOS
+    #[cfg(target_os = "macos")]
+    {
+        let _ = crate::command_env::plain_command("security")
+            .args([
+                "delete-generic-password",
+                "-s",
+                "gemini",
+                "-a",
+                "antigravity-acp",
+            ])
+            .output();
+    }
+
+    // 4. Trigger stale temp directories cleanup
+    crate::agy_install::cleanup_stale_antigravity_temp_dirs();
+
+    // 5. Verify auth status
+    if agy_auth_status(binary)? {
+        bail!("Antigravity sign-out did not clear credentials");
+    }
+
+    Ok(())
 }
 
 pub fn authenticate_agy(
@@ -3014,10 +3069,26 @@ mod tests {
         assert_eq!(launch.args, vec!["--uid="]);
         #[cfg(not(target_os = "linux"))]
         assert!(launch.args.is_empty());
+        let allowed_keys = [
+            "ANTIGRAVITY_HARNESS_PATH",
+            "RULES_PYTHON_EXTRACT_ROOT",
+            "TEMP",
+            "TMP",
+            "TMPDIR",
+        ];
         for (key, val) in &launch.env {
-            assert_eq!(key, "ANTIGRAVITY_HARNESS_PATH");
+            assert!(
+                allowed_keys.contains(&key.as_str()),
+                "unexpected env key {key}"
+            );
             assert!(!val.is_empty());
         }
+        assert!(
+            launch
+                .env
+                .iter()
+                .any(|(key, _)| key == "RULES_PYTHON_EXTRACT_ROOT")
+        );
     }
 
     #[test]
