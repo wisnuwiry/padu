@@ -85,7 +85,7 @@ export function reduceRuntimeEvent(
       session.agent_preset = typeof payload === 'string' ? payload : null
       break
     case 'autoTitleUpdated':
-      session.auto_title = typeof payload === 'string' && payload.trim() ? payload.trim() : null
+      session.auto_title = typeof payload === 'string' ? normalizeSessionTitle(payload) : null
       break
     case 'availableCommands':
       if (Array.isArray(payload)) session.available_commands = payload as ReportedCommand[]
@@ -492,14 +492,256 @@ function asThreadGoal(payload: unknown): ThreadGoal | null {
   return value as unknown as ThreadGoal
 }
 
-/** Mirror of the desktop's prompt-derived title fallback: first seven words,
- * ellipsized at 54 characters, applied only while the task is unnamed. */
+/** Mirror of the desktop's prompt-derived title fallback: normalized and
+ * humanized first words, ellipsized at 54 characters, applied only while
+ * the task is unnamed. */
 function setTitleFromPrompt(session: AgentSession, prompt: string) {
   if (session.messages.length > 0 || session.title !== 'New task' || session.auto_title) return
-  let title = prompt.split(/\s+/u).filter(Boolean).slice(0, 7).join(' ')
+  const title = promptFallbackTitle(prompt)
   if (!title) return
-  if ([...title].length > 54) title = `${[...title].slice(0, 53).join('')}…`
   session.auto_title = title
+}
+
+/** Maximum characters kept for a provider-supplied automatic title. */
+export const AUTO_TITLE_MAX_CHARS = 80
+/** Words kept for the local prompt-derived fallback title. */
+export const PROMPT_TITLE_WORDS = 7
+/** Characters kept for the local prompt-derived fallback title. */
+export const PROMPT_TITLE_MAX_CHARS = 54
+
+/**
+ * Normalizes an automatically generated session title: trims, decodes a JSON
+ * `{title}` envelope, keeps the first meaningful line, strips markdown
+ * (fences, inline code, emphasis, links) and a `Title:` prefix, humanizes
+ * code-like tokens (`snake_case`, `kebab-case`, `camelCase`, file paths),
+ * and caps the result at 80 characters. Returns `null` when nothing
+ * title-worthy remains, including provider placeholders such as
+ * `New session - …`. Mirrors `normalize_session_title` in
+ * `crates/padu-protocol/src/model.rs`.
+ */
+export function normalizeSessionTitle(raw: string): string | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  let candidate = trimmed
+  if (candidate.startsWith('{') || candidate.startsWith('"')) {
+    try {
+      const value: unknown = JSON.parse(candidate)
+      if (typeof value === 'string') {
+        candidate = value
+      } else if (value && typeof value === 'object' && typeof (value as Record<string, unknown>).title === 'string') {
+        candidate = (value as Record<string, unknown>).title as string
+      }
+    } catch {
+      // Not JSON — treat the raw text as the title.
+    }
+  }
+  let line: string | null = null
+  for (const entry of candidate.split('\n')) {
+    const text = entry.trim()
+    if (!text || text.startsWith('```') || text.toLowerCase() === 'json') continue
+    line = text
+    break
+  }
+  if (line === null) return null
+  // Provider placeholders must not replace the local prompt fallback. Check
+  // before humanization turns `New session - …` into `New session …`.
+  const loweredLine = line.toLowerCase()
+  if (loweredLine === 'new task' || loweredLine === 'new session') return null
+  for (const prefix of ['new session -', 'new session:']) {
+    if (loweredLine.startsWith(prefix)) {
+      const rest = line
+        .slice(prefix.length)
+        .trim()
+        .replace(/^[-:]+/, '')
+        .trim()
+      if (!rest) return null
+      line = rest
+      break
+    }
+  }
+  const title = cleanAndHumanizeTitle(line)
+  if (!title) return null
+  const lowered = title.toLowerCase()
+  if (lowered === 'new task' || lowered === 'new session') return null
+  if (![...title].some((character) => /[\p{L}\p{N}]/u.test(character))) return null
+  return truncateTitle(title, AUTO_TITLE_MAX_CHARS)
+}
+
+/**
+ * Derives the local prompt fallback title: the normalized, humanized prompt
+ * capped at 7 words and 54 characters. Mirrors `prompt_fallback_title` in
+ * `crates/padu-protocol/src/model.rs`.
+ */
+export function promptFallbackTitle(prompt: string): string | null {
+  const cleaned = cleanAndHumanizeTitle(prompt)
+  if (!cleaned) return null
+  const words = cleaned.split(/\s+/u).filter(Boolean).slice(0, PROMPT_TITLE_WORDS).join(' ')
+  if (!words) return null
+  if ([...words].length > PROMPT_TITLE_MAX_CHARS) {
+    return `${[...words].slice(0, PROMPT_TITLE_MAX_CHARS - 1).join('')}…`
+  }
+  return words
+}
+
+function cleanAndHumanizeTitle(text: string): string | null {
+  const withoutFences = text.replaceAll('```', ' ')
+  const withoutLinks = stripMarkdownLinks(withoutFences)
+  // Drop inline-code, emphasis, and strikethrough markers but keep the
+  // words they wrap; underscores and dashes are humanized per token below.
+  const withoutMarkers = [...withoutLinks].filter((character) => character !== '`' && character !== '*' && character !== '~').join('')
+  let cleaned = withoutMarkers.trim()
+  for (const prefix of ['title:', 'session title:']) {
+    if (cleaned.length >= prefix.length && cleaned.slice(0, prefix.length).toLowerCase() === prefix) {
+      cleaned = cleaned.slice(prefix.length).trim()
+      break
+    }
+  }
+  cleaned = stripLeadingListMarkers(cleaned)
+  // A leading slash-command (`/fix …`) or mention is an instruction, not
+  // part of the name.
+  const parts = cleaned.split(/\s+/u).filter(Boolean)
+  if (parts.length > 0 && parts[0]!.length > 1 && (parts[0]!.startsWith('/') || parts[0]!.startsWith('@'))) {
+    const stripped = parts[0]!.slice(1).trim()
+    const rest = parts.slice(1).join(' ')
+    cleaned = rest ? `${stripped} ${rest}` : stripped
+  }
+  const words: string[] = []
+  for (const token of cleaned.split(/\s+/u)) {
+    humanizeTitleToken(token, words)
+  }
+  const title = words
+    .join(' ')
+    .trim()
+    .replace(/^["'#_`]+|["'#_`]+$/g, '')
+    .replace(/[.,:;]+$/u, '')
+    .trim()
+  return title || null
+}
+
+/** Turns one whitespace-separated token into title words: unwraps quotes and
+ * brackets, keeps the last path segment, drops call parens and file
+ * extensions, then splits `snake_case`, `kebab-case`, and `camelCase`. */
+function humanizeTitleToken(token: string, words: string[]): void {
+  let current = token.trim().replace(/^["'`()[\]{}<>]+|["'`()[\]{}<>]+$/g, '').trim()
+  if (!current) return
+  if ((current.startsWith('/') || current.startsWith('@')) && current.length > 1) {
+    current = current.slice(1).trim()
+    if (!current) return
+  }
+  if (current.includes('/') || current.includes('\\')) {
+    const segments = current.split(/[/\\]/u).map((segment) => segment.trim()).filter(Boolean)
+    current = segments.at(-1) ?? current
+  }
+  while (current.endsWith('()') && current.length > 2) {
+    current = current.slice(0, -2).trim()
+  }
+  current = current.replace(/^[()[\]{}<>"'`]+|[()[\]{}<>"'`]+$/g, '').trim()
+  if (!current) return
+  // Drop a trailing file extension (`auth.rs` → `auth`) when the suffix
+  // looks like one: short and alphabetic.
+  const dot = current.lastIndexOf('.')
+  if (dot > 0) {
+    const stem = current.slice(0, dot)
+    const suffix = current.slice(dot + 1)
+    if (
+      stem && suffix.length >= 1 && suffix.length <= 4 && /^[A-Za-z]+$/.test(suffix)
+      && [...stem].some((character) => /[\p{L}\p{N}]/u.test(character))
+    ) {
+      current = stem.trim()
+    }
+  }
+  if (!current) return
+  const spaced = [...current]
+    .map((character) =>
+      character === '_' || character === '-' || character === '.' || character === '/' || character === '\\' || character === ':'
+        ? ' '
+        : character,
+    )
+    .join('')
+  for (const word of splitCamelCase(spaced).split(/\s+/u)) {
+    const cleaned = word.trim().replace(/^["'()[\]{}:;,.]+|["'()[\]{}:;,.]+$/g, '').trim()
+    if (cleaned) words.push(cleaned)
+  }
+}
+
+function splitCamelCase(text: string): string {
+  const chars = [...text]
+  let output = ''
+  chars.forEach((character, index) => {
+    if (index > 0 && /\p{Lu}/u.test(character)) {
+      const previous = chars[index - 1]!
+      const next = chars[index + 1]
+      const lowerToUpper = (/[\p{Ll}]/u.test(previous) || /\p{N}/u.test(previous))
+      const acronymBoundary = /[\p{Lu}]/u.test(previous) && next !== undefined && /[\p{Ll}]/u.test(next)
+      if (lowerToUpper || acronymBoundary) output += ' '
+    }
+    output += character
+  })
+  return output
+}
+
+/** Replaces markdown links and images with their visible text:
+ * `[label](url)` → `label`, `![alt](url)` → `alt`. */
+function stripMarkdownLinks(text: string): string {
+  let output = ''
+  let index = 0
+  while (index < text.length) {
+    const char = text[index]!
+    if (char === '[') {
+      const close = text.indexOf(']', index)
+      if (close !== -1 && text[close + 1] === '(') {
+        const end = text.indexOf(')', close + 1)
+        if (end !== -1) {
+          output += text.slice(index + 1, close)
+          index = end + 1
+          continue
+        }
+      }
+    }
+    if (char === '!' && text[index + 1] === '[') {
+      // Handled above through the `[` branch on the next pass; keep
+      // the `!` out of the output.
+      index += 1
+      continue
+    }
+    output += char
+    index += 1
+  }
+  return output
+}
+
+function stripLeadingListMarkers(text: string): string {
+  let cleaned = text.trim()
+  for (;;) {
+    const trimmed = cleaned.trimStart()
+    const markerOnly = trimmed.replace(/^[#>»•*\-+❯»]+/u, '')
+    if (markerOnly !== trimmed) {
+      cleaned = markerOnly.trimStart()
+      continue
+    }
+    const ordered = trimmed.match(/^(\d+)[.)]\s+/u)
+    if (ordered) {
+      cleaned = trimmed.slice(ordered[0].length)
+      continue
+    }
+    cleaned = trimmed
+    break
+  }
+  return cleaned
+}
+
+function truncateTitle(title: string, maxChars: number): string {
+  if ([...title].length <= maxChars) return title
+  let truncated = [...title].slice(0, maxChars).join('')
+  // Avoid leaving a half-word: backtrack to the last space when the cut
+  // lands inside one.
+  const next = [...title][maxChars]
+  const last = [...truncated].at(-1)
+  if (next !== undefined && last !== undefined && /[\p{L}\p{N}]/u.test(next) && /[\p{L}\p{N}]/u.test(last)) {
+    const space = truncated.lastIndexOf(' ')
+    if (space !== -1) truncated = truncated.slice(0, space)
+  }
+  return truncated.trimEnd()
 }
 
 function activeTurn(session: AgentSession) {
