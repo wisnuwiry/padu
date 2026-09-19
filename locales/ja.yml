@@ -1088,6 +1088,11 @@ actions.command_required: 実行するコマンドを入力してください。
 actions.keybinding: キーボードショートカット
 actions.keybinding_placeholder: "例: ⌘⇧R または Ctrl+Shift+R"
 actions.keybinding_help: キーボードから直接このアクションをトリガーするグローバルショートカット。
+actions.click_to_record: クリックまたはキーを押して記録...
+actions.record_shortcut: 記録
+actions.recording_shortcut: キーボードのキーを押してください...
+actions.clear_shortcut: クリア
+actions.cancel_recording: キャンセル
 actions.preview_url: ブラウザプレビュー URL
 actions.preview_url_placeholder: http://localhost:3000
 actions.preview_url_help: このアクションの実行時にアプリ内ブラウザタブをこのURLに移動します。

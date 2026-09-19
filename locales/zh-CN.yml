@@ -1050,6 +1050,11 @@ actions.command_required: 请输入要执行的命令。
 actions.keybinding: 键盘快捷键
 actions.keybinding_placeholder: 例如：⌘⇧R 或 Ctrl+Shift+R
 actions.keybinding_help: 通过全局快捷键随时触发此动作。
+actions.click_to_record: 点击或按下按键以录制...
+actions.record_shortcut: 录制
+actions.recording_shortcut: 请按下键盘按键组合...
+actions.clear_shortcut: 清除
+actions.cancel_recording: 取消
 actions.preview_url: 浏览器预览网址
 actions.preview_url_placeholder: http://localhost:3000
 actions.preview_url_help: 运行此动作时自动在内置浏览器中导航至该网址。

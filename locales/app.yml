@@ -2172,6 +2172,16 @@ actions.keybinding_placeholder:
   en: e.g. ⌘⇧R or Ctrl+Shift+R
 actions.keybinding_help:
   en: Global shortcut to trigger this action directly from your keyboard.
+actions.click_to_record:
+  en: Click or press keys to record shortcut...
+actions.record_shortcut:
+  en: Record
+actions.recording_shortcut:
+  en: Press shortcut keys on keyboard...
+actions.clear_shortcut:
+  en: Clear
+actions.cancel_recording:
+  en: Cancel
 actions.preview_url:
   en: Browser Preview URL
 actions.preview_url_placeholder:
