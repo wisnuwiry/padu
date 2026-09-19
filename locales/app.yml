@@ -2182,6 +2182,8 @@ actions.clear_shortcut:
   en: Clear
 actions.cancel_recording:
   en: Cancel
+actions.done_recording:
+  en: Done
 actions.preview_url:
   en: Browser Preview URL
 actions.preview_url_placeholder:

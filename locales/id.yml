@@ -1054,6 +1054,7 @@ actions.record_shortcut: Rekam
 actions.recording_shortcut: Tekan tombol pintasan di keyboard...
 actions.clear_shortcut: Hapus
 actions.cancel_recording: Batal
+actions.done_recording: Selesai
 actions.preview_url: URL Pratinjau Peramban
 actions.preview_url_placeholder: http://localhost:3000
 actions.preview_url_help: Secara otomatis mengarahkan tab peramban bawaan ke URL ini saat aksi dijalankan.

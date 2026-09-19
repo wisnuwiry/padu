@@ -122,6 +122,53 @@ pub(crate) fn format_keystroke_shortcut(keystroke: &gpui::Keystroke) -> Option<S
     }
 }
 
+pub(crate) fn format_keystroke_realtime(keystroke: &gpui::Keystroke) -> String {
+    if let Some(shortcut) = format_keystroke_shortcut(keystroke) {
+        return shortcut;
+    }
+
+    let is_macos = cfg!(target_os = "macos");
+    let key_lower = keystroke.key.to_lowercase();
+    let has_platform = keystroke.modifiers.platform
+        || matches!(key_lower.as_str(), "cmd" | "command" | "meta" | "super");
+    let has_control =
+        keystroke.modifiers.control || matches!(key_lower.as_str(), "ctrl" | "control");
+    let has_alt = keystroke.modifiers.alt || matches!(key_lower.as_str(), "alt" | "option");
+    let has_shift = keystroke.modifiers.shift || matches!(key_lower.as_str(), "shift");
+
+    if is_macos {
+        let mut s = String::new();
+        if has_platform {
+            s.push('⌘');
+        }
+        if has_control {
+            s.push('⌃');
+        }
+        if has_alt {
+            s.push('⌥');
+        }
+        if has_shift {
+            s.push('⇧');
+        }
+        s
+    } else {
+        let mut parts = Vec::new();
+        if has_control {
+            parts.push("Ctrl");
+        }
+        if has_alt {
+            parts.push("Alt");
+        }
+        if has_shift {
+            parts.push("Shift");
+        }
+        if has_platform {
+            parts.push("Win");
+        }
+        parts.join("+")
+    }
+}
+
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new(
@@ -151,6 +198,8 @@ pub(crate) struct ProjectActionDialogState {
     pub keybinding_input: Entity<TextInput>,
     pub preview_url_input: Entity<TextInput>,
     pub is_recording_keybinding: bool,
+    pub live_recording_preview: Option<String>,
+    pub original_keybinding: Option<String>,
     pub shortcut_focus: FocusHandle,
     pub icon: ProjectScriptIcon,
     pub icon_picker_open: bool,
@@ -268,6 +317,8 @@ impl Padu {
             keybinding_input,
             preview_url_input,
             is_recording_keybinding: false,
+            live_recording_preview: None,
+            original_keybinding: None,
             shortcut_focus,
             icon,
             icon_picker_open: false,
@@ -431,6 +482,7 @@ impl Padu {
         let is_shortcut_focused = shortcut_focus.is_focused(window);
         let is_recording = is_recording_keybinding || is_shortcut_focused;
         let current_shortcut = keybinding_input.read(cx).content().trim().to_string();
+        let live_recording_preview = dialog.live_recording_preview.clone();
 
         let has_preview_url = !preview_url_input.read(cx).content().trim().is_empty();
 
@@ -849,12 +901,52 @@ impl Padu {
                                                 },
                                             ))
                                             .child(if is_recording {
-                                                div()
-                                                    .text_size(sp(12.0))
-                                                    .font_weight(FontWeight::MEDIUM)
-                                                    .text_color(theme.text)
-                                                    .child(tr!("actions.recording_shortcut"))
-                                                    .into_any_element()
+                                                if let Some(preview) = &live_recording_preview {
+                                                    div()
+                                                        .flex()
+                                                        .items_center()
+                                                        .gap(px(4.0))
+                                                        .child(
+                                                            div()
+                                                                .px(px(7.0))
+                                                                .py(px(2.0))
+                                                                .rounded(px(5.0))
+                                                                .bg(theme.accent.opacity(0.12))
+                                                                .border_1()
+                                                                .border_color(theme.accent)
+                                                                .text_size(sp(12.0))
+                                                                .font_weight(FontWeight::SEMIBOLD)
+                                                                .text_color(theme.accent)
+                                                                .child(preview.clone()),
+                                                        )
+                                                        .into_any_element()
+                                                } else if !current_shortcut.is_empty() {
+                                                    div()
+                                                        .flex()
+                                                        .items_center()
+                                                        .gap(px(4.0))
+                                                        .child(
+                                                            div()
+                                                                .px(px(7.0))
+                                                                .py(px(2.0))
+                                                                .rounded(px(5.0))
+                                                                .bg(theme.raised)
+                                                                .border_1()
+                                                                .border_color(theme.border_strong)
+                                                                .text_size(sp(12.0))
+                                                                .font_weight(FontWeight::SEMIBOLD)
+                                                                .text_color(theme.text)
+                                                                .child(current_shortcut.clone()),
+                                                        )
+                                                        .into_any_element()
+                                                } else {
+                                                    div()
+                                                        .text_size(sp(12.0))
+                                                        .font_weight(FontWeight::MEDIUM)
+                                                        .text_color(theme.accent)
+                                                        .child(tr!("actions.recording_shortcut"))
+                                                        .into_any_element()
+                                                }
                                             } else if !current_shortcut.is_empty() {
                                                 div()
                                                     .flex()
@@ -890,15 +982,43 @@ impl Padu {
                                             .when(is_recording, |row| {
                                                 row.child(
                                                     div()
+                                                        .id("done-keybinding-record-btn")
+                                                        .px(px(8.0))
+                                                        .py(px(3.0))
+                                                        .rounded(px(5.0))
+                                                        .bg(theme.inverse)
+                                                        .border_1()
+                                                        .border_color(theme.inverse)
+                                                        .text_size(sp(11.0))
+                                                        .font_weight(FontWeight::MEDIUM)
+                                                        .text_color(theme.on_inverse)
+                                                        .cursor_pointer()
+                                                        .hover(|e| e.opacity(0.9))
+                                                        .child(tr!("actions.done_recording"))
+                                                        .on_click(cx.listener(|this, _, _, cx| {
+                                                            cx.stop_propagation();
+                                                            if let Some(d) =
+                                                                this.project_action_dialog.as_mut()
+                                                            {
+                                                                d.is_recording_keybinding = false;
+                                                                d.live_recording_preview = None;
+                                                                d.original_keybinding = None;
+                                                                cx.notify();
+                                                            }
+                                                        })),
+                                                )
+                                                .child(
+                                                    div()
                                                         .id("cancel-keybinding-record-btn")
-                                                        .px(px(7.0))
-                                                        .py(px(2.5))
-                                                        .rounded(px(4.0))
+                                                        .px(px(8.0))
+                                                        .py(px(3.0))
+                                                        .rounded(px(5.0))
                                                         .bg(theme.raised)
                                                         .border_1()
                                                         .border_color(theme.border)
                                                         .text_size(sp(11.0))
                                                         .text_color(theme.text_secondary)
+                                                        .cursor_pointer()
                                                         .hover(|e| e.bg(theme.overlay))
                                                         .child(tr!("actions.cancel_recording"))
                                                         .on_click(cx.listener(|this, _, _, cx| {
@@ -906,7 +1026,20 @@ impl Padu {
                                                             if let Some(d) =
                                                                 this.project_action_dialog.as_mut()
                                                             {
+                                                                if let Some(orig) =
+                                                                    d.original_keybinding.take()
+                                                                {
+                                                                    d.keybinding_input.update(
+                                                                        cx,
+                                                                        |input, cx| {
+                                                                            input.set_content(
+                                                                                orig, cx,
+                                                                            );
+                                                                        },
+                                                                    );
+                                                                }
                                                                 d.is_recording_keybinding = false;
+                                                                d.live_recording_preview = None;
                                                                 cx.notify();
                                                             }
                                                         })),
@@ -952,6 +1085,10 @@ impl Padu {
                                                                     {
                                                                         d.is_recording_keybinding =
                                                                             false;
+                                                                        d.live_recording_preview =
+                                                                            None;
+                                                                        d.original_keybinding =
+                                                                            None;
                                                                     }
                                                                     cx.notify();
                                                                 },
@@ -962,9 +1099,9 @@ impl Padu {
                                             .when(!is_recording, |row| {
                                                 row.child(
                                                     div()
-                                                        .px(px(7.0))
-                                                        .py(px(2.5))
-                                                        .rounded(px(4.0))
+                                                        .px(px(8.0))
+                                                        .py(px(3.0))
+                                                        .rounded(px(5.0))
                                                         .bg(theme.raised)
                                                         .border_1()
                                                         .border_color(theme.border)
@@ -978,7 +1115,17 @@ impl Padu {
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         cx.stop_propagation();
                                         if let Some(d) = this.project_action_dialog.as_mut() {
-                                            d.is_recording_keybinding = true;
+                                            if !d.is_recording_keybinding {
+                                                d.is_recording_keybinding = true;
+                                                d.original_keybinding = Some(
+                                                    d.keybinding_input
+                                                        .read(cx)
+                                                        .content()
+                                                        .trim()
+                                                        .to_string(),
+                                                );
+                                                d.live_recording_preview = None;
+                                            }
                                             let focus = d.shortcut_focus.clone();
                                             window.focus(&focus, cx);
                                             cx.notify();
@@ -993,29 +1140,39 @@ impl Padu {
 
                                             let key_lower = event.keystroke.key.to_lowercase();
 
-                                            // Allow normal Tab navigation without modifiers
-                                            if key_lower == "tab"
-                                                && !event.keystroke.modifiers.modified()
-                                            {
+                                            // Enter or Return commits recording (Done)
+                                            if matches!(key_lower.as_str(), "enter" | "return") {
                                                 dialog.is_recording_keybinding = false;
-                                                cx.notify();
-                                                return;
-                                            }
-                                            if key_lower == "tab"
-                                                && event.keystroke.modifiers.shift
-                                                && !event.keystroke.modifiers.control
-                                                && !event.keystroke.modifiers.alt
-                                                && !event.keystroke.modifiers.platform
-                                            {
-                                                dialog.is_recording_keybinding = false;
+                                                dialog.live_recording_preview = None;
+                                                dialog.original_keybinding = None;
+                                                cx.stop_propagation();
                                                 cx.notify();
                                                 return;
                                             }
 
-                                            // Escape cancels recording
+                                            // Escape cancels recording and restores original
                                             if key_lower == "escape" {
+                                                if let Some(orig) =
+                                                    dialog.original_keybinding.take()
+                                                {
+                                                    dialog.keybinding_input.update(
+                                                        cx,
+                                                        |input, cx| {
+                                                            input.set_content(orig, cx);
+                                                        },
+                                                    );
+                                                }
                                                 dialog.is_recording_keybinding = false;
+                                                dialog.live_recording_preview = None;
                                                 cx.stop_propagation();
+                                                cx.notify();
+                                                return;
+                                            }
+
+                                            // Allow normal Tab navigation
+                                            if key_lower == "tab" {
+                                                dialog.is_recording_keybinding = false;
+                                                dialog.live_recording_preview = None;
                                                 cx.notify();
                                                 return;
                                             }
@@ -1027,28 +1184,31 @@ impl Padu {
                                                 dialog.keybinding_input.update(cx, |input, cx| {
                                                     input.set_content(String::new(), cx);
                                                 });
-                                                dialog.is_recording_keybinding = false;
+                                                dialog.live_recording_preview = None;
                                                 cx.stop_propagation();
                                                 cx.notify();
                                                 return;
                                             }
 
-                                            // Attempt to format keystroke as a valid shortcut
+                                            // Real-time preview for any pressed key (including modifiers)
+                                            let preview =
+                                                format_keystroke_realtime(&event.keystroke);
+                                            if !preview.is_empty() {
+                                                dialog.live_recording_preview = Some(preview);
+                                            }
+
+                                            // If it forms a full non-modifier shortcut, update input
                                             if let Some(formatted) =
                                                 format_keystroke_shortcut(&event.keystroke)
                                             {
                                                 dialog.keybinding_input.update(cx, |input, cx| {
                                                     input.set_content(formatted, cx);
                                                 });
-                                                dialog.is_recording_keybinding = false;
-                                                cx.stop_propagation();
-                                                cx.notify();
-                                            } else {
-                                                // Pure modifier key down (user is holding Cmd, Shift, Ctrl, Alt)
-                                                dialog.is_recording_keybinding = true;
-                                                cx.stop_propagation();
-                                                cx.notify();
                                             }
+
+                                            dialog.is_recording_keybinding = true;
+                                            cx.stop_propagation();
+                                            cx.notify();
                                         },
                                     )),
                             )
@@ -1329,6 +1489,8 @@ impl Padu {
                                 .h(px(32.0))
                                 .px(px(10.0))
                                 .rounded(px(7.0))
+                                .border_1()
+                                .border_color(theme.border)
                                 .cursor_pointer()
                                 .text_size(sp(12.0))
                                 .text_color(theme.danger)
@@ -1336,6 +1498,7 @@ impl Padu {
                                 .hover(|e| e.bg(theme.overlay))
                                 .flex()
                                 .items_center()
+                                .justify_center()
                                 .gap(px(6.0))
                                 .child(icon("icons/trash.svg", 13.0, theme.danger))
                                 .child(tr!("actions.delete"))
@@ -1371,7 +1534,7 @@ impl Padu {
                                     .track_focus(&cancel_focus)
                                     .tab_index(0)
                                     .h(px(32.0))
-                                    .px(px(12.0))
+                                    .px(px(14.0))
                                     .rounded(px(7.0))
                                     .border_1()
                                     .border_color(theme.border)
@@ -1384,6 +1547,7 @@ impl Padu {
                                     .hover(|e| e.bg(theme.overlay))
                                     .flex()
                                     .items_center()
+                                    .justify_center()
                                     .gap(px(6.0))
                                     .child(tr!("actions.cancel"))
                                     .child(
@@ -1418,6 +1582,8 @@ impl Padu {
                                     .h(px(32.0))
                                     .px(px(14.0))
                                     .rounded(px(7.0))
+                                    .border_1()
+                                    .border_color(theme.inverse)
                                     .cursor_pointer()
                                     .text_size(sp(12.0))
                                     .font_weight(FontWeight::MEDIUM)
@@ -1429,6 +1595,7 @@ impl Padu {
                                     .hover(|e| e.opacity(0.9))
                                     .flex()
                                     .items_center()
+                                    .justify_center()
                                     .gap(px(6.0))
                                     .child(save_label)
                                     .child(
@@ -1516,6 +1683,43 @@ mod tests {
             key_char: None,
         };
         assert_eq!(format_keystroke_shortcut(&ks), Some("F5".to_string()));
+    }
+
+    #[test]
+    fn test_format_keystroke_realtime_pure_modifier() {
+        let ks = Keystroke {
+            modifiers: Modifiers {
+                platform: true,
+                ..Default::default()
+            },
+            key: "cmd".to_string(),
+            key_char: None,
+        };
+        let formatted = format_keystroke_realtime(&ks);
+        if cfg!(target_os = "macos") {
+            assert!(formatted.contains('⌘'));
+        } else {
+            assert!(formatted.contains("Win"));
+        }
+    }
+
+    #[test]
+    fn test_format_keystroke_realtime_complete_chord() {
+        let ks = Keystroke {
+            modifiers: Modifiers {
+                platform: true,
+                shift: true,
+                ..Default::default()
+            },
+            key: "b".to_string(),
+            key_char: None,
+        };
+        let formatted = format_keystroke_realtime(&ks);
+        if cfg!(target_os = "macos") {
+            assert_eq!(formatted, "⌘⇧B");
+        } else {
+            assert_eq!(formatted, "Shift+Win+B");
+        }
     }
 }
 

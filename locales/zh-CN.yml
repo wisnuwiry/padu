@@ -1055,6 +1055,7 @@ actions.record_shortcut: 录制
 actions.recording_shortcut: 请按下键盘按键组合...
 actions.clear_shortcut: 清除
 actions.cancel_recording: 取消
+actions.done_recording: 完成
 actions.preview_url: 浏览器预览网址
 actions.preview_url_placeholder: http://localhost:3000
 actions.preview_url_help: 运行此动作时自动在内置浏览器中导航至该网址。
