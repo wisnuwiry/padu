@@ -88,7 +88,8 @@ impl Padu {
             .unwrap_or_default();
         let initial_kb = existing
             .as_ref()
-            .and_then(|s| s.keybinding.clone())
+            .and_then(|s| s.keybinding.as_deref())
+            .map(crate::ui::format_shortcut_for_display)
             .unwrap_or_default();
         let initial_preview_url = existing
             .as_ref()

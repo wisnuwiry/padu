@@ -19,7 +19,7 @@ pub use dialog::ConfirmVariant;
 #[allow(unused_imports)]
 pub use shortcut_recorder::{
     KeyDownResult, ShortcutRecorderState, format_keystroke_realtime, format_keystroke_shortcut,
-    matches_keystroke,
+    format_shortcut_for_display, matches_keystroke,
 };
 
 use crate::model::{ActivityKind, ProviderKind, SessionStatus};

@@ -591,6 +591,7 @@ impl Padu {
                                         }),
                                 )
                                 .when_some(script.keybinding.clone(), |parent, kb| {
+                                    let display_kb = crate::ui::format_shortcut_for_display(&kb);
                                     parent.child(
                                         div()
                                             .px(px(4.0))
@@ -601,7 +602,7 @@ impl Padu {
                                             .border_color(theme.border)
                                             .text_size(sp(10.5))
                                             .text_color(theme.text_tertiary)
-                                            .child(kb),
+                                            .child(display_kb),
                                     )
                                 })
                                 .on_click(move |_, window, cx| {
