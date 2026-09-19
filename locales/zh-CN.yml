@@ -1093,6 +1093,10 @@ environment.summary: 环境和后台工作
 environment.changes: 更改
 environment.commit_or_push: 提交或推送
 environment.compare_branch: 比较分支
+environment.initialize_git_repository: 初始化 Git 仓库
+environment.initialize_git_success: 已初始化 Git 仓库
+environment.initialize_git_error: "无法初始化 Git 仓库：%{error}"
+environment.git_unavailable: 守护进程主机上无法使用 Git
 environment.task_id: 任务 ID
 environment.agent_cli_thread_id: 智能体 CLI 线程 ID
 commit.message_placeholder: 提交信息（留空以自动生成）…
