@@ -48,11 +48,27 @@ export const Route = createRootRoute({
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { name: "theme-color", content: "#0d0f14" },
+      {
+        name: "robots",
+        content: "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1",
+      },
       { property: "og:site_name", content: "Padu" },
       { property: "og:type", content: "website" },
+      { property: "og:locale", content: "en_US" },
       { property: "og:image", content: "https://padu.dev/preview-dark.webp" },
+      { property: "og:image:width", content: "2266" },
+      { property: "og:image:height", content: "1752" },
+      { property: "og:image:type", content: "image/webp" },
+      {
+        property: "og:image:alt",
+        content: "Padu - Native, Local-First Desktop & Web Workspace for AI Coding Agents",
+      },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:image", content: "https://padu.dev/preview-dark.webp" },
+      {
+        name: "twitter:image:alt",
+        content: "Padu - Native, Local-First Desktop & Web Workspace for AI Coding Agents",
+      },
     ],
     links: [
       { rel: "icon", href: "/favicon.ico", sizes: "48x48" },

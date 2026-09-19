@@ -141,7 +141,7 @@ export function LandingPage({ eyebrow, title, subtitle }: LandingPageProps) {
       <div className="landing-content bg-background border-t border-white/[0.06]">
         <main className="p-6 md:p-20 md:pt-32 max-w-5xl mx-auto">
           <div className="space-y-32">
-            <ArchitectureCarousel />
+            {/* <ArchitectureCarousel /> */}
             {/* <EcosystemBentoSection /> */}
             <MultiProviderSection />
             <FAQ />
@@ -754,7 +754,7 @@ function FAQ() {
       <SectionHeader
         eyebrow="FAQ"
         title="Frequently asked questions."
-        description="Everything you need to know about Padu's architecture, privacy, and agent support."
+        description="Everything you need to know about Padu's local-first workflows, privacy, and agent support."
       />
       <div className="divide-y divide-white/[0.08]">
         <FAQItem question="What is Padu?">
@@ -773,10 +773,10 @@ function FAQ() {
           Agents communicate directly with their provider APIs using the credentials on your computer.
         </FAQItem>
         <FAQItem question="What AI coding agents does Padu support?">
-          Padu supports leading coding agents with native direct drivers and ACP (Agent Client
-          Protocol) integrations: Claude Code, OpenAI Codex CLI, OpenCode, Pi Agent, Amp, DeepSeek,
-          Cursor CLI, Fx, Grok Build, Kimi Code, GitHub Copilot, Google Gemini CLI, Cline, Goose, and
-          Mistral Vibe. See the full catalog on the{" "}
+          Padu supports leading coding agents through native direct drivers and ACP (Agent Client
+          Protocol) integrations. Native drivers: Claude Code, OpenAI Codex CLI, OpenCode, Pi, Oh My
+          Pi, Amp, DeepSeek, and Command Code. ACP integrations: Antigravity, Cursor CLI, Fx, Grok
+          Build, Kimi Code, and Qoder CLI. See the full catalog on the{" "}
           <a href="/agents" className="underline hover:text-white transition-colors">
             supported agents page
           </a>
