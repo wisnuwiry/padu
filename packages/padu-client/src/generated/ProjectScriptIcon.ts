@@ -3,4 +3,4 @@
 /**
  * Icon identifier for a project script/action.
  */
-export type ProjectScriptIcon = "play" | "test" | "lint" | "configure" | "build" | "debug";
+export type ProjectScriptIcon = "play" | "test" | "lint" | "build" | "debug";

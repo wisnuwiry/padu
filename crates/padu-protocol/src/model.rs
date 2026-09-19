@@ -623,27 +623,18 @@ pub enum ProjectScriptIcon {
     Play,
     Test,
     Lint,
-    Configure,
     Build,
     Debug,
 }
 
 impl ProjectScriptIcon {
-    pub const ALL: [Self; 6] = [
-        Self::Play,
-        Self::Test,
-        Self::Lint,
-        Self::Configure,
-        Self::Build,
-        Self::Debug,
-    ];
+    pub const ALL: [Self; 5] = [Self::Play, Self::Test, Self::Lint, Self::Build, Self::Debug];
 
     pub fn id(&self) -> &'static str {
         match self {
             Self::Play => "play",
             Self::Test => "test",
             Self::Lint => "lint",
-            Self::Configure => "configure",
             Self::Build => "build",
             Self::Debug => "debug",
         }
@@ -654,7 +645,6 @@ impl ProjectScriptIcon {
             Self::Play => "Play",
             Self::Test => "Test",
             Self::Lint => "Lint",
-            Self::Configure => "Configure",
             Self::Build => "Build",
             Self::Debug => "Debug",
         }
@@ -665,7 +655,6 @@ impl ProjectScriptIcon {
             Self::Play => "icons/play.svg",
             Self::Test => "icons/flask.svg",
             Self::Lint => "icons/list-checks.svg",
-            Self::Configure => "icons/wrench.svg",
             Self::Build => "icons/hammer.svg",
             Self::Debug => "icons/bug.svg",
         }
@@ -675,7 +664,6 @@ impl ProjectScriptIcon {
         match id {
             "test" => Self::Test,
             "lint" => Self::Lint,
-            "configure" => Self::Configure,
             "build" => Self::Build,
             "debug" => Self::Debug,
             _ => Self::Play,
