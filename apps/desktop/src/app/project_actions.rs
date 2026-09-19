@@ -268,6 +268,58 @@ impl Padu {
         self.add_project_script(project_id, script, cx);
     }
 
+    pub(crate) fn handle_project_action_global_keystroke(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.project_action_dialog.is_some()
+            || self.project_action_dialog_request.is_some()
+            || self.confirm_dialog.is_some()
+            || self.commit_dialog.is_some()
+            || self.goal_dialog.is_some()
+            || self.goal_dialog_request.is_some()
+            || self.host_dialog.is_some()
+            || self.host_dialog_request.is_some()
+            || self.whats_new.is_some()
+            || self.command_palette.open
+            || self.settings_page.is_some()
+        {
+            return;
+        }
+
+        // Only trigger on shortcuts with modifiers or function keys to avoid intercepting normal typing
+        let is_chord = event.keystroke.modifiers.platform
+            || event.keystroke.modifiers.control
+            || event.keystroke.modifiers.alt
+            || (event.keystroke.key.starts_with('f')
+                && event.keystroke.key[1..].chars().all(|c| c.is_ascii_digit()));
+        if !is_chord {
+            return;
+        }
+
+        let Some(formatted) =
+            crate::app::dialogs::project_action::format_keystroke_shortcut(&event.keystroke)
+        else {
+            return;
+        };
+
+        let Some(project) = self.active_project().cloned() else {
+            return;
+        };
+
+        for script in &project.scripts {
+            if let Some(ref kb) = script.keybinding {
+                if kb.trim().eq_ignore_ascii_case(&formatted) {
+                    cx.stop_propagation();
+                    self.run_project_script(&script.clone(), cx);
+                    return;
+                }
+            }
+        }
+    }
+
     /// Renders the project actions topbar split-button control.
     pub fn render_project_actions_control(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let project = self.active_project()?.clone();

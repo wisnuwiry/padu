@@ -442,6 +442,7 @@ impl Render for Padu {
             .capture_any_mouse_down(cx.listener(Self::navigation_mouse_down))
             .on_mouse_move(cx.listener(Self::resize_panel_mouse_move))
             .capture_any_mouse_up(cx.listener(Self::finish_panel_resize))
+            .on_key_down(cx.listener(Self::handle_project_action_global_keystroke))
             .size_full()
             .relative()
             .flex()
