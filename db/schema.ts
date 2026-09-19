@@ -22,6 +22,8 @@ export const projects = sqliteTable("projects", {
   position: integer("position").notNull(),
   /** When the project was added, unix seconds. */
   createdAt: integer("created_at").notNull(),
+  /** Project scripts / actions, JSON serialized. */
+  scripts: text("scripts").notNull().default("[]"),
 });
 
 export const notes = sqliteTable(

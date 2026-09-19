@@ -31,7 +31,7 @@ use crate::i18n::AppLanguage;
 use crate::identity::DATA_DIRECTORY_NAME;
 use crate::model::{
     AgentSession, FavoriteModel, InteractionMode, Message, MessageAttachment, MessageRole, Project,
-    ProviderKind, RuntimeMode, SessionWorkspace,
+    ProjectScript, ProviderKind, RuntimeMode, SessionWorkspace,
 };
 use crate::theme::ThemePreference;
 use padu_protocol::notes::EmbeddedNote;
@@ -1170,7 +1170,7 @@ impl StateStore {
         }
 
         let mut projects = connection
-            .prepare("SELECT id, name, path, created_at FROM projects ORDER BY position")
+            .prepare("SELECT id, name, path, created_at, scripts FROM projects ORDER BY position")
             .map_err(to_io_error)?;
         state.projects = projects
             .query_map([], |row| {
@@ -1179,16 +1179,22 @@ impl StateStore {
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, i64>(3)?,
+                    row.get::<_, Option<String>>(4)?,
                 ))
             })
             .map_err(to_io_error)?
             .filter_map(Result::ok)
-            .filter_map(|(id, name, path, created_at)| {
+            .filter_map(|(id, name, path, created_at, scripts_json)| {
+                let scripts: Vec<ProjectScript> = scripts_json
+                    .as_deref()
+                    .and_then(|json| serde_json::from_str(json).ok())
+                    .unwrap_or_default();
                 Some(Project {
                     id: Uuid::parse_str(&id).ok()?,
                     name,
                     path: PathBuf::from(path),
                     created_at: created_at as u64,
+                    scripts,
                 })
             })
             .collect();
@@ -1406,6 +1412,8 @@ impl StateStore {
                 .execute("DELETE FROM projects", [])
                 .map_err(to_io_error)?;
             for (position, project) in state.projects.iter().enumerate() {
+                let scripts_json =
+                    serde_json::to_string(&project.scripts).unwrap_or_else(|_| "[]".to_string());
                 transaction
                     .execute(
                         INSERT_PROJECT,
@@ -1414,7 +1422,8 @@ impl StateStore {
                             project.name,
                             project.path.to_string_lossy(),
                             position as i64,
-                            project.created_at as i64
+                            project.created_at as i64,
+                            scripts_json,
                         ],
                     )
                     .map_err(to_io_error)?;
@@ -2021,13 +2030,14 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          pinned_at     = excluded.pinned_at,
          archived_at   = excluded.archived_at";
 
-const INSERT_PROJECT: &str = "INSERT INTO projects(id, name, path, position, created_at)
-     VALUES(?1, ?2, ?3, ?4, ?5)
+const INSERT_PROJECT: &str = "INSERT INTO projects(id, name, path, position, created_at, scripts)
+     VALUES(?1, ?2, ?3, ?4, ?5, ?6)
      ON CONFLICT(id) DO UPDATE SET
          name       = excluded.name,
          path       = excluded.path,
          position   = excluded.position,
-         created_at = excluded.created_at";
+         created_at = excluded.created_at,
+         scripts    = excluded.scripts";
 
 /// The transcript, written alongside the list row it belongs to.
 const UPSERT_SESSION_DETAIL: &str = "INSERT INTO session_details(session_id, data)
@@ -2389,28 +2399,48 @@ mod tests {
         let directory = temporary_directory();
         let store = store_in(&directory);
         let mut state = PersistedState::fresh(PathBuf::from("/tmp/some project"));
+        state.projects[0].scripts.push(ProjectScript {
+            id: "dev".into(),
+            name: "Dev Server".into(),
+            command: "npm run dev".into(),
+            icon: Default::default(),
+            run_on_worktree_create: false,
+            async_run: None,
+            preview_url: Some("http://localhost:3000".into()),
+            auto_open_preview: false,
+            keybinding: Some("⌘⇧R".into()),
+        });
         let project = state.projects[0].clone();
         assert!(project.created_at > 0, "a new project is dated");
         store.save(&mut state).unwrap();
 
         // Stored as columns, not as a JSON blob.
         let connection = Connection::open(directory.join("app.db")).unwrap();
-        let (name, path, created_at): (String, String, i64) = connection
+        let (name, path, created_at, scripts_json): (String, String, i64, String) = connection
             .query_row(
-                "SELECT name, path, created_at FROM projects WHERE id = ?1",
+                "SELECT name, path, created_at, scripts FROM projects WHERE id = ?1",
                 params![project.id.to_string()],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
         assert_eq!(name, project.name);
         assert_eq!(path, project.path.to_string_lossy());
         assert_eq!(created_at as u64, project.created_at);
+        assert!(scripts_json.contains("npm run dev"));
+        assert!(scripts_json.contains("⌘⇧R"));
         drop(connection);
 
         let restored = store_in(&directory).load().unwrap();
         assert_eq!(restored.projects[0].name, project.name);
         assert_eq!(restored.projects[0].path, project.path);
         assert_eq!(restored.projects[0].created_at, project.created_at);
+        assert_eq!(restored.projects[0].scripts.len(), 1);
+        assert_eq!(restored.projects[0].scripts[0].name, "Dev Server");
+        assert_eq!(restored.projects[0].scripts[0].command, "npm run dev");
+        assert_eq!(
+            restored.projects[0].scripts[0].keybinding.as_deref(),
+            Some("⌘⇧R")
+        );
 
         fs::remove_dir_all(directory).ok();
     }

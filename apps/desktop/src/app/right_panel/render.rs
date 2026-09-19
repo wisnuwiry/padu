@@ -79,6 +79,9 @@ impl Padu {
                 .into_any_element(),
             Some(RightPanelSurface::Browser(browser_id)) => {
                 let browser = self.ensure_right_panel_browser(browser_id, window, cx);
+                if let Some(url) = self.right_panel_pending_browser_urls.remove(&browser_id) {
+                    browser.update(cx, |b, cx| b.navigate_to_url(url, cx));
+                }
                 if self
                     .right_panel_pending_browser_focus
                     .take_if(|pending| *pending == browser_id)

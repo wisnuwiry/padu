@@ -43,6 +43,13 @@
       "when": 1788952075161,
       "tag": "0005_blushing_young_avengers",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1789786263494,
+      "tag": "0006_mature_metal_master",
+      "breakpoints": true
     }
   ]
 }

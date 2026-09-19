@@ -36,6 +36,7 @@ fn export_to(output: &Path) -> Result<(), Box<dyn std::error::Error>> {
     ClientMessage::export_all(&config)?;
     ServerMessage::export_all(&config)?;
     DaemonReady::export_all(&config)?;
+    padu_protocol::model::Project::export_all(&config)?;
     padu_protocol::persistence::HostProfile::export_all(&config)?;
     strip_trailing_whitespace(output)?;
     fs::write(

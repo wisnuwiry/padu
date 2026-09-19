@@ -4,6 +4,7 @@ pub mod commit;
 pub mod confirm;
 pub mod goal;
 pub mod host;
+pub mod project_action;
 
 use gpui::{AnyElement, App, Context, Window};
 
@@ -15,6 +16,7 @@ pub fn init(cx: &mut App) {
     commit::init(cx);
     goal::init(cx);
     host::init(cx);
+    project_action::init(cx);
 }
 
 impl Padu {
@@ -31,6 +33,9 @@ impl Padu {
             return Some(element);
         }
         if let Some(element) = self.render_commit_dialog(cx) {
+            return Some(element);
+        }
+        if let Some(element) = self.render_project_action_dialog(window, cx) {
             return Some(element);
         }
         if let Some(element) = self.render_goal_dialog(window, cx) {

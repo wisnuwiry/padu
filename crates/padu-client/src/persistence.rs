@@ -537,6 +537,8 @@ pub struct PersistedState {
     pub hosts: Vec<HostProfile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_host_id: Option<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub last_invoked_script: HashMap<Uuid, String>,
     #[serde(default = "default_notifications_enabled")]
     pub notifications_enabled: bool,
     #[serde(default = "default_notification_sound_enabled")]
@@ -610,6 +612,7 @@ impl PersistedState {
             open_in_app: None,
             hosts: Vec::new(),
             active_host_id: None,
+            last_invoked_script: HashMap::new(),
             notifications_enabled: true,
             notification_sound_enabled: true,
             conversation_background: ConversationBackgroundSettings::default(),

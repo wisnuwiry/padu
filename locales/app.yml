@@ -2140,6 +2140,97 @@ right_panel.hide:
 right_panel.close_tab:
   en: Close %{title}
 
+actions.run:
+  en: Run %{name}
+actions.add:
+  en: Add Action
+actions.edit:
+  en: Edit %{name}
+actions.edit_title:
+  en: Edit Project Action
+actions.add_title:
+  en: New Project Action
+actions.description:
+  en: Configure reusable terminal commands and automations for this project.
+actions.name:
+  en: Action Name
+actions.name_placeholder:
+  en: e.g. Dev Server, Test Suite, Typecheck
+actions.name_required:
+  en: Please enter an action name.
+actions.command:
+  en: Terminal Command
+actions.command_placeholder:
+  en: e.g. npm run dev, cargo test, pnpm build
+actions.command_help:
+  en: Executed in your project's root terminal session.
+actions.command_required:
+  en: Please enter a command to execute.
+actions.keybinding:
+  en: Keyboard Shortcut
+actions.keybinding_placeholder:
+  en: e.g. ⌘⇧R or Ctrl+Shift+R
+actions.keybinding_help:
+  en: Global shortcut to trigger this action directly from your keyboard.
+actions.click_to_record:
+  en: Click or press keys to record shortcut...
+actions.record_shortcut:
+  en: Record
+actions.recording_shortcut:
+  en: Press shortcut keys on keyboard...
+actions.clear_shortcut:
+  en: Clear
+actions.cancel_recording:
+  en: Cancel
+actions.done_recording:
+  en: Done
+actions.preview_url:
+  en: Browser Preview URL
+actions.preview_url_placeholder:
+  en: http://localhost:3000
+actions.preview_url_help:
+  en: Navigates the in-app browser tab to this URL when this action is run.
+actions.preview_url_optional:
+  en: Optional
+actions.open_preview:
+  en: Open browser preview
+actions.options_section:
+  en: Execution & Automation
+actions.run_on_worktree_create:
+  en: Run on workspace creation
+actions.run_on_worktree_create_desc:
+  en: Automatically execute when preparing new worktrees or branches.
+actions.wait_for_setup:
+  en: Block until script completes
+actions.wait_for_setup_desc:
+  en: Hold agent turn execution until this setup script finishes.
+actions.auto_open_preview:
+  en: Auto-open browser preview
+actions.auto_open_preview_desc:
+  en: Switch to the browser preview tab immediately when this action runs.
+actions.delete:
+  en: Delete Action
+actions.delete_confirm_title:
+  en: Delete action "%{name}"?
+actions.delete_confirm_description:
+  en: This project action will be permanently removed. This cannot be undone.
+actions.delete_confirm_button:
+  en: Delete Action
+actions.cancel:
+  en: Cancel
+actions.save_changes:
+  en: Save Changes
+actions.save_action:
+  en: Create Action
+actions.from_file:
+  en: Configured in %{file}
+actions.setup_suffix:
+  en: (setup)
+actions.running:
+  en: Running %{name}
+actions.icon_picker_title:
+  en: Choose Icon
+
 open_in.open:
   en: Open project in %{app}
 open_in.choose:

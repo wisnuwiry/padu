@@ -852,6 +852,7 @@ impl Padu {
                 }))
                 .into_any_element()
         });
+        let project_actions = self.render_project_actions_control(cx);
         let open_in = self.render_open_in_control(workspace_path, cx);
         let entries = Rc::new(entries);
         let weak = cx.entity().downgrade();
@@ -879,6 +880,7 @@ impl Padu {
             .flex()
             .items_center()
             .gap(px(8.0))
+            .children(project_actions)
             .children(git_status)
             .children(open_in)
             .child(info)
