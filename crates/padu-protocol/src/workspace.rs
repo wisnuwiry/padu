@@ -121,6 +121,10 @@ pub enum WorkspaceOperation {
         #[ts(type = "string")]
         cwd: PathBuf,
     },
+    InitRepository {
+        #[ts(type = "string")]
+        cwd: PathBuf,
+    },
     CheckoutBranch {
         #[ts(type = "string")]
         cwd: PathBuf,
