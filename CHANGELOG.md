@@ -16,6 +16,23 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.1.8] - 2026-09-19
+
+### Added
+
+- **Project Actions**: Run per-project scripts from the topbar split button, with script editor modal, delete confirmation, persisted scripts/keybindings, and global shortcut dispatch.
+- **Shortcut Recorder**: Record action shortcuts in-dialog with realtime capture, Done/Cancel handling, and cross-platform Windows, Linux, and macOS support.
+- **Empty-Session Quick Actions**: Show reusable action cards in empty sessions on desktop and web.
+
+### Improved
+
+- **Project Action Execution**: Terminal command helper, preview-URL/browser navigation handling, and success toasts for shortcut-triggered actions.
+- **Project Action Dialog**: Pinned 2-column layout, automation card, refreshed copy across locales, and rounded footer.
+
+### Fixed
+
+- **Antigravity on Windows**: Isolate scratch per session for parallel servers, scope runfiles redirection and cache to Windows, harden sign-out, surface job-object init failures, and terminate subprocess trees on exit.
+
 ## [0.1.7] - 2026-09-18
 
 ### Added
