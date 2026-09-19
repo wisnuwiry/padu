@@ -89,49 +89,98 @@ fn child_search_path(program: &Path) -> Option<OsString> {
 /// `agy_acp_server.exe`) do not exit automatically unless bound to a Job Object.
 /// Binding the current process to a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
 /// ensures the Windows kernel terminates the entire process tree when Padu closes.
-pub fn ensure_job_object_for_process_tree() {
+///
+/// Initialization runs once; a failure is stored and returned to every caller
+/// so job-object errors surface at spawn time instead of silently producing
+/// an unbound process tree. On other platforms this is a no-op returning `Ok`.
+pub fn ensure_job_object_for_process_tree() -> io::Result<()> {
+    #[cfg(not(windows))]
+    {
+        Ok(())
+    }
     #[cfg(windows)]
     {
-        use std::sync::Once;
-        use windows_sys::Win32::Foundation::CloseHandle;
-        use windows_sys::Win32::System::JobObjects::{
-            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-            SetInformationJobObject,
-        };
-        use windows_sys::Win32::System::Threading::GetCurrentProcess;
+        job_object_init_once()
+    }
+}
 
-        static INIT: Once = Once::new();
-        INIT.call_once(|| unsafe {
-            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
-            if job.is_null() {
-                return;
-            }
+#[cfg(windows)]
+static JOB_OBJECT_INIT: OnceLock<Result<(), JobObjectInitError>> = OnceLock::new();
 
-            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+#[cfg(windows)]
+#[derive(Debug, Clone)]
+struct JobObjectInitError {
+    kind: io::ErrorKind,
+    message: String,
+}
 
-            let res = SetInformationJobObject(
-                job,
-                JobObjectExtendedLimitInformation,
-                &info as *const _ as *const core::ffi::c_void,
-                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            );
-            if res == 0 {
-                CloseHandle(job);
-                return;
-            }
+#[cfg(windows)]
+impl JobObjectInitError {
+    fn capture(error: io::Error) -> Self {
+        Self {
+            kind: error.kind(),
+            // `to_string` preserves the OS error code in the message, so the
+            // reconstructed error below carries the same detail.
+            message: error.to_string(),
+        }
+    }
 
-            let current_process = GetCurrentProcess();
-            let assign_res = AssignProcessToJobObject(job, current_process);
-            if assign_res == 0 {
-                CloseHandle(job);
-                return;
-            }
-            // Intentionally keep the job handle open for the lifetime of Padu.
-            // When Padu terminates, the OS automatically closes the handle, triggering
-            // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE to terminate all child and grandchild processes.
-        });
+    fn to_io_error(&self) -> io::Error {
+        io::Error::new(self.kind.clone(), self.message.clone())
+    }
+}
+
+#[cfg(windows)]
+fn job_object_init_once() -> io::Result<()> {
+    JOB_OBJECT_INIT
+        .get_or_init(init_job_object_for_process_tree)
+        .as_ref()
+        .map(|_| ())
+        .map_err(JobObjectInitError::to_io_error)
+}
+
+#[cfg(windows)]
+fn init_job_object_for_process_tree() -> Result<(), JobObjectInitError> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+        SetInformationJobObject,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+    unsafe {
+        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        if job.is_null() {
+            return Err(JobObjectInitError::capture(io::Error::last_os_error()));
+        }
+
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+
+        let res = SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const core::ffi::c_void,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        );
+        if res == 0 {
+            let error = io::Error::last_os_error();
+            CloseHandle(job);
+            return Err(JobObjectInitError::capture(error));
+        }
+
+        let current_process = GetCurrentProcess();
+        let assign_res = AssignProcessToJobObject(job, current_process);
+        if assign_res == 0 {
+            let error = io::Error::last_os_error();
+            CloseHandle(job);
+            return Err(JobObjectInitError::capture(error));
+        }
+        // Intentionally keep the job handle open for the lifetime of Padu.
+        // When Padu terminates, the OS automatically closes the handle, triggering
+        // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE to terminate all child and grandchild processes.
+        Ok(())
     }
 }
 
@@ -142,7 +191,10 @@ pub fn ensure_job_object_for_process_tree() {
 /// provider CLI, the daemon — and flashes it on screen. `CREATE_NO_WINDOW`
 /// keeps the child's console hidden while its pipes still work.
 pub fn plain_command(program: impl AsRef<OsStr>) -> Command {
-    ensure_job_object_for_process_tree();
+    // Construction cannot fail without breaking every `Command` call site, so
+    // this is a best-effort early init. The authoritative check happens in
+    // `spawn` (and the Windows ACP setup), which return the stored error.
+    let _ = ensure_job_object_for_process_tree();
     let mut command = Command::new(program);
     detach_console(&mut command);
     command
@@ -166,7 +218,7 @@ fn detach_console(command: &mut Command) {
 /// provider-side async process reapers. The caller's mask is restored as soon
 /// as the child has been created.
 pub fn spawn(command: &mut Command) -> io::Result<Child> {
-    ensure_job_object_for_process_tree();
+    ensure_job_object_for_process_tree()?;
     detach_console(command);
     with_sigchld_unblocked(|| command.spawn())
 }
@@ -197,8 +249,7 @@ pub(crate) fn unblock_sigchld_for_current_thread() -> io::Result<()> {
     }
     #[cfg(windows)]
     {
-        ensure_job_object_for_process_tree();
-        Ok(())
+        ensure_job_object_for_process_tree()
     }
     #[cfg(not(any(target_os = "macos", windows)))]
     {
