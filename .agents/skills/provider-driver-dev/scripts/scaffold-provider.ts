@@ -13,7 +13,6 @@
  *   bun .agents/skills/provider-driver-dev/scripts/scaffold-provider.ts goose "Goose" goose --acp
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "../../../..");

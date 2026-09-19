@@ -162,6 +162,9 @@ bun run --filter @padu/client check
 bun run --filter @padu/client test
 ```
 
+The desktop Rust crate is named `padu` (not `padu-desktop`), so scope
+desktop-only runs as `cargo check -p padu` / `cargo test -p padu`.
+
 When a Rust wire type changes, run `bun run protocol:generate` and commit the
 updated files under `packages/padu-client/src/generated`.
 

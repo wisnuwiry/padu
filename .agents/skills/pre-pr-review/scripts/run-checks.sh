@@ -44,18 +44,24 @@ declare -a CHECK_RESULTS=()
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
+# Output policy: one line per passing check; failing checks print the last
+# 30 lines of captured output so the cause is visible without re-running.
+CHECK_LOG="$(mktemp)"
+trap 'rm -f "$CHECK_LOG"' EXIT
+
 run_check() {
     local name="$1"
     local cmd="$2"
     local start=$SECONDS
     echo -e "${BLUE}▶ ${name}${NC}"
-    if eval "$cmd" > /dev/null 2>&1; then
+    if eval "$cmd" >"$CHECK_LOG" 2>&1; then
         local elapsed=$(( SECONDS - start ))
         echo -e "${GREEN}  ✔ Passed${DIM} (${elapsed}s)${NC}"
         CHECK_RESULTS+=("✔|${name}|${elapsed}s")
     else
         local elapsed=$(( SECONDS - start ))
-        echo -e "${RED}  ✖ Failed${DIM} (${elapsed}s)${NC}"
+        echo -e "${RED}  ✖ Failed${DIM} (${elapsed}s) — error tail:${NC}"
+        tail -30 "$CHECK_LOG" | sed 's/^/    /'
         CHECK_RESULTS+=("✖|${name}|${elapsed}s")
         ERRORS=$((ERRORS + 1))
     fi
@@ -88,8 +94,15 @@ echo -e "${BOLD}${BLUE}╚══════════════════
 
 echo -e "${BOLD}Base ref:${NC} ${BASE_REF}"
 
-# Collect changed files relative to base
-CHANGED_FILES=$(git diff --name-only "${BASE_REF}"...HEAD 2>/dev/null || git diff --name-only HEAD)
+# Collect changed files relative to base (fall back to worktree-vs-HEAD when
+# the base ref does not exist, e.g. fresh clones without origin/main).
+if git rev-parse --verify --quiet "${BASE_REF}" >/dev/null; then
+    DIFF_RANGE="${BASE_REF}...HEAD"
+else
+    DIFF_RANGE="HEAD"
+    echo -e "${YELLOW}  Base '${BASE_REF}' not found — diffing worktree against HEAD${NC}"
+fi
+CHANGED_FILES=$(git diff --name-only ${DIFF_RANGE} 2>/dev/null || git diff --name-only HEAD)
 if [ -z "$CHANGED_FILES" ]; then
     CHANGED_FILES=$(git diff --name-only HEAD)
 fi
@@ -138,27 +151,27 @@ echo -e "${BOLD}━━━ 2. Anti-Pattern Scans ━━━${NC}"
 
 # Debug code in Rust
 run_warn_check "Debug macros in Rust (dbg!, println! in apps/desktop/)" \
-    "git diff ${BASE_REF}...HEAD -- '*.rs' | grep -n '^\+' | grep -E '(dbg!\(|println!\(|eprintln!\()' | grep -v '// keep' | grep -v '#\[cfg(test)\]' | head -20"
+    "git diff ${DIFF_RANGE} -- '*.rs' | grep -n '^\+' | grep -E '(dbg!\(|println!\(|eprintln!\()' | grep -v '// keep' | grep -v '#\[cfg(test)\]' | head -20"
 
 # Debug code in TypeScript
 run_warn_check "Debug code in TS/TSX (console.log, debugger)" \
-    "git diff ${BASE_REF}...HEAD -- '*.ts' '*.tsx' | grep -n '^\+' | grep -E '(console\.(log|debug|warn)\(|debugger;)' | head -20"
+    "git diff ${DIFF_RANGE} -- '*.ts' '*.tsx' | grep -n '^\+' | grep -E '(console\.(log|debug|warn)\(|debugger;)' | head -20"
 
 # Bare .unwrap() in non-test Rust code
 run_warn_check "Bare .unwrap() in changed Rust files (non-test)" \
-    "git diff ${BASE_REF}...HEAD -- '*.rs' | grep -n '^\+' | grep -v '#\[test\]' | grep -v 'mod tests' | grep -v '// safe:' | grep '\.unwrap()' | head -20"
+    "git diff ${DIFF_RANGE} -- '*.rs' | grep -n '^\+' | grep -v '#\[test\]' | grep -v 'mod tests' | grep -v '// safe:' | grep '\.unwrap()' | head -20"
 
 # Secrets & credentials
 run_warn_check "Potential secrets or credentials" \
-    "git diff ${BASE_REF}...HEAD | grep -niE '(api[_-]?key|secret[_-]?key|password|token|credential)\\s*[:=]\\s*[\"'\\'']' | head -10"
+    "git diff ${DIFF_RANGE} | grep -niE '(api[_-]?key|secret[_-]?key|password|token|credential)\\s*[:=]\\s*[\"'\\'']' | head -10"
 
 # Performance anti-patterns: request_animation_frame in streaming paths
 run_warn_check "request_animation_frame usage (verify non-streaming)" \
-    "git diff ${BASE_REF}...HEAD -- '*.rs' | grep -n '^\+' | grep 'request_animation_frame' | head -10"
+    "git diff ${DIFF_RANGE} -- '*.rs' | grep -n '^\+' | grep 'request_animation_frame' | head -10"
 
 # Performance anti-patterns: window.refresh() (expensive, bypasses pane cache)
 run_warn_check "window.refresh() usage (bypasses pane cache)" \
-    "git diff ${BASE_REF}...HEAD -- '*.rs' | grep -n '^\+' | grep 'window\.refresh\|\.refresh()' | head -10"
+    "git diff ${DIFF_RANGE} -- '*.rs' | grep -n '^\+' | grep 'window\.refresh\|\.refresh()' | head -10"
 
 # Leftover temp files
 run_warn_check "Tracked temp/OS files (.DS_Store, .env, *.orig)" \
