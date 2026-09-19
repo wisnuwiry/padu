@@ -12,7 +12,7 @@ base64 = "0.23"
 blake3 = "1.8"
 chrono = "0.4"
 crossbeam-channel = "0.5"
-dirs = "6.0"
+dirs = "7.0"
 # The egoist/zed fork is upstream main plus PR #61945 (layered scene
 # rendering), which lets GPUI composite menus and tooltips above native child
 # views — the browser surface's WKWebView. Drop back to upstream once the PR
