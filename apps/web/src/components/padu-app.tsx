@@ -67,6 +67,7 @@ import {
   displayTitle,
   getNote,
   hydrateSession,
+  initializeWorkspaceRepository,
   loadProviderSessionHistory,
   persistProject,
   removeSession,
@@ -1781,6 +1782,31 @@ function TaskHeader({
     : null
   const isFullscreenConversation = fullscreen && showingConversation
   const hasProject = Boolean(project)
+  // A resolved `null` snapshot means the daemon confirmed the workspace is not
+  // a Git repository; `undefined` only means the query has not answered yet.
+  const canInitializeRepository = branches.isSuccess && branches.data === null
+  const gitUnavailable = branches.isError
+  const [initializingRepository, setInitializingRepository] = useState(false)
+  const { client: daemonClient, config: daemonConfig } = useDaemon()
+  const queryClient = useQueryClient()
+
+  async function initializeRepository() {
+    if (!daemonClient || !daemonConfig || !cwd || initializingRepository) return
+    setInitializingRepository(true)
+    try {
+      await initializeWorkspaceRepository(daemonClient, cwd)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: daemonKeys.workspace(daemonConfig.address, cwd) }),
+        queryClient.invalidateQueries({ queryKey: ['daemon', daemonConfig.address, 'workspace-tree'] }),
+        queryClient.invalidateQueries({ queryKey: ['daemon', daemonConfig.address, 'workspace-diff'] }),
+      ])
+      toast.success(t('environment.initialize_git_success'))
+    } catch (error) {
+      toast.error(t('environment.initialize_git_error', { error: errorMessage(error) }))
+    } finally {
+      setInitializingRepository(false)
+    }
+  }
 
   function navigateStrip(stripIndex: number, key: TabNavigationKey) {
     const next = tabNavigationIndex(tabs.length + 1, stripIndex, key)
@@ -1844,8 +1870,12 @@ function TaskHeader({
               ? { additions: branches.data.additions, deletions: branches.data.deletions }
               : undefined
           }
+          canInitializeRepository={canInitializeRepository}
+          gitUnavailable={gitUnavailable}
+          initializingRepository={initializingRepository}
           sessionId={session.id}
           onCommit={onCommit}
+          onInitializeRepository={initializeRepository}
           onCompareBranch={onCompareBranch}
           onOpenBackgroundWork={onOpenBackgroundWork}
         />
@@ -1920,13 +1950,21 @@ function TaskHeader({
 function EnvironmentPopover({
   sessionId,
   changes,
+  canInitializeRepository,
+  gitUnavailable,
+  initializingRepository,
   onCommit,
+  onInitializeRepository,
   onCompareBranch,
   onOpenBackgroundWork,
 }: {
   sessionId: string
   changes?: { additions: number; deletions: number }
+  canInitializeRepository: boolean
+  gitUnavailable: boolean
+  initializingRepository: boolean
   onCommit: (returnFocus: HTMLElement | null) => void
+  onInitializeRepository: () => void
   onCompareBranch: () => void
   onOpenBackgroundWork: (key: BackgroundWorkKey) => void
 }) {
@@ -2014,39 +2052,65 @@ function EnvironmentPopover({
             <div className="flex h-[30px] items-center px-2 text-[13.5px] text-[var(--text-tertiary)]">
               {t('environment.title')}
             </div>
-            <EnvironmentAction
-              icon="gitCommitHorizontal"
-              label={t('environment.commit_or_push')}
-              onClick={() => {
-                setOpen(false)
-                onCommit(trigger.current)
-              }}
-            />
-            <EnvironmentAction
-              icon="github"
-              label={t('environment.compare_branch')}
-              trailing={
-                <span className="flex shrink-0 items-center gap-2">
-                  {changes && (
-                    <span className="flex items-center gap-1.5 text-[12px] font-medium">
-                      <PaduIcon className="size-3 text-[var(--text-tertiary)]" name="fileDiff" />
-                      {changes.additions > 0 && (
-                        <span className="text-[var(--success)]">+{changes.additions}</span>
-                      )}
-                      {changes.deletions > 0 && (
-                        <span className="text-destructive">-{changes.deletions}</span>
-                      )}
-                    </span>
-                  )}
-                  <PaduIcon className="size-[13px] text-[var(--text-tertiary)]" name="arrowUpRight" />
+            {gitUnavailable ? (
+              <div className="flex min-h-8 w-full items-center gap-2.5 rounded-[8px] px-2 text-[13.5px]">
+                <PaduIcon className="size-3.5 shrink-0 text-[var(--warning)]" name="alert" />
+                <span className="min-w-0 flex-1 truncate text-[var(--text-secondary)]">
+                  {t('environment.git_unavailable')}
                 </span>
-              }
-              onClick={() => {
-                setOpen(false)
-                onCompareBranch()
-                focusTrigger()
-              }}
-            />
+              </div>
+            ) : (
+              <>
+                {canInitializeRepository ? (
+                  <EnvironmentAction
+                    disabled={initializingRepository}
+                    icon="gitBranch"
+                    label={t('environment.initialize_git_repository')}
+                    onClick={() => {
+                      setOpen(false)
+                      onInitializeRepository()
+                      focusTrigger()
+                    }}
+                  />
+                ) : (
+                  <EnvironmentAction
+                    icon="gitCommitHorizontal"
+                    label={t('environment.commit_or_push')}
+                    onClick={() => {
+                      setOpen(false)
+                      onCommit(trigger.current)
+                    }}
+                  />
+                )}
+                {!canInitializeRepository && (
+                  <EnvironmentAction
+                    icon="github"
+                    label={t('environment.compare_branch')}
+                    trailing={
+                      <span className="flex shrink-0 items-center gap-2">
+                        {changes && (
+                          <span className="flex items-center gap-1.5 text-[12px] font-medium">
+                            <PaduIcon className="size-3 text-[var(--text-tertiary)]" name="fileDiff" />
+                            {changes.additions > 0 && (
+                              <span className="text-[var(--success)]">+{changes.additions}</span>
+                            )}
+                            {changes.deletions > 0 && (
+                              <span className="text-destructive">-{changes.deletions}</span>
+                            )}
+                          </span>
+                        )}
+                        <PaduIcon className="size-[13px] text-[var(--text-tertiary)]" name="arrowUpRight" />
+                      </span>
+                    }
+                    onClick={() => {
+                      setOpen(false)
+                      onCompareBranch()
+                      focusTrigger()
+                    }}
+                  />
+                )}
+              </>
+            )}
             {hasBackgroundWork && <div className="mx-2 my-2 h-px bg-border" />}
             {processes.length > 0 && (
               <EnvironmentWorkSection
@@ -2195,16 +2259,22 @@ function EnvironmentAction({
   icon,
   label,
   trailing,
+  disabled,
   onClick,
 }: {
-  icon: 'gitCommitHorizontal' | 'github'
+  icon: 'gitCommitHorizontal' | 'github' | 'gitBranch'
   label: string
   trailing?: ReactNode
+  disabled?: boolean
   onClick: () => void
 }) {
   return (
     <button
-      className="flex min-h-8 w-full items-center gap-2.5 rounded-[8px] px-2 text-[13.5px] outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
+      className={cn(
+        'flex min-h-8 w-full items-center gap-2.5 rounded-[8px] px-2 text-[13.5px] outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring',
+        disabled && 'pointer-events-none opacity-50',
+      )}
+      disabled={disabled}
       role="menuitem"
       type="button"
       onClick={onClick}

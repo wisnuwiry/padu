@@ -556,6 +556,15 @@ export async function checkoutWorkspaceBranch(
   return result.snapshot
 }
 
+export async function initializeWorkspaceRepository(
+  client: PaduClient,
+  cwd: string,
+): Promise<BranchSnapshot> {
+  const result = await workspaceRequest(client, { type: 'initRepository', cwd })
+  if (result.type !== 'branchChanged') throw new Error('The daemon returned an unexpected Git response')
+  return result.snapshot
+}
+
 export async function collectWorkspaceDiff(
   client: PaduClient,
   cwd: string,
