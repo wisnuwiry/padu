@@ -123,8 +123,12 @@ impl Padu {
             if let Some(RightPanelSurface::Browser(browser_id)) =
                 self.right_panel_surfaces.get(index)
             {
-                if let Some(browser) = self.right_panel_browsers.get(browser_id) {
+                let browser_id = *browser_id;
+                if let Some(browser) = self.right_panel_browsers.get(&browser_id) {
                     browser.update(cx, |b, cx| b.navigate_to_url(url, cx));
+                } else {
+                    self.right_panel_pending_browser_urls
+                        .insert(browser_id, url);
                 }
             }
         }
@@ -161,7 +165,8 @@ impl Padu {
                 } else {
                     let cmd = command.clone();
                     cx.spawn(async move |this, cx| {
-                        for _ in 0..20 {
+                        // Poll until ready (up to 3 seconds)
+                        for _ in 0..60 {
                             let ready = this
                                 .update(cx, |this, cx| {
                                     if let Some(term) = this.active_terminal_view() {
@@ -186,7 +191,7 @@ impl Padu {
             }
         }
 
-        self.show_toast(tr!("actions.running", name = &script.name));
+        self.show_success_toast(tr!("actions.running", name = &script.name));
         cx.notify();
     }
 
@@ -268,9 +273,9 @@ impl Padu {
         self.add_project_script(project_id, script, cx);
     }
 
-    pub(crate) fn handle_project_action_global_keystroke(
+    pub(crate) fn handle_project_action_keystroke_event(
         &mut self,
-        event: &gpui::KeyDownEvent,
+        event: &gpui::KeystrokeEvent,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -299,19 +304,13 @@ impl Padu {
             return;
         }
 
-        let Some(formatted) =
-            crate::app::dialogs::project_action::format_keystroke_shortcut(&event.keystroke)
-        else {
-            return;
-        };
-
         let Some(project) = self.active_project().cloned() else {
             return;
         };
 
         for script in &project.scripts {
             if let Some(ref kb) = script.keybinding {
-                if kb.trim().eq_ignore_ascii_case(&formatted) {
+                if crate::ui::matches_keystroke(kb, &event.keystroke) {
                     cx.stop_propagation();
                     self.run_project_script(&script.clone(), cx);
                     return;
@@ -612,6 +611,33 @@ impl Padu {
                                     });
                                 }),
                         )
+                        // Open browser preview button if preview_url is present
+                        .when_some(script.preview_url.clone(), |parent, preview_url| {
+                            let trimmed = preview_url.trim().to_string();
+                            if trimmed.is_empty() {
+                                return parent;
+                            }
+                            let w_prev = weak.clone();
+                            let h_prev = handle.clone();
+                            parent.child(
+                                div()
+                                    .id(ElementId::from(format!("preview-action-{}", script.id)))
+                                    .size(px(22.0))
+                                    .rounded(px(4.0))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .hover(|e| e.bg(theme.surface))
+                                    .tooltip(Tooltip::text(tr!("actions.open_preview")))
+                                    .child(icon("icons/globe.svg", 12.0, theme.text_tertiary))
+                                    .on_click(move |_, window, cx| {
+                                        h_prev.close(window, cx);
+                                        let _ = w_prev.update(cx, |this, cx| {
+                                            this.open_browser_url(trimmed.clone(), cx);
+                                        });
+                                    }),
+                            )
+                        })
                         // Edit button on right
                         .child(
                             div()

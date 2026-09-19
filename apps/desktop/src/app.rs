@@ -1541,6 +1541,8 @@ pub struct Padu {
     /// A Browser surface was just opened; the next right panel render moves
     /// focus into its address bar.
     right_panel_pending_browser_focus: Option<Uuid>,
+    pub(crate) right_panel_pending_browser_urls: HashMap<Uuid, String>,
+    _keystroke_interceptor: Option<gpui::Subscription>,
     /// GPUI is compositing deferred draws on a plane above native views, so
     /// menus render over the live webview and no snapshot occlusion is needed.
     /// When the overlay could not be enabled, the browser falls back to
@@ -3456,6 +3458,8 @@ impl Padu {
                 right_panel_terminals: HashMap::new(),
                 right_panel_browsers: HashMap::new(),
                 right_panel_pending_browser_focus: None,
+                right_panel_pending_browser_urls: HashMap::new(),
+                _keystroke_interceptor: None,
                 scene_overlay_enabled,
                 settings_page: None,
                 workspace_page: WorkspacePage::Conversation,
@@ -3609,6 +3613,11 @@ impl Padu {
             // And the header's "open project in app" targets, so its menu
             // lists installed apps and icons without ever probing on a frame.
             this.detect_open_in_apps(cx);
+            let keystroke_listener =
+                cx.listener(|this, event: &gpui::KeystrokeEvent, window, cx| {
+                    this.handle_project_action_keystroke_event(event, window, cx);
+                });
+            this._keystroke_interceptor = Some(cx.intercept_keystrokes(keystroke_listener));
             if this.onboarding.open {
                 window.focus(&this.onboarding.focus, cx);
             }
