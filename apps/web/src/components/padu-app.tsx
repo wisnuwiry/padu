@@ -14,7 +14,7 @@ import type {
   ProviderSessionSummary,
   ReviewDiffSource,
 } from '@padu/client'
-import { useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -1395,7 +1395,6 @@ export function PaduApp() {
           onCompareBranch={() => openPanel('changes', 'branch')}
           onMenu={showSidebar}
           onOpenBackgroundWork={openBackgroundWork}
-          onOpenChanges={() => openPanel('changes', 'uncommitted')}
           onToggleFullscreen={() => {
             if (!activePanelSessionId) return
             setPanelFullscreenForSession(activePanelSessionId, { expanded: false, conversation: false })
@@ -1743,7 +1742,6 @@ function TaskHeader({
   tabs = [],
   activeTabId,
   onMenu,
-  onOpenChanges,
   onCommit,
   onCompareBranch,
   onOpenBackgroundWork,
@@ -1763,7 +1761,6 @@ function TaskHeader({
   tabs?: PanelTab[]
   activeTabId?: string | null
   onMenu: () => void
-  onOpenChanges: () => void
   onCommit: (returnFocus: HTMLElement | null) => void
   onCompareBranch: () => void
   onOpenBackgroundWork: (key: BackgroundWorkKey) => void
@@ -1840,19 +1837,13 @@ function TaskHeader({
         <div className="flex-1" />
       )}
 
-      {branches.data && (branches.data.additions > 0 || branches.data.deletions > 0) && (
-        <button
-          className="flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[11px] hover:bg-accent cursor-pointer"
-          type="button"
-          onClick={onOpenChanges}
-        >
-          <span className="text-[var(--success)]">+{branches.data.additions}</span>
-          <span className="text-destructive">-{branches.data.deletions}</span>
-        </button>
-      )}
-
       {session && (
         <EnvironmentPopover
+          changes={
+            branches.data && (branches.data.additions > 0 || branches.data.deletions > 0)
+              ? { additions: branches.data.additions, deletions: branches.data.deletions }
+              : undefined
+          }
           sessionId={session.id}
           onCommit={onCommit}
           onCompareBranch={onCompareBranch}
@@ -1928,11 +1919,13 @@ function TaskHeader({
 
 function EnvironmentPopover({
   sessionId,
+  changes,
   onCommit,
   onCompareBranch,
   onOpenBackgroundWork,
 }: {
   sessionId: string
+  changes?: { additions: number; deletions: number }
   onCommit: (returnFocus: HTMLElement | null) => void
   onCompareBranch: () => void
   onOpenBackgroundWork: (key: BackgroundWorkKey) => void
@@ -1981,7 +1974,12 @@ function EnvironmentPopover({
         }}
         title={backgroundWorkCountSummary(items, t)}
       >
-        <PaduIcon name="info" />
+        <span className="relative inline-flex">
+          <PaduIcon name="info" />
+          {changes && (
+            <span className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-[var(--warning)]" />
+          )}
+        </span>
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Positioner
@@ -2027,7 +2025,22 @@ function EnvironmentPopover({
             <EnvironmentAction
               icon="github"
               label={t('environment.compare_branch')}
-              trailing="arrowUpRight"
+              trailing={
+                <span className="flex shrink-0 items-center gap-2">
+                  {changes && (
+                    <span className="flex items-center gap-1.5 text-[12px] font-medium">
+                      <PaduIcon className="size-3 text-[var(--text-tertiary)]" name="fileDiff" />
+                      {changes.additions > 0 && (
+                        <span className="text-[var(--success)]">+{changes.additions}</span>
+                      )}
+                      {changes.deletions > 0 && (
+                        <span className="text-destructive">-{changes.deletions}</span>
+                      )}
+                    </span>
+                  )}
+                  <PaduIcon className="size-[13px] text-[var(--text-tertiary)]" name="arrowUpRight" />
+                </span>
+              }
               onClick={() => {
                 setOpen(false)
                 onCompareBranch()
@@ -2186,7 +2199,7 @@ function EnvironmentAction({
 }: {
   icon: 'gitCommitHorizontal' | 'github'
   label: string
-  trailing?: 'arrowUpRight'
+  trailing?: ReactNode
   onClick: () => void
 }) {
   return (
@@ -2198,7 +2211,7 @@ function EnvironmentAction({
     >
       <PaduIcon className="size-3.5 text-[var(--text-secondary)]" name={icon} />
       <span className="min-w-0 flex-1 truncate text-left">{label}</span>
-      {trailing && <PaduIcon className="size-[13px] text-[var(--text-tertiary)]" name={trailing} />}
+      {trailing}
     </button>
   )
 }
