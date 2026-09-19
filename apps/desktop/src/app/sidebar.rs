@@ -2,6 +2,7 @@ use chrono::{DateTime, Datelike, Days, Local, NaiveDate, Utc};
 use gpui::{KeyBinding, actions};
 
 use super::*;
+use crate::app::right_panel::EmptyStateCardAction;
 
 actions!(padu_sidebar, [CancelSessionRename]);
 
@@ -2828,6 +2829,45 @@ impl Padu {
                                 })),
                         ),
                 )
+                .child(
+                    div()
+                        .mt(px(20.0))
+                        .w_full()
+                        .max_w(px(480.0))
+                        .flex()
+                        .flex_col()
+                        .gap(px(8.0))
+                        .child(
+                            div()
+                                .w_full()
+                                .flex()
+                                .gap(px(8.0))
+                                .child(
+                                    self.render_empty_state_card(
+                                        EmptyStateCardAction::NewProject,
+                                        cx,
+                                    ),
+                                )
+                                .child(
+                                    self.render_empty_state_card(EmptyStateCardAction::Notes, cx),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .w_full()
+                                .flex()
+                                .gap(px(8.0))
+                                .child(
+                                    self.render_empty_state_card(EmptyStateCardAction::Browser, cx),
+                                )
+                                .child(
+                                    self.render_empty_state_card(
+                                        EmptyStateCardAction::Terminal,
+                                        cx,
+                                    ),
+                                ),
+                        ),
+                )
         } else {
             let selected_project_id = self.state.selected_project;
             let projectless_selected = self.selected_project().is_some_and(Project::is_projectless);
@@ -2932,6 +2972,17 @@ impl Padu {
                                 .child(tr_cow!("onboarding.question_mark"))
                         }),
                 )
+                .child(
+                    div()
+                        .mt(px(20.0))
+                        .w_full()
+                        .max_w(px(480.0))
+                        .flex()
+                        .gap(px(8.0))
+                        .child(self.render_empty_state_card(EmptyStateCardAction::Notes, cx))
+                        .child(self.render_empty_state_card(EmptyStateCardAction::Browser, cx))
+                        .child(self.render_empty_state_card(EmptyStateCardAction::Terminal, cx)),
+                )
         };
 
         div()
@@ -2965,6 +3016,7 @@ fn sidebar_session_selected(
 
 #[cfg(test)]
 mod tests {
+    use super::right_panel::EmptyStateCardAction;
     use super::*;
 
     #[test]

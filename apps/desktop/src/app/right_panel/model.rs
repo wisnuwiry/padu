@@ -1,5 +1,28 @@
 use super::*;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum EmptyStateCardAction {
+    NewProject,
+    Notes,
+    Browser,
+    Terminal,
+}
+
+impl EmptyStateCardAction {
+    pub(crate) fn activate(self, padu: &mut Padu, cx: &mut Context<Padu>) {
+        match self {
+            Self::NewProject => padu.add_project(cx),
+            Self::Notes => padu.open_notes(cx),
+            Self::Browser => {
+                padu.open_right_panel_surface(RightPanelSurface::new_browser(), cx);
+            }
+            Self::Terminal => {
+                padu.open_right_panel_surface(RightPanelSurface::new_terminal(), cx);
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum InlineFileOperationKind {
     Rename { source: PathBuf },
