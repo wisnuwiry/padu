@@ -9,12 +9,18 @@ pub mod dialog;
 pub mod menu;
 pub mod motion;
 pub mod scrollbar;
+pub mod shortcut_recorder;
 pub mod slider;
 pub mod text_field;
 pub mod tooltip;
 
 #[allow(unused_imports)]
 pub use dialog::ConfirmVariant;
+#[allow(unused_imports)]
+pub use shortcut_recorder::{
+    KeyDownResult, ShortcutRecorderState, format_keystroke_realtime, format_keystroke_shortcut,
+    matches_keystroke,
+};
 
 use crate::model::{ActivityKind, ProviderKind, SessionStatus};
 use crate::theme::{Theme, sp};
