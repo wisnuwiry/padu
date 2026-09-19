@@ -2140,6 +2140,15 @@ right_panel.hide:
 right_panel.close_tab:
   en: Close %{title}
 
+empty_state.new_project:
+  en: New project
+empty_state.new_project_description:
+  en: Open a folder to start working
+empty_state.notes:
+  en: Notes
+empty_state.notes_description:
+  en: Capture ideas and snippets
+
 actions.run:
   en: Run %{name}
 actions.add:

@@ -1034,6 +1034,10 @@ right_panel.tabs: 右侧面板标签页
 right_panel.add_tab: 添加面板标签页
 right_panel.hide: 隐藏右侧面板
 right_panel.close_tab: 关闭%{title}
+empty_state.new_project: 新建项目
+empty_state.new_project_description: 打开文件夹开始工作
+empty_state.notes: 笔记
+empty_state.notes_description: 记录想法和片段
 actions.run: 运行 %{name}
 actions.add: 添加动作
 actions.edit: 编辑 %{name}
