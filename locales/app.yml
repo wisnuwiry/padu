@@ -1073,6 +1073,12 @@ sidebar.status_waiting:
   en: Waiting
 sidebar.status_failed:
   en: Failed
+sidebar.provider:
+  en: Provider
+sidebar.project:
+  en: Project
+sidebar.host:
+  en: Host
 
 project.new_project:
   en: New project…

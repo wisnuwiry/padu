@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Kbd } from '@/components/ui/kbd'
 import { Tooltip } from '@/components/ui/tooltip'
 import { PanelResizeHandle } from '@/components/panel-resize-handle'
-import { PaduIcon, ProviderIcon } from '@/components/padu-icon'
+import { PaduIcon, ProviderIcon, providerMeta } from '@/components/padu-icon'
 import { DeleteSessionDialog } from '@/components/delete-session-dialog'
 import { useStoredBoolean } from '@/components/settings/shared'
 import { displayHost } from '@/lib/connection'
@@ -463,6 +463,7 @@ export function Sidebar({
                 <div className="relative px-2.5 pb-px">
                   <SessionRow
                     groupedByProject={grouping === 'project'}
+                    hostName={currentHostDisplayName}
                     item={row.item}
                     nowSeconds={nowSeconds}
                     selected={selectedSessionId === row.item.session.id}
@@ -616,6 +617,7 @@ function SessionRow({
   selected,
   groupedByProject,
   showProvider = true,
+  hostName,
   onSelect,
   onRename,
   onRemove,
@@ -628,6 +630,7 @@ function SessionRow({
   selected: boolean
   groupedByProject?: boolean
   showProvider?: boolean
+  hostName?: string
   onSelect: (sessionId: string) => void
   onRename: (sessionId: string, title: string) => Promise<void>
   onRemove: (sessionId: string) => void | Promise<void>
@@ -642,7 +645,15 @@ function SessionRow({
   const rowButton = useRef<HTMLButtonElement>(null)
   const restoreMenuFocus = useRef(false)
   const currentTitle = displayTitle(item.session)
+  const isWorking = item.session.status === 'working' || item.session.status === 'connecting'
   const timeLabel = sessionTimeLabel(item.session, nowSeconds, t)
+  const hoverStatusLabel = isWorking
+    ? (sessionTimeLabel(item.session, nowSeconds, t) ?? t('sidebar.status_working'))
+    : item.session.status === 'waiting'
+    ? t('sidebar.status_waiting')
+    : item.session.status === 'failed'
+    ? t('sidebar.status_failed')
+    : null
 
   async function commitRename() {
     if (skipRenameCommit.current) {
@@ -677,12 +688,31 @@ function SessionRow({
         }
       }}
     >
-      <ContextMenu.Trigger
-        className={cn(
-          'group relative rounded-[7px] hover:bg-sidebar-accent',
-          selected && 'bg-sidebar-accent',
-        )}
+      <Tooltip
+        align="start"
+        className="max-w-[300px] p-2.5 items-start"
+        content={
+          <SessionHoverDetail
+            host={hostName ?? t('host.local')}
+            project={item.projectName}
+            provider={item.session.provider}
+            status={item.session.status}
+            statusLabel={hoverStatusLabel}
+            title={currentTitle}
+          />
+        }
+        delay={300}
+        disabled={renaming || menuOpen}
+        side="right"
+        sideOffset={8}
+        triggerClassName="flex w-full"
       >
+        <ContextMenu.Trigger
+          className={cn(
+            'group relative block w-full rounded-[7px] hover:bg-sidebar-accent',
+            selected && 'bg-sidebar-accent',
+          )}
+        >
         {renaming ? (
           <div
             className={cn(
@@ -774,7 +804,7 @@ function SessionRow({
               </span>
               <SessionStatus status={item.session.status} t={t} />
             </span>
-            {timeLabel && (
+            {!isWorking && timeLabel && (
               <span
                 className={cn(
                   'shrink-0 text-[11px] text-[var(--text-ghost)] group-hover:text-[var(--text-tertiary)]',
@@ -847,6 +877,7 @@ function SessionRow({
           </button>
         )}
       </ContextMenu.Trigger>
+      </Tooltip>
       <ContextMenu.Portal>
         <ContextMenu.Positioner className="z-[100] outline-none">
           <ContextMenu.Popup
@@ -913,6 +944,7 @@ function SessionMetadata({
   nowSeconds: number
   t: Translator
 }) {
+  const isWorking = item.session.status === 'working' || item.session.status === 'connecting'
   const timeLabel = sessionTimeLabel(item.session, nowSeconds, t)
   return (
     <span className="flex w-full min-w-0 items-center gap-[5px] text-[11.5px] leading-[15px] text-[var(--text-tertiary)]">
@@ -920,7 +952,7 @@ function SessionMetadata({
         <PaduIcon className="size-[12px] shrink-0" name="folder" />
       </span>
       <span className="min-w-0 flex-1 truncate">{item.projectName}</span>
-      {timeLabel && (
+      {!isWorking && timeLabel && (
         <span
           className={cn(
             'shrink-0 text-[var(--text-ghost)]',
@@ -931,6 +963,70 @@ function SessionMetadata({
         </span>
       )}
     </span>
+  )
+}
+
+function SessionHoverDetail({
+  title,
+  project,
+  host,
+  provider,
+  status,
+  statusLabel,
+}: {
+  title: string
+  project: string
+  host: string
+  provider: AgentSession['provider']
+  status: AgentSession['status']
+  statusLabel?: string | null
+}) {
+  const { t } = useI18n()
+  const meta = providerMeta(provider)
+
+  return (
+    <div className="flex max-w-[280px] flex-col gap-2 text-left text-[12px] leading-tight">
+      <div className="break-words font-medium text-foreground">
+        {title}
+      </div>
+      <div className="h-px w-full bg-border" />
+      <div className="flex flex-col gap-1.5 text-[11.5px] text-[var(--text-secondary)]">
+        <div className="flex items-center gap-2">
+          <ProviderIcon className="size-3 shrink-0" provider={provider} />
+          <span className="text-[var(--text-tertiary)]">{t('sidebar.provider')}:</span>
+          <span className="truncate font-medium text-foreground">{meta.name}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <PaduIcon className="size-3 shrink-0 text-[var(--text-tertiary)]" name="folder" />
+          <span className="text-[var(--text-tertiary)]">{t('sidebar.project')}:</span>
+          <span className="truncate font-medium text-foreground">{project}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <PaduIcon className="size-3 shrink-0 text-[var(--text-tertiary)]" name="server" />
+          <span className="text-[var(--text-tertiary)]">{t('sidebar.host')}:</span>
+          <span className="truncate font-medium text-foreground">{host}</span>
+        </div>
+        {statusLabel && (
+          <div className="flex items-center gap-2">
+            <SessionStatus status={status} t={t} />
+            <span
+              className={cn(
+                'truncate font-medium',
+                status === 'working' || status === 'connecting'
+                  ? 'text-[var(--success)]'
+                  : status === 'waiting'
+                  ? 'text-[var(--warning)]'
+                  : status === 'failed'
+                  ? 'text-destructive'
+                  : 'text-[var(--text-secondary)]',
+              )}
+            >
+              {statusLabel}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 

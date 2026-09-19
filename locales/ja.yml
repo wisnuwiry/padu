@@ -530,6 +530,9 @@ sidebar.resize: サイドバーの幅を変更
 sidebar.status_working: 作業中
 sidebar.status_waiting: 待機中
 sidebar.status_failed: 失敗
+sidebar.provider: プロバイダー
+sidebar.project: プロジェクト
+sidebar.host: ホスト
 
 project.new_project: 新規プロジェクト…
 project.no_project: プロジェクトを使用しない

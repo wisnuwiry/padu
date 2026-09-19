@@ -518,6 +518,9 @@ sidebar.resize: 调整侧边栏宽度
 sidebar.status_working: 正在工作
 sidebar.status_waiting: 正在等待
 sidebar.status_failed: 失败
+sidebar.provider: 提供商
+sidebar.project: 项目
+sidebar.host: 主机
 project.new_project: 新建项目…
 project.no_project: 不使用项目
 project.no_project_name: 无项目

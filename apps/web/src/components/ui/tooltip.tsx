@@ -13,6 +13,7 @@ export interface TooltipProps {
   children: ReactNode
   disabled?: boolean
   className?: string
+  triggerClassName?: string
 }
 
 export function Tooltip({
@@ -25,6 +26,7 @@ export function Tooltip({
   children,
   disabled = false,
   className,
+  triggerClassName,
 }: TooltipProps) {
   if (!content || disabled) return <>{children}</>
 
@@ -33,7 +35,7 @@ export function Tooltip({
       <TooltipPrimitive.Root>
         <TooltipPrimitive.Trigger
           render={(props) => (
-            <span {...props} className={cn('inline-flex', props.className)}>
+            <span {...props} className={cn('inline-flex', triggerClassName, props.className)}>
               {children}
             </span>
           )}
@@ -51,7 +53,7 @@ export function Tooltip({
                 className,
               )}
             >
-              <span>{content}</span>
+              <div className="min-w-0">{content}</div>
               {shortcut && <Kbd size="xs">{shortcut}</Kbd>}
             </TooltipPrimitive.Popup>
           </TooltipPrimitive.Positioner>
