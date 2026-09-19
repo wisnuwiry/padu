@@ -321,10 +321,8 @@ impl Padu {
         let cancel_focus = dialog.cancel_focus.clone();
         let delete_focus = dialog.delete_focus.clone();
 
-        let is_recording_keybinding = dialog.recorder.is_recording;
         let shortcut_focus = dialog.recorder.focus.clone();
-        let is_shortcut_focused = shortcut_focus.is_focused(window);
-        let is_recording = is_recording_keybinding || is_shortcut_focused;
+        let is_recording = dialog.recorder.is_recording && shortcut_focus.is_focused(window);
         let current_shortcut = keybinding_input.read(cx).content().trim().to_string();
         let live_recording_preview = dialog.recorder.live_preview.clone();
 
@@ -839,6 +837,12 @@ impl Padu {
                                                         .cursor_pointer()
                                                         .hover(|e| e.opacity(0.9))
                                                         .child(tr!("actions.done_recording"))
+                                                        .on_mouse_down(
+                                                            MouseButton::Left,
+                                                            |_, _, cx| {
+                                                                cx.stop_propagation();
+                                                            },
+                                                        )
                                                         .on_click(cx.listener(|this, _, _, cx| {
                                                             cx.stop_propagation();
                                                             if let Some(d) =
@@ -863,6 +867,12 @@ impl Padu {
                                                         .cursor_pointer()
                                                         .hover(|e| e.bg(theme.overlay))
                                                         .child(tr!("actions.cancel_recording"))
+                                                        .on_mouse_down(
+                                                            MouseButton::Left,
+                                                            |_, _, cx| {
+                                                                cx.stop_propagation();
+                                                            },
+                                                        )
                                                         .on_click(cx.listener(|this, _, _, cx| {
                                                             cx.stop_propagation();
                                                             if let Some(d) =
@@ -907,6 +917,12 @@ impl Padu {
                                                                 11.0,
                                                                 theme.text_tertiary,
                                                             ))
+                                                            .on_mouse_down(
+                                                                MouseButton::Left,
+                                                                |_, _, cx| {
+                                                                    cx.stop_propagation();
+                                                                },
+                                                            )
                                                             .on_click(cx.listener(
                                                                 move |this, _, _, cx| {
                                                                     cx.stop_propagation();
@@ -950,7 +966,9 @@ impl Padu {
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         cx.stop_propagation();
                                         if let Some(d) = this.project_action_dialog.as_mut() {
-                                            if !d.recorder.is_recording {
+                                            if !d.recorder.is_recording
+                                                || !d.recorder.focus.is_focused(window)
+                                            {
                                                 let current = Some(
                                                     d.keybinding_input
                                                         .read(cx)
@@ -968,13 +986,29 @@ impl Padu {
                                         }
                                     }))
                                     .on_key_down(cx.listener(
-                                        move |this, event: &KeyDownEvent, _, cx| {
+                                        move |this, event: &KeyDownEvent, window, cx| {
                                             let Some(dialog) = this.project_action_dialog.as_mut()
                                             else {
                                                 return;
                                             };
 
                                             match dialog.recorder.handle_key_down(event) {
+                                                KeyDownResult::StartRecording => {
+                                                    let current = Some(
+                                                        dialog
+                                                            .keybinding_input
+                                                            .read(cx)
+                                                            .content()
+                                                            .trim()
+                                                            .to_string(),
+                                                    )
+                                                    .filter(|s| !s.is_empty());
+                                                    dialog
+                                                        .recorder
+                                                        .start_recording(current, window, cx);
+                                                    cx.stop_propagation();
+                                                    cx.notify();
+                                                }
                                                 KeyDownResult::Committed => {
                                                     cx.stop_propagation();
                                                     cx.notify();

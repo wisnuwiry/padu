@@ -317,6 +317,15 @@ impl ShortcutRecorderState {
     pub fn handle_key_down(&mut self, event: &KeyDownEvent) -> KeyDownResult {
         let key_lower = event.keystroke.key.to_lowercase();
 
+        if !self.is_recording {
+            if matches!(key_lower.as_str(), "enter" | "return" | "space")
+                && !event.keystroke.modifiers.modified()
+            {
+                return KeyDownResult::StartRecording;
+            }
+            return KeyDownResult::Ignored;
+        }
+
         if matches!(key_lower.as_str(), "enter" | "return") {
             self.stop_recording();
             return KeyDownResult::Committed;
@@ -353,6 +362,7 @@ impl ShortcutRecorderState {
 }
 
 pub enum KeyDownResult {
+    StartRecording,
     Committed,
     Cancelled(Option<String>),
     Cleared,
@@ -471,5 +481,109 @@ mod tests {
         } else {
             assert_eq!(formatted, "Shift+Win+B");
         }
+    }
+
+    #[gpui::test]
+    fn test_shortcut_recorder_state_lifecycle(cx: &mut gpui::TestAppContext) {
+        let focus = cx.update(|cx| cx.focus_handle());
+        let mut state = ShortcutRecorderState::new(focus);
+        assert!(!state.is_recording);
+        assert!(state.original_keybinding.is_none());
+        assert!(state.live_preview.is_none());
+
+        // Simulate start recording
+        state.is_recording = true;
+        state.original_keybinding = Some("⌘B".to_string());
+        state.live_preview = Some("⌘".to_string());
+
+        // Stop recording
+        state.stop_recording();
+        assert!(!state.is_recording);
+        assert!(state.original_keybinding.is_none());
+        assert!(state.live_preview.is_none());
+
+        // Simulate cancel recording
+        state.is_recording = true;
+        state.original_keybinding = Some("⌘B".to_string());
+        state.live_preview = Some("⌘".to_string());
+        let restored = state.cancel_recording();
+        assert_eq!(restored, Some("⌘B".to_string()));
+        assert!(!state.is_recording);
+        assert!(state.original_keybinding.is_none());
+        assert!(state.live_preview.is_none());
+    }
+
+    #[gpui::test]
+    fn test_shortcut_recorder_key_down_modes(cx: &mut gpui::TestAppContext) {
+        let focus = cx.update(|cx| cx.focus_handle());
+        let mut state = ShortcutRecorderState::new(focus);
+
+        // When not recording: ordinary keys are ignored
+        let regular_key = gpui::KeyDownEvent {
+            keystroke: Keystroke {
+                modifiers: Modifiers::default(),
+                key: "a".to_string(),
+                key_char: Some("a".into()),
+            },
+            is_held: false,
+            prefer_character_input: false,
+        };
+        assert!(matches!(
+            state.handle_key_down(&regular_key),
+            KeyDownResult::Ignored
+        ));
+
+        // When not recording: space or enter triggers StartRecording
+        let space_key = gpui::KeyDownEvent {
+            keystroke: Keystroke {
+                modifiers: Modifiers::default(),
+                key: "space".to_string(),
+                key_char: Some(" ".into()),
+            },
+            is_held: false,
+            prefer_character_input: false,
+        };
+        assert!(matches!(
+            state.handle_key_down(&space_key),
+            KeyDownResult::StartRecording
+        ));
+
+        // Now enter recording mode
+        state.is_recording = true;
+
+        // Escape cancels
+        let esc_key = gpui::KeyDownEvent {
+            keystroke: Keystroke {
+                modifiers: Modifiers::default(),
+                key: "escape".to_string(),
+                key_char: None,
+            },
+            is_held: false,
+            prefer_character_input: false,
+        };
+        assert!(matches!(
+            state.handle_key_down(&esc_key),
+            KeyDownResult::Cancelled(_)
+        ));
+        assert!(!state.is_recording);
+
+        // Re-enter recording mode
+        state.is_recording = true;
+
+        // Enter commits
+        let enter_key = gpui::KeyDownEvent {
+            keystroke: Keystroke {
+                modifiers: Modifiers::default(),
+                key: "enter".to_string(),
+                key_char: None,
+            },
+            is_held: false,
+            prefer_character_input: false,
+        };
+        assert!(matches!(
+            state.handle_key_down(&enter_key),
+            KeyDownResult::Committed
+        ));
+        assert!(!state.is_recording);
     }
 }
