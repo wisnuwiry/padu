@@ -165,14 +165,88 @@ pub struct SessionMessageMatch {
     pub snippet: String,
 }
 
+/// Discriminator for how a desktop / mobile / web client reaches a Padu
+/// daemon over the network. Drives which desktop transport is spawned and
+/// which fields on `HostProfile` are populated.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum HostKind {
+    /// User-supplied WebSocket URL — the original behaviour, used whenever
+    /// a static reachable address is available.
+    #[default]
+    Direct,
+    /// Tailnet address: MagicDNS name or 100.x.y.z IP plus the daemon's
+    /// bound port. The daemon must be exposed on a non-loopback bind.
+    Tailscale,
+    /// `trycloudflare.com` Quick Tunnel (or future named tunnel) fronting
+    /// the local daemon. The desktop generates a QR code; the mobile app
+    /// scans it to capture `address` + `token`.
+    Cloudflare,
+    /// Reverse SSH relay: the desktop opens `ssh -R` to a jump host and
+    /// reaches the daemon at the remote-bound port.
+    SshRelay,
+}
+
+/// Tailnet-specific knobs. Resolved `address` is still `wss://<host>:<port>`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TailscaleHostConfig {
+    /// MagicDNS name (e.g. `my-mac.tail-abc.ts.net`) or a raw 100.x.y.z IP.
+    pub magic_dns: String,
+    /// Daemon-side port that must be reachable over the Tailnet.
+    pub port: u16,
+}
+
+/// Cloudflare Tunnel knobs. The resolved `address` is the Quick-Tunnel
+/// hostname observed from the `cloudflared` startup banner.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudflareHostConfig {
+    /// Hostname observed from cloudflared (e.g. `xyz.trycloudflare.com`).
+    pub hostname: String,
+    /// `true` for the account-less `cloudflared tunnel --url ...` flow;
+    /// `false` for a future named-tunnel integration.
+    #[serde(default)]
+    pub quick_tunnel: bool,
+}
+
+/// Reverse-SSH-relay knobs. The resolved `address` is
+/// `wss://<ssh.host>:<remote_port>`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SshHostConfig {
+    pub user: String,
+    pub host: String,
+    /// Port the remote sshd binds for the `-R` forward.
+    pub remote_port: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_file: Option<String>,
+    /// Reserved for the future `--bind-tls` daemon flag. v1 always uses
+    /// plain ws:// on the loopback end; cloudflared/SSH terminate TLS.
+    #[serde(default)]
+    pub use_tls: bool,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct HostProfile {
     pub id: String,
     pub name: String,
+    /// Transport discriminator. Defaults to `Direct` when absent (legacy
+    /// `app.json` files written before this field landed).
+    #[serde(default)]
+    pub kind: HostKind,
+    /// Resolved WebSocket URL — the only field `DaemonSupervisor::connect`
+    /// ever reads. Populated from the transport at save time.
     pub address: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tailscale: Option<TailscaleHostConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloudflare: Option<CloudflareHostConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh: Option<SshHostConfig>,
     pub created_at: u64,
     pub updated_at: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -186,5 +260,89 @@ impl HostProfile {
         } else {
             &self.name
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_profile(kind: HostKind) -> HostProfile {
+        HostProfile {
+            id: "host-1".into(),
+            name: "Sample".into(),
+            kind,
+            address: "wss://example.test:34123".into(),
+            token: None,
+            tailscale: None,
+            cloudflare: None,
+            ssh: None,
+            created_at: 1,
+            updated_at: 1,
+            last_connected_at: None,
+        }
+    }
+
+    #[test]
+    fn host_profile_round_trips_with_all_kinds() {
+        for kind in [
+            HostKind::Direct,
+            HostKind::Tailscale,
+            HostKind::Cloudflare,
+            HostKind::SshRelay,
+        ] {
+            let profile = base_profile(kind);
+            let json = serde_json::to_string(&profile).unwrap();
+            let parsed: HostProfile = serde_json::from_str(&json).unwrap();
+            assert_eq!(profile, parsed, "round-trip failed for {kind:?}");
+            assert_eq!(parsed.kind, kind);
+        }
+    }
+
+    #[test]
+    fn host_profile_defaults_to_direct_when_kind_missing() {
+        let json = r#"{"id":"x","name":"y","address":"wss://z","createdAt":0,"updatedAt":0}"#;
+        let parsed: HostProfile = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.kind, HostKind::Direct);
+    }
+
+    #[test]
+    fn host_profile_omits_transport_blocks_when_none() {
+        let profile = base_profile(HostKind::Direct);
+        let json = serde_json::to_string(&profile).unwrap();
+        assert!(!json.contains("\"tailscale\""));
+        assert!(!json.contains("\"cloudflare\""));
+        assert!(!json.contains("\"ssh\""));
+    }
+
+    #[test]
+    fn transport_specific_blocks_round_trip() {
+        let profile = HostProfile {
+            tailscale: Some(TailscaleHostConfig {
+                magic_dns: "mac.tail-abc.ts.net".into(),
+                port: 34123,
+            }),
+            cloudflare: Some(CloudflareHostConfig {
+                hostname: "xyz.trycloudflare.com".into(),
+                quick_tunnel: true,
+            }),
+            ssh: Some(SshHostConfig {
+                user: "alice".into(),
+                host: "jump.example.com".into(),
+                remote_port: 19999,
+                identity_file: Some("/Users/alice/.ssh/id_ed25519".into()),
+                use_tls: false,
+            }),
+            ..base_profile(HostKind::SshRelay)
+        };
+        let json = serde_json::to_string(&profile).unwrap();
+        let parsed: HostProfile = serde_json::from_str(&json).unwrap();
+        assert_eq!(profile, parsed);
+        assert_eq!(
+            parsed.tailscale.as_ref().unwrap().magic_dns,
+            "mac.tail-abc.ts.net"
+        );
+        assert!(parsed.cloudflare.as_ref().unwrap().quick_tunnel);
+        assert_eq!(parsed.ssh.as_ref().unwrap().remote_port, 19999);
     }
 }

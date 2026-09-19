@@ -127,6 +127,7 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
       const newProfile: HostProfile = {
         id,
         name: input.name.trim() || displayHost(normalizedAddress),
+        kind: 'direct',
         address: normalizedAddress,
         token: input.token?.trim() || undefined,
         createdAt: now,

@@ -2,7 +2,7 @@
 
 use gpui::{KeyBinding, actions};
 
-use padu_client::persistence::{HostProfile, normalize_daemon_address};
+use padu_client::persistence::{HostKind, HostProfile, normalize_daemon_address};
 
 use crate::app::*;
 use crate::ui::dialog::dialog_backdrop;
@@ -185,8 +185,12 @@ impl Padu {
             let new_profile = HostProfile {
                 id: Uuid::new_v4().to_string(),
                 name,
+                kind: HostKind::Direct,
                 address: normalized_address,
                 token,
+                tailscale: None,
+                cloudflare: None,
+                ssh: None,
                 created_at: now,
                 updated_at: now,
                 last_connected_at: None,
