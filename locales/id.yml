@@ -517,6 +517,9 @@ sidebar.resize: Ubah ukuran bilah sisi
 sidebar.status_working: Bekerja
 sidebar.status_waiting: Menunggu
 sidebar.status_failed: Gagal
+sidebar.provider: Penyedia
+sidebar.project: Proyek
+sidebar.host: Host
 project.new_project: Proyek baru…
 project.no_project: Jangan bekerja dalam proyek
 project.no_project_name: Tanpa proyek
