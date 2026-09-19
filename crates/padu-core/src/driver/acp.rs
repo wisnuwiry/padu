@@ -61,6 +61,10 @@ pub struct AcpDriver {
     mode: RuntimeMode,
     interaction_mode: InteractionMode,
     computer_use: Option<super::support::HeadlessComputerUseRuntime>,
+    /// Per-session Antigravity scratch dir. Held for the driver's lifetime so
+    /// the active-registry entry (and the directory) survives as long as the
+    /// child process runs; parallel sessions each hold their own.
+    _agy_session_temp: Option<crate::agy_install::AgySessionTempDir>,
 }
 
 /// Per-provider launch details. Everything after process launch is ACP.
@@ -69,7 +73,15 @@ struct AcpLaunch {
     env: Vec<(String, String)>,
 }
 
-fn launch_for(provider: ProviderKind, reasoning_effort: Option<&str>) -> anyhow::Result<AcpLaunch> {
+fn launch_for(
+    provider: ProviderKind,
+    reasoning_effort: Option<&str>,
+    agy_session_temp: Option<&Path>,
+) -> anyhow::Result<AcpLaunch> {
+    // Only the Windows Agy branch consumes the session temp dir; keep the
+    // parameter warning-free on other platforms.
+    #[cfg(not(windows))]
+    let _ = agy_session_temp;
     match provider {
         ProviderKind::Agy => {
             let mut env = Vec::new();
@@ -94,7 +106,11 @@ fn launch_for(provider: ProviderKind, reasoning_effort: Option<&str>) -> anyhow:
                     "RULES_PYTHON_EXTRACT_ROOT".into(),
                     runfiles_cache.to_string_lossy().into_owned(),
                 ));
-                let temp_str = isolated_temp.to_string_lossy().into_owned();
+                // Per-session scratch when the driver holds a guard; the
+                // shared root otherwise (short-lived helpers). The runfiles
+                // cache stays shared either way — no ~900MB duplication.
+                let temp_dir = agy_session_temp.unwrap_or(&isolated_temp);
+                let temp_str = temp_dir.to_string_lossy().into_owned();
                 env.push(("TEMP".into(), temp_str.clone()));
                 env.push(("TMP".into(), temp_str));
             }
@@ -186,7 +202,19 @@ impl AcpDriver {
             None => None,
         };
 
-        let launch = launch_for(provider, reasoning_effort.as_deref())?;
+        let agy_session_temp = (provider == ProviderKind::Agy && cfg!(windows))
+            .then(crate::agy_install::create_agy_session_temp_dir)
+            .transpose()
+            .context("could not create Antigravity session temp directory")?;
+        let launch = launch_for(
+            provider,
+            reasoning_effort.as_deref(),
+            agy_session_temp.as_ref().map(|dir| dir.path()),
+        )?;
+        // Reap crash orphans now that this session is registered as active.
+        if provider == ProviderKind::Agy {
+            crate::agy_install::cleanup_stale_antigravity_temp_dirs();
+        }
         let computer_use = (provider == ProviderKind::Grok && computer_use_enabled)
             .then(|| super::support::HeadlessComputerUseRuntime::start(provider, events.clone()))
             .transpose()?;
@@ -246,6 +274,7 @@ impl AcpDriver {
             mode,
             interaction_mode,
             computer_use,
+            _agy_session_temp: agy_session_temp,
         })
     }
 }
@@ -268,7 +297,8 @@ fn sdk_agent_with_stderr_callback(
     stderr_lines: Arc<Mutex<Vec<String>>>,
     on_stderr: Option<Arc<dyn Fn(&str) + Send + Sync>>,
 ) -> anyhow::Result<AcpAgent> {
-    crate::command_env::ensure_job_object_for_process_tree();
+    crate::command_env::ensure_job_object_for_process_tree()
+        .context("could not bind the ACP process tree to a Windows job object")?;
     let binary = binary
         .to_str()
         .ok_or_else(|| anyhow!("the ACP executable path is not valid UTF-8"))?;
@@ -336,7 +366,7 @@ pub(crate) fn catalog_agent(
     binary: &Path,
     cwd: &Path,
 ) -> anyhow::Result<AcpAgent> {
-    let launch = launch_for(provider, None)?;
+    let launch = launch_for(provider, None, None)?;
     sdk_agent(binary, cwd, launch, None, Arc::new(Mutex::new(Vec::new())))
 }
 
@@ -799,7 +829,7 @@ pub(crate) fn discover_agy_models(binary: &Path) -> Vec<ProviderModel> {
     let Ok(agent) = sdk_agent(
         binary,
         &cwd,
-        launch_for(ProviderKind::Agy, None).unwrap_or(AcpLaunch {
+        launch_for(ProviderKind::Agy, None, None).unwrap_or(AcpLaunch {
             args: Vec::new(),
             env: Vec::new(),
         }),
@@ -1237,7 +1267,7 @@ fn agy_account_from_token_blob(payload: &str) -> Option<String> {
 
 pub fn logout_agy(binary: &Path, cwd: &Path) -> anyhow::Result<()> {
     // 1. Best-effort ACP RPC logout with 45-second timeout (giving Windows cold starts ample time)
-    if let Ok(launch) = launch_for(ProviderKind::Agy, None) {
+    if let Ok(launch) = launch_for(ProviderKind::Agy, None, None) {
         if let Ok(agent) = sdk_agent(binary, cwd, launch, None, Arc::new(Mutex::new(Vec::new()))) {
             let request = Client.builder().name("padu").connect_with(
                 agent,
@@ -1343,7 +1373,7 @@ pub fn authenticate_agy(
     let agent = sdk_agent_with_stderr_callback(
         binary,
         cwd,
-        launch_for(ProviderKind::Agy, None)?,
+        launch_for(ProviderKind::Agy, None, None)?,
         None,
         Arc::new(Mutex::new(Vec::new())),
         Some(auth_callback),
@@ -3197,14 +3227,15 @@ mod tests {
 
     #[test]
     fn launch_for_qoder_starts_its_documented_acp_server() {
-        let launch = launch_for(ProviderKind::Qoder, None).expect("Qoder launch should succeed");
+        let launch =
+            launch_for(ProviderKind::Qoder, None, None).expect("Qoder launch should succeed");
         assert_eq!(launch.args, vec!["--acp"]);
         assert!(launch.env.is_empty());
     }
 
     #[test]
     fn launch_for_agy_sets_appropriate_arguments() {
-        let launch = launch_for(ProviderKind::Agy, None).expect("agy launch should succeed");
+        let launch = launch_for(ProviderKind::Agy, None, None).expect("agy launch should succeed");
         #[cfg(target_os = "linux")]
         assert_eq!(launch.args, vec!["--uid="]);
         #[cfg(not(target_os = "linux"))]
@@ -3662,7 +3693,7 @@ mod tests {
 
     #[test]
     fn fx_launches_its_documented_acp_subcommand() {
-        let launch = launch_for(ProviderKind::Fx, None).unwrap();
+        let launch = launch_for(ProviderKind::Fx, None, None).unwrap();
         assert_eq!(launch.args, ["acp"]);
         assert!(launch.env.is_empty());
     }
@@ -3964,12 +3995,12 @@ mod tests {
 
     #[test]
     fn grok_launch_passes_reasoning_effort_before_stdio() {
-        let launch = launch_for(ProviderKind::Grok, Some("xhigh")).unwrap();
+        let launch = launch_for(ProviderKind::Grok, Some("xhigh"), None).unwrap();
         assert_eq!(
             launch.args,
             ["agent", "--reasoning-effort", "xhigh", "stdio"]
         );
-        let bare = launch_for(ProviderKind::Grok, None).unwrap();
+        let bare = launch_for(ProviderKind::Grok, None, None).unwrap();
         assert_eq!(bare.args, ["agent", "stdio"]);
     }
 

@@ -1,8 +1,11 @@
 //! Installation of Google's official Antigravity ACP server distribution.
 
+use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 use crate::download_manager::{DownloadCancellation, DownloadManager, DownloadRequest};
 use anyhow::{Context, bail};
@@ -59,70 +62,195 @@ pub fn isolated_temp_dir() -> PathBuf {
     base_dir().join("tmp")
 }
 
+/// Marker file proving `isolated_temp_dir()` is Padu-owned.
+///
+/// The isolated temp directory holds arbitrary scratch files created by
+/// `agy_acp_server` (via `TEMP`/`TMP`/`TMPDIR` overrides), so per-child
+/// markers are not feasible. A single marker in the container proves Padu
+/// created it; cleanup refuses to delete anything when the marker is absent.
+const ISOLATED_TEMP_OWNERSHIP_MARKER: &str = ".padu-owned";
+
 /// Ensure that both the persistent runfiles cache and the isolated temp directories exist.
 pub fn ensure_runtime_dirs() -> anyhow::Result<(PathBuf, PathBuf)> {
     let runfiles = runfiles_cache_dir();
     let temp = isolated_temp_dir();
     fs::create_dir_all(&runfiles).context("could not create Antigravity runfiles directory")?;
     fs::create_dir_all(&temp).context("could not create Antigravity isolated temp directory")?;
+    // Best-effort: if the marker cannot be written, cleanup fail-closes
+    // (skips) rather than deleting from an unverified directory.
+    let _ = fs::write(
+        temp.join(ISOLATED_TEMP_OWNERSHIP_MARKER),
+        "padu-antigravity-tmp",
+    );
     Ok((runfiles, temp))
 }
 
-/// Scavenge and remove stale Antigravity temporary directories left behind
+/// Scavenge and remove stale Antigravity temporary files left behind
 /// by aborted sessions, crashes, or previous unpackings.
 ///
-/// Cleans:
-/// 1. Unlocked folders in `isolated_temp_dir()` (~/.padu/providers/antigravity/tmp).
-/// 2. Orphaned Antigravity runfiles directories in the system temp directory
-///    (`std::env::temp_dir()`, e.g. `C:\Users\<user>\AppData\Local\Temp`),
-///    identified by Bazel runfiles markers (`Bazel.runfiles_*` or folders containing
-///    both `google3` and `pywin32_system32` / `grpc`).
+/// Layout under `isolated_temp_dir()` (`~/.padu/providers/antigravity/tmp`):
+/// - `agy-<uuid>/` — one per live `agy_acp_server` session, each holding its
+///   own `TEMP`/`TMP` scratch. The ~900MB Bazel dependency tree is *not*
+///   duplicated here; it stays in the shared [`runfiles_cache_dir`] via
+///   `RULES_PYTHON_EXTRACT_ROOT`.
+/// - Loose files at the root — legacy of the previous shared-`TEMP` mode and
+///   of short-lived helpers (model discovery, auth probes, sign-out).
 ///
-/// Directories locked by active processes (or DLLs in use) fail deletion safely
-/// and are skipped.
+/// Only runs when the container is provably Padu-owned (under [`base_dir`]
+/// with the ownership marker from [`ensure_runtime_dirs`]). Session subdirs
+/// still referenced by live drivers (see [`AgySessionTempDir`]) are excluded,
+/// so parallel sessions never wipe each other. Loose legacy files are removed
+/// only when older than [`STALE_LOOSE_FILE_AGE`], protecting short-lived
+/// helpers that may still be running concurrently.
+///
+/// Deliberately does not scan `std::env::temp_dir()`: prefix heuristics
+/// (`Bazel.runfiles_*`, `_bazel_*`) and module markers (`google3` + `grpc`)
+/// also match temp directories owned by other Bazel-based tools, so deleting
+/// them risks destroying another application's data.
 pub fn cleanup_stale_antigravity_temp_dirs() {
-    // 1. Clean Padu's isolated temp directory
     let isolated = isolated_temp_dir();
-    if isolated.exists() {
-        if let Ok(entries) = fs::read_dir(&isolated) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    let _ = fs::remove_dir_all(&path);
-                } else {
-                    let _ = fs::remove_file(&path);
-                }
-            }
-        }
+    if !is_owned_isolated_temp_dir(&isolated) {
+        return;
     }
-
-    // 2. Scan std::env::temp_dir() for orphaned Antigravity/Bazel runfiles
-    let sys_temp = std::env::temp_dir();
-    if let Ok(entries) = fs::read_dir(&sys_temp) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
+    let active = active_session_temp_dirs_snapshot();
+    let Ok(entries) = fs::read_dir(&isolated) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.file_name().and_then(|n| n.to_str()) == Some(ISOLATED_TEMP_OWNERSHIP_MARKER) {
+            continue;
+        }
+        if path.is_dir() {
+            // Session subdir: live while its driver holds the guard. A crashed
+            // daemon loses the in-memory registry, so after a restart every
+            // leftover subdir is correctly treated as stale.
+            if active.contains(&path) || !is_owned_session_subdir(&path) {
                 continue;
             }
-            let file_name = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or_default();
-
-            // Bazel runfiles extracted by Hermetic Python or old Antigravity folders
-            let is_bazel_runfiles = file_name.starts_with("Bazel.runfiles_")
-                || file_name.starts_with("_bazel_")
-                || file_name.starts_with("antigravity_tmp_");
-
-            // Look for distinctive Python module markers extracted by agy_acp_server
-            let is_agy_extracted_bundle = path.join("google3").exists()
-                && (path.join("pywin32_system32").exists() || path.join("grpc").exists());
-
-            if is_bazel_runfiles || is_agy_extracted_bundle {
-                let _ = fs::remove_dir_all(&path);
-            }
+            let _ = fs::remove_dir_all(&path);
+        } else if is_stale_loose_file(&path) {
+            let _ = fs::remove_file(&path);
         }
     }
+}
+
+/// Loose root files must be untouched while fresh so a concurrent short-lived
+/// helper (discovery, auth probe, sign-out) never loses its scratch.
+const STALE_LOOSE_FILE_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+
+fn is_stale_loose_file(path: &Path) -> bool {
+    is_stale_loose_file_at(path, std::time::SystemTime::now())
+}
+
+fn is_stale_loose_file_at(path: &Path, now: std::time::SystemTime) -> bool {
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    let Ok(modified) = metadata.modified() else {
+        return false;
+    };
+    now.duration_since(modified)
+        .is_ok_and(|age| age >= STALE_LOOSE_FILE_AGE)
+}
+
+fn is_owned_isolated_temp_dir(dir: &Path) -> bool {
+    dir.starts_with(base_dir()) && dir.join(ISOLATED_TEMP_OWNERSHIP_MARKER).is_file()
+}
+
+fn is_owned_session_subdir(dir: &Path) -> bool {
+    dir.starts_with(isolated_temp_dir()) && dir.join(ISOLATED_TEMP_OWNERSHIP_MARKER).is_file()
+}
+
+/// A per-session Antigravity scratch directory (`tmp/agy-<uuid>/`).
+///
+/// Parallel `agy_acp_server` processes each get their own `TEMP`/`TMP` root
+/// while sharing the ~900MB [`runfiles_cache_dir`], so sessions never clash
+/// and Windows never pays for duplicate extractions. The path is registered
+/// in a process-wide active set for as long as the guard lives; [`cleanup_stale_antigravity_temp_dirs`]
+/// skips registered paths. Dropping the guard unregisters and best-effort
+/// removes the directory (the driver stops its process tree first, so removal
+/// is safe); crash orphans lose their registration and are reaped by the next
+/// startup or sign-out cleanup.
+pub struct AgySessionTempDir {
+    path: PathBuf,
+}
+
+impl AgySessionTempDir {
+    /// Scratch root to hand to the child via `TEMP`/`TMP`/`TMPDIR`.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for AgySessionTempDir {
+    fn drop(&mut self) {
+        unregister_session_temp_dir(&self.path);
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+static ACTIVE_AGY_SESSION_TEMP_DIRS: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+
+fn active_session_temp_dirs() -> &'static Mutex<HashSet<PathBuf>> {
+    ACTIVE_AGY_SESSION_TEMP_DIRS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn active_session_temp_dirs_snapshot() -> HashSet<PathBuf> {
+    active_session_temp_dirs()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+}
+
+fn register_session_temp_dir(path: &Path) {
+    if let Ok(mut active) = active_session_temp_dirs().lock() {
+        active.insert(path.to_path_buf());
+    }
+}
+
+fn unregister_session_temp_dir(path: &Path) {
+    if let Ok(mut active) = active_session_temp_dirs().lock() {
+        active.remove(path);
+    }
+}
+
+/// Create a fresh per-session scratch directory and register it as active.
+///
+/// Ensures the parent container (and its ownership marker) exists first. The
+/// caller must keep the guard alive for as long as the child process runs —
+/// for a long-lived driver that means storing it on the driver struct.
+pub fn create_agy_session_temp_dir() -> std::io::Result<AgySessionTempDir> {
+    let isolated = isolated_temp_dir();
+    fs::create_dir_all(&isolated)?;
+    // Best-effort parent marker; cleanup fail-closes (skips) without it.
+    let _ = fs::write(
+        isolated.join(ISOLATED_TEMP_OWNERSHIP_MARKER),
+        "padu-antigravity-tmp",
+    );
+    for _ in 0..16 {
+        let path = isolated.join(format!("agy-{}", uuid::Uuid::new_v4()));
+        // `create_dir` (not `create_dir_all`) so a UUID collision fails loudly
+        // instead of reusing another session's directory.
+        match fs::create_dir(&path) {
+            Ok(()) => {
+                // Per-subdir marker proves Padu created this entry; cleanup
+                // refuses to delete subdirs without it.
+                let _ = fs::write(
+                    path.join(ISOLATED_TEMP_OWNERSHIP_MARKER),
+                    "padu-agy-session",
+                );
+                register_session_temp_dir(&path);
+                return Ok(AgySessionTempDir { path });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "could not allocate a unique Antigravity session temp directory",
+    ))
 }
 
 pub fn remove() -> anyhow::Result<()> {
@@ -594,14 +722,52 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_stale_antigravity_temp_dirs_removes_orphans() {
+    fn session_temp_guard_registers_and_cleans_up_on_drop() {
+        let guard = create_agy_session_temp_dir().expect("create session temp dir");
+        assert!(guard.path().is_dir());
+        assert!(guard.path().join(ISOLATED_TEMP_OWNERSHIP_MARKER).is_file());
+        assert!(
+            active_session_temp_dirs_snapshot().contains(guard.path()),
+            "live session temp dir must be registered as active"
+        );
+        let path = guard.path().to_path_buf();
+        drop(guard);
+        assert!(!active_session_temp_dirs_snapshot().contains(&path));
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn stale_loose_file_age_gate_keeps_fresh_files() {
         let temp_dir =
+            std::env::temp_dir().join(format!("agy-test-stale-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let fresh = temp_dir.join("fresh.tmp");
+        fs::write(&fresh, b"fresh").unwrap();
+        assert!(!is_stale_loose_file_at(
+            &fresh,
+            std::time::SystemTime::now()
+        ));
+        let future = std::time::SystemTime::now() + STALE_LOOSE_FILE_AGE + Duration::from_secs(1);
+        assert!(is_stale_loose_file_at(&fresh, future));
+        assert!(!is_stale_loose_file_at(
+            &temp_dir.join("missing.tmp"),
+            future
+        ));
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn system_temp_bazel_dirs_are_no_longer_touched() {
+        // Regression guard: the cleanup must not scan std::env::temp_dir().
+        // A foreign Bazel directory must survive the cleanup call.
+        let foreign =
             std::env::temp_dir().join(format!("Bazel.runfiles_test_{}", uuid::Uuid::new_v4()));
-        let _ = fs::create_dir_all(&temp_dir);
-        assert!(temp_dir.exists());
+        let _ = fs::create_dir_all(&foreign);
+        assert!(foreign.exists());
 
         cleanup_stale_antigravity_temp_dirs();
 
-        assert!(!temp_dir.exists());
+        assert!(foreign.exists());
+        let _ = fs::remove_dir_all(&foreign);
     }
 }
