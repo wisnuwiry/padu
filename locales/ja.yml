@@ -1098,6 +1098,7 @@ actions.preview_url: ブラウザプレビュー URL
 actions.preview_url_placeholder: http://localhost:3000
 actions.preview_url_help: このアクションの実行時にアプリ内ブラウザタブをこのURLに移動します。
 actions.preview_url_optional: 任意
+actions.open_preview: ブラウザプレビューを開く
 actions.options_section: 実行と自動化
 actions.run_on_worktree_create: ワークスペース作成時に実行
 actions.run_on_worktree_create_desc: 新しいワークツリーまたはブランチを準備する際に自動実行します。

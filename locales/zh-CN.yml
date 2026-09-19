@@ -1060,6 +1060,7 @@ actions.preview_url: 浏览器预览网址
 actions.preview_url_placeholder: http://localhost:3000
 actions.preview_url_help: 运行此动作时自动在内置浏览器中导航至该网址。
 actions.preview_url_optional: 可选
+actions.open_preview: 打开浏览器预览
 actions.options_section: 执行与自动化
 actions.run_on_worktree_create: 创建工作空间时自动运行
 actions.run_on_worktree_create_desc: 在准备新工作树或分支时自动执行此脚本。

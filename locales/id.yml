@@ -1059,6 +1059,7 @@ actions.preview_url: URL Pratinjau Peramban
 actions.preview_url_placeholder: http://localhost:3000
 actions.preview_url_help: Secara otomatis mengarahkan tab peramban bawaan ke URL ini saat aksi dijalankan.
 actions.preview_url_optional: Opsional
+actions.open_preview: Buka pratinjau peramban
 actions.options_section: Eksekusi & Otomasi
 actions.run_on_worktree_create: Jalankan saat pembuatan ruang kerja
 actions.run_on_worktree_create_desc: Eksekusi otomatis saat menyiapkan worktree atau cabang baru.

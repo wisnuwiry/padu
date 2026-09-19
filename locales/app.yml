@@ -2192,6 +2192,8 @@ actions.preview_url_help:
   en: Navigates the in-app browser tab to this URL when this action is run.
 actions.preview_url_optional:
   en: Optional
+actions.open_preview:
+  en: Open browser preview
 actions.options_section:
   en: Execution & Automation
 actions.run_on_worktree_create:

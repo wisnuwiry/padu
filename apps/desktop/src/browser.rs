@@ -1177,10 +1177,7 @@ pub struct BrowserView {
     host: Option<Rc<WebviewHost>>,
     /// Why the webview could not be created, shown in place of the page.
     host_error: Option<String>,
-    /// Somewhere to navigate to as soon as the host lands. WebView2's
-    /// controller is created asynchronously, so the surface can be asked to
-    /// open a URL before it has anything to open it in.
-    #[cfg(target_os = "windows")]
+    /// Somewhere to navigate to as soon as the host lands.
     pending_url: Option<String>,
     /// A navigation has been requested at least once: the surface shows the
     /// page area instead of the start hint, and the native view may be shown.
@@ -1291,7 +1288,6 @@ impl BrowserView {
             address,
             host: None,
             host_error: None,
-            #[cfg(target_os = "windows")]
             pending_url: None,
             navigation_requested: false,
             current_url: None,
@@ -1409,7 +1405,10 @@ impl BrowserView {
 
         match built {
             Ok(webview) => {
-                self.host = Some(Rc::new(WebviewHost::new(webview, on_responder_change)))
+                self.host = Some(Rc::new(WebviewHost::new(webview, on_responder_change)));
+                if let Some(url) = self.pending_url.take() {
+                    self.navigate_to_url(url, cx);
+                }
             }
             Err(error) => self.host_error = Some(error.to_string()),
         }
@@ -1647,10 +1646,7 @@ impl BrowserView {
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     pub fn navigate_to_url(&mut self, url: String, cx: &mut Context<Self>) {
         let Some(host) = &self.host else {
-            #[cfg(target_os = "windows")]
-            {
-                self.pending_url = Some(url);
-            }
+            self.pending_url = Some(url);
             return;
         };
         if host.webview.load_url(&url).is_err() {
@@ -1804,10 +1800,7 @@ impl BrowserView {
         self.snapshot = None;
         self.snapshot_pending = false;
         self.loading = false;
-        #[cfg(target_os = "windows")]
-        {
-            self.pending_url = None;
-        }
+        self.pending_url = None;
         if let Some(host) = self.host.take() {
             if host.native_focus_within() {
                 self.reclaim_native_keyboard(cx);
