@@ -34,7 +34,7 @@ import { FilesPanel, type FileBuffer } from './files-panel'
 import { BackgroundWorkPanel, sameBackgroundWorkKey } from './background-work-panel'
 import { TerminalPanel } from './terminal-panel'
 import { clamp, panelContentId, panelTabId, useViewportWidth } from './shared'
-export { PanelTabButton, PanelTabStrip } from './panel-tab-strip'
+export { PanelCard, PanelTabButton, PanelTabStrip } from './panel-tab-strip'
 export { panelContentId, panelTabId } from './shared'
 export type { PanelTabStripProps } from './panel-tab-strip'
 

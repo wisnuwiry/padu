@@ -280,7 +280,7 @@ export function PanelChooser({
   )
 }
 
-function PanelCard({
+export function PanelCard({
   icon,
   label,
   description,

@@ -1071,6 +1071,10 @@ right_panel.tabs: 右パネルのタブ
 right_panel.add_tab: パネルタブを追加
 right_panel.hide: 右パネルを隠す
 right_panel.close_tab: "%{title} を閉じる"
+empty_state.new_project: 新規プロジェクト
+empty_state.new_project_description: フォルダを開いて作業を開始します
+empty_state.notes: ノート
+empty_state.notes_description: アイデアやスニペットを記録します
 
 actions.run: "%{name} を実行"
 actions.add: アクションを追加

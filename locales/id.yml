@@ -1033,6 +1033,10 @@ right_panel.tabs: Tab panel kanan
 right_panel.add_tab: Tambah tab panel
 right_panel.hide: Sembunyikan panel kanan
 right_panel.close_tab: Tutup %{title}
+empty_state.new_project: Proyek baru
+empty_state.new_project_description: Buka folder untuk mulai bekerja
+empty_state.notes: Catatan
+empty_state.notes_description: Catat ide dan cuplikan
 actions.run: Jalankan %{name}
 actions.add: Tambah Aksi
 actions.edit: Edit %{name}

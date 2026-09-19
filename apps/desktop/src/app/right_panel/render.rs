@@ -771,21 +771,25 @@ impl Padu {
             )
     }
 
-    pub(crate) fn render_right_panel_card(
+    /// Shared card chrome for the right-panel chooser and the empty-session
+    /// quick actions. Keyboard reachable via tab stop plus enter/space, with
+    /// the same hover/active treatment in both places.
+    pub(crate) fn render_action_card(
         &self,
-        surface: RightPanelSurface,
+        id: SharedString,
+        icon_path: &'static str,
+        label: String,
         description: String,
+        shortcut: Option<&'static str>,
+        on_activate: impl Fn(&mut Self, &mut Context<Self>) + Clone + 'static,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let theme = Theme::current(cx);
-        let icon_path = surface.icon_path();
-        let label = surface.label();
-        let shortcut = surface.shortcut();
+        let focus = self.transcript_control_focus(id.clone().to_string(), cx);
         div()
-            .id(SharedString::from(format!(
-                "right-panel-card-{}",
-                label.to_lowercase()
-            )))
+            .id(id)
+            .track_focus(&focus)
+            .tab_index(0)
             .h(px(114.0))
             .flex_1()
             .min_w_0()
@@ -798,6 +802,7 @@ impl Padu {
             .flex_col()
             .items_start()
             .cursor_pointer()
+            .focus_visible(|style| style.border_1().border_color(theme.accent))
             .hover(|element| element.bg(theme.raised).border_color(theme.text_ghost))
             .active(|element| element.bg(theme.overlay_strong))
             .child(
@@ -830,9 +835,92 @@ impl Padu {
                     .text_overflow(gpui::TextOverflow::Truncate("...".into()))
                     .child(description),
             )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.open_right_panel_surface(surface.clone(), cx);
+            .on_click(cx.listener({
+                let on_activate = on_activate.clone();
+                move |this, _, _, cx| {
+                    on_activate(this, cx);
+                }
             }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    cx.stop_propagation();
+                    on_activate(this, cx);
+                }
+            }))
+    }
+
+    pub(crate) fn render_right_panel_card(
+        &self,
+        surface: RightPanelSurface,
+        description: String,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let icon_path = surface.icon_path();
+        let label = surface.label();
+        let shortcut = surface.shortcut();
+        let card_id = SharedString::from(format!("right-panel-card-{}", label.to_lowercase()));
+        self.render_action_card(
+            card_id,
+            icon_path,
+            label,
+            description,
+            shortcut,
+            move |this, cx| {
+                this.open_right_panel_surface(surface.clone(), cx);
+            },
+            cx,
+        )
+    }
+
+    /// Quick-action cards shown in the empty session view. The project-less
+    /// opening shows New Project plus Notes/Browser/Terminal; a new session
+    /// inside a project shows the same row without New Project.
+    pub(crate) fn render_empty_state_card(
+        &self,
+        action: EmptyStateCardAction,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let (id, icon_path, label, description, shortcut) = match action {
+            EmptyStateCardAction::NewProject => (
+                SharedString::from("empty-state-card-new-project"),
+                "icons/folder-new.svg",
+                tr!("empty_state.new_project"),
+                tr!("empty_state.new_project_description"),
+                None,
+            ),
+            EmptyStateCardAction::Notes => (
+                SharedString::from("empty-state-card-notes"),
+                "icons/note.svg",
+                tr!("empty_state.notes"),
+                tr!("empty_state.notes_description"),
+                Some(crate::platform::primary_shortcut("⇧⌘M", "Ctrl+Shift+M")),
+            ),
+            EmptyStateCardAction::Browser => (
+                SharedString::from("empty-state-card-browser"),
+                "icons/globe.svg",
+                tr!("right_panel.browser"),
+                tr!("right_panel.browser_description"),
+                RightPanelSurface::new_browser().shortcut(),
+            ),
+            EmptyStateCardAction::Terminal => (
+                SharedString::from("empty-state-card-terminal"),
+                "icons/terminal.svg",
+                tr!("right_panel.terminal"),
+                tr!("right_panel.terminal_description"),
+                RightPanelSurface::new_terminal().shortcut(),
+            ),
+        };
+        self.render_action_card(
+            id,
+            icon_path,
+            label,
+            description,
+            shortcut,
+            move |this, cx| {
+                action.activate(this, cx);
+            },
+            cx,
+        )
     }
 
     pub(crate) fn render_right_panel_empty_message(

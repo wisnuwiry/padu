@@ -1,6 +1,7 @@
 // Public compatibility facade. Keep importing `@/components/right-panel` stable while
 // the implementation is organized by panel concern under `right-panel/`.
 export {
+  PanelCard,
   PanelTabButton,
   PanelTabStrip,
   RightPanel,

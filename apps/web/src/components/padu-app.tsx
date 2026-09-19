@@ -30,6 +30,7 @@ import { DaemonFilePicker } from '@/components/daemon-file-picker'
 import { OnboardingModal } from '@/components/onboarding-modal'
 import {
   RightPanel,
+  PanelCard,
   PanelTabStrip,
   panelTabId,
   type PanelSurface,
@@ -690,6 +691,11 @@ export function PaduApp() {
       ? document.activeElement
       : null
     setProjectPickerOpen(true)
+  }
+
+  function openNotesPage() {
+    window.sessionStorage.setItem('padu.note-target-session', current?.id ?? 'new')
+    void navigate({ to: '/notes', search: { q: undefined, noteId: undefined, projectId: activeProject?.id } })
   }
 
   function openCommandPalette(view: CommandPaletteView = 'commands', query = '') {
@@ -1413,6 +1419,8 @@ export function PaduApp() {
                 onAddProject={openProjectPicker}
                 onProject={(project) => chooseProject(project)}
                 onProjectless={() => void createProjectlessTask()}
+                onOpenNotes={openNotesPage}
+                onOpenTerminal={() => openPanel('terminal')}
               />
               <Composer
                 draft
@@ -1484,6 +1492,8 @@ export function PaduApp() {
               projectlessPending={projectlessPending}
               onAddProject={openProjectPicker}
               onProjectless={() => void createProjectlessTask()}
+              onOpenNotes={openNotesPage}
+              onOpenTerminal={() => openPanel('terminal')}
             />
           )
         ) : current ? (
@@ -1575,6 +1585,8 @@ export function PaduApp() {
             projectlessPending={projectlessPending}
             onAddProject={openProjectPicker}
             onProjectless={() => void createProjectlessTask()}
+            onOpenNotes={openNotesPage}
+            onOpenTerminal={() => openPanel('terminal')}
           />
         )}
 
@@ -2197,14 +2209,20 @@ function NewTaskCanvas({
   onProject,
   onAddProject,
   onProjectless,
+  onOpenNotes,
+  onOpenTerminal,
 }: {
   project: Project
   projects: Project[]
   onProject: (project: Project) => void
   onAddProject: () => void
   onProjectless: () => void
+  onOpenNotes: () => void
+  onOpenTerminal: () => void
 }) {
   const { t } = useI18n()
+  const notesShortcut = usePrimaryShortcut('⌘⇧M', 'Ctrl+Shift+M')
+  const terminalShortcut = usePrimaryShortcut('⌘T', 'Ctrl+T')
   const projectless = isProjectlessProject(project)
   return (
     <div className="relative flex min-h-0 flex-1 items-center justify-center px-8 pb-12">
@@ -2243,6 +2261,25 @@ function NewTaskCanvas({
             </>
           )}
         </div>
+        {/* Desktop parity (sidebar.rs empty state): quick-action cards reusing
+            the right-panel PanelCard. The Browser card is desktop-only
+            (native webview), so web shows Notes + Terminal here. */}
+        <div className="mx-auto mt-5 grid w-full max-w-[420px] grid-cols-2 gap-2 text-left">
+          <PanelCard
+            icon={<PaduIcon className="size-[18px]" name="note" />}
+            label={t('empty_state.notes')}
+            description={t('empty_state.notes_description')}
+            shortcut={notesShortcut}
+            onClick={onOpenNotes}
+          />
+          <PanelCard
+            icon={<PaduIcon className="size-[18px]" name="terminal" />}
+            label={t('right_panel.terminal')}
+            description={t('right_panel.terminal_description')}
+            shortcut={terminalShortcut}
+            onClick={onOpenTerminal}
+          />
+        </div>
       </div>
     </div>
   )
@@ -2252,12 +2289,18 @@ function NoProjectState({
   projectlessPending,
   onAddProject,
   onProjectless,
+  onOpenNotes,
+  onOpenTerminal,
 }: {
   projectlessPending: boolean
   onAddProject: () => void
   onProjectless: () => void
+  onOpenNotes: () => void
+  onOpenTerminal: () => void
 }) {
   const { t } = useI18n()
+  const notesShortcut = usePrimaryShortcut('⌘⇧M', 'Ctrl+Shift+M')
+  const terminalShortcut = usePrimaryShortcut('⌘T', 'Ctrl+T')
   return (
     <div className="relative flex min-h-0 flex-1 items-center justify-center px-8 pb-12">
       <ConversationBackgroundLayer />
@@ -2279,6 +2322,31 @@ function NoProjectState({
           >
             {projectlessPending ? t('common.creating') : t('project.no_project_name')}
           </Button>
+        </div>
+        {/* Desktop parity (sidebar.rs empty state): quick-action cards reusing
+            the right-panel PanelCard. The Browser card is desktop-only
+            (native webview), so web shows New Project + Notes + Terminal. */}
+        <div className="mx-auto mt-5 grid w-full max-w-[420px] grid-cols-2 gap-2 text-left">
+          <PanelCard
+            icon={<PaduIcon className="size-[18px]" name="folderNew" />}
+            label={t('empty_state.new_project')}
+            description={t('empty_state.new_project_description')}
+            onClick={onAddProject}
+          />
+          <PanelCard
+            icon={<PaduIcon className="size-[18px]" name="note" />}
+            label={t('empty_state.notes')}
+            description={t('empty_state.notes_description')}
+            shortcut={notesShortcut}
+            onClick={onOpenNotes}
+          />
+          <PanelCard
+            icon={<PaduIcon className="size-[18px]" name="terminal" />}
+            label={t('right_panel.terminal')}
+            description={t('right_panel.terminal_description')}
+            shortcut={terminalShortcut}
+            onClick={onOpenTerminal}
+          />
         </div>
       </div>
     </div>
