@@ -214,6 +214,17 @@ enum BranchPickerAction {
     Create,
 }
 
+/// What the last `InspectBranches` probe found for a workspace path. Render
+/// only reads the cached value, so the failure case has to be stored too:
+/// otherwise a host without Git looks identical to "not a repository".
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkspaceRepoStatus {
+    Repository,
+    NotARepository,
+    /// The probe could not run at all — most often Git is not installed.
+    Unavailable,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum WorkspacePage {
     Conversation,
@@ -1309,6 +1320,11 @@ pub struct Padu {
     /// Stale-while-revalidate value for the selected path, avoiding label
     /// flicker when app activation invalidates the query.
     visible_branch_snapshot: Option<(PathBuf, BranchSnapshot)>,
+    /// Mirrors the last `InspectBranches` outcome for the visible workspace so
+    /// `&self` render paths can separate "not a repository" from "not fetched
+    /// yet" and from "Git could not run". A plain option, because the
+    /// `QueryCache` backing the fetch needs `&mut self` to read.
+    visible_workspace_repo_status: Option<(PathBuf, WorkspaceRepoStatus)>,
     branch_operation_pending: bool,
     /// Window-modal Git commit/push UI. Its repository snapshot is filled
     /// off-thread; frames only read this in-memory value.
@@ -3324,6 +3340,7 @@ impl Padu {
                 branch_picker_row_cache: RefCell::new(Vec::new()),
                 branch_snapshots: QueryCache::new(MAX_CACHED_WORKSPACES),
                 visible_branch_snapshot: None,
+                visible_workspace_repo_status: None,
                 branch_operation_pending: false,
                 commit_dialog: None,
                 confirm_dialog: None,

@@ -2261,6 +2261,14 @@ environment.commit_or_push:
   en: Commit or push
 environment.compare_branch:
   en: Compare branch
+environment.initialize_git_repository:
+  en: Initialize Git repository
+environment.initialize_git_success:
+  en: Initialized Git repository
+environment.initialize_git_error:
+  en: "Couldn't initialize Git repository: %{error}"
+environment.git_unavailable:
+  en: Git is unavailable on the daemon host
 environment.task_id:
   en: Task ID
 environment.agent_cli_thread_id:

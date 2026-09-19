@@ -1092,6 +1092,10 @@ environment.summary: Pekerjaan lingkungan dan latar belakang
 environment.changes: Perubahan
 environment.commit_or_push: Komit atau push
 environment.compare_branch: Bandingkan cabang
+environment.initialize_git_repository: Inisialisasi repositori Git
+environment.initialize_git_success: Repositori Git diinisialisasi
+environment.initialize_git_error: "Tidak dapat menginisialisasi repositori Git: %{error}"
+environment.git_unavailable: Git tidak tersedia di host daemon
 environment.task_id: ID Tugas
 environment.agent_cli_thread_id: ID Thread CLI Agen
 commit.message_placeholder: Pesan komit (kosongkan untuk dibuat otomatis)…

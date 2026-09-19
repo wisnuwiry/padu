@@ -1133,6 +1133,10 @@ environment.summary: 環境とバックグラウンド作業
 environment.changes: 変更
 environment.commit_or_push: コミットまたはプッシュ
 environment.compare_branch: ブランチを比較
+environment.initialize_git_repository: Git リポジトリを初期化
+environment.initialize_git_success: Git リポジトリを初期化しました
+environment.initialize_git_error: "Git リポジトリを初期化できませんでした：%{error}"
+environment.git_unavailable: デーモンホストで Git を利用できません
 environment.task_id: タスク ID
 environment.agent_cli_thread_id: エージェント CLI スレッド ID
 

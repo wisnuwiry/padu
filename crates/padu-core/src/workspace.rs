@@ -131,6 +131,9 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
         WorkspaceOperation::InspectBranches { cwd } => WorkspaceResult::Branches {
             snapshot: crate::git_branch::inspect(&cwd)?,
         },
+        WorkspaceOperation::InitRepository { cwd } => WorkspaceResult::BranchChanged {
+            snapshot: crate::git_branch::init(&cwd)?,
+        },
         WorkspaceOperation::CheckoutBranch {
             cwd,
             branch,

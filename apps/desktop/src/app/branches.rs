@@ -36,11 +36,15 @@ impl Padu {
                 Ok(Some(snapshot)) => {
                     let snapshot = snapshot.clone();
                     self.cache_sidebar_branch_label(&workspace_path, snapshot.display_branch());
+                    self.visible_workspace_repo_status =
+                        Some((workspace_path.clone(), WorkspaceRepoStatus::Repository));
                     self.visible_branch_snapshot = Some((workspace_path, snapshot.clone()));
                     Some(snapshot)
                 }
                 Ok(None) => {
                     self.cache_sidebar_branch_label(&workspace_path, None);
+                    self.visible_workspace_repo_status =
+                        Some((workspace_path.clone(), WorkspaceRepoStatus::NotARepository));
                     if self
                         .visible_branch_snapshot
                         .as_ref()
@@ -50,7 +54,11 @@ impl Padu {
                     }
                     None
                 }
-                Err(_) => fallback,
+                Err(_) => {
+                    self.visible_workspace_repo_status =
+                        Some((workspace_path.clone(), WorkspaceRepoStatus::Unavailable));
+                    fallback
+                }
             },
             Query::Pending => fallback,
             Query::Missing(token) => {
@@ -105,13 +113,22 @@ impl Padu {
                                         *branch = current.to_owned();
                                         persisted_branch_changed = true;
                                     }
+                                    padu.visible_workspace_repo_status =
+                                        Some((fetch_path.clone(), WorkspaceRepoStatus::Repository));
                                     padu.visible_branch_snapshot = Some((fetch_path, snapshot));
                                     if persisted_branch_changed {
                                         padu.save();
                                     }
                                 }
-                                Ok(None) => padu.visible_branch_snapshot = None,
-                                Err(_) => {}
+                                Ok(None) => {
+                                    padu.visible_workspace_repo_status =
+                                        Some((fetch_path, WorkspaceRepoStatus::NotARepository));
+                                    padu.visible_branch_snapshot = None;
+                                }
+                                Err(_) => {
+                                    padu.visible_workspace_repo_status =
+                                        Some((fetch_path, WorkspaceRepoStatus::Unavailable));
+                                }
                             }
                             cx.notify();
                         }
@@ -349,6 +366,8 @@ impl Padu {
                     Ok(snapshot) => {
                         let current = snapshot.current.clone();
                         padu.cache_sidebar_branch_label(&path, snapshot.display_branch());
+                        padu.visible_workspace_repo_status =
+                            Some((path.clone(), WorkspaceRepoStatus::Repository));
                         padu.visible_branch_snapshot = Some((path.clone(), snapshot));
                         padu.branch_snapshots.invalidate(&path);
                         let selected_path = padu
@@ -369,6 +388,49 @@ impl Padu {
                     }
                     Err(error) => {
                         padu.show_toast(tr!("errors.change_branch", error = error));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Initialize a Git repository in the selected workspace and adopt the
+    /// returned snapshot, so the Environment section swaps its Initialize
+    /// action for the Commit and Compare rows without another round trip.
+    pub(super) fn initialize_git_repository(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        let workspace = padu_client::WorkspaceClient::new(self.daemon.client());
+        cx.spawn(async move |padu, cx| {
+            let result = cx
+                .background_executor()
+                .spawn({
+                    let path = path.clone();
+                    async move {
+                        match workspace.request(
+                            padu_client::WorkspaceOperation::InitRepository { cwd: path.clone() },
+                        )? {
+                            padu_client::WorkspaceResult::BranchChanged { snapshot } => {
+                                Ok((path, snapshot))
+                            }
+                            _ => anyhow::bail!("the daemon returned an invalid branch response"),
+                        }
+                    }
+                })
+                .await;
+            let _ = padu.update(cx, |padu, cx| {
+                match result {
+                    Ok((path, snapshot)) => {
+                        padu.cache_sidebar_branch_label(&path, snapshot.display_branch());
+                        padu.visible_workspace_repo_status =
+                            Some((path.clone(), WorkspaceRepoStatus::Repository));
+                        padu.visible_branch_snapshot = Some((path.clone(), snapshot));
+                        padu.branch_snapshots.invalidate(&path);
+                        padu.invalidate_workspace_queries(cx);
+                        padu.show_success_toast(tr!("environment.initialize_git_success"));
+                    }
+                    Err(error) => {
+                        padu.show_toast(tr!("environment.initialize_git_error", error = error));
                     }
                 }
                 cx.notify();

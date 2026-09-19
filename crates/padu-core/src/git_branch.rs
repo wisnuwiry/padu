@@ -14,7 +14,7 @@ use std::ffi::OsString;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStringExt as _;
 
-use anyhow::{Context as _, anyhow, bail};
+use anyhow::{anyhow, bail};
 const MAX_UNTRACKED_FILES: usize = 2_048;
 const MAX_UNTRACKED_FILE_BYTES: u64 = 8 * 1_024 * 1_024;
 const MAX_UNTRACKED_TOTAL_BYTES: u64 = 32 * 1_024 * 1_024;
@@ -22,14 +22,30 @@ const BINARY_PROBE_BYTES: usize = 8_000;
 
 pub use padu_protocol::git::{BranchEntry, BranchSnapshot};
 
+/// Run `git` in `cwd`. A host that never installed Git fails the spawn with
+/// `NotFound`, so it gets a message that reads as a product error instead of a
+/// raw OS one; every Git entry point shares this so the daemon reports the same
+/// cause wherever the missing binary is hit first.
+fn run_git(cwd: &Path, args: &[&str]) -> anyhow::Result<Output> {
+    crate::command_env::plain_command("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .map_err(spawn_error)
+}
+
+fn spawn_error(error: std::io::Error) -> anyhow::Error {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        anyhow!("Git is not installed on the host running the padu daemon")
+    } else {
+        anyhow!(error).context("failed to execute git")
+    }
+}
+
 /// Inspect local branches and which worktree, if any, currently owns each.
 /// `Ok(None)` means `cwd` is not inside a Git repository.
 pub fn inspect(cwd: &Path) -> anyhow::Result<Option<BranchSnapshot>> {
-    let repository_output = crate::command_env::plain_command("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .current_dir(cwd)
-        .output()
-        .context("failed to execute git")?;
+    let repository_output = run_git(cwd, &["rev-parse", "--show-toplevel"])?;
     if !repository_output.status.success() {
         return Ok(None);
     }
@@ -236,12 +252,7 @@ fn path_from_git_bytes(path: &[u8]) -> PathBuf {
 }
 
 pub fn checkout(cwd: &Path, branch: &str) -> anyhow::Result<BranchSnapshot> {
-    let output = crate::command_env::plain_command("git")
-        .args(["switch", "--"])
-        .arg(branch)
-        .current_dir(cwd)
-        .output()
-        .context("failed to execute git switch")?;
+    let output = run_git(cwd, &["switch", "--", branch])?;
     if !output.status.success() {
         bail!("{}", command_error(&output));
     }
@@ -253,33 +264,33 @@ pub fn create_and_checkout(cwd: &Path, branch: &str) -> anyhow::Result<BranchSna
     if branch.is_empty() {
         bail!("enter a branch name");
     }
-    let validation = crate::command_env::plain_command("git")
-        .args(["check-ref-format", "--branch"])
-        .arg(branch)
-        .current_dir(cwd)
-        .output()
-        .context("failed to validate the branch name")?;
+    let validation = run_git(cwd, &["check-ref-format", "--branch", branch])?;
     if !validation.status.success() {
         bail!("{}", command_error(&validation));
     }
-    let output = crate::command_env::plain_command("git")
-        .args(["switch", "-c"])
-        .arg(branch)
-        .current_dir(cwd)
-        .output()
-        .context("failed to execute git switch")?;
+    let output = run_git(cwd, &["switch", "-c", branch])?;
     if !output.status.success() {
         bail!("{}", command_error(&output));
     }
     inspect(cwd)?.ok_or_else(|| anyhow!("the workspace is no longer a Git repository"))
 }
 
+/// Initialize a Git repository in `cwd` and return its fresh branch state.
+/// Already-repository workspaces are returned unchanged so the operation is
+/// safe to retry.
+pub fn init(cwd: &Path) -> anyhow::Result<BranchSnapshot> {
+    if let Some(snapshot) = inspect(cwd)? {
+        return Ok(snapshot);
+    }
+    let output = run_git(cwd, &["init", "-b", "main"])?;
+    if !output.status.success() {
+        bail!("{}", command_error(&output));
+    }
+    inspect(cwd)?.ok_or_else(|| anyhow!("the workspace is not a Git repository after init"))
+}
+
 fn git_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
-    let output = crate::command_env::plain_command("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .context("failed to execute git")?;
+    let output = run_git(cwd, args)?;
     if !output.status.success() {
         bail!("{}", command_error(&output));
     }
@@ -287,11 +298,7 @@ fn git_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
 }
 
 fn optional_stdout(cwd: &Path, args: &[&str]) -> anyhow::Result<Option<String>> {
-    let output = crate::command_env::plain_command("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .context("failed to execute git")?;
+    let output = run_git(cwd, args)?;
     if output.status.success() {
         return Ok(Some(
             String::from_utf8_lossy(&output.stdout).trim().to_owned(),
@@ -391,6 +398,41 @@ mod tests {
                 .branches
                 .iter()
                 .any(|branch| branch.name == "topic/new-picker")
+        );
+    }
+
+    #[test]
+    fn a_missing_git_binary_reports_an_actionable_error() {
+        let missing = spawn_error(std::io::Error::from(std::io::ErrorKind::NotFound));
+        assert_eq!(
+            missing.to_string(),
+            "Git is not installed on the host running the padu daemon"
+        );
+
+        let other = spawn_error(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        assert_eq!(other.to_string(), "failed to execute git");
+    }
+
+    #[test]
+    fn initializes_a_repository_with_a_main_branch() {
+        let root = std::env::temp_dir().join(format!("padu-branch-init-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+
+        let snapshot = init(&root).unwrap();
+        assert_eq!(snapshot.current.as_deref(), Some("main"));
+        assert_eq!(snapshot.repository, fs::canonicalize(&root).unwrap());
+    }
+
+    #[test]
+    fn init_reuses_an_existing_repository() {
+        let repository = repository();
+        let snapshot = init(&repository).unwrap();
+        assert_eq!(snapshot.current.as_deref(), Some("main"));
+        assert!(
+            snapshot
+                .branches
+                .iter()
+                .any(|branch| branch.name == "feature")
         );
     }
 

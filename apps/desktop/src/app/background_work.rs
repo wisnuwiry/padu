@@ -46,8 +46,14 @@ struct BackgroundSummaryEntry {
 #[derive(Clone)]
 struct EnvironmentSummary {
     commit_status: Option<String>,
+    changes: Option<(u64, u64)>,
+    /// The selected workspace path, used by the Initialize action.
+    path: Option<PathBuf>,
+    /// The last repository probe result; `None` while it is still unknown.
+    repo_status: Option<WorkspaceRepoStatus>,
     commit_focus: FocusHandle,
     compare_focus: FocusHandle,
+    init_git_focus: FocusHandle,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -742,11 +748,22 @@ impl Padu {
         let change_counts = snapshot
             .map(|snapshot| (snapshot.additions, snapshot.deletions))
             .filter(|(additions, deletions)| *additions > 0 || *deletions > 0);
+        let has_changes = change_counts.is_some();
+        let repo_status = workspace_path.and_then(|path| {
+            self.visible_workspace_repo_status
+                .as_ref()
+                .filter(|(repo_path, _)| repo_path == path)
+                .map(|(_, status)| *status)
+        });
         let environment = if has_project {
             Some(EnvironmentSummary {
                 commit_status: self.commit_operation_status_label(),
+                changes: change_counts,
+                path: workspace_path.map(Path::to_path_buf),
+                repo_status,
                 commit_focus: self.transcript_control_focus("environment-summary-commit", cx),
                 compare_focus: self.transcript_control_focus("environment-summary-compare", cx),
+                init_git_focus: self.transcript_control_focus("environment-summary-init-git", cx),
             })
         } else {
             None
@@ -797,61 +814,18 @@ impl Padu {
                         .right(px(4.0))
                         .child(pulse_dot(5.0, theme.accent)),
                 )
+            })
+            .when(has_changes, |trigger| {
+                trigger.child(
+                    div()
+                        .absolute()
+                        .bottom(px(4.0))
+                        .right(px(4.0))
+                        .size(px(5.0))
+                        .rounded_full()
+                        .bg(theme.warning),
+                )
             });
-        let git_status = change_counts.map(|(additions, deletions)| {
-            let focus = self.transcript_control_focus("header-git-status", cx);
-            div()
-                .id("header-git-status")
-                .track_focus(&focus)
-                .tab_index(0)
-                .h(px(28.0))
-                .px(px(7.0))
-                .rounded(px(7.0))
-                .flex_none()
-                .flex()
-                .items_center()
-                .gap(px(6.0))
-                .cursor_pointer()
-                .text_size(sp(12.5))
-                .font_weight(FontWeight::MEDIUM)
-                .focus_visible(|style| {
-                    style
-                        .bg(theme.overlay)
-                        .border_1()
-                        .border_color(theme.accent)
-                })
-                .hover(|style| style.bg(theme.overlay))
-                .active(|style| style.bg(theme.overlay_strong))
-                .when(additions > 0, |button| {
-                    button.child(
-                        div()
-                            .text_color(theme.success)
-                            .child(format!("+{additions}")),
-                    )
-                })
-                .when(deletions > 0, |button| {
-                    button.child(
-                        div()
-                            .text_color(theme.danger)
-                            .child(format!("-{deletions}")),
-                    )
-                })
-                .tooltip(Tooltip::text(tr!("environment.changes")))
-                .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                    cx.stop_propagation();
-                })
-                .on_click(cx.listener(|this, _, _, cx| {
-                    cx.stop_propagation();
-                    this.set_right_panel_diff_source(ReviewDiffSource::Uncommitted, cx);
-                }))
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                        this.set_right_panel_diff_source(ReviewDiffSource::Uncommitted, cx);
-                        cx.stop_propagation();
-                    }
-                }))
-                .into_any_element()
-        });
         let project_actions = self.render_project_actions_control(cx);
         let open_in = self.render_open_in_control(workspace_path, cx);
         let entries = Rc::new(entries);
@@ -881,7 +855,6 @@ impl Padu {
             .items_center()
             .gap(px(8.0))
             .children(project_actions)
-            .children(git_status)
             .children(open_in)
             .child(info)
             .into_any_element()
@@ -1632,6 +1605,72 @@ fn render_environment_summary_section(
     weak: WeakEntity<Padu>,
     theme: &Theme,
 ) -> Div {
+    let section = div().w_full().flex().flex_col().gap_0().child(
+        div()
+            .h(px(30.0))
+            .px(px(8.0))
+            .flex()
+            .items_center()
+            .text_size(sp(13.5))
+            .text_color(theme.text_tertiary)
+            .child(tr!("environment.title")),
+    );
+
+    match environment.repo_status {
+        // Outside a repository there is nothing to commit or compare yet, so
+        // the section offers the one action that turns it into one.
+        Some(WorkspaceRepoStatus::NotARepository) => {
+            let init_handle = handle;
+            let init_weak = weak;
+            let init_path = environment.path;
+            let init = render_environment_action_row(
+                "environment-summary-init-git",
+                &environment.init_git_focus,
+                "icons/git-branch.svg",
+                tr!("environment.initialize_git_repository"),
+                true,
+                false,
+                None,
+                theme,
+                move |window, cx| {
+                    init_handle.close(window, cx);
+                    window.refresh();
+                    let Some(path) = init_path.clone() else {
+                        return;
+                    };
+                    let _ = init_weak.update(cx, |this, cx| {
+                        this.initialize_git_repository(path, cx);
+                    });
+                },
+            );
+            return section.child(init);
+        }
+        // The probe itself failed — typically a host without Git. Say so
+        // instead of offering actions that are guaranteed to fail.
+        Some(WorkspaceRepoStatus::Unavailable) => {
+            let unavailable = div()
+                .id("environment-summary-git-unavailable")
+                .min_h(px(32.0))
+                .w_full()
+                .px(px(8.0))
+                .flex()
+                .items_center()
+                .gap(px(10.0))
+                .child(icon("icons/alert.svg", 14.0, theme.warning))
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .truncate()
+                        .text_size(sp(13.5))
+                        .text_color(theme.text_secondary)
+                        .child(tr!("environment.git_unavailable")),
+                );
+            return section.child(unavailable);
+        }
+        _ => {}
+    }
+
     let commit_handle = handle.clone();
     let commit_weak = weak.clone();
     let commit_pending = environment.commit_status.is_some();
@@ -1655,6 +1694,39 @@ fn render_environment_summary_section(
         },
     );
 
+    let changes = environment.changes.map(|(additions, deletions)| {
+        div()
+            .flex()
+            .items_center()
+            .gap(px(5.0))
+            .flex_none()
+            .text_size(sp(12.0))
+            .font_weight(FontWeight::MEDIUM)
+            .child(icon("icons/file-diff.svg", 12.0, theme.text_tertiary))
+            .when(additions > 0, |row| {
+                row.child(
+                    div()
+                        .text_color(theme.success)
+                        .child(format!("+{additions}")),
+                )
+            })
+            .when(deletions > 0, |row| {
+                row.child(
+                    div()
+                        .text_color(theme.danger)
+                        .child(format!("-{deletions}")),
+                )
+            })
+            .into_any_element()
+    });
+    let compare_trailing = div()
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .flex_none()
+        .children(changes)
+        .child(icon("icons/arrow-up-right.svg", 13.0, theme.text_tertiary))
+        .into_any_element();
     let compare_handle = handle;
     let compare_weak = weak;
     let compare = render_environment_action_row(
@@ -1664,7 +1736,7 @@ fn render_environment_summary_section(
         tr!("environment.compare_branch"),
         true,
         false,
-        Some(icon("icons/arrow-up-right.svg", 13.0, theme.text_tertiary).into_any_element()),
+        Some(compare_trailing),
         theme,
         move |window, cx| {
             compare_handle.close(window, cx);
@@ -1675,23 +1747,7 @@ fn render_environment_summary_section(
         },
     );
 
-    div()
-        .w_full()
-        .flex()
-        .flex_col()
-        .gap_0()
-        .child(
-            div()
-                .h(px(30.0))
-                .px(px(8.0))
-                .flex()
-                .items_center()
-                .text_size(sp(13.5))
-                .text_color(theme.text_tertiary)
-                .child(tr!("environment.title")),
-        )
-        .child(commit)
-        .child(compare)
+    section.child(commit).child(compare)
 }
 
 fn render_environment_action_row(
