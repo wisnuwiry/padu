@@ -250,6 +250,150 @@ pub(super) fn session_time_label(session: &AgentSession, now: u64) -> Option<Str
         .map(|last_reply_at| format_time_ago(now.saturating_sub(last_reply_at)))
 }
 
+#[derive(Clone)]
+struct SessionTooltip {
+    title: SharedString,
+    project: SharedString,
+    host: SharedString,
+    provider: SharedString,
+    provider_kind: ProviderKind,
+    status_text: Option<SharedString>,
+    status: SessionStatus,
+}
+
+impl SessionTooltip {
+    fn build(self, _window: &mut Window, cx: &mut App) -> gpui::AnyView {
+        cx.new(|_| self).into()
+    }
+}
+
+impl Render for SessionTooltip {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = Theme::current(cx);
+        div().pt(px(4.0)).pl(px(2.0)).child(
+            div()
+                .w(px(280.0))
+                .px(px(10.0))
+                .py(px(8.0))
+                .rounded(px(6.0))
+                .border_1()
+                .border_color(theme.border_strong)
+                .bg(theme.raised)
+                .shadow_md()
+                .flex()
+                .flex_col()
+                .gap(px(7.0))
+                .child(
+                    div()
+                        .text_size(sp(12.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .line_height(sp(16.0))
+                        .text_color(theme.text)
+                        .whitespace_normal()
+                        .child(self.title.clone()),
+                )
+                .child(div().w_full().h(px(1.0)).bg(theme.border))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(5.0))
+                        .text_size(sp(11.5))
+                        .line_height(sp(14.0))
+                        .text_color(theme.text_secondary)
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(7.0))
+                                .child(icon(
+                                    provider_icon(self.provider_kind),
+                                    12.0,
+                                    provider_color(&theme, self.provider_kind),
+                                ))
+                                .child(div().text_color(theme.text_tertiary).child(
+                                    SharedString::from(format!("{}:", tr!("sidebar.provider"))),
+                                ))
+                                .child(
+                                    div()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(theme.text)
+                                        .child(self.provider.clone()),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(7.0))
+                                .child(icon("icons/folder.svg", 12.0, theme.text_tertiary))
+                                .child(div().text_color(theme.text_tertiary).child(
+                                    SharedString::from(format!("{}:", tr!("sidebar.project"))),
+                                ))
+                                .child(
+                                    div()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(theme.text)
+                                        .child(self.project.clone()),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(7.0))
+                                .child(icon("icons/server.svg", 12.0, theme.text_tertiary))
+                                .child(
+                                    div().text_color(theme.text_tertiary).child(
+                                        SharedString::from(format!("{}:", tr!("sidebar.host"))),
+                                    ),
+                                )
+                                .child(
+                                    div()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(theme.text)
+                                        .child(self.host.clone()),
+                                ),
+                        )
+                        .when_some(self.status_text.clone(), |el, status_text| {
+                            let status_color = status_color(&theme, self.status);
+                            el.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(7.0))
+                                    .when(
+                                        matches!(
+                                            self.status,
+                                            SessionStatus::Working | SessionStatus::Connecting
+                                        ),
+                                        |e| {
+                                            e.child(motion::spin_slow(icon(
+                                                "icons/loader-circle.svg",
+                                                12.0,
+                                                status_color,
+                                            )))
+                                        },
+                                    )
+                                    .when(self.status == SessionStatus::Waiting, |e| {
+                                        e.child(icon("icons/alert.svg", 12.0, status_color))
+                                    })
+                                    .when(self.status == SessionStatus::Failed, |e| {
+                                        e.child(icon("icons/x.svg", 12.0, status_color))
+                                    })
+                                    .child(
+                                        div()
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(status_color)
+                                            .child(status_text),
+                                    ),
+                            )
+                        }),
+                ),
+        )
+    }
+}
+
 /// Recency for sidebar ordering and date groups. A submitted turn promotes the
 /// task immediately, while metadata edits such as a rename do not; a task with
 /// no turns stays anchored to when it was created.
@@ -2294,7 +2438,45 @@ impl Padu {
                 .into_any_element()
         };
 
-        let time_label = session_time_label(session, unix_time()).map(SharedString::from);
+        let time_label = if working {
+            None
+        } else {
+            session_time_label(session, unix_time()).map(SharedString::from)
+        };
+
+        let hover_status_text = if session.is_busy()
+            && let Some(turn) = session
+                .turns
+                .last()
+                .filter(|turn| turn.status == TurnStatus::Running)
+        {
+            Some(SharedString::from(tr!(
+                "sidebar.working",
+                elapsed = format_working_elapsed(unix_time().saturating_sub(turn.started_at))
+            )))
+        } else if working {
+            Some(SharedString::from(tr!("sidebar.status_working")))
+        } else if session.status == SessionStatus::Waiting {
+            Some(SharedString::from(tr!("sidebar.status_waiting")))
+        } else if session.status == SessionStatus::Failed {
+            Some(SharedString::from(tr!("sidebar.status_failed")))
+        } else {
+            None
+        };
+
+        let project_name = project
+            .map(Project::display_name)
+            .unwrap_or_else(|| tr!("project.no_project_name"));
+
+        let session_tooltip = SessionTooltip {
+            title: SharedString::from(localized_session_title(session)),
+            project: SharedString::from(project_name),
+            host: SharedString::from(self.state.active_host_display_name(&tr!("host.local"))),
+            provider: SharedString::from(session.provider.display_name()),
+            provider_kind: session.provider,
+            status_text: hover_status_text,
+            status: session.status,
+        };
 
         let dot = div()
             .w(px(14.0))
@@ -2485,6 +2667,7 @@ impl Padu {
             .child(row_content)
             .when(!renaming, |element| {
                 element
+                    .tooltip(move |window, cx| session_tooltip.clone().build(window, cx))
                     .track_focus(&row_focus)
                     .tab_index(0)
                     .focus_visible(|style| style.border_1().border_color(theme.accent))
@@ -3018,7 +3201,6 @@ fn sidebar_session_selected(
 
 #[cfg(test)]
 mod tests {
-    use super::right_panel::EmptyStateCardAction;
     use super::*;
 
     #[test]
