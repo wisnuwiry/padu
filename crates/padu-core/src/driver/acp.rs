@@ -25,7 +25,7 @@ use agent_client_protocol::{
     AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo, Handled, LineDirection, Responder,
     UntypedMessage,
 };
-use anyhow::{Context as _, anyhow};
+use anyhow::{Context as _, anyhow, bail};
 use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
 
@@ -61,6 +61,10 @@ pub struct AcpDriver {
     mode: RuntimeMode,
     interaction_mode: InteractionMode,
     computer_use: Option<super::support::HeadlessComputerUseRuntime>,
+    /// Per-session Antigravity scratch dir. Held for the driver's lifetime so
+    /// the active-registry entry (and the directory) survives as long as the
+    /// child process runs; parallel sessions each hold their own.
+    _agy_session_temp: Option<crate::agy_install::AgySessionTempDir>,
 }
 
 /// Per-provider launch details. Everything after process launch is ACP.
@@ -69,7 +73,15 @@ struct AcpLaunch {
     env: Vec<(String, String)>,
 }
 
-fn launch_for(provider: ProviderKind, reasoning_effort: Option<&str>) -> anyhow::Result<AcpLaunch> {
+fn launch_for(
+    provider: ProviderKind,
+    reasoning_effort: Option<&str>,
+    agy_session_temp: Option<&Path>,
+) -> anyhow::Result<AcpLaunch> {
+    // Only the Windows Agy branch consumes the session temp dir; keep the
+    // parameter warning-free on other platforms.
+    #[cfg(not(windows))]
+    let _ = agy_session_temp;
     match provider {
         ProviderKind::Agy => {
             let mut env = Vec::new();
@@ -87,6 +99,20 @@ fn launch_for(provider: ProviderKind, reasoning_effort: Option<&str>) -> anyhow:
                         harness.to_string_lossy().into_owned(),
                     ));
                 }
+            }
+            #[cfg(windows)]
+            if let Ok((runfiles_cache, isolated_temp)) = crate::agy_install::ensure_runtime_dirs() {
+                env.push((
+                    "RULES_PYTHON_EXTRACT_ROOT".into(),
+                    runfiles_cache.to_string_lossy().into_owned(),
+                ));
+                // Per-session scratch when the driver holds a guard; the
+                // shared root otherwise (short-lived helpers). The runfiles
+                // cache stays shared either way — no ~900MB duplication.
+                let temp_dir = agy_session_temp.unwrap_or(&isolated_temp);
+                let temp_str = temp_dir.to_string_lossy().into_owned();
+                env.push(("TEMP".into(), temp_str.clone()));
+                env.push(("TMP".into(), temp_str));
             }
             Ok(AcpLaunch {
                 // The official registry distribution requires an empty UID flag on
@@ -176,7 +202,19 @@ impl AcpDriver {
             None => None,
         };
 
-        let launch = launch_for(provider, reasoning_effort.as_deref())?;
+        let agy_session_temp = (provider == ProviderKind::Agy && cfg!(windows))
+            .then(crate::agy_install::create_agy_session_temp_dir)
+            .transpose()
+            .context("could not create Antigravity session temp directory")?;
+        let launch = launch_for(
+            provider,
+            reasoning_effort.as_deref(),
+            agy_session_temp.as_ref().map(|dir| dir.path()),
+        )?;
+        // Reap crash orphans now that this session is registered as active.
+        if provider == ProviderKind::Agy {
+            crate::agy_install::cleanup_stale_antigravity_temp_dirs();
+        }
         let computer_use = (provider == ProviderKind::Grok && computer_use_enabled)
             .then(|| super::support::HeadlessComputerUseRuntime::start(provider, events.clone()))
             .transpose()?;
@@ -236,6 +274,7 @@ impl AcpDriver {
             mode,
             interaction_mode,
             computer_use,
+            _agy_session_temp: agy_session_temp,
         })
     }
 }
@@ -258,6 +297,8 @@ fn sdk_agent_with_stderr_callback(
     stderr_lines: Arc<Mutex<Vec<String>>>,
     on_stderr: Option<Arc<dyn Fn(&str) + Send + Sync>>,
 ) -> anyhow::Result<AcpAgent> {
+    crate::command_env::ensure_job_object_for_process_tree()
+        .context("could not bind the ACP process tree to a Windows job object")?;
     let binary = binary
         .to_str()
         .ok_or_else(|| anyhow!("the ACP executable path is not valid UTF-8"))?;
@@ -325,7 +366,7 @@ pub(crate) fn catalog_agent(
     binary: &Path,
     cwd: &Path,
 ) -> anyhow::Result<AcpAgent> {
-    let launch = launch_for(provider, None)?;
+    let launch = launch_for(provider, None, None)?;
     sdk_agent(binary, cwd, launch, None, Arc::new(Mutex::new(Vec::new())))
 }
 
@@ -788,7 +829,7 @@ pub(crate) fn discover_agy_models(binary: &Path) -> Vec<ProviderModel> {
     let Ok(agent) = sdk_agent(
         binary,
         &cwd,
-        launch_for(ProviderKind::Agy, None).unwrap_or(AcpLaunch {
+        launch_for(ProviderKind::Agy, None, None).unwrap_or(AcpLaunch {
             args: Vec::new(),
             env: Vec::new(),
         }),
@@ -832,7 +873,7 @@ pub(crate) fn discover_agy_models(binary: &Path) -> Vec<ProviderModel> {
     let result = smol::block_on(smol::future::race(
         async move { request.await.map_err(anyhow::Error::new) },
         async move {
-            smol::Timer::after(Duration::from_secs(10)).await;
+            smol::Timer::after(Duration::from_secs(30)).await;
             Err(anyhow!("Antigravity model discovery timed out"))
         },
     ));
@@ -1028,19 +1069,153 @@ fn agy_token_files() -> [&'static str; 5] {
     ]
 }
 
-/// Logged-in Google identity for Antigravity, decoded from Antigravity's own
-/// OAuth token files — no keychain access, so macOS never prompts and the
-/// same code runs on every platform. Anything blank or missing yields `None`
-/// and the settings row hides instead of guessing. Blocking file reads —
-/// daemon only.
+/// Logged-in Google identity for Antigravity, scoped strictly to the ACP
+/// server credentials (`antigravity-acp` in Keychain or `acp_token.json` files).
+/// Never reads Gemini CLI's global credentials (`oauth_creds.json`).
+///
+/// Looks in order:
+/// 1. Cached identity file `account_identity.json` in Padu's Antigravity directory
+/// 2. Local Antigravity token files (`antigravity-cli`, `jetski`, `antigravity-acp`)
+/// 3. If only `refresh_token` is present in ACP credentials (e.g. macOS Keychain or
+///    acp_token.json), resolves the user's email via a token refresh request,
+///    caches it to `account_identity.json`, and returns it.
 pub fn agy_account_label() -> Option<String> {
+    // 1. Cached identity file in ~/.padu/providers/antigravity/account_identity.json
+    let cache_path = crate::agy_install::account_identity_file();
+    if let Ok(content) = std::fs::read_to_string(&cache_path) {
+        if let Some(account) = agy_account_from_token_blob(&content) {
+            return Some(account);
+        }
+    }
+
+    // 2. Check Antigravity-specific token files
     let home = std::env::var_os("GEMINI_HOME")
         .map(std::path::PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|h| h.join(".gemini")))?;
-    agy_token_files()
-        .iter()
-        .filter_map(|relative| std::fs::read_to_string(home.join(relative)).ok())
-        .find_map(|payload| agy_account_from_token_blob(&payload))
+        .or_else(|| dirs::home_dir().map(|h| h.join(".gemini")));
+    if let Some(ref home) = home {
+        for relative in agy_token_files() {
+            if let Ok(payload) = std::fs::read_to_string(home.join(relative)) {
+                if let Some(account) = agy_account_from_token_blob(&payload) {
+                    return Some(account);
+                }
+            }
+        }
+    }
+
+    // 3. Extract ACP credentials (keychain on macOS or acp_token.json) and resolve email
+    let acp_blob = {
+        #[cfg(target_os = "macos")]
+        {
+            crate::command_env::plain_command("security")
+                .args([
+                    "find-generic-password",
+                    "-s",
+                    "gemini",
+                    "-a",
+                    "antigravity-acp",
+                    "-w",
+                ])
+                .stdin(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            None
+        }
+    }
+    .or_else(|| {
+        let home = home.as_ref()?;
+        for relative in [
+            "antigravity-acp/acp_token.json",
+            "antigravity-acp/acp_business_token.json",
+            "antigravity/acp/acp_token.json",
+        ] {
+            if let Ok(payload) = std::fs::read_to_string(home.join(relative)) {
+                return Some(payload);
+            }
+        }
+        None
+    });
+
+    if let Some(blob) = acp_blob {
+        if let Some(account) = agy_account_from_token_blob(&blob) {
+            return Some(account);
+        }
+        if let Some(email) = resolve_email_from_acp_token_blob(&blob) {
+            if let Some(parent) = cache_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(
+                &cache_path,
+                serde_json::json!({ "email": &email }).to_string(),
+            );
+            return Some(email);
+        }
+    }
+
+    None
+}
+
+/// Given an Antigravity ACP credential blob with OAuth client credentials and a
+/// `refresh_token`, exchanges the refresh token with Google's token endpoint to
+/// extract the `email` claim from the returned `id_token` (or userinfo endpoint).
+fn resolve_email_from_acp_token_blob(payload: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(payload.trim()).ok()?;
+    let client_id = value.get("client_id")?.as_str()?;
+    let client_secret = value.get("client_secret")?.as_str()?;
+    let refresh_token = value.get("refresh_token")?.as_str()?;
+    let token_uri = value
+        .get("token_uri")
+        .and_then(Value::as_str)
+        .unwrap_or("https://oauth2.googleapis.com/token");
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .ok()?;
+
+    let form_body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("client_id", client_id)
+        .append_pair("client_secret", client_secret)
+        .append_pair("refresh_token", refresh_token)
+        .append_pair("grant_type", "refresh_token")
+        .finish();
+
+    let response = client
+        .post(token_uri)
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(form_body)
+        .send()
+        .ok()?;
+
+    let response_value: Value = serde_json::from_reader(response).ok()?;
+
+    if let Some(id_token) = response_value.get("id_token").and_then(Value::as_str) {
+        if let Some(email) = crate::usage::jwt_payload_email(id_token) {
+            return Some(email);
+        }
+    }
+
+    if let Some(access_token) = response_value.get("access_token").and_then(Value::as_str) {
+        let userinfo_resp = client
+            .get("https://www.googleapis.com/oauth2/v2/userinfo")
+            .header("Authorization", format!("Bearer {access_token}"))
+            .send()
+            .ok()?;
+        let userinfo: Value = serde_json::from_reader(userinfo_resp).ok()?;
+        if let Some(email) = userinfo.get("email").and_then(Value::as_str) {
+            let trimmed = email.trim();
+            if !trimmed.is_empty() && trimmed.contains('@') {
+                return Some(trimmed.to_owned());
+            }
+        }
+    }
+
+    None
 }
 
 /// Identity from one Antigravity credential blob: explicit email fields win,
@@ -1091,39 +1266,89 @@ fn agy_account_from_token_blob(payload: &str) -> Option<String> {
 }
 
 pub fn logout_agy(binary: &Path, cwd: &Path) -> anyhow::Result<()> {
-    let agent = sdk_agent(
-        binary,
-        cwd,
-        launch_for(ProviderKind::Agy, None)?,
-        None,
-        Arc::new(Mutex::new(Vec::new())),
-    )?;
-    let request = Client.builder().name("padu").connect_with(
-        agent,
-        async move |connection: ConnectionTo<Agent>| {
-            let _initialize = connection
-                .send_request(
-                    InitializeRequest::new(ProtocolVersion::V1)
-                        .client_capabilities(ClientCapabilities::new().terminal(false))
-                        .client_info(Implementation::new("padu", env!("CARGO_PKG_VERSION"))),
-                )
-                .block_task()
-                .await?;
-            connection
-                .send_request(LogoutRequest::new())
-                .block_task()
-                .await?;
-            Ok(())
-        },
-    );
-    smol::block_on(smol::future::race(
-        async move { request.await.map_err(anyhow::Error::new) },
-        async move {
-            smol::Timer::after(Duration::from_secs(10)).await;
-            Err(anyhow!("Antigravity sign-out timed out"))
-        },
-    ))
-    .map_err(|error| anyhow!("Antigravity sign-out failed: {error}"))
+    // 1. Best-effort ACP RPC logout with 45-second timeout (giving Windows cold starts ample time)
+    if let Ok(launch) = launch_for(ProviderKind::Agy, None, None) {
+        if let Ok(agent) = sdk_agent(binary, cwd, launch, None, Arc::new(Mutex::new(Vec::new()))) {
+            let request = Client.builder().name("padu").connect_with(
+                agent,
+                async move |connection: ConnectionTo<Agent>| {
+                    let _initialize = connection
+                        .send_request(
+                            InitializeRequest::new(ProtocolVersion::V1)
+                                .client_capabilities(ClientCapabilities::new().terminal(false))
+                                .client_info(Implementation::new(
+                                    "padu",
+                                    env!("CARGO_PKG_VERSION"),
+                                )),
+                        )
+                        .block_task()
+                        .await?;
+                    connection
+                        .send_request(LogoutRequest::new())
+                        .block_task()
+                        .await?;
+                    Ok(())
+                },
+            );
+            let _ = smol::block_on(smol::future::race(
+                async move { request.await.map_err(anyhow::Error::new) },
+                async move {
+                    smol::Timer::after(Duration::from_secs(45)).await;
+                    Err(anyhow!("Antigravity sign-out timed out"))
+                },
+            ));
+        }
+    }
+
+    // 2. Clear cached ACP identity file
+    let cache_file = crate::agy_install::account_identity_file();
+    if cache_file.exists() {
+        let _ = std::fs::remove_file(&cache_file);
+    }
+
+    // 3. Deterministically remove all local token files on disk
+    let gemini_home = std::env::var_os("GEMINI_HOME").map(PathBuf::from);
+    let home = dirs::home_dir();
+    let mut candidate_roots = Vec::new();
+    if let Some(gemini_home) = gemini_home {
+        candidate_roots.push(gemini_home);
+    }
+    if let Some(home) = home {
+        candidate_roots.push(home.join(".gemini"));
+    }
+
+    for root in candidate_roots {
+        for relative in agy_token_files() {
+            let path = root.join(relative);
+            if path.exists() {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+    }
+
+    // 4. Purge macOS Keychain entry if on macOS
+    #[cfg(target_os = "macos")]
+    {
+        let _ = crate::command_env::plain_command("security")
+            .args([
+                "delete-generic-password",
+                "-s",
+                "gemini",
+                "-a",
+                "antigravity-acp",
+            ])
+            .output();
+    }
+
+    // 4. Trigger stale temp directories cleanup
+    crate::agy_install::cleanup_stale_antigravity_temp_dirs();
+
+    // 5. Verify auth status
+    if agy_auth_status(binary)? {
+        bail!("Antigravity sign-out did not clear credentials");
+    }
+
+    Ok(())
 }
 
 pub fn authenticate_agy(
@@ -1148,7 +1373,7 @@ pub fn authenticate_agy(
     let agent = sdk_agent_with_stderr_callback(
         binary,
         cwd,
-        launch_for(ProviderKind::Agy, None)?,
+        launch_for(ProviderKind::Agy, None, None)?,
         None,
         Arc::new(Mutex::new(Vec::new())),
         Some(auth_callback),
@@ -3002,21 +3227,51 @@ mod tests {
 
     #[test]
     fn launch_for_qoder_starts_its_documented_acp_server() {
-        let launch = launch_for(ProviderKind::Qoder, None).expect("Qoder launch should succeed");
+        let launch =
+            launch_for(ProviderKind::Qoder, None, None).expect("Qoder launch should succeed");
         assert_eq!(launch.args, vec!["--acp"]);
         assert!(launch.env.is_empty());
     }
 
     #[test]
     fn launch_for_agy_sets_appropriate_arguments() {
-        let launch = launch_for(ProviderKind::Agy, None).expect("agy launch should succeed");
+        let launch = launch_for(ProviderKind::Agy, None, None).expect("agy launch should succeed");
         #[cfg(target_os = "linux")]
         assert_eq!(launch.args, vec!["--uid="]);
         #[cfg(not(target_os = "linux"))]
         assert!(launch.args.is_empty());
-        for (key, val) in &launch.env {
-            assert_eq!(key, "ANTIGRAVITY_HARNESS_PATH");
-            assert!(!val.is_empty());
+        #[cfg(windows)]
+        {
+            let allowed_keys = [
+                "ANTIGRAVITY_HARNESS_PATH",
+                "RULES_PYTHON_EXTRACT_ROOT",
+                "TEMP",
+                "TMP",
+            ];
+            for (key, val) in &launch.env {
+                assert!(
+                    allowed_keys.contains(&key.as_str()),
+                    "unexpected env key {key}"
+                );
+                assert!(!val.is_empty());
+            }
+            assert!(
+                launch
+                    .env
+                    .iter()
+                    .any(|(key, _)| key == "RULES_PYTHON_EXTRACT_ROOT")
+            );
+        }
+        #[cfg(not(windows))]
+        {
+            assert!(
+                !launch
+                    .env
+                    .iter()
+                    .any(|(key, _)| key == "RULES_PYTHON_EXTRACT_ROOT")
+            );
+            assert!(!launch.env.iter().any(|(key, _)| key == "TEMP"));
+            assert!(!launch.env.iter().any(|(key, _)| key == "TMPDIR"));
         }
     }
 
@@ -3059,6 +3314,18 @@ mod tests {
         );
         assert_eq!(agy_account_from_token_blob("not json"), None);
         assert_eq!(agy_account_from_token_blob("{}"), None);
+    }
+
+    #[test]
+    fn resolve_email_from_acp_token_blob_rejects_empty_or_invalid_blob() {
+        assert_eq!(resolve_email_from_acp_token_blob("not json"), None);
+        assert_eq!(resolve_email_from_acp_token_blob("{}"), None);
+        assert_eq!(
+            resolve_email_from_acp_token_blob(
+                r#"{"client_id": "cid", "client_secret": "sec", "refresh_token": "rt"}"#
+            ),
+            None
+        );
     }
 
     #[test]
@@ -3426,7 +3693,7 @@ mod tests {
 
     #[test]
     fn fx_launches_its_documented_acp_subcommand() {
-        let launch = launch_for(ProviderKind::Fx, None).unwrap();
+        let launch = launch_for(ProviderKind::Fx, None, None).unwrap();
         assert_eq!(launch.args, ["acp"]);
         assert!(launch.env.is_empty());
     }
@@ -3728,12 +3995,12 @@ mod tests {
 
     #[test]
     fn grok_launch_passes_reasoning_effort_before_stdio() {
-        let launch = launch_for(ProviderKind::Grok, Some("xhigh")).unwrap();
+        let launch = launch_for(ProviderKind::Grok, Some("xhigh"), None).unwrap();
         assert_eq!(
             launch.args,
             ["agent", "--reasoning-effort", "xhigh", "stdio"]
         );
-        let bare = launch_for(ProviderKind::Grok, None).unwrap();
+        let bare = launch_for(ProviderKind::Grok, None, None).unwrap();
         assert_eq!(bare.args, ["agent", "stdio"]);
     }
 
