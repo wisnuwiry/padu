@@ -13,161 +13,10 @@ actions!(
     [ConfirmProjectActionDialog, DismissProjectActionDialog]
 );
 
+use crate::ui::shortcut_recorder::{KeyDownResult, ShortcutRecorderState};
+
 const DIALOG_CONTEXT: &str = "ProjectActionDialog";
 const DIALOG_INPUT_CONTEXT: &str = "ProjectActionDialog > TextInput";
-
-pub(crate) fn format_keystroke_shortcut(keystroke: &gpui::Keystroke) -> Option<String> {
-    let key_lower = keystroke.key.to_lowercase();
-    if matches!(
-        key_lower.as_str(),
-        "cmd"
-            | "command"
-            | "meta"
-            | "shift"
-            | "control"
-            | "ctrl"
-            | "alt"
-            | "option"
-            | "fn"
-            | "super"
-            | "hyper"
-    ) {
-        return None;
-    }
-
-    let is_macos = cfg!(target_os = "macos");
-
-    let display_key = match key_lower.as_str() {
-        "enter" | "return" => {
-            if is_macos {
-                "↵".to_string()
-            } else {
-                "Enter".to_string()
-            }
-        }
-        "tab" => {
-            if is_macos {
-                "⇥".to_string()
-            } else {
-                "Tab".to_string()
-            }
-        }
-        "space" => "Space".to_string(),
-        "backspace" => {
-            if is_macos {
-                "⌫".to_string()
-            } else {
-                "Backspace".to_string()
-            }
-        }
-        "delete" => {
-            if is_macos {
-                "⌦".to_string()
-            } else {
-                "Delete".to_string()
-            }
-        }
-        "escape" => "Esc".to_string(),
-        "up" => "↑".to_string(),
-        "down" => "↓".to_string(),
-        "left" => "←".to_string(),
-        "right" => "→".to_string(),
-        "pageup" => "PageUp".to_string(),
-        "pagedown" => "PageDown".to_string(),
-        "home" => "Home".to_string(),
-        "end" => "End".to_string(),
-        k if k.starts_with('f') && k[1..].chars().all(|c| c.is_ascii_digit()) => k.to_uppercase(),
-        k if k.len() == 1 => k.to_uppercase(),
-        other => {
-            let mut c = other.chars();
-            match c.next() {
-                None => String::new(),
-                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-            }
-        }
-    };
-
-    if is_macos {
-        let mut s = String::new();
-        if keystroke.modifiers.platform {
-            s.push('⌘');
-        }
-        if keystroke.modifiers.control {
-            s.push('⌃');
-        }
-        if keystroke.modifiers.alt {
-            s.push('⌥');
-        }
-        if keystroke.modifiers.shift {
-            s.push('⇧');
-        }
-        s.push_str(&display_key);
-        Some(s)
-    } else {
-        let mut parts = Vec::new();
-        if keystroke.modifiers.control {
-            parts.push("Ctrl");
-        }
-        if keystroke.modifiers.alt {
-            parts.push("Alt");
-        }
-        if keystroke.modifiers.shift {
-            parts.push("Shift");
-        }
-        if keystroke.modifiers.platform {
-            parts.push("Win");
-        }
-        parts.push(&display_key);
-        Some(parts.join("+"))
-    }
-}
-
-pub(crate) fn format_keystroke_realtime(keystroke: &gpui::Keystroke) -> String {
-    if let Some(shortcut) = format_keystroke_shortcut(keystroke) {
-        return shortcut;
-    }
-
-    let is_macos = cfg!(target_os = "macos");
-    let key_lower = keystroke.key.to_lowercase();
-    let has_platform = keystroke.modifiers.platform
-        || matches!(key_lower.as_str(), "cmd" | "command" | "meta" | "super");
-    let has_control =
-        keystroke.modifiers.control || matches!(key_lower.as_str(), "ctrl" | "control");
-    let has_alt = keystroke.modifiers.alt || matches!(key_lower.as_str(), "alt" | "option");
-    let has_shift = keystroke.modifiers.shift || matches!(key_lower.as_str(), "shift");
-
-    if is_macos {
-        let mut s = String::new();
-        if has_platform {
-            s.push('⌘');
-        }
-        if has_control {
-            s.push('⌃');
-        }
-        if has_alt {
-            s.push('⌥');
-        }
-        if has_shift {
-            s.push('⇧');
-        }
-        s
-    } else {
-        let mut parts = Vec::new();
-        if has_control {
-            parts.push("Ctrl");
-        }
-        if has_alt {
-            parts.push("Alt");
-        }
-        if has_shift {
-            parts.push("Shift");
-        }
-        if has_platform {
-            parts.push("Win");
-        }
-        parts.join("+")
-    }
-}
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
@@ -197,10 +46,7 @@ pub(crate) struct ProjectActionDialogState {
     pub command_input: Entity<TextInput>,
     pub keybinding_input: Entity<TextInput>,
     pub preview_url_input: Entity<TextInput>,
-    pub is_recording_keybinding: bool,
-    pub live_recording_preview: Option<String>,
-    pub original_keybinding: Option<String>,
-    pub shortcut_focus: FocusHandle,
+    pub recorder: ShortcutRecorderState,
     pub icon: ProjectScriptIcon,
     pub icon_picker_open: bool,
     pub run_on_worktree_create: bool,
@@ -309,6 +155,7 @@ impl Padu {
 
         let name_focus = name_input.read(cx).focus();
         let shortcut_focus = cx.focus_handle();
+        let recorder = ShortcutRecorderState::new(shortcut_focus);
         self.project_action_dialog = Some(ProjectActionDialogState {
             project_id: request.project_id,
             script_id,
@@ -316,10 +163,7 @@ impl Padu {
             command_input,
             keybinding_input,
             preview_url_input,
-            is_recording_keybinding: false,
-            live_recording_preview: None,
-            original_keybinding: None,
-            shortcut_focus,
+            recorder,
             icon,
             icon_picker_open: false,
             run_on_worktree_create,
@@ -477,12 +321,12 @@ impl Padu {
         let cancel_focus = dialog.cancel_focus.clone();
         let delete_focus = dialog.delete_focus.clone();
 
-        let is_recording_keybinding = dialog.is_recording_keybinding;
-        let shortcut_focus = dialog.shortcut_focus.clone();
+        let is_recording_keybinding = dialog.recorder.is_recording;
+        let shortcut_focus = dialog.recorder.focus.clone();
         let is_shortcut_focused = shortcut_focus.is_focused(window);
         let is_recording = is_recording_keybinding || is_shortcut_focused;
         let current_shortcut = keybinding_input.read(cx).content().trim().to_string();
-        let live_recording_preview = dialog.live_recording_preview.clone();
+        let live_recording_preview = dialog.recorder.live_preview.clone();
 
         let has_preview_url = !preview_url_input.read(cx).content().trim().is_empty();
 
@@ -1000,9 +844,7 @@ impl Padu {
                                                             if let Some(d) =
                                                                 this.project_action_dialog.as_mut()
                                                             {
-                                                                d.is_recording_keybinding = false;
-                                                                d.live_recording_preview = None;
-                                                                d.original_keybinding = None;
+                                                                d.recorder.stop_recording();
                                                                 cx.notify();
                                                             }
                                                         })),
@@ -1027,7 +869,7 @@ impl Padu {
                                                                 this.project_action_dialog.as_mut()
                                                             {
                                                                 if let Some(orig) =
-                                                                    d.original_keybinding.take()
+                                                                    d.recorder.cancel_recording()
                                                                 {
                                                                     d.keybinding_input.update(
                                                                         cx,
@@ -1038,8 +880,6 @@ impl Padu {
                                                                         },
                                                                     );
                                                                 }
-                                                                d.is_recording_keybinding = false;
-                                                                d.live_recording_preview = None;
                                                                 cx.notify();
                                                             }
                                                         })),
@@ -1083,12 +923,7 @@ impl Padu {
                                                                         .project_action_dialog
                                                                         .as_mut()
                                                                     {
-                                                                        d.is_recording_keybinding =
-                                                                            false;
-                                                                        d.live_recording_preview =
-                                                                            None;
-                                                                        d.original_keybinding =
-                                                                            None;
+                                                                        d.recorder.stop_recording();
                                                                     }
                                                                     cx.notify();
                                                                 },
@@ -1115,19 +950,20 @@ impl Padu {
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         cx.stop_propagation();
                                         if let Some(d) = this.project_action_dialog.as_mut() {
-                                            if !d.is_recording_keybinding {
-                                                d.is_recording_keybinding = true;
-                                                d.original_keybinding = Some(
+                                            if !d.recorder.is_recording {
+                                                let current = Some(
                                                     d.keybinding_input
                                                         .read(cx)
                                                         .content()
                                                         .trim()
                                                         .to_string(),
-                                                );
-                                                d.live_recording_preview = None;
+                                                )
+                                                .filter(|s| !s.is_empty());
+                                                d.recorder.start_recording(current, window, cx);
+                                            } else {
+                                                let focus = d.recorder.focus.clone();
+                                                window.focus(&focus, cx);
                                             }
-                                            let focus = d.shortcut_focus.clone();
-                                            window.focus(&focus, cx);
                                             cx.notify();
                                         }
                                     }))
@@ -1138,77 +974,52 @@ impl Padu {
                                                 return;
                                             };
 
-                                            let key_lower = event.keystroke.key.to_lowercase();
-
-                                            // Enter or Return commits recording (Done)
-                                            if matches!(key_lower.as_str(), "enter" | "return") {
-                                                dialog.is_recording_keybinding = false;
-                                                dialog.live_recording_preview = None;
-                                                dialog.original_keybinding = None;
-                                                cx.stop_propagation();
-                                                cx.notify();
-                                                return;
-                                            }
-
-                                            // Escape cancels recording and restores original
-                                            if key_lower == "escape" {
-                                                if let Some(orig) =
-                                                    dialog.original_keybinding.take()
-                                                {
+                                            match dialog.recorder.handle_key_down(event) {
+                                                KeyDownResult::Committed => {
+                                                    cx.stop_propagation();
+                                                    cx.notify();
+                                                }
+                                                KeyDownResult::Cancelled(orig) => {
+                                                    if let Some(orig) = orig {
+                                                        dialog.keybinding_input.update(
+                                                            cx,
+                                                            |input, cx| {
+                                                                input.set_content(orig, cx);
+                                                            },
+                                                        );
+                                                    }
+                                                    cx.stop_propagation();
+                                                    cx.notify();
+                                                }
+                                                KeyDownResult::Cleared => {
                                                     dialog.keybinding_input.update(
                                                         cx,
                                                         |input, cx| {
-                                                            input.set_content(orig, cx);
+                                                            input.set_content(String::new(), cx);
                                                         },
                                                     );
+                                                    cx.stop_propagation();
+                                                    cx.notify();
                                                 }
-                                                dialog.is_recording_keybinding = false;
-                                                dialog.live_recording_preview = None;
-                                                cx.stop_propagation();
-                                                cx.notify();
-                                                return;
+                                                KeyDownResult::Shortcut(formatted) => {
+                                                    dialog.keybinding_input.update(
+                                                        cx,
+                                                        |input, cx| {
+                                                            input.set_content(formatted, cx);
+                                                        },
+                                                    );
+                                                    dialog.recorder.is_recording = true;
+                                                    cx.stop_propagation();
+                                                    cx.notify();
+                                                }
+                                                KeyDownResult::PendingPreview => {
+                                                    cx.stop_propagation();
+                                                    cx.notify();
+                                                }
+                                                KeyDownResult::Ignored => {
+                                                    cx.notify();
+                                                }
                                             }
-
-                                            // Allow normal Tab navigation
-                                            if key_lower == "tab" {
-                                                dialog.is_recording_keybinding = false;
-                                                dialog.live_recording_preview = None;
-                                                cx.notify();
-                                                return;
-                                            }
-
-                                            // Backspace or Delete without modifiers clears shortcut
-                                            if (key_lower == "backspace" || key_lower == "delete")
-                                                && !event.keystroke.modifiers.modified()
-                                            {
-                                                dialog.keybinding_input.update(cx, |input, cx| {
-                                                    input.set_content(String::new(), cx);
-                                                });
-                                                dialog.live_recording_preview = None;
-                                                cx.stop_propagation();
-                                                cx.notify();
-                                                return;
-                                            }
-
-                                            // Real-time preview for any pressed key (including modifiers)
-                                            let preview =
-                                                format_keystroke_realtime(&event.keystroke);
-                                            if !preview.is_empty() {
-                                                dialog.live_recording_preview = Some(preview);
-                                            }
-
-                                            // If it forms a full non-modifier shortcut, update input
-                                            if let Some(formatted) =
-                                                format_keystroke_shortcut(&event.keystroke)
-                                            {
-                                                dialog.keybinding_input.update(cx, |input, cx| {
-                                                    input.set_content(formatted, cx);
-                                                });
-                                            }
-
-                                            dialog.is_recording_keybinding = true;
-                                            cx.stop_propagation();
-                                            cx.notify();
                                         },
                                     )),
                             )
@@ -1260,7 +1071,41 @@ impl Padu {
                                     .flex()
                                     .items_center()
                                     .gap(px(6.0))
-                                    .child(icon("icons/globe.svg", 13.0, theme.text_tertiary))
+                                    .child({
+                                        let preview_url_val =
+                                            preview_url_input.read(cx).content().trim().to_string();
+                                        let has_url = !preview_url_val.is_empty();
+                                        div()
+                                            .id("dialog-preview-globe-button")
+                                            .size(px(20.0))
+                                            .rounded(px(4.0))
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .when(has_url, |b| {
+                                                let url_clone = preview_url_val.clone();
+                                                b.cursor_pointer()
+                                                    .hover(|e| e.bg(theme.overlay))
+                                                    .tooltip(Tooltip::text(tr!(
+                                                        "actions.open_preview"
+                                                    )))
+                                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                                        this.open_browser_url(
+                                                            url_clone.clone(),
+                                                            cx,
+                                                        );
+                                                    }))
+                                            })
+                                            .child(icon(
+                                                "icons/globe.svg",
+                                                13.0,
+                                                if has_url {
+                                                    theme.accent
+                                                } else {
+                                                    theme.text_tertiary
+                                                },
+                                            ))
+                                    })
                                     .child(div().flex_1().child(preview_url_input.clone()))
                                     .when(
                                         !preview_url_input.read(cx).content().trim().is_empty(),
@@ -1634,92 +1479,6 @@ impl Padu {
             },
             card,
         ))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use gpui::{Keystroke, Modifiers};
-
-    #[test]
-    fn test_format_keystroke_shortcut_modifiers_alone_return_none() {
-        for key in [
-            "cmd", "command", "meta", "shift", "control", "ctrl", "alt", "option", "fn",
-        ] {
-            let ks = Keystroke {
-                modifiers: Modifiers::default(),
-                key: key.to_string(),
-                key_char: None,
-            };
-            assert_eq!(format_keystroke_shortcut(&ks), None);
-        }
-    }
-
-    #[test]
-    fn test_format_keystroke_shortcut_letters_and_modifiers() {
-        let ks = Keystroke {
-            modifiers: Modifiers {
-                platform: true,
-                shift: true,
-                ..Default::default()
-            },
-            key: "r".to_string(),
-            key_char: None,
-        };
-        let formatted = format_keystroke_shortcut(&ks).unwrap();
-        if cfg!(target_os = "macos") {
-            assert_eq!(formatted, "⌘⇧R");
-        } else {
-            assert_eq!(formatted, "Shift+Win+R");
-        }
-    }
-
-    #[test]
-    fn test_format_keystroke_shortcut_function_keys() {
-        let ks = Keystroke {
-            modifiers: Modifiers::default(),
-            key: "f5".to_string(),
-            key_char: None,
-        };
-        assert_eq!(format_keystroke_shortcut(&ks), Some("F5".to_string()));
-    }
-
-    #[test]
-    fn test_format_keystroke_realtime_pure_modifier() {
-        let ks = Keystroke {
-            modifiers: Modifiers {
-                platform: true,
-                ..Default::default()
-            },
-            key: "cmd".to_string(),
-            key_char: None,
-        };
-        let formatted = format_keystroke_realtime(&ks);
-        if cfg!(target_os = "macos") {
-            assert!(formatted.contains('⌘'));
-        } else {
-            assert!(formatted.contains("Win"));
-        }
-    }
-
-    #[test]
-    fn test_format_keystroke_realtime_complete_chord() {
-        let ks = Keystroke {
-            modifiers: Modifiers {
-                platform: true,
-                shift: true,
-                ..Default::default()
-            },
-            key: "b".to_string(),
-            key_char: None,
-        };
-        let formatted = format_keystroke_realtime(&ks);
-        if cfg!(target_os = "macos") {
-            assert_eq!(formatted, "⌘⇧B");
-        } else {
-            assert_eq!(formatted, "Shift+Win+B");
-        }
     }
 }
 
