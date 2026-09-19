@@ -46,6 +46,7 @@ struct BackgroundSummaryEntry {
 #[derive(Clone)]
 struct EnvironmentSummary {
     commit_status: Option<String>,
+    changes: Option<(u64, u64)>,
     commit_focus: FocusHandle,
     compare_focus: FocusHandle,
 }
@@ -742,9 +743,11 @@ impl Padu {
         let change_counts = snapshot
             .map(|snapshot| (snapshot.additions, snapshot.deletions))
             .filter(|(additions, deletions)| *additions > 0 || *deletions > 0);
+        let has_changes = change_counts.is_some();
         let environment = if has_project {
             Some(EnvironmentSummary {
                 commit_status: self.commit_operation_status_label(),
+                changes: change_counts,
                 commit_focus: self.transcript_control_focus("environment-summary-commit", cx),
                 compare_focus: self.transcript_control_focus("environment-summary-compare", cx),
             })
@@ -797,61 +800,18 @@ impl Padu {
                         .right(px(4.0))
                         .child(pulse_dot(5.0, theme.accent)),
                 )
+            })
+            .when(has_changes, |trigger| {
+                trigger.child(
+                    div()
+                        .absolute()
+                        .bottom(px(4.0))
+                        .right(px(4.0))
+                        .size(px(5.0))
+                        .rounded_full()
+                        .bg(theme.warning),
+                )
             });
-        let git_status = change_counts.map(|(additions, deletions)| {
-            let focus = self.transcript_control_focus("header-git-status", cx);
-            div()
-                .id("header-git-status")
-                .track_focus(&focus)
-                .tab_index(0)
-                .h(px(28.0))
-                .px(px(7.0))
-                .rounded(px(7.0))
-                .flex_none()
-                .flex()
-                .items_center()
-                .gap(px(6.0))
-                .cursor_pointer()
-                .text_size(sp(12.5))
-                .font_weight(FontWeight::MEDIUM)
-                .focus_visible(|style| {
-                    style
-                        .bg(theme.overlay)
-                        .border_1()
-                        .border_color(theme.accent)
-                })
-                .hover(|style| style.bg(theme.overlay))
-                .active(|style| style.bg(theme.overlay_strong))
-                .when(additions > 0, |button| {
-                    button.child(
-                        div()
-                            .text_color(theme.success)
-                            .child(format!("+{additions}")),
-                    )
-                })
-                .when(deletions > 0, |button| {
-                    button.child(
-                        div()
-                            .text_color(theme.danger)
-                            .child(format!("-{deletions}")),
-                    )
-                })
-                .tooltip(Tooltip::text(tr!("environment.changes")))
-                .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                    cx.stop_propagation();
-                })
-                .on_click(cx.listener(|this, _, _, cx| {
-                    cx.stop_propagation();
-                    this.set_right_panel_diff_source(ReviewDiffSource::Uncommitted, cx);
-                }))
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                        this.set_right_panel_diff_source(ReviewDiffSource::Uncommitted, cx);
-                        cx.stop_propagation();
-                    }
-                }))
-                .into_any_element()
-        });
         let project_actions = self.render_project_actions_control(cx);
         let open_in = self.render_open_in_control(workspace_path, cx);
         let entries = Rc::new(entries);
@@ -881,7 +841,6 @@ impl Padu {
             .items_center()
             .gap(px(8.0))
             .children(project_actions)
-            .children(git_status)
             .children(open_in)
             .child(info)
             .into_any_element()
@@ -1655,6 +1614,39 @@ fn render_environment_summary_section(
         },
     );
 
+    let changes = environment.changes.map(|(additions, deletions)| {
+        div()
+            .flex()
+            .items_center()
+            .gap(px(5.0))
+            .flex_none()
+            .text_size(sp(12.0))
+            .font_weight(FontWeight::MEDIUM)
+            .child(icon("icons/file-diff.svg", 12.0, theme.text_tertiary))
+            .when(additions > 0, |row| {
+                row.child(
+                    div()
+                        .text_color(theme.success)
+                        .child(format!("+{additions}")),
+                )
+            })
+            .when(deletions > 0, |row| {
+                row.child(
+                    div()
+                        .text_color(theme.danger)
+                        .child(format!("-{deletions}")),
+                )
+            })
+            .into_any_element()
+    });
+    let compare_trailing = div()
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .flex_none()
+        .children(changes)
+        .child(icon("icons/arrow-up-right.svg", 13.0, theme.text_tertiary))
+        .into_any_element();
     let compare_handle = handle;
     let compare_weak = weak;
     let compare = render_environment_action_row(
@@ -1664,7 +1656,7 @@ fn render_environment_summary_section(
         tr!("environment.compare_branch"),
         true,
         false,
-        Some(icon("icons/arrow-up-right.svg", 13.0, theme.text_tertiary).into_any_element()),
+        Some(compare_trailing),
         theme,
         move |window, cx| {
             compare_handle.close(window, cx);
