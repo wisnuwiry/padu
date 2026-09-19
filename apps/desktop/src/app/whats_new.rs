@@ -2,8 +2,9 @@
 //!
 //! A full-width button sits directly above the sidebar footer while the
 //! recorded [`PersistedState::last_seen_version`] differs from the running
-//! version. Opening the dialog marks the current version seen, so the button
-//! disappears immediately. Fresh installs stamp the version silently at
+//! version. Only pressing Done in the dialog marks the current version seen,
+//! so the button stays visible when the dialog is closed via the close
+//! button, backdrop, or Escape. Fresh installs stamp the version silently at
 //! startup and never show the button.
 //!
 //! Only the current version's notes are bundled (extracted at build time
@@ -89,20 +90,31 @@ impl Padu {
         cx.notify();
     }
 
-    /// Close the dialog and stamp the current version seen. Idempotent: every
-    /// dismiss path (Done, close, backdrop, Escape) funnels through here.
-    pub fn dismiss_whats_new(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Close the dialog without marking the version seen. Used by every
+    /// dismiss path except Done (close button, backdrop, Escape), so the
+    /// sidebar button stays visible until the user explicitly presses Done.
+    pub fn close_whats_new(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(state) = self.whats_new.take() else {
             return;
         };
-        // One-shot user action: mark seen synchronously so the sidebar button
-        // disappears on the same frame the dialog closes.
-        self.state.last_seen_version = Some(WHATS_NEW_VERSION.to_string());
-        self.save();
         if let Some(previous_focus) = state.previous_focus {
             window.focus(&previous_focus, cx);
         }
         cx.notify();
+    }
+
+    /// Close the dialog via Done and stamp the current version seen.
+    /// Idempotent: stamping happens only here, so every other close path
+    /// funnels through [`Self::close_whats_new`] instead.
+    pub fn dismiss_whats_new(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.whats_new.is_none() {
+            return;
+        }
+        // One-shot user action: mark seen synchronously so the sidebar button
+        // disappears on the same frame the dialog closes.
+        self.state.last_seen_version = Some(WHATS_NEW_VERSION.to_string());
+        self.save();
+        self.close_whats_new(window, cx);
     }
 
     /// Full-width button rendered directly above the sidebar footer row.
@@ -221,7 +233,7 @@ impl Padu {
             .child(icon("icons/x.svg", 13.0, theme.text_secondary))
             .child(crate::ui::kbd_badge("Esc", &theme))
             .on_activation(cx, |this, window, cx| {
-                this.dismiss_whats_new(window, cx);
+                this.close_whats_new(window, cx);
             });
 
         let header = div()
@@ -397,7 +409,7 @@ impl Padu {
             .track_focus(&state.focus)
             .tab_group()
             .on_action(cx.listener(|this, _: &DismissWhatsNew, window, cx| {
-                this.dismiss_whats_new(window, cx);
+                this.close_whats_new(window, cx);
             }))
             .on_action(cx.listener(|this, _: &OpenWhatsNew, window, cx| {
                 this.open_whats_new(window, cx);
@@ -425,7 +437,7 @@ impl Padu {
             "whats-new-backdrop",
             &theme,
             cx,
-            |this, window, cx| this.dismiss_whats_new(window, cx),
+            |this, window, cx| this.close_whats_new(window, cx),
             card,
         ))
     }

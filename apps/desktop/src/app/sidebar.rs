@@ -1164,7 +1164,9 @@ impl Padu {
     }
 
     /// Bottom sidebar: the full-width "what's new" button (only while an
-    /// update is unseen) directly on top of the settings icon row.
+    /// update is unseen) directly on top of the settings icon row. Only Done
+    /// in the dialog marks the version seen; closing via X, backdrop, or
+    /// Escape keeps the button visible.
     fn render_sidebar_footer(&self, cx: &mut Context<Self>) -> Div {
         let show_whats_new = self.should_show_whats_new();
         div()
