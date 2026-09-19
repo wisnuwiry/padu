@@ -1075,34 +1075,41 @@ right_panel.close_tab: "%{title} を閉じる"
 actions.run: "%{name} を実行"
 actions.add: アクションを追加
 actions.edit: "%{name} を編集"
-actions.edit_title: アクションを編集
-actions.add_title: アクションを追加
-actions.description: アクションはトップバーやショートカットから実行できるプロジェクト固有のコマンドです。
-actions.name: 名前
-actions.name_placeholder: テスト
-actions.name_required: 名前を入力してください。
-actions.command: コマンド
-actions.command_placeholder: bun test
-actions.command_required: コマンドを入力してください。
-actions.keybinding: ショートカット
-actions.keybinding_placeholder: キーを押してください
-actions.keybinding_help: ショートカットを押してください。Backspaceでクリアできます。
-actions.preview_url: プレビューURL (任意)
-actions.preview_url_placeholder: http://localhost:5173
-actions.preview_url_help: このアクションの実行時にアプリ内プレビューでこのURLを開きます。
-actions.run_on_worktree_create: ワークツリー作成時に自動実行
-actions.wait_for_setup: エージェント開始前に完了を待機
-actions.auto_open_preview: アクション実行時にプレビューを自動表示
-actions.delete: 削除
-actions.delete_confirm_title: アクション "%{name}" を削除しますか？
-actions.delete_confirm_description: この操作は取り消せません。
+actions.edit_title: プロジェクトアクションの編集
+actions.add_title: 新規プロジェクトアクション
+actions.description: このプロジェクトで再利用可能なターミナルコマンドや自動化を設定します。
+actions.name: アクション名
+actions.name_placeholder: "例: 開発サーバー、テスト、ビルド"
+actions.name_required: アクション名を入力してください。
+actions.command: ターミナルコマンド
+actions.command_placeholder: "例: npm run dev、cargo test、pnpm build"
+actions.command_help: プロジェクトのルートターミナルセッションで実行されます。
+actions.command_required: 実行するコマンドを入力してください。
+actions.keybinding: キーボードショートカット
+actions.keybinding_placeholder: "例: ⌘⇧R または Ctrl+Shift+R"
+actions.keybinding_help: キーボードから直接このアクションをトリガーするグローバルショートカット。
+actions.preview_url: ブラウザプレビュー URL
+actions.preview_url_placeholder: http://localhost:3000
+actions.preview_url_help: このアクションの実行時にアプリ内ブラウザタブをこのURLに移動します。
+actions.preview_url_optional: 任意
+actions.options_section: 実行と自動化
+actions.run_on_worktree_create: ワークスペース作成時に実行
+actions.run_on_worktree_create_desc: 新しいワークツリーまたはブランチを準備する際に自動実行します。
+actions.wait_for_setup: スクリプトの完了まで待機
+actions.wait_for_setup_desc: このセットアップスクリプトが完了するまでエージェントの実行を保留します。
+actions.auto_open_preview: ブラウザプレビューを自動で開く
+actions.auto_open_preview_desc: このアクションの開始と同時にプレビュータブを開きます。
+actions.delete: アクションを削除
+actions.delete_confirm_title: アクション「%{name}」を削除しますか？
+actions.delete_confirm_description: このプロジェクトアクションは完全に削除されます。この操作は取り消せません。
 actions.delete_confirm_button: アクションを削除
 actions.cancel: キャンセル
 actions.save_changes: 変更を保存
-actions.save_action: アクションを保存
-actions.from_file: "%{file} からインポート"
+actions.save_action: アクションを作成
+actions.from_file: "%{file} で設定済み"
 actions.setup_suffix: (セットアップ)
 actions.running: "%{name} を実行中"
+actions.icon_picker_title: アイコンを選択
 
 open_in.open: "プロジェクトを %{app} で開く"
 open_in.choose: プロジェクトを開くアプリを選択…

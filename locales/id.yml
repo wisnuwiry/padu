@@ -1034,36 +1034,43 @@ right_panel.add_tab: Tambah tab panel
 right_panel.hide: Sembunyikan panel kanan
 right_panel.close_tab: Tutup %{title}
 actions.run: Jalankan %{name}
-actions.add: Tambah aksi
+actions.add: Tambah Aksi
 actions.edit: Edit %{name}
-actions.edit_title: Edit Aksi
-actions.add_title: Tambah Aksi
-actions.description: Aksi adalah perintah khusus proyek yang dapat dijalankan dari bilah atas atau pintasan.
-actions.name: Nama
-actions.name_placeholder: Test
-actions.name_required: Nama wajib diisi.
-actions.command: Perintah
-actions.command_placeholder: bun test
-actions.command_required: Perintah wajib diisi.
-actions.keybinding: Pintasan
-actions.keybinding_placeholder: Tekan pintasan
-actions.keybinding_help: Tekan pintasan. Tekan Backspace untuk menghapus.
-actions.preview_url: URL Pratinjau (opsional)
-actions.preview_url_placeholder: http://localhost:5173
-actions.preview_url_help: Buka URL ini di pratinjau dalam aplikasi saat aksi ini berjalan.
-actions.run_on_worktree_create: Jalankan otomatis saat pembuatan worktree
-actions.wait_for_setup: Tunggu hingga selesai sebelum agen dimulai
-actions.auto_open_preview: Buka pratinjau otomatis saat aksi ini berjalan
-actions.delete: Hapus
+actions.edit_title: Edit Aksi Proyek
+actions.add_title: Aksi Proyek Baru
+actions.description: Konfigurasi perintah terminal dan otomasi yang dapat digunakan kembali untuk proyek ini.
+actions.name: Nama Aksi
+actions.name_placeholder: mis. Server Dev, Uji Coba, Build
+actions.name_required: Harap masukkan nama aksi.
+actions.command: Perintah Terminal
+actions.command_placeholder: mis. npm run dev, cargo test, pnpm build
+actions.command_help: Dijalankan di sesi terminal root proyek Anda.
+actions.command_required: Harap masukkan perintah yang akan dieksekusi.
+actions.keybinding: Pintasan Keyboard
+actions.keybinding_placeholder: mis. ⌘⇧R atau Ctrl+Shift+R
+actions.keybinding_help: Pintasan global untuk memicu aksi ini langsung dari keyboard Anda.
+actions.preview_url: URL Pratinjau Peramban
+actions.preview_url_placeholder: http://localhost:3000
+actions.preview_url_help: Secara otomatis mengarahkan tab peramban bawaan ke URL ini saat aksi dijalankan.
+actions.preview_url_optional: Opsional
+actions.options_section: Eksekusi & Otomasi
+actions.run_on_worktree_create: Jalankan saat pembuatan ruang kerja
+actions.run_on_worktree_create_desc: Eksekusi otomatis saat menyiapkan worktree atau cabang baru.
+actions.wait_for_setup: Tunggu skrip hingga selesai
+actions.wait_for_setup_desc: Tahan eksekusi giliran agen sampai skrip penyiapan ini selesai.
+actions.auto_open_preview: Buka pratinjau peramban otomatis
+actions.auto_open_preview_desc: Beralih ke tab pratinjau peramban segera setelah aksi ini berjalan.
+actions.delete: Hapus Aksi
 actions.delete_confirm_title: Hapus aksi "%{name}"?
-actions.delete_confirm_description: Tindakan ini tidak dapat dibatalkan.
-actions.delete_confirm_button: Hapus aksi
+actions.delete_confirm_description: Aksi proyek ini akan dihapus secara permanen. Tindakan ini tidak dapat dibatalkan.
+actions.delete_confirm_button: Hapus Aksi
 actions.cancel: Batal
-actions.save_changes: Simpan perubahan
-actions.save_action: Simpan aksi
-actions.from_file: Dari %{file}
-actions.setup_suffix: (setup)
+actions.save_changes: Simpan Perubahan
+actions.save_action: Buat Aksi
+actions.from_file: Dikonfigurasi di %{file}
+actions.setup_suffix: (penyiapan)
 actions.running: Menjalankan %{name}
+actions.icon_picker_title: Pilih Ikon
 open_in.open: Buka proyek di %{app}
 open_in.choose: Buka proyek di…
 environment.title: Lingkungan

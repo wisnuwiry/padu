@@ -1037,34 +1037,41 @@ right_panel.close_tab: 关闭%{title}
 actions.run: 运行 %{name}
 actions.add: 添加动作
 actions.edit: 编辑 %{name}
-actions.edit_title: 编辑动作
-actions.add_title: 添加动作
-actions.description: 动作是可以在顶栏或通过快捷键运行的项目级自定义命令。
-actions.name: 名称
-actions.name_placeholder: 测试
-actions.name_required: 名称不能为空。
-actions.command: 命令
-actions.command_placeholder: bun test
-actions.command_required: 命令不能为空。
-actions.keybinding: 快捷键
-actions.keybinding_placeholder: 按下快捷键
-actions.keybinding_help: 按下快捷键。按退格键清除。快捷键在整个环境中生效。
-actions.preview_url: 预览网址（可选）
-actions.preview_url_placeholder: http://localhost:5173
-actions.preview_url_help: 运行此动作时在内置预览中打开此网址。
-actions.run_on_worktree_create: 创建工作树时自动运行
-actions.wait_for_setup: 在智能体启动前等待其完成
-actions.auto_open_preview: 运行此动作时自动打开预览
-actions.delete: 删除
+actions.edit_title: 编辑项目动作
+actions.add_title: 新建项目动作
+actions.description: 配置可在顶栏或通过快捷键随时调用的项目级终端命令与自动化流程。
+actions.name: 动作名称
+actions.name_placeholder: 例如：开发服务器、测试套件、构建
+actions.name_required: 请输入动作名称。
+actions.command: 终端命令
+actions.command_placeholder: 例如：npm run dev、cargo test、pnpm build
+actions.command_help: 将在项目根目录的终端会话中执行。
+actions.command_required: 请输入要执行的命令。
+actions.keybinding: 键盘快捷键
+actions.keybinding_placeholder: 例如：⌘⇧R 或 Ctrl+Shift+R
+actions.keybinding_help: 通过全局快捷键随时触发此动作。
+actions.preview_url: 浏览器预览网址
+actions.preview_url_placeholder: http://localhost:3000
+actions.preview_url_help: 运行此动作时自动在内置浏览器中导航至该网址。
+actions.preview_url_optional: 可选
+actions.options_section: 执行与自动化
+actions.run_on_worktree_create: 创建工作空间时自动运行
+actions.run_on_worktree_create_desc: 在准备新工作树或分支时自动执行此脚本。
+actions.wait_for_setup: 等待脚本执行完成
+actions.wait_for_setup_desc: 在此设置脚本完成前暂停智能体执行。
+actions.auto_open_preview: 自动打开浏览器预览
+actions.auto_open_preview_desc: 动作启动时立即切换至预览标签页。
+actions.delete: 删除动作
 actions.delete_confirm_title: 删除动作 "%{name}"？
-actions.delete_confirm_description: 此操作不可撤回。
+actions.delete_confirm_description: 该项目动作将被永久删除，此操作无法撤销。
 actions.delete_confirm_button: 删除动作
 actions.cancel: 取消
 actions.save_changes: 保存修改
-actions.save_action: 保存动作
+actions.save_action: 创建动作
 actions.from_file: 来自 %{file}
 actions.setup_suffix: (初始化)
 actions.running: 正在运行 %{name}
+actions.icon_picker_title: 选择图标
 open_in.open: 用%{app}打开项目
 open_in.choose: 选择打开项目的应用…
 environment.title: 环境
