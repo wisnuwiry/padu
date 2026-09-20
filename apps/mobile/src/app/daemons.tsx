@@ -48,17 +48,35 @@ export default function DaemonsScreen() {
       <Stack.Screen
         options={{
           headerRight: () => (
-            <Pressable
-              accessibilityLabel="Add daemon"
-              accessibilityRole="button"
-              hitSlop={10}
-              onPress={() => router.push('/daemon-editor')}>
-              <AppSymbol
-                name={{ ios: 'plus', android: 'add', web: 'add' }}
-                size={21}
-                tintColor={theme.accent}
-              />
-            </Pressable>
+            <View style={styles.headerActions}>
+              <Pressable
+                accessibilityHint="Import a daemon from the desktop's QR code"
+                accessibilityLabel="Import from link"
+                accessibilityRole="button"
+                hitSlop={10}
+                onPress={() => router.push('/daemon-import')}>
+                <AppSymbol
+                  name={{
+                    ios: 'qrcode.viewfinder',
+                    android: 'qr_code_scanner',
+                    web: 'qr_code_scanner',
+                  }}
+                  size={21}
+                  tintColor={theme.accent}
+                />
+              </Pressable>
+              <Pressable
+                accessibilityLabel="Add daemon"
+                accessibilityRole="button"
+                hitSlop={10}
+                onPress={() => router.push('/daemon-editor')}>
+                <AppSymbol
+                  name={{ ios: 'plus', android: 'add', web: 'add' }}
+                  size={21}
+                  tintColor={theme.accent}
+                />
+              </Pressable>
+            </View>
           ),
         }}
       />
@@ -79,8 +97,21 @@ export default function DaemonsScreen() {
           <View style={styles.empty}>
             <Text style={[styles.emptyTitle, { color: theme.text }]}>No saved daemons</Text>
             <Text style={[styles.emptyBody, { color: theme.textSecondary }]}>
-              Add the address and token shown in Padu Desktop’s Daemon settings.
+              Scan the QR code in Padu Desktop’s host dialog with your camera,
+              or add the address and token by hand.
             </Text>
+            <Pressable
+              accessibilityLabel="Import from link"
+              accessibilityRole="button"
+              onPress={() => router.push('/daemon-import')}
+              style={({ pressed }) => [
+                styles.emptyAction,
+                { backgroundColor: theme.inverse, opacity: pressed ? 0.8 : 1 },
+              ]}>
+              <Text style={[styles.emptyActionLabel, { color: theme.onInverse }]}>
+                Import from Link
+              </Text>
+            </Pressable>
           </View>
         )}
         ListFooterComponent={daemon.profiles.length ? (
@@ -154,6 +185,7 @@ export default function DaemonsScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  headerActions: { alignItems: 'center', flexDirection: 'row', gap: 18 },
   listContent: { paddingBottom: 36 },
   intro: { fontSize: 13.5, lineHeight: 19, margin: Spacing.three, marginBottom: 12 },
   row: {
@@ -183,4 +215,11 @@ const styles = StyleSheet.create({
   empty: { alignItems: 'center', paddingHorizontal: 40, paddingTop: 100 },
   emptyTitle: { fontSize: 18, fontWeight: '700' },
   emptyBody: { fontSize: 14, lineHeight: 20, marginTop: 8, maxWidth: 320, textAlign: 'center' },
+  emptyAction: {
+    borderRadius: Radius.large,
+    marginTop: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  emptyActionLabel: { fontSize: 14, fontWeight: '700' },
 });
