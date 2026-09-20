@@ -248,7 +248,35 @@ impl Padu {
                                                             }),
                                                     )
                                                     .child(SharedString::from("·"))
-                                                    .child(last_conn_label),
+                                                    .child(last_conn_label)
+                                                    .when_some(
+                                                        self.host_transport_status(&host.id),
+                                                        |row, (label, healthy)| {
+                                                            row.child(SharedString::from("·"))
+                                                                .child(
+                                                                    div()
+                                                                        .flex()
+                                                                        .items_center()
+                                                                        .gap(px(3.5))
+                                                                        .child(icon(
+                                                                            if healthy {
+                                                                                "icons/check.svg"
+                                                                            } else {
+                                                                                "icons/alert.svg"
+                                                                            },
+                                                                            10.5,
+                                                                            if healthy {
+                                                                                theme.success
+                                                                            } else {
+                                                                                theme.warning
+                                                                            },
+                                                                        ))
+                                                                        .child(SharedString::from(
+                                                                            label,
+                                                                        )),
+                                                                )
+                                                        },
+                                                    ),
                                             ),
                                     ),
                             )
@@ -322,6 +350,22 @@ impl Padu {
                             )
                     }))
             })
+    }
+
+    /// Compact tunnel state for the host list row.
+    ///
+    /// Uses `try_lock` so the render path never blocks on a transport that is
+    /// mid-start; a contended lock simply renders no status this frame.
+    fn host_transport_status(&self, host_id: &str) -> Option<(String, bool)> {
+        use padu_client::transport::TransportStatus;
+        let slot = self.host_transports.get(host_id)?;
+        let guard = slot.try_lock()?;
+        match guard.status() {
+            TransportStatus::Ready { .. } => Some((tr!("host.tunnel_connected"), true)),
+            TransportStatus::Starting => Some((tr!("host.tunnel_starting"), true)),
+            TransportStatus::Failed { .. } => Some((tr!("host.tunnel_failed"), false)),
+            _ => None,
+        }
     }
 
     pub(super) fn render_daemon_settings(&self, cx: &mut Context<Self>) -> AnyElement {

@@ -242,6 +242,50 @@ impl TransportRegistry {
             .remove(host_id)
     }
 
+    /// Move a running transport to a different key, preserving the subprocess.
+    /// Used when a host dialog's provisional tunnel is handed off to the saved
+    /// profile's id. Returns `false` when no transport exists under `from`.
+    pub fn rekey(&self, from: &str, to: &str) -> bool {
+        let mut guard = self.inner.lock().expect("transport registry poisoned");
+        match guard.remove(from) {
+            Some(slot) => {
+                guard.insert(to.to_string(), slot);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Ensure a transport exists under `key` and is ready, returning its
+    /// resolved address.
+    ///
+    /// An already-ready transport is reused, so switching back to a host does
+    /// not spawn a second subprocess or rotate a Quick Tunnel URL.
+    pub async fn ensure_started(
+        &self,
+        key: &str,
+        make: impl FnOnce() -> Box<dyn Transport>,
+        context: &TransportContext,
+    ) -> Result<TransportHandle, TransportError> {
+        if let Some(slot) = self.get(key) {
+            let guard = slot.lock().await;
+            if let TransportStatus::Ready { address, .. } = guard.status() {
+                return Ok(TransportHandle {
+                    address,
+                    qr_payload: None,
+                    pid: None,
+                });
+            }
+            // A stopped or failed transport is replaced rather than reused.
+            drop(guard);
+            self.remove(key);
+        }
+        let mut transport = make();
+        let handle = transport.start(context).await?;
+        self.register(key, transport);
+        Ok(handle)
+    }
+
     /// Number of registered hosts.
     pub fn len(&self) -> usize {
         self.inner
@@ -373,6 +417,69 @@ mod tests {
         futures_lite::future::block_on(registry.shutdown_all());
         assert_eq!(stops.load(std::sync::atomic::Ordering::SeqCst), 1);
         assert!(registry.is_empty());
+    }
+
+    #[test]
+    fn ensure_started_reuses_a_ready_transport() {
+        let registry = TransportRegistry::new();
+        let (transport, starts, _stops) = make_recorder();
+        let context = TransportContext {
+            local_port: 34123,
+            token: "tok".into(),
+        };
+        let first = futures_lite::future::block_on(registry.ensure_started(
+            "host-a",
+            || transport,
+            &context,
+        ))
+        .unwrap();
+        assert_eq!(first.address, "wss://recorder.test");
+
+        // A second call with a factory that would panic if invoked: reuse
+        // must win over starting a new transport.
+        let second = futures_lite::future::block_on(registry.ensure_started(
+            "host-a",
+            || panic!("must not rebuild a ready transport"),
+            &context,
+        ))
+        .unwrap();
+        assert_eq!(second.address, "wss://recorder.test");
+        assert_eq!(starts.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn ensure_started_replaces_a_stopped_transport() {
+        let registry = TransportRegistry::new();
+        let (transport, _starts, stops) = make_recorder();
+        let context = TransportContext {
+            local_port: 34123,
+            token: "tok".into(),
+        };
+        futures_lite::future::block_on(registry.ensure_started("host-a", || transport, &context))
+            .unwrap();
+        // Stop it, then ensure again: the slot is replaced, not reused.
+        let slot = registry.get("host-a").unwrap();
+        futures_lite::future::block_on(async {
+            slot.lock().await.stop().await.unwrap();
+        });
+        let (replacement, starts, _) = make_recorder();
+        futures_lite::future::block_on(registry.ensure_started("host-a", || replacement, &context))
+            .unwrap();
+        assert_eq!(stops.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(starts.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn rekey_preserves_the_slot_and_moves_it() {
+        let registry = TransportRegistry::new();
+        let (transport, _starts, stops) = make_recorder();
+        registry.register("draft-key", transport);
+        assert!(registry.rekey("draft-key", "host-7"));
+        assert!(registry.get("draft-key").is_none());
+        assert!(registry.get("host-7").is_some());
+        // Moving does not stop the transport.
+        assert_eq!(stops.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(!registry.rekey("missing", "host-8"));
     }
 
     #[test]

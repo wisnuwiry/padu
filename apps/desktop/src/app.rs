@@ -2052,11 +2052,38 @@ impl Padu {
         self.assistant_footer_fingerprint.set(None);
     }
 
+    /// Live transports for remote hosts. Exposed so the app's quit hook can
+    /// tear every tunnel down without reaching into `Padu`.
+    pub(crate) fn host_transports(&self) -> &padu_client::transport::TransportRegistry {
+        &self.host_transports
+    }
+
+    /// Stop and forget the transport backing `host_id`, if one is running.
+    /// A relay host's tunnel is only valid while that host is active, so this
+    /// runs when switching away rather than leaving the subprocess behind.
+    fn stop_host_transport(&self, host_id: &str) {
+        let Some(slot) = self.host_transports.remove(host_id) else {
+            return;
+        };
+        smol::spawn(async move {
+            let mut transport = slot.lock().await;
+            let _ = transport.stop().await;
+        })
+        .detach();
+    }
+
     pub(super) fn switch_to_host(&mut self, host_id: Option<String>, cx: &mut Context<Self>) {
         self.save();
 
+        let previous_host = self.state.active_host_id.clone();
         self.state.set_active_host(host_id.clone());
         let _ = self.store.write_app_settings(&self.state.app_settings());
+
+        if let Some(previous) = previous_host
+            && host_id.as_deref() != Some(previous.as_str())
+        {
+            self.stop_host_transport(&previous);
+        }
 
         self.teardown_all_runtimes();
 
@@ -2071,24 +2098,65 @@ impl Padu {
             .cloned();
 
         let existing_local = self.local_daemon.clone();
+        let registry = self.host_transports.clone();
+        let local_port = self.state.daemon_exposure.port;
 
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    match profile {
-                        None => {
-                            if let Some(local) = existing_local {
-                                Ok(local)
-                            } else {
-                                crate::daemon::start_process()
-                            }
+                    let Some(profile) = profile else {
+                        return if let Some(local) = existing_local {
+                            Ok((local, None))
+                        } else {
+                            crate::daemon::start_process().map(|daemon| (daemon, None))
+                        };
+                    };
+
+                    let token = profile.token.clone().unwrap_or_default();
+                    let context = padu_client::transport::TransportContext {
+                        local_port,
+                        token: token.clone(),
+                    };
+
+                    // Relay transports open their tunnel before the client
+                    // connects, and report the address actually carrying
+                    // traffic. A stale saved address — most often a Quick
+                    // Tunnel rotated by a restart — is replaced.
+                    let address = match profile.kind {
+                        padu_client::persistence::HostKind::Direct
+                        | padu_client::persistence::HostKind::Tailscale => profile.address.clone(),
+                        padu_client::persistence::HostKind::SshRelay => {
+                            let ssh = profile.ssh.clone().ok_or_else(|| {
+                                anyhow::anyhow!("host has no SSH relay configuration")
+                            })?;
+                            let transport = padu_client::transport::SshTransport::new(
+                                padu_client::transport::ssh::SshConfig {
+                                    user: ssh.user,
+                                    host: ssh.host,
+                                    remote_port: ssh.remote_port,
+                                    identity_file: ssh.identity_file,
+                                },
+                            );
+                            registry
+                                .ensure_started(&profile.id, || Box::new(transport), &context)
+                                .await
+                                .map_err(anyhow::Error::from)?
+                                .address
                         }
-                        Some(p) => {
-                            let token = p.token.unwrap_or_default();
-                            padu_client::DaemonSupervisor::connect(&p.address, token)
+                        padu_client::persistence::HostKind::Cloudflare => {
+                            let transport = padu_client::transport::CloudflareTransport::new();
+                            registry
+                                .ensure_started(&profile.id, || Box::new(transport), &context)
+                                .await
+                                .map_err(anyhow::Error::from)?
+                                .address
                         }
-                    }
+                    };
+
+                    let rotated = (address != profile.address).then(|| address.clone());
+                    let daemon = padu_client::DaemonSupervisor::connect(&address, token)?;
+                    Ok((daemon, rotated))
                 })
                 .await;
 
@@ -2098,7 +2166,21 @@ impl Padu {
                 }
                 this.host_switch_pending = false;
                 match result {
-                    Ok(daemon) => {
+                    Ok((daemon, rotated)) => {
+                        if let Some(address) = rotated
+                            && let Some(id) = this.state.active_host_id.clone()
+                            && let Some(profile) = this.state.hosts.iter_mut().find(|h| h.id == id)
+                        {
+                            profile.address = address.clone();
+                            if let Some(cloudflare) = profile.cloudflare.as_mut() {
+                                cloudflare.hostname = address
+                                    .trim_start_matches("wss://")
+                                    .trim_start_matches("ws://")
+                                    .to_string();
+                            }
+                            let _ = this.store.write_app_settings(&this.state.app_settings());
+                            this.show_toast(tr!("host.tunnel_url_changed"));
+                        }
                         if !daemon.is_remote() {
                             this.local_daemon = Some(daemon.clone());
                         }

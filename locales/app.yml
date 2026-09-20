@@ -756,6 +756,12 @@ host.start_tunnel:
   en: Start Tunnel
 host.restart_tunnel:
   en: Restart Tunnel
+host.tunnel_url_changed:
+  en: Tunnel URL changed — re-scan the QR code on your other devices.
+host.tunnel_connected:
+  en: Tunnel connected
+host.tunnel_failed:
+  en: Tunnel unavailable
 web.connect_title:
   en: Connect to Padu daemon
 web.connect_description:

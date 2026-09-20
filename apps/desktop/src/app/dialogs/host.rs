@@ -540,6 +540,16 @@ impl Padu {
         }
 
         let _ = self.store.write_app_settings(&self.state.app_settings());
+
+        // A tunnel provisioned in the dialog is handed to the saved profile
+        // instead of being torn down on close, so `switch_to_host` reuses it
+        // rather than spawning a second tunnel with a different URL.
+        if kind == HostKind::Cloudflare
+            && let Some(dialog) = &self.host_dialog
+        {
+            self.host_transports.rekey(&dialog.tunnel_key, &profile_id);
+        }
+
         self.close_host_dialog(window, cx);
         self.switch_to_host(Some(profile_id), cx);
     }
