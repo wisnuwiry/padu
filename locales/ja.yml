@@ -1552,3 +1552,28 @@ session.pin: ピン留め
 session.unpin: ピン留めを外す
 session.archive: アーカイブ
 errors.update_task: "タスクを更新できませんでした：%{error}"
+host.transport: トランスポート
+host.transport_direct: 直接
+host.transport_tailscale: Tailscale
+host.transport_cloudflare: Cloudflare
+host.transport_ssh: SSH
+host.tailscale_hint: "MagicDNS 名または 100.x アドレスとデーモンのポートを入力してください（例: my-mac.tail-abc.ts.net:34123）"
+host.ssh_user: ユーザー
+host.ssh_user_placeholder: "例: alice"
+host.ssh_host: 踏み台ホスト
+host.ssh_host_placeholder: "例: jump.example.com"
+host.ssh_remote_port: リモートポート
+host.ssh_remote_port_placeholder: "例: 19999"
+host.ssh_identity_file: 秘密鍵ファイル
+host.ssh_identity_placeholder: SSH 秘密鍵へのパス（任意）
+host.tunnel_idle_hint: Cloudflare Quick Tunnel を開始し、Padu Mobile アプリで QR コードをスキャンしてください。URL はトンネルを再起動するたびに変わります。
+host.tunnel_starting: トンネルを開始しています…
+host.tunnel_ready: トンネルの準備完了
+host.qr_scan_hint: Padu Mobile でこのコードをスキャンすると、トークンを入力せずにこのホストを追加できます。
+host.start_tunnel: トンネルを開始
+host.restart_tunnel: トンネルを再起動
+host.tunnel_url_changed: トンネル URL が変わりました — 他のデバイスで QR コードを再スキャンしてください。
+host.tunnel_connected: トンネル接続済み
+host.tunnel_failed: トンネル利用不可
+host.transport_web_hint: このデーモンにテールネット経由で到達できる場合は Tailscale を使用してください。Cloudflare と SSH のリレーは Padu Desktop から追加します。
+host.transport_relay_hint: このホストは Padu Desktop によってプロビジョニングされました。トンネルはそこで管理されます。

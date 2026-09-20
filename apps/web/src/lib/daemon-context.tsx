@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { PaduClient, type HostProfile } from '@padu/client'
+import { PaduClient, type HostKind, type HostProfile } from '@padu/client'
 import {
   createContext,
   useCallback,
@@ -43,7 +43,12 @@ interface DaemonContextValue {
   reconnect: () => Promise<void>
   disconnect: () => void
   forget: () => void
-  addHost: (input: { name: string; address: string; token?: string }) => Promise<HostProfile>
+  addHost: (input: {
+    name: string
+    address: string
+    token?: string
+    kind?: HostKind
+  }) => Promise<HostProfile>
   updateHost: (id: string, updates: Partial<HostProfile>) => Promise<void>
   removeHost: (id: string) => Promise<void>
   switchHost: (id: string | null) => Promise<void>
@@ -115,7 +120,12 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
   )
 
   const addHost = useCallback(
-    async (input: { name: string; address: string; token?: string }) => {
+    async (input: {
+      name: string
+      address: string
+      token?: string
+      kind?: HostKind
+    }) => {
       const now = Math.floor(Date.now() / 1_000)
       const id = typeof crypto !== 'undefined' && crypto.randomUUID
         ? crypto.randomUUID()
@@ -127,7 +137,7 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
       const newProfile: HostProfile = {
         id,
         name: input.name.trim() || displayHost(normalizedAddress),
-        kind: 'direct',
+        kind: input.kind ?? 'direct',
         address: normalizedAddress,
         token: input.token?.trim() || undefined,
         createdAt: now,

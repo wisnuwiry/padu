@@ -762,6 +762,10 @@ host.tunnel_connected:
   en: Tunnel connected
 host.tunnel_failed:
   en: Tunnel unavailable
+host.transport_web_hint:
+  en: Use Tailscale when this daemon is reachable over your tailnet. Cloudflare and SSH relays are added from Padu Desktop.
+host.transport_relay_hint:
+  en: This host was provisioned by Padu Desktop. Its tunnel is managed there.
 web.connect_title:
   en: Connect to Padu daemon
 web.connect_description:

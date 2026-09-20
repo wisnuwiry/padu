@@ -1494,3 +1494,28 @@ session.pin: Sematkan
 session.unpin: Lepas sematan
 session.archive: Arsipkan
 errors.update_task: "Tidak dapat memperbarui tugas: %{error}"
+host.transport: Transport
+host.transport_direct: Langsung
+host.transport_tailscale: Tailscale
+host.transport_cloudflare: Cloudflare
+host.transport_ssh: SSH
+host.tailscale_hint: "Masukkan nama MagicDNS atau alamat 100.x beserta porta daemon, mis. my-mac.tail-abc.ts.net:34123"
+host.ssh_user: Pengguna
+host.ssh_user_placeholder: mis. alice
+host.ssh_host: Host lompatan
+host.ssh_host_placeholder: mis. jump.example.com
+host.ssh_remote_port: Porta jarak jauh
+host.ssh_remote_port_placeholder: mis. 19999
+host.ssh_identity_file: Berkas identitas
+host.ssh_identity_placeholder: Jalur opsional ke kunci privat SSH
+host.tunnel_idle_hint: Mulai Cloudflare Quick Tunnel, lalu pindai kode QR dari aplikasi Padu Mobile. URL berubah setiap kali tunnel dimulai ulang.
+host.tunnel_starting: Memulai tunnel…
+host.tunnel_ready: Tunnel siap
+host.qr_scan_hint: Pindai kode ini di Padu Mobile untuk menambahkan host ini tanpa mengetik token.
+host.start_tunnel: Mulai Tunnel
+host.restart_tunnel: Mulai Ulang Tunnel
+host.tunnel_url_changed: URL tunnel berubah — pindai ulang kode QR di perangkat lain.
+host.tunnel_connected: Tunnel tersambung
+host.tunnel_failed: Tunnel tidak tersedia
+host.transport_web_hint: Gunakan Tailscale jika daemon ini dapat dijangkau melalui tailnet Anda. Relay Cloudflare dan SSH ditambahkan dari Padu Desktop.
+host.transport_relay_hint: Host ini disediakan oleh Padu Desktop. Tunnel-nya dikelola di sana.

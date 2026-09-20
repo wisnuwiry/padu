@@ -4,6 +4,7 @@ import { HostDialog } from '@/components/host-dialog'
 import { PaduIcon } from '@/components/padu-icon'
 import { Button } from '@/components/ui/button'
 import { useDaemon } from '@/lib/daemon-context'
+import { transportLabelKey } from '@/lib/daemon-transport'
 import { useI18n } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
 import { DetailRow, SettingsCard, SettingText, errorMessage, formatHostLastConnected } from './shared'
@@ -77,6 +78,11 @@ export function RemoteHostsCard() {
                       <span className="truncate text-[13.5px] font-medium text-foreground">
                         {host.name || host.address}
                       </span>
+                      {transportLabelKey(host.kind) && (
+                        <span className="shrink-0 rounded bg-[var(--overlay)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--text-secondary)]">
+                          {t(transportLabelKey(host.kind)!)}
+                        </span>
+                      )}
                       {isActive && (
                         <span className="rounded bg-[var(--success-soft)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--success)]">
                           {t('host.active')}
