@@ -12,11 +12,13 @@ Padu includes a full-featured browser web client (`apps/web`). You can access th
 
 ## Connecting from the Browser
 
-When your daemon is running on `127.0.0.1:4789`, open your browser and connect via WebSocket. The web client provides feature parity with the desktop interface, including split diff inspection, multi-agent turns, and session switching.
+Expose the daemon (see [Connectivity](/docs/connectivity)), then open your browser and connect to its WebSocket URL. The web client provides feature parity with the desktop interface, including split diff inspection, multi-agent turns, and session switching.
+
+A page served over HTTPS can only open a `wss://` socket, so the daemon needs TLS in front of it — either a reverse proxy (below) or a tunnel.
 
 ## Reverse Proxy Configuration
 
-If you host the daemon on a remote development machine and wish to access it over HTTPS, you can place a reverse proxy (such as Caddy or Nginx) in front of port `4789`.
+If you host the daemon on a remote development machine and wish to access it over HTTPS, you can place a reverse proxy (such as Caddy or Nginx) in front of port `34123`.
 
 ### Caddy (Recommended)
 
@@ -24,7 +26,7 @@ Caddy manages TLS certificates, headers, and WebSocket upgrades automatically:
 
 ```caddy
 padu.example.com {
-  reverse_proxy 127.0.0.1:4789
+  reverse_proxy 127.0.0.1:34123
 }
 ```
 
@@ -46,7 +48,7 @@ server {
   client_max_body_size 100m;
 
   location / {
-    proxy_pass http://127.0.0.1:4789;
+    proxy_pass http://127.0.0.1:34123;
     proxy_http_version 1.1;
 
     # WebSocket upgrade
