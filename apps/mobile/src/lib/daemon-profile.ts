@@ -1,7 +1,27 @@
+/** Mirrors the desktop's `HostKind`, so both sides name a transport the same. */
+export type DaemonTransport =
+  | "direct"
+  | "tailscale"
+  | "cloudflare"
+  | "ssh_relay";
+
+export const DAEMON_TRANSPORTS: DaemonTransport[] = [
+  "direct",
+  "tailscale",
+  "cloudflare",
+  "ssh_relay",
+];
+
 export interface DaemonProfile {
   id: string;
   name: string;
   address: string;
+  /**
+   * How the desktop reaches this daemon. Imported profiles carry the kind from
+   * their connect link; profiles added by hand before transports existed
+   * deserialize as `direct`.
+   */
+  kind: DaemonTransport;
   createdAt: number;
   updatedAt: number;
   lastConnectedAt: number | null;
@@ -11,6 +31,7 @@ export interface DaemonProfileInput {
   name: string;
   address: string;
   token?: string;
+  kind?: DaemonTransport;
 }
 
 export function normalizeDaemonAddress(value: string): string {
@@ -52,10 +73,64 @@ export function normalizeDaemonProfile(
     id,
     name,
     address,
+    // Editing a hand-added profile must not silently drop an imported kind.
+    kind: input.kind ?? existing?.kind ?? "direct",
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
     lastConnectedAt: existing?.lastConnectedAt ?? null,
   };
+}
+
+/**
+ * Best-effort description of how a daemon is reached.
+ *
+ * Used for connection hints and the host-list badge. The stored `kind` wins
+ * when present; otherwise the address is inspected, which keeps profiles saved
+ * before transports existed rendering sensibly.
+ */
+export type ConnectionClass =
+  | "cloudflare"
+  | "tailscale"
+  | "ssh_relay"
+  | "public_wss"
+  | "private_ws"
+  | "insecure_public_ws"
+  | "invalid";
+
+export function classifyConnection(
+  address: string,
+  kind: DaemonTransport = "direct",
+): ConnectionClass {
+  let normalized: string;
+  try {
+    normalized = normalizeDaemonAddress(address);
+  } catch {
+    return "invalid";
+  }
+  if (kind === "cloudflare") return "cloudflare";
+  if (kind === "ssh_relay") return "ssh_relay";
+  if (kind === "tailscale") return "tailscale";
+
+  if (normalized.startsWith("wss://")) {
+    const hostname = new URL(normalized).hostname.toLowerCase();
+    if (hostname.endsWith(".trycloudflare.com")) return "cloudflare";
+    if (hostname.endsWith(".ts.net") || isTailnetHostname(hostname)) {
+      return "tailscale";
+    }
+    return "public_wss";
+  }
+  // Plain ws:// is only acceptable on a network the user already trusts.
+  return isPrivateDaemonAddress(normalized) ? "private_ws" : "insecure_public_ws";
+}
+
+/** True for a raw Tailscale address inside the 100.64.0.0/10 CGNAT range. */
+function isTailnetHostname(hostname: string): boolean {
+  const octets = hostname.split(".");
+  if (octets.length !== 4) return false;
+  const first = Number(octets[0]);
+  const second = Number(octets[1]);
+  if (!Number.isInteger(first) || !Number.isInteger(second)) return false;
+  return first === 100 && second >= 64 && second <= 127;
 }
 
 export function displayHost(address: string): string {
@@ -125,6 +200,11 @@ export function parseDaemonProfiles(value: unknown): DaemonProfile[] {
         id: record.id,
         name: record.name.trim() || displayHost(record.address),
         address: normalizeDaemonAddress(record.address),
+        // An unknown kind (a profile written by a newer build) degrades to
+        // `direct` rather than discarding the whole profile.
+        kind: DAEMON_TRANSPORTS.includes(record.kind as DaemonTransport)
+          ? (record.kind as DaemonTransport)
+          : "direct",
         createdAt: record.createdAt,
         updatedAt: record.updatedAt,
         lastConnectedAt: record.lastConnectedAt as number | null,

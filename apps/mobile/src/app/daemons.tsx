@@ -19,7 +19,24 @@ import { DaemonAvatar } from '@/components/daemon-avatar';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useDaemon } from '@/lib/daemon-context';
-import { displayHost, type DaemonProfile } from '@/lib/daemon-profile';
+import {
+  displayHost,
+  type DaemonProfile,
+  type DaemonTransport,
+} from '@/lib/daemon-profile';
+
+function transportLabel(kind: DaemonTransport): string {
+  switch (kind) {
+    case 'cloudflare':
+      return 'Cloudflare';
+    case 'tailscale':
+      return 'Tailscale';
+    case 'ssh_relay':
+      return 'SSH';
+    default:
+      return '';
+  }
+}
 
 export default function DaemonsScreen() {
   const theme = useTheme();
@@ -144,6 +161,13 @@ export default function DaemonsScreen() {
               <View style={styles.copy}>
                 <View style={styles.nameLine}>
                   <Text numberOfLines={1} style={[styles.name, { color: theme.text }]}>{item.name}</Text>
+                  {item.kind !== 'direct' ? (
+                    <View style={[styles.transportBadge, { backgroundColor: theme.backgroundElement }]}>
+                      <Text style={[styles.transportBadgeLabel, { color: theme.textSecondary }]}>
+                        {transportLabel(item.kind)}
+                      </Text>
+                    </View>
+                  ) : null}
                   {active && <ConnectionStatus phase={daemon.phase} />}
                 </View>
                 <Text numberOfLines={1} style={[styles.host, { color: theme.textSecondary }]}>
@@ -202,6 +226,12 @@ const styles = StyleSheet.create({
   copy: { flex: 1, minWidth: 0 },
   nameLine: { alignItems: 'center', flexDirection: 'row', gap: 9 },
   name: { flexShrink: 1, fontSize: 16, fontWeight: '700' },
+  transportBadge: {
+    borderRadius: 5,
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+  },
+  transportBadgeLabel: { fontSize: 11, fontWeight: '600' },
   host: { fontSize: 12.5, marginTop: 5 },
   editButton: { alignItems: 'center', height: 42, justifyContent: 'center', width: 34 },
   footer: {

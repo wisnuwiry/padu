@@ -22,8 +22,10 @@ import { Radius } from "@/constants/theme";
 import { useTheme } from "@/hooks/use-theme";
 import { useDaemon } from "@/lib/daemon-context";
 import {
+  classifyConnection,
   isPrivateDaemonAddress,
   normalizeDaemonAddress,
+  type ConnectionClass,
 } from "@/lib/daemon-profile";
 
 export default function DaemonEditorScreen() {
@@ -51,6 +53,10 @@ export default function DaemonEditorScreen() {
     } catch {
       return "invalid";
     }
+  }, [address]);
+  const connectionClass = useMemo<ConnectionClass | null>(() => {
+    if (!address.trim()) return null;
+    return classifyConnection(address);
   }, [address]);
   const canSave = Boolean(
     address.trim() &&
@@ -292,7 +298,11 @@ export default function DaemonEditorScreen() {
           </View>
         </View>
 
-        <ConnectionFootnote profile={Boolean(profile)} security={security} />
+        <ConnectionFootnote
+          connectionClass={connectionClass}
+          profile={Boolean(profile)}
+          security={security}
+        />
 
         {localError && (
           <View accessibilityLiveRegion="polite" style={styles.messageRow}>
@@ -358,9 +368,11 @@ export default function DaemonEditorScreen() {
 type ConnectionSecurity = "secure" | "private" | "insecure" | "invalid" | null;
 
 function ConnectionFootnote({
+  connectionClass,
   profile,
   security,
 }: {
+  connectionClass: ConnectionClass | null;
   profile: boolean;
   security: ConnectionSecurity;
 }) {
@@ -399,10 +411,19 @@ function ConnectionFootnote({
   } else if (security === "secure") {
     color = colors.success;
     icon = { ios: "lock.fill", android: "lock", web: "lock" };
+    // Naming the transport tells the user *why* it is safe, which matters most
+    // for the addresses they did not type themselves (QR-imported hosts).
+    const transport =
+      connectionClass === "cloudflare"
+        ? "Encrypted through Cloudflare."
+        : connectionClass === "tailscale"
+          ? "Encrypted over your tailnet."
+          : connectionClass === "ssh_relay"
+            ? "Encrypted through your SSH tunnel."
+            : "Encrypted connection.";
     text = Platform.select({
-      web: "Encrypted connection. The token stays in this browser.",
-      default:
-        "Encrypted connection. The token is stored in this device’s keychain.",
+      web: `${transport} The token stays in this browser.`,
+      default: `${transport} The token is stored in this device’s keychain.`,
     });
   }
 

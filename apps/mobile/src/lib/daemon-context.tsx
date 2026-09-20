@@ -397,6 +397,7 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
         name: connectLinkFallbackName(link),
         address: link.address,
         token: link.token,
+        kind: link.kind,
       });
     },
     [activate, saveProfile],
