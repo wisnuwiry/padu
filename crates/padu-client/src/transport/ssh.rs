@@ -11,10 +11,12 @@
 //! is surfaced via [`TransportError::Crashed`].
 
 use std::process::Stdio;
+use std::sync::Arc;
 
 use anyhow::Context as _;
 use async_trait::async_trait;
 use padu_protocol::persistence::HostKind;
+use parking_lot::Mutex;
 use smol::process::Command;
 
 use crate::transport::{
@@ -83,14 +85,14 @@ impl SshConfig {
 /// State tracked by an active [`SshTransport`].
 pub struct SshTransport {
     config: SshConfig,
-    status: TransportStatus,
+    status: Arc<Mutex<TransportStatus>>,
 }
 
 impl SshTransport {
     pub fn new(config: SshConfig) -> Self {
         Self {
             config,
-            status: TransportStatus::Idle,
+            status: Arc::new(Mutex::new(TransportStatus::Idle)),
         }
     }
 }
@@ -102,7 +104,7 @@ impl Transport for SshTransport {
     }
 
     async fn start(&mut self, ctx: &TransportContext) -> Result<TransportHandle, TransportError> {
-        if let TransportStatus::Ready { address, .. } = &self.status {
+        if let TransportStatus::Ready { address, .. } = self.status.lock().clone() {
             return Ok(TransportHandle {
                 address: address.clone(),
                 qr_payload: None,
@@ -114,7 +116,7 @@ impl Transport for SshTransport {
             binary: "ssh".into(),
             why: "".into(),
         })?;
-        self.status = TransportStatus::Starting;
+        *self.status.lock() = TransportStatus::Starting;
         let argv = self.config.argv(ctx.local_port);
         let mut child = Command::new(&binary)
             .args(&argv)
@@ -129,7 +131,7 @@ impl Transport for SshTransport {
             && !status.success()
         {
             let stderr = read_stderr_tail(&mut child).await.unwrap_or_default();
-            self.status = TransportStatus::Failed {
+            *self.status.lock() = TransportStatus::Failed {
                 error: format!("ssh exited {}: {}", status, stderr.trim()),
             };
             return Err(TransportError::Crashed(format!(
@@ -139,14 +141,32 @@ impl Transport for SshTransport {
             )));
         }
         let address = self.config.address();
-        self.status = TransportStatus::Ready {
+        *self.status.lock() = TransportStatus::Ready {
             since: std::time::Instant::now(),
             address: address.clone(),
         };
         let pid = child.id();
-        // Detach the child — keep it running. The App::shutdown hook
-        // (§3.5 of the plan) is responsible for SIGTERM-ing it.
-        std::mem::forget(child);
+        // Watch the relay so a dropped connection flips the status to
+        // `Failed` rather than leaving the UI claiming a live tunnel. The
+        // task owns the child from here; `status()` reaps it.
+        let watcher_status = self.status.clone();
+        smol::spawn(async move {
+            let outcome = child.status().await;
+            let mut guard = watcher_status.lock();
+            if !matches!(
+                *guard,
+                TransportStatus::Ready { .. } | TransportStatus::Starting
+            ) {
+                return;
+            }
+            *guard = TransportStatus::Failed {
+                error: match outcome {
+                    Ok(exit) => format!("ssh relay exited ({exit})"),
+                    Err(error) => format!("ssh relay could not be waited on: {error}"),
+                },
+            };
+        })
+        .detach();
         Ok(TransportHandle {
             address,
             qr_payload: None,
@@ -155,20 +175,20 @@ impl Transport for SshTransport {
     }
 
     async fn stop(&mut self) -> Result<(), TransportError> {
-        self.status = TransportStatus::Stopped;
+        *self.status.lock() = TransportStatus::Stopped;
         Ok(())
     }
 
     fn status(&self) -> TransportStatus {
-        self.status.clone()
+        self.status.lock().clone()
     }
 
     fn is_starting(&self) -> bool {
-        matches!(self.status, TransportStatus::Starting)
+        matches!(*self.status.lock(), TransportStatus::Starting)
     }
 
     fn qr_payload(&self, ctx: &TransportContext) -> Result<QrPayload, TransportError> {
-        if !matches!(self.status, TransportStatus::Ready { .. }) {
+        if !matches!(*self.status.lock(), TransportStatus::Ready { .. }) {
             return Err(TransportError::InvalidInput(
                 "ssh tunnel is not ready yet".into(),
             ));

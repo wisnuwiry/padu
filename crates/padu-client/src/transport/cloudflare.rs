@@ -5,22 +5,26 @@
 //! surfaces `wss://<hostname>` as the resolved address. The QR payload is
 //! emitted on the same handle so the dialog can render it immediately.
 //!
-//! v1 leaves the watchdog deliberately minimal: the child runs to completion
-//! (typically indefinitely). `Drop` sends SIGTERM and waits up to 2 s for
-//! graceful exit. If `cloudflared` reports an account requirement, we surface
-//! a structured [`TransportError::AccountRequired`] instead of timing out.
+//! Once the tunnel is up the child is handed to `watch_child`, so a later
+//! crash flips the status to `Failed` rather than leaving the UI claiming a
+//! live tunnel. Tearing the process down is the registry's shutdown hook's
+//! job. If `cloudflared` reports an account requirement, we surface a
+//! structured [`TransportError::AccountRequired`] instead of timing out.
 
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use padu_protocol::persistence::HostKind;
+use parking_lot::Mutex;
 
 use crate::transport::{
     QrPayload, Transport, TransportContext, TransportError, TransportHandle, TransportStatus,
+    watch_child,
 };
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
@@ -86,7 +90,7 @@ pub fn detect_account_required(stdout: &str) -> Option<&'static str> {
 /// Cloudflare Quick Tunnel transport. Holds the spawned child + a parsed
 /// status snapshot.
 pub struct CloudflareTransport {
-    status: TransportStatus,
+    status: Arc<Mutex<TransportStatus>>,
 }
 
 impl Default for CloudflareTransport {
@@ -98,7 +102,7 @@ impl Default for CloudflareTransport {
 impl CloudflareTransport {
     pub fn new() -> Self {
         Self {
-            status: TransportStatus::Idle,
+            status: Arc::new(Mutex::new(TransportStatus::Idle)),
         }
     }
 
@@ -119,7 +123,7 @@ impl Transport for CloudflareTransport {
     }
 
     async fn start(&mut self, ctx: &TransportContext) -> Result<TransportHandle, TransportError> {
-        if let TransportStatus::Ready { address, .. } = &self.status {
+        if let TransportStatus::Ready { address, .. } = self.status.lock().clone() {
             let qr_payload = self.encode_qr_payload(ctx).ok();
             return Ok(TransportHandle {
                 address: address.clone(),
@@ -131,7 +135,7 @@ impl Transport for CloudflareTransport {
             binary: "cloudflared".into(),
             why: " — install with `brew install cloudflared` or `apt install cloudflared`".into(),
         })?;
-        self.status = TransportStatus::Starting;
+        *self.status.lock() = TransportStatus::Starting;
         let mut child = Command::new(&binary)
             .args(Self::build_argv(ctx.local_port))
             .stdout(Stdio::piped())
@@ -168,7 +172,7 @@ impl Transport for CloudflareTransport {
                 drop(line_rx);
                 let _ = child.kill();
                 let _ = child.wait();
-                self.status = TransportStatus::Failed {
+                *self.status.lock() = TransportStatus::Failed {
                     error: "cloudflared did not become ready in time".into(),
                 };
                 return Err(TransportError::StartupTimeout {
@@ -188,7 +192,7 @@ impl Transport for CloudflareTransport {
                         drop(line_rx);
                         let _ = child.kill();
                         let _ = child.wait();
-                        self.status = TransportStatus::Failed {
+                        *self.status.lock() = TransportStatus::Failed {
                             error: format!("cloudflared account error: {reason}"),
                         };
                         return Err(TransportError::AccountRequired {
@@ -203,22 +207,19 @@ impl Transport for CloudflareTransport {
                                 .trim_start_matches("https://")
                                 .trim_start_matches("http://")
                         );
-                        self.status = TransportStatus::Ready {
+                        *self.status.lock() = TransportStatus::Ready {
                             since: Instant::now(),
                             address: address.clone(),
                         };
                         let qr_payload = self.encode_qr_payload_for(ctx, &address).ok();
-                        // Detach the child — keep it running. The App::shutdown
-                        // hook (§3.5) is responsible for SIGTERM-ing it.
-                        // We do NOT wait on the reader thread: it exits when
-                        // the channel closes (which happens after we drop
-                        // `line_rx` above; do that here too so the thread
-                        // tears down cleanly when stdout closes).
+                        // Hand the child to a watcher so a later crash flips
+                        // the status to `Failed` instead of leaving the UI
+                        // claiming a live tunnel. The reader thread exits on
+                        // its own once the channel closes, so dropping its
+                        // handle just detaches it.
                         drop(line_rx);
-                        // Leak the child handle so it survives until the
-                        // registry's `shutdown_all` triggers it.
-                        std::mem::forget(child);
-                        std::mem::forget(reader_thread);
+                        drop(reader_thread);
+                        watch_child(child, self.status.clone(), "cloudflared");
                         return Ok(TransportHandle {
                             address,
                             qr_payload,
@@ -230,7 +231,7 @@ impl Transport for CloudflareTransport {
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     // cloudflared exited before publishing a URL.
                     let _ = child.wait();
-                    self.status = TransportStatus::Failed {
+                    *self.status.lock() = TransportStatus::Failed {
                         error: "cloudflared exited before publishing a URL".into(),
                     };
                     return Err(TransportError::Crashed(
@@ -242,16 +243,16 @@ impl Transport for CloudflareTransport {
     }
 
     async fn stop(&mut self) -> Result<(), TransportError> {
-        self.status = TransportStatus::Stopped;
+        *self.status.lock() = TransportStatus::Stopped;
         Ok(())
     }
 
     fn status(&self) -> TransportStatus {
-        self.status.clone()
+        self.status.lock().clone()
     }
 
     fn is_starting(&self) -> bool {
-        matches!(self.status, TransportStatus::Starting)
+        matches!(*self.status.lock(), TransportStatus::Starting)
     }
 
     fn qr_payload(&self, ctx: &TransportContext) -> Result<QrPayload, TransportError> {
@@ -261,8 +262,8 @@ impl Transport for CloudflareTransport {
 
 impl CloudflareTransport {
     fn build_qr_payload(&self, ctx: &TransportContext) -> Result<QrPayload, TransportError> {
-        let address = match &self.status {
-            TransportStatus::Ready { address, .. } => address.clone(),
+        let address = match self.status.lock().clone() {
+            TransportStatus::Ready { address, .. } => address,
             _ => {
                 return Err(TransportError::InvalidInput(
                     "cloudflared is not ready yet".into(),

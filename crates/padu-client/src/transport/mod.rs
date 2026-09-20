@@ -27,7 +27,8 @@ pub mod tailscale;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::Mutex;
+
+use parking_lot::Mutex;
 use std::time::Instant;
 
 use anyhow::Result;
@@ -101,6 +102,41 @@ pub enum TransportError {
 impl From<std::io::Error> for TransportError {
     fn from(value: std::io::Error) -> Self {
         TransportError::Io(value.to_string())
+    }
+}
+
+/// Watch a spawned child process and mark its transport failed when it exits.
+///
+/// Without this, a `cloudflared` or `ssh` that dies after a successful start
+/// would leave `TransportStatus` reporting `Ready` forever: the settings row
+/// would claim a dead tunnel is connected, and the desktop would silently
+/// retry the daemon connection behind it with nothing to show the user. A
+/// deliberate `stop()` records `Stopped` first, which the watcher respects.
+pub(crate) fn watch_child(
+    mut child: std::process::Child,
+    status: Arc<Mutex<TransportStatus>>,
+    label: &'static str,
+) {
+    let spawned = std::thread::Builder::new()
+        .name(format!("{label}-watch"))
+        .spawn(move || {
+            let outcome = child.wait();
+            let mut guard = status.lock();
+            if !matches!(
+                *guard,
+                TransportStatus::Ready { .. } | TransportStatus::Starting
+            ) {
+                return;
+            }
+            *guard = TransportStatus::Failed {
+                error: match outcome {
+                    Ok(exit) => format!("{label} exited ({exit})"),
+                    Err(error) => format!("{label} could not be waited on: {error}"),
+                },
+            };
+        });
+    if let Err(error) = spawned {
+        eprintln!("could not start the {label} watcher: {error}");
     }
 }
 
@@ -212,7 +248,7 @@ impl TransportRegistry {
     pub fn register(&self, host_id: impl Into<String>, transport: Box<dyn Transport>) {
         let id = host_id.into();
         let previous = {
-            let mut guard = self.inner.lock().expect("transport registry poisoned");
+            let mut guard = self.inner.lock();
             guard.remove(&id)
         };
         if let Some(prev) = previous {
@@ -221,32 +257,24 @@ impl TransportRegistry {
         }
         self.inner
             .lock()
-            .expect("transport registry poisoned")
             .insert(id, Arc::new(async_lock::Mutex::new(transport)));
     }
 
     pub fn get(&self, host_id: &str) -> Option<TransportSlot> {
-        self.inner
-            .lock()
-            .expect("transport registry poisoned")
-            .get(host_id)
-            .cloned()
+        self.inner.lock().get(host_id).cloned()
     }
 
     /// Drop a transport slot without stopping it. Callers that need a graceful
     /// shutdown should `stop()` the transport first.
     pub fn remove(&self, host_id: &str) -> Option<TransportSlot> {
-        self.inner
-            .lock()
-            .expect("transport registry poisoned")
-            .remove(host_id)
+        self.inner.lock().remove(host_id)
     }
 
     /// Move a running transport to a different key, preserving the subprocess.
     /// Used when a host dialog's provisional tunnel is handed off to the saved
     /// profile's id. Returns `false` when no transport exists under `from`.
     pub fn rekey(&self, from: &str, to: &str) -> bool {
-        let mut guard = self.inner.lock().expect("transport registry poisoned");
+        let mut guard = self.inner.lock();
         match guard.remove(from) {
             Some(slot) => {
                 guard.insert(to.to_string(), slot);
@@ -288,10 +316,7 @@ impl TransportRegistry {
 
     /// Number of registered hosts.
     pub fn len(&self) -> usize {
-        self.inner
-            .lock()
-            .expect("transport registry poisoned")
-            .len()
+        self.inner.lock().len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -302,7 +327,7 @@ impl TransportRegistry {
     /// The registry's own lock is released before any transport is awaited.
     pub async fn shutdown_all(&self) {
         let entries: Vec<TransportSlot> = {
-            let mut guard = self.inner.lock().expect("transport registry poisoned");
+            let mut guard = self.inner.lock();
             guard.drain().map(|(_, t)| t).collect()
         };
         for transport in entries {
@@ -480,6 +505,42 @@ mod tests {
         // Moving does not stop the transport.
         assert_eq!(stops.load(std::sync::atomic::Ordering::SeqCst), 0);
         assert!(!registry.rekey("missing", "host-8"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn watch_child_marks_a_dead_transport_failed() {
+        let status = Arc::new(Mutex::new(TransportStatus::Ready {
+            since: Instant::now(),
+            address: "wss://dead.test".into(),
+        }));
+        let child = std::process::Command::new("true").spawn().unwrap();
+        watch_child(child, status.clone(), "test");
+
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if matches!(*status.lock(), TransportStatus::Failed { .. }) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            matches!(*status.lock(), TransportStatus::Failed { .. }),
+            "a dead child must flip the status to Failed"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn watch_child_respects_a_deliberate_stop() {
+        // `stop()` records `Stopped` before the child is reaped, so the
+        // watcher must not overwrite it with a failure.
+        let status = Arc::new(Mutex::new(TransportStatus::Stopped));
+        let child = std::process::Command::new("true").spawn().unwrap();
+        watch_child(child, status.clone(), "test");
+
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(matches!(*status.lock(), TransportStatus::Stopped));
     }
 
     #[test]
