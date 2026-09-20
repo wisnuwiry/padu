@@ -1,8 +1,16 @@
 //! Modal editor for creating and editing remote daemon host profiles.
 
-use gpui::{KeyBinding, actions};
+use std::sync::Arc;
 
-use padu_client::persistence::{HostKind, HostProfile, normalize_daemon_address};
+use gpui::{Image, ImageFormat, KeyBinding, actions};
+
+use padu_client::persistence::{
+    CloudflareHostConfig, HostKind, HostProfile, SshHostConfig, TailscaleHostConfig,
+    normalize_daemon_address,
+};
+use padu_client::transport::{
+    CloudflareTransport, QrPayload, Transport, TransportContext, render_svg,
+};
 
 use crate::app::*;
 use crate::ui::dialog::dialog_backdrop;
@@ -11,6 +19,8 @@ actions!(padu_host_dialog, [ConfirmHostDialog, DismissHostDialog]);
 
 const DIALOG_CONTEXT: &str = "HostDialog";
 const DIALOG_INPUT_CONTEXT: &str = "HostDialog > TextInput";
+/// Edge length, in pixels, of the rendered QR code.
+const QR_TARGET_PX: f32 = 168.0;
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
@@ -30,15 +40,208 @@ pub(crate) struct HostDialogRequest {
     pub editing_profile_id: Option<String>,
 }
 
+/// Live Cloudflare tunnel state for the dialog. The tunnel is spawned lazily
+/// when the user asks for one, and kept alive in the app's transport registry.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) enum TunnelState {
+    #[default]
+    Idle,
+    Starting,
+    Ready {
+        address: String,
+        /// Self-contained SVG, rasterized by GPUI through resvg.
+        qr_svg: String,
+    },
+    Failed(String),
+}
+
 pub(crate) struct HostDialogState {
     pub editing_profile_id: Option<String>,
+    pub kind: HostKind,
     pub name_input: Entity<TextInput>,
     pub address_input: Entity<TextInput>,
     pub token_input: Entity<TextInput>,
+    pub ssh_user_input: Entity<TextInput>,
+    pub ssh_host_input: Entity<TextInput>,
+    pub ssh_port_input: Entity<TextInput>,
+    pub ssh_identity_input: Entity<TextInput>,
+    /// Registry key for a dialog-owned tunnel, so it can be replaced or
+    /// stopped when the dialog closes.
+    pub tunnel_key: String,
+    pub tunnel: TunnelState,
     pub error: Option<String>,
     pub save_focus: FocusHandle,
     pub cancel_focus: FocusHandle,
     pub delete_focus: Option<FocusHandle>,
+}
+
+/// Form values collected from the host dialog. Plain data so profile building
+/// can be unit-tested without a GPUI window.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct HostFormValues {
+    pub name: String,
+    pub address: String,
+    pub token: String,
+    pub ssh_user: String,
+    pub ssh_host: String,
+    pub ssh_remote_port: String,
+    pub ssh_identity_file: String,
+    /// Resolved `wss://…` URL for a Cloudflare Quick Tunnel.
+    pub cloudflare_address: Option<String>,
+}
+
+/// Split a normalized `ws(s)://host[:port]` address into `(host, port)`.
+fn split_host_port(address: &str) -> Result<(String, u16), String> {
+    let rest = address
+        .strip_prefix("wss://")
+        .or_else(|| address.strip_prefix("ws://"))
+        .ok_or_else(|| "Enter a ws:// or wss:// address".to_string())?;
+    let (host, port_str) = if let Some(close) = rest.find(']') {
+        let host = &rest[..=close];
+        let port = rest[close + 1..]
+            .strip_prefix(':')
+            .ok_or_else(|| "Include the port".to_string())?;
+        (host.to_string(), port)
+    } else {
+        let (host, port) = rest
+            .rsplit_once(':')
+            .ok_or_else(|| "Include the port".to_string())?;
+        (host.to_string(), port)
+    };
+    let port: u16 = port_str
+        .parse()
+        .map_err(|_| "Enter a valid port".to_string())?;
+    if port == 0 {
+        return Err("Enter a valid port".to_string());
+    }
+    Ok((host, port))
+}
+
+/// Build a `HostProfile` from raw dialog fields.
+///
+/// Every transport resolves to a `wss://…` `address` up front, because that is
+/// the only field `DaemonSupervisor::connect` reads. The transport-specific
+/// block is stored alongside for re-provisioning and status display.
+pub(crate) fn build_host_profile(
+    kind: HostKind,
+    editing: Option<&HostProfile>,
+    values: &HostFormValues,
+    now: u64,
+) -> Result<HostProfile, String> {
+    let token = {
+        let trimmed = values.token.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    };
+
+    let (address, tailscale, cloudflare, ssh) = match kind {
+        HostKind::Direct => {
+            let address = normalize_daemon_address(&values.address).map_err(|e| e.to_string())?;
+            (address, None, None, None)
+        }
+        HostKind::Tailscale => {
+            let address = normalize_daemon_address(&values.address).map_err(|e| e.to_string())?;
+            let (magic_dns, port) = split_host_port(&address)?;
+            (
+                address,
+                Some(TailscaleHostConfig { magic_dns, port }),
+                None,
+                None,
+            )
+        }
+        HostKind::Cloudflare => {
+            let resolved = values
+                .cloudflare_address
+                .clone()
+                .ok_or_else(|| "Start the tunnel before saving".to_string())?;
+            let hostname = resolved
+                .strip_prefix("wss://")
+                .or_else(|| resolved.strip_prefix("ws://"))
+                .ok_or_else(|| "The tunnel URL must use wss://".to_string())?
+                .trim_end_matches('/')
+                .to_string();
+            (
+                resolved,
+                None,
+                Some(CloudflareHostConfig {
+                    hostname,
+                    quick_tunnel: true,
+                }),
+                None,
+            )
+        }
+        HostKind::SshRelay => {
+            let user = values.ssh_user.trim();
+            if user.is_empty() {
+                return Err("Enter the SSH user".into());
+            }
+            let host = values.ssh_host.trim();
+            if host.is_empty() {
+                return Err("Enter the SSH host".into());
+            }
+            let remote_port: u16 = values
+                .ssh_remote_port
+                .trim()
+                .parse()
+                .map_err(|_| "Enter a valid remote port".to_string())?;
+            if remote_port == 0 {
+                return Err("Enter a valid remote port".into());
+            }
+            let identity = values.ssh_identity_file.trim();
+            (
+                format!("wss://{host}:{remote_port}"),
+                None,
+                None,
+                Some(SshHostConfig {
+                    user: user.to_string(),
+                    host: host.to_string(),
+                    remote_port,
+                    identity_file: (!identity.is_empty()).then(|| identity.to_string()),
+                    use_tls: false,
+                }),
+            )
+        }
+    };
+
+    let name = if values.name.trim().is_empty() {
+        padu_client::persistence::display_host(&address)
+    } else {
+        values.name.trim().to_string()
+    };
+
+    Ok(HostProfile {
+        id: editing
+            .map(|profile| profile.id.clone())
+            .unwrap_or_else(|| Uuid::new_v4().to_string()),
+        name,
+        kind,
+        address,
+        token,
+        tailscale,
+        cloudflare,
+        ssh,
+        created_at: editing.map(|profile| profile.created_at).unwrap_or(now),
+        updated_at: now,
+        last_connected_at: editing.and_then(|profile| profile.last_connected_at),
+    })
+}
+
+/// Transport options shown in the dialog's segmented control.
+const TRANSPORT_OPTIONS: [HostKind; 4] = [
+    HostKind::Direct,
+    HostKind::Tailscale,
+    HostKind::Cloudflare,
+    HostKind::SshRelay,
+];
+
+/// `tr!` needs a literal key, so the label is resolved through a match rather
+/// than a dynamic lookup.
+fn transport_label(kind: HostKind) -> String {
+    match kind {
+        HostKind::Direct => tr!("host.transport_direct"),
+        HostKind::Tailscale => tr!("host.transport_tailscale"),
+        HostKind::Cloudflare => tr!("host.transport_cloudflare"),
+        HostKind::SshRelay => tr!("host.transport_ssh"),
+    }
 }
 
 impl Padu {
@@ -75,7 +278,27 @@ impl Padu {
             .as_ref()
             .and_then(|h| h.token.clone())
             .unwrap_or_default();
+        let initial_kind = existing.as_ref().map(|h| h.kind).unwrap_or_default();
+        let initial_ssh = existing.as_ref().and_then(|h| h.ssh.clone());
+        let initial_ssh_user = initial_ssh
+            .as_ref()
+            .map(|s| s.user.clone())
+            .unwrap_or_default();
+        let initial_ssh_host = initial_ssh
+            .as_ref()
+            .map(|s| s.host.clone())
+            .unwrap_or_default();
+        let initial_ssh_port = initial_ssh
+            .as_ref()
+            .map(|s| s.remote_port.to_string())
+            .unwrap_or_else(|| "19999".to_string());
+        let initial_ssh_identity = initial_ssh
+            .as_ref()
+            .and_then(|s| s.identity_file.clone())
+            .unwrap_or_default();
 
+        // A saved Cloudflare profile's tunnel is re-provisioned on demand when
+        // the dialog opens, so the dialog always starts from `Idle`.
         let name_input = cx.new(|cx| {
             let mut input = TextInput::new(window, cx).placeholder(tr!("host.name_placeholder"));
             if !initial_name.is_empty() {
@@ -100,6 +323,37 @@ impl Padu {
             input
         });
 
+        let ssh_user_input = cx.new(|cx| {
+            let mut input =
+                TextInput::new(window, cx).placeholder(tr!("host.ssh_user_placeholder"));
+            if !initial_ssh_user.is_empty() {
+                input.set_content(initial_ssh_user, cx);
+            }
+            input
+        });
+        let ssh_host_input = cx.new(|cx| {
+            let mut input =
+                TextInput::new(window, cx).placeholder(tr!("host.ssh_host_placeholder"));
+            if !initial_ssh_host.is_empty() {
+                input.set_content(initial_ssh_host, cx);
+            }
+            input
+        });
+        let ssh_port_input = cx.new(|cx| {
+            let mut input =
+                TextInput::new(window, cx).placeholder(tr!("host.ssh_remote_port_placeholder"));
+            input.set_content(initial_ssh_port, cx);
+            input
+        });
+        let ssh_identity_input = cx.new(|cx| {
+            let mut input =
+                TextInput::new(window, cx).placeholder(tr!("host.ssh_identity_placeholder"));
+            if !initial_ssh_identity.is_empty() {
+                input.set_content(initial_ssh_identity, cx);
+            }
+            input
+        });
+
         let address_focus = address_input.read(cx).focus();
         let name_focus = name_input.read(cx).focus();
         let first_focus = if request.editing_profile_id.is_some() {
@@ -111,9 +365,16 @@ impl Padu {
         let is_editing = request.editing_profile_id.is_some();
         self.host_dialog = Some(HostDialogState {
             editing_profile_id: request.editing_profile_id,
+            kind: initial_kind,
             name_input,
             address_input,
             token_input,
+            ssh_user_input,
+            ssh_host_input,
+            ssh_port_input,
+            ssh_identity_input,
+            tunnel_key: format!("host-dialog-{}", Uuid::new_v4()),
+            tunnel: TunnelState::Idle,
             error: None,
             save_focus: cx.focus_handle(),
             cancel_focus: cx.focus_handle(),
@@ -126,10 +387,118 @@ impl Padu {
         cx.notify();
     }
 
+    fn host_form_values(&self, cx: &App) -> HostFormValues {
+        let Some(dialog) = &self.host_dialog else {
+            return HostFormValues::default();
+        };
+        HostFormValues {
+            name: dialog.name_input.read(cx).content().trim().to_string(),
+            address: dialog.address_input.read(cx).content().trim().to_string(),
+            token: dialog.token_input.read(cx).content().trim().to_string(),
+            ssh_user: dialog.ssh_user_input.read(cx).content().trim().to_string(),
+            ssh_host: dialog.ssh_host_input.read(cx).content().trim().to_string(),
+            ssh_remote_port: dialog.ssh_port_input.read(cx).content().trim().to_string(),
+            ssh_identity_file: dialog
+                .ssh_identity_input
+                .read(cx)
+                .content()
+                .trim()
+                .to_string(),
+            cloudflare_address: match &dialog.tunnel {
+                TunnelState::Ready { address, .. } => Some(address.clone()),
+                _ => None,
+            },
+        }
+    }
+
+    /// Provision a Cloudflare Quick Tunnel for the dialog's current fields.
+    /// The tunnel is registered in the app registry so it stays alive after
+    /// the dialog closes; the resolved hostname and QR land back in the dialog.
+    pub(crate) fn start_host_tunnel(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = &self.host_dialog else {
+            return;
+        };
+        if matches!(dialog.tunnel, TunnelState::Starting) {
+            return;
+        }
+        let tunnel_key = dialog.tunnel_key.clone();
+        let token = dialog.token_input.read(cx).content().trim().to_string();
+        let local_port = self.state.daemon_exposure.port;
+
+        if let Some(dialog) = self.host_dialog.as_mut() {
+            dialog.tunnel = TunnelState::Starting;
+            dialog.error = None;
+        }
+        cx.notify();
+
+        let registry = self.host_transports.clone();
+        let transport_token = token.clone();
+        cx.spawn(async move |this, cx| {
+            let (transport, outcome) = cx
+                .background_executor()
+                .spawn(async move {
+                    let mut transport = CloudflareTransport::new();
+                    let context = TransportContext {
+                        local_port,
+                        token: transport_token,
+                    };
+                    let outcome = transport.start(&context).await;
+                    (transport, outcome)
+                })
+                .await;
+
+            let _ = this.update(cx, |this, cx| {
+                match outcome {
+                    Ok(handle) => {
+                        let payload = QrPayload {
+                            kind: HostKind::Cloudflare,
+                            url: handle.address.clone(),
+                            token,
+                            name: String::new(),
+                        };
+                        let qr_svg = render_svg(&payload, QR_TARGET_PX as u32).ok();
+                        registry.register(tunnel_key, Box::new(transport));
+                        if let Some(dialog) = this.host_dialog.as_mut() {
+                            dialog.tunnel = match qr_svg {
+                                Some(qr_svg) => TunnelState::Ready {
+                                    address: handle.address,
+                                    qr_svg,
+                                },
+                                None => TunnelState::Failed(
+                                    "Could not render a QR code for the tunnel".to_string(),
+                                ),
+                            };
+                        }
+                    }
+                    Err(error) => {
+                        if let Some(dialog) = this.host_dialog.as_mut() {
+                            dialog.tunnel = TunnelState::Failed(error.to_string());
+                        }
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     pub(crate) fn close_host_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.host_dialog_request = None;
-        if self.host_dialog.take().is_none() {
+        let Some(dialog) = self.host_dialog.take() else {
             return;
+        };
+        // A tunnel provisioned but not saved is discarded; one that was saved
+        // is re-registered under the profile id by `switch_to_host`.
+        if let Some(transport) = self.host_transports.get(&dialog.tunnel_key) {
+            let registry = self.host_transports.clone();
+            let key = dialog.tunnel_key.clone();
+            cx.spawn(async move |_, _| {
+                let mut transport = transport.lock().await;
+                let _ = transport.stop().await;
+                drop(transport);
+                registry.remove(&key);
+            })
+            .detach();
         }
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);
@@ -140,65 +509,35 @@ impl Padu {
         let Some(dialog) = &self.host_dialog else {
             return;
         };
-
-        let raw_name = dialog.name_input.read(cx).content().trim().to_string();
-        let raw_address = dialog.address_input.read(cx).content().trim().to_string();
-        let raw_token = dialog.token_input.read(cx).content().trim().to_string();
+        let kind = dialog.kind;
         let editing_id = dialog.editing_profile_id.clone();
+        let editing = editing_id
+            .as_ref()
+            .and_then(|id| self.state.hosts.iter().find(|h| &h.id == id))
+            .cloned();
+        let values = self.host_form_values(cx);
 
-        let normalized_address = match normalize_daemon_address(&raw_address) {
-            Ok(addr) => addr,
+        let profile = match build_host_profile(kind, editing.as_ref(), &values, unix_time()) {
+            Ok(profile) => profile,
             Err(error) => {
                 if let Some(dialog) = self.host_dialog.as_mut() {
-                    dialog.error = Some(error.to_string());
+                    dialog.error = Some(error);
                 }
                 cx.notify();
                 return;
             }
         };
 
-        let token = if raw_token.is_empty() {
-            None
+        let profile_id = profile.id.clone();
+        if let Some(existing) = self.state.hosts.iter_mut().find(|h| h.id == profile_id) {
+            let created_at = existing.created_at;
+            let last_connected_at = existing.last_connected_at;
+            *existing = profile;
+            existing.created_at = created_at;
+            existing.last_connected_at = last_connected_at;
         } else {
-            Some(raw_token)
-        };
-
-        let profile_id = if let Some(id) = editing_id {
-            if let Some(existing) = self.state.hosts.iter_mut().find(|h| h.id == id) {
-                existing.name = if raw_name.is_empty() {
-                    padu_client::persistence::display_host(&normalized_address)
-                } else {
-                    raw_name
-                };
-                existing.address = normalized_address;
-                existing.token = token;
-                existing.updated_at = unix_time();
-            }
-            id
-        } else {
-            let name = if raw_name.is_empty() {
-                padu_client::persistence::display_host(&normalized_address)
-            } else {
-                raw_name
-            };
-            let now = unix_time();
-            let new_profile = HostProfile {
-                id: Uuid::new_v4().to_string(),
-                name,
-                kind: HostKind::Direct,
-                address: normalized_address,
-                token,
-                tailscale: None,
-                cloudflare: None,
-                ssh: None,
-                created_at: now,
-                updated_at: now,
-                last_connected_at: None,
-            };
-            let id = new_profile.id.clone();
-            self.state.add_host_profile(new_profile);
-            id
-        };
+            self.state.add_host_profile(profile);
+        }
 
         let _ = self.store.write_app_settings(&self.state.app_settings());
         self.close_host_dialog(window, cx);
@@ -227,6 +566,7 @@ impl Padu {
         let dialog = self.host_dialog.as_ref()?;
         let theme = Theme::current(cx);
         let is_editing = dialog.editing_profile_id.is_some();
+        let kind = dialog.kind;
         let title = if is_editing {
             tr!("host.edit_host")
         } else {
@@ -241,11 +581,85 @@ impl Padu {
         let name_input = dialog.name_input.clone();
         let address_input = dialog.address_input.clone();
         let token_input = dialog.token_input.clone();
+        let ssh_user_input = dialog.ssh_user_input.clone();
+        let ssh_host_input = dialog.ssh_host_input.clone();
+        let ssh_port_input = dialog.ssh_port_input.clone();
+        let ssh_identity_input = dialog.ssh_identity_input.clone();
+        let tunnel = dialog.tunnel.clone();
         let error_message = dialog.error.clone();
 
         let save_focus = dialog.save_focus.clone();
         let cancel_focus = dialog.cancel_focus.clone();
         let delete_focus = dialog.delete_focus.clone();
+
+        let mut fields = div().flex().flex_col().gap(px(12.0)).child(labelled_field(
+            tr!("host.name"),
+            theme.text_secondary,
+            text_field_box(&theme, false, name_input),
+        ));
+
+        match kind {
+            HostKind::Direct | HostKind::Tailscale => {
+                fields = fields.child(labelled_field(
+                    tr!("host.address"),
+                    theme.text_secondary,
+                    text_field_box(&theme, error_message.is_some(), address_input),
+                ));
+                if kind == HostKind::Tailscale {
+                    fields = fields.child(hint_text(tr!("host.tailscale_hint"), &theme));
+                }
+                fields = fields.child(labelled_field(
+                    tr!("host.token"),
+                    theme.text_secondary,
+                    text_field_box(&theme, false, token_input),
+                ));
+            }
+            HostKind::Cloudflare => {
+                fields = fields.child(self.render_tunnel_section(&tunnel, &theme, cx));
+                fields = fields.child(labelled_field(
+                    tr!("host.token"),
+                    theme.text_secondary,
+                    text_field_box(&theme, false, token_input),
+                ));
+            }
+            HostKind::SshRelay => {
+                fields = fields
+                    .child(labelled_field(
+                        tr!("host.ssh_user"),
+                        theme.text_secondary,
+                        text_field_box(&theme, false, ssh_user_input),
+                    ))
+                    .child(labelled_field(
+                        tr!("host.ssh_host"),
+                        theme.text_secondary,
+                        text_field_box(&theme, false, ssh_host_input),
+                    ))
+                    .child(labelled_field(
+                        tr!("host.ssh_remote_port"),
+                        theme.text_secondary,
+                        text_field_box(&theme, false, ssh_port_input),
+                    ))
+                    .child(labelled_field(
+                        tr!("host.ssh_identity_file"),
+                        theme.text_secondary,
+                        text_field_box(&theme, false, ssh_identity_input),
+                    ))
+                    .child(labelled_field(
+                        tr!("host.token"),
+                        theme.text_secondary,
+                        text_field_box(&theme, false, token_input),
+                    ));
+            }
+        }
+
+        if let Some(error) = error_message {
+            fields = fields.child(
+                div()
+                    .text_size(sp(11.5))
+                    .text_color(gpui::hsla(0.0, 0.7, 0.55, 1.0))
+                    .child(error),
+            );
+        }
 
         let card = div()
             .key_context(DIALOG_CONTEXT)
@@ -256,7 +670,7 @@ impl Padu {
                 this.close_host_dialog(window, cx);
             }))
             .id("host-dialog-card")
-            .w(px(460.0))
+            .w(px(480.0))
             .rounded(px(14.0))
             .border_1()
             .border_color(theme.border_strong)
@@ -297,103 +711,10 @@ impl Padu {
                             })),
                     ),
             )
+            // Transport selector
+            .child(self.render_transport_selector(kind, &theme, cx))
             // Fields
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(12.0))
-                    // Name Field
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.0))
-                            .child(
-                                div()
-                                    .text_size(sp(12.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("host.name")),
-                            )
-                            .child(
-                                div()
-                                    .h(px(32.0))
-                                    .px(px(10.0))
-                                    .rounded(px(7.0))
-                                    .border_1()
-                                    .border_color(theme.border)
-                                    .bg(theme.surface)
-                                    .flex()
-                                    .items_center()
-                                    .child(name_input),
-                            ),
-                    )
-                    // Address Field
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.0))
-                            .child(
-                                div()
-                                    .text_size(sp(12.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("host.address")),
-                            )
-                            .child(
-                                div()
-                                    .h(px(32.0))
-                                    .px(px(10.0))
-                                    .rounded(px(7.0))
-                                    .border_1()
-                                    .border_color(if error_message.is_some() {
-                                        theme.accent
-                                    } else {
-                                        theme.border
-                                    })
-                                    .bg(theme.surface)
-                                    .flex()
-                                    .items_center()
-                                    .child(address_input),
-                            )
-                            .when_some(error_message, |el, error| {
-                                el.child(
-                                    div()
-                                        .text_size(sp(11.5))
-                                        .text_color(gpui::hsla(0.0, 0.7, 0.55, 1.0))
-                                        .child(error),
-                                )
-                            }),
-                    )
-                    // Token Field
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.0))
-                            .child(
-                                div()
-                                    .text_size(sp(12.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("host.token")),
-                            )
-                            .child(
-                                div()
-                                    .h(px(32.0))
-                                    .px(px(10.0))
-                                    .rounded(px(7.0))
-                                    .border_1()
-                                    .border_color(theme.border)
-                                    .bg(theme.surface)
-                                    .flex()
-                                    .items_center()
-                                    .child(token_input),
-                            ),
-                    ),
-            )
+            .child(fields)
             // Footer Actions
             .child(
                 div()
@@ -538,5 +859,414 @@ impl Padu {
             |padu, window, cx| padu.close_host_dialog(window, cx),
             card,
         ))
+    }
+
+    fn render_transport_selector(
+        &self,
+        active: HostKind,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let mut row = div().flex().items_center().gap(px(6.0)).child(
+            div()
+                .flex_none()
+                .text_size(sp(12.5))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text_secondary)
+                .child(tr!("host.transport")),
+        );
+        for kind in TRANSPORT_OPTIONS {
+            let is_active = kind == active;
+            let id = SharedString::from(format!("transport-option-{:?}", kind));
+            row = row.child(
+                div()
+                    .id(id)
+                    .tab_index(0)
+                    .h(px(26.0))
+                    .px(px(9.0))
+                    .rounded(px(6.0))
+                    .border_1()
+                    .border_color(if is_active {
+                        theme.accent
+                    } else {
+                        theme.border
+                    })
+                    .bg(if is_active {
+                        theme.accent.opacity(0.12)
+                    } else {
+                        theme.surface
+                    })
+                    .text_color(if is_active {
+                        theme.accent
+                    } else {
+                        theme.text_secondary
+                    })
+                    .text_size(sp(12.0))
+                    .font_weight(if is_active {
+                        FontWeight::MEDIUM
+                    } else {
+                        FontWeight::NORMAL
+                    })
+                    .cursor_pointer()
+                    .focus_visible(|style| style.border_color(theme.accent))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .hover(|e| e.bg(theme.overlay))
+                    .child(transport_label(kind))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(dialog) = this.host_dialog.as_mut() {
+                            dialog.kind = kind;
+                            dialog.error = None;
+                        }
+                        cx.notify();
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                        if !event.keystroke.modifiers.modified()
+                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                        {
+                            if let Some(dialog) = this.host_dialog.as_mut() {
+                                dialog.kind = kind;
+                                dialog.error = None;
+                            }
+                            cx.notify();
+                            cx.stop_propagation();
+                        }
+                    })),
+            );
+        }
+        row
+    }
+
+    fn render_tunnel_section(
+        &self,
+        tunnel: &TunnelState,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let mut section = div().flex().flex_col().gap(px(8.0));
+
+        match tunnel {
+            TunnelState::Idle => {
+                section = section.child(hint_text(tr!("host.tunnel_idle_hint"), theme));
+            }
+            TunnelState::Starting => {
+                section = section.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_secondary)
+                        .child(tr!("host.tunnel_starting")),
+                );
+            }
+            TunnelState::Ready { address, qr_svg } => {
+                section = section
+                    .child(
+                        div()
+                            .text_size(sp(12.0))
+                            .text_color(theme.text_secondary)
+                            .child(tr!("host.tunnel_ready")),
+                    )
+                    .child(
+                        div()
+                            .font_family(crate::md::render::MONO_FAMILY)
+                            .text_size(sp(12.0))
+                            .text_color(theme.text)
+                            .truncate()
+                            .child(address.clone()),
+                    )
+                    .child(render_qr_image(qr_svg, theme))
+                    .child(hint_text(tr!("host.qr_scan_hint"), theme));
+            }
+            TunnelState::Failed(error) => {
+                section = section.child(
+                    div()
+                        .text_size(sp(11.5))
+                        .text_color(gpui::hsla(0.0, 0.7, 0.55, 1.0))
+                        .child(error.clone()),
+                );
+            }
+        }
+
+        let label = if matches!(tunnel, TunnelState::Idle | TunnelState::Failed(_)) {
+            tr!("host.start_tunnel")
+        } else {
+            tr!("host.restart_tunnel")
+        };
+        let starting = matches!(tunnel, TunnelState::Starting);
+
+        section.child(
+            div()
+                .id("start-tunnel-button")
+                .tab_index(0)
+                .h(px(28.0))
+                .px(px(12.0))
+                .rounded(px(7.0))
+                .border_1()
+                .border_color(theme.border_strong)
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap(px(6.0))
+                .cursor_pointer()
+                .text_size(sp(12.5))
+                .text_color(theme.text_secondary)
+                .opacity(if starting { 0.55 } else { 1.0 })
+                .focus_visible(|style| style.border_color(theme.accent))
+                .when(!starting, |element| {
+                    element
+                        .hover(|e| e.bg(theme.overlay))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.start_host_tunnel(cx);
+                        }))
+                        .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                            if !event.keystroke.modifiers.modified()
+                                && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                            {
+                                this.start_host_tunnel(cx);
+                                cx.stop_propagation();
+                            }
+                        }))
+                })
+                .child(label),
+        )
+    }
+}
+
+fn labelled_field(label: impl Into<SharedString>, label_color: Hsla, control: Div) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(4.0))
+        .child(
+            div()
+                .text_size(sp(12.5))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(label_color)
+                .child(label.into()),
+        )
+        .child(control)
+}
+
+fn text_field_box(theme: &Theme, invalid: bool, input: Entity<TextInput>) -> Div {
+    div()
+        .h(px(32.0))
+        .px(px(10.0))
+        .rounded(px(7.0))
+        .border_1()
+        .border_color(if invalid { theme.accent } else { theme.border })
+        .bg(theme.surface)
+        .flex()
+        .items_center()
+        .child(input)
+}
+
+fn hint_text(text: impl Into<SharedString>, theme: &Theme) -> Div {
+    div()
+        .text_size(sp(11.5))
+        .line_height(sp(16.0))
+        .text_color(theme.text_tertiary)
+        .child(text.into())
+}
+
+/// Paint the QR SVG. GPUI rasterizes `ImageFormat::Svg` through resvg, and
+/// `Image::from_bytes` keys its cache on the content hash, so rebuilding the
+/// image each frame is a cache hit rather than a re-rasterization.
+fn render_qr_image(svg: &str, theme: &Theme) -> Div {
+    let image = Arc::new(Image::from_bytes(ImageFormat::Svg, svg.as_bytes().to_vec()));
+    div()
+        .rounded(px(6.0))
+        .border_1()
+        .border_color(theme.border_strong)
+        // The QR is scannable on white, so keep an opaque light plate under it
+        // in both themes rather than inheriting the dialog surface.
+        .bg(gpui::hsla(0.0, 0.0, 1.0, 1.0))
+        .p(px(8.0))
+        .child(
+            img(image)
+                .id("host-dialog-qr")
+                .w(px(QR_TARGET_PX))
+                .h(px(QR_TARGET_PX)),
+        )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn values() -> HostFormValues {
+        HostFormValues {
+            name: "Studio".into(),
+            address: "192.168.1.10:34123".into(),
+            token: "  secret  ".into(),
+            ssh_user: "alice".into(),
+            ssh_host: "jump.example.com".into(),
+            ssh_remote_port: "19999".into(),
+            ssh_identity_file: String::new(),
+            cloudflare_address: None,
+        }
+    }
+
+    #[test]
+    fn build_direct_profile_normalizes_and_trims_token() {
+        let profile = build_host_profile(HostKind::Direct, None, &values(), 100).unwrap();
+        assert_eq!(profile.kind, HostKind::Direct);
+        assert_eq!(profile.address, "ws://192.168.1.10:34123");
+        assert_eq!(profile.token.as_deref(), Some("secret"));
+        assert!(profile.tailscale.is_none());
+        assert!(profile.cloudflare.is_none());
+        assert!(profile.ssh.is_none());
+        assert_eq!(profile.created_at, 100);
+        assert_eq!(profile.updated_at, 100);
+    }
+
+    #[test]
+    fn build_direct_profile_names_after_address_when_blank() {
+        let mut v = values();
+        v.name = "   ".into();
+        let profile = build_host_profile(HostKind::Direct, None, &v, 1).unwrap();
+        assert_eq!(profile.name, "192.168.1.10:34123");
+    }
+
+    #[test]
+    fn build_tailscale_profile_extracts_magic_dns_and_port() {
+        let mut v = values();
+        v.address = "wss://mac.tail-abc.ts.net:34123".into();
+        let profile = build_host_profile(HostKind::Tailscale, None, &v, 1).unwrap();
+        assert_eq!(profile.kind, HostKind::Tailscale);
+        assert_eq!(profile.address, "wss://mac.tail-abc.ts.net:34123");
+        let tailscale = profile.tailscale.expect("tailscale block");
+        assert_eq!(tailscale.magic_dns, "mac.tail-abc.ts.net");
+        assert_eq!(tailscale.port, 34123);
+    }
+
+    #[test]
+    fn build_tailscale_profile_requires_a_port() {
+        let mut v = values();
+        v.address = "wss://mac.tail-abc.ts.net".into();
+        let error = build_host_profile(HostKind::Tailscale, None, &v, 1).unwrap_err();
+        assert!(error.contains("port"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn build_cloudflare_profile_uses_resolved_tunnel_address() {
+        let mut v = values();
+        v.cloudflare_address = Some("wss://random-words.trycloudflare.com".into());
+        let profile = build_host_profile(HostKind::Cloudflare, None, &v, 1).unwrap();
+        assert_eq!(profile.kind, HostKind::Cloudflare);
+        assert_eq!(profile.address, "wss://random-words.trycloudflare.com");
+        let cloudflare = profile.cloudflare.expect("cloudflare block");
+        assert_eq!(cloudflare.hostname, "random-words.trycloudflare.com");
+        assert!(cloudflare.quick_tunnel);
+    }
+
+    #[test]
+    fn build_cloudflare_profile_requires_a_started_tunnel() {
+        let error = build_host_profile(HostKind::Cloudflare, None, &values(), 1).unwrap_err();
+        assert!(
+            error.contains("Start the tunnel"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn build_ssh_profile_derives_address_from_host_and_port() {
+        let profile = build_host_profile(HostKind::SshRelay, None, &values(), 1).unwrap();
+        assert_eq!(profile.kind, HostKind::SshRelay);
+        assert_eq!(profile.address, "wss://jump.example.com:19999");
+        let ssh = profile.ssh.expect("ssh block");
+        assert_eq!(ssh.user, "alice");
+        assert_eq!(ssh.host, "jump.example.com");
+        assert_eq!(ssh.remote_port, 19999);
+        assert!(ssh.identity_file.is_none());
+    }
+
+    #[test]
+    fn build_ssh_profile_keeps_identity_file_when_set() {
+        let mut v = values();
+        v.ssh_identity_file = "/Users/alice/.ssh/id_ed25519".into();
+        let profile = build_host_profile(HostKind::SshRelay, None, &v, 1).unwrap();
+        assert_eq!(
+            profile.ssh.unwrap().identity_file.as_deref(),
+            Some("/Users/alice/.ssh/id_ed25519")
+        );
+    }
+
+    #[test]
+    fn build_ssh_profile_rejects_blank_user_host_and_bad_port() {
+        let mut v = values();
+        v.ssh_user = "  ".into();
+        assert!(build_host_profile(HostKind::SshRelay, None, &v, 1).is_err());
+
+        let mut v = values();
+        v.ssh_host = String::new();
+        assert!(build_host_profile(HostKind::SshRelay, None, &v, 1).is_err());
+
+        let mut v = values();
+        v.ssh_remote_port = "0".into();
+        assert!(build_host_profile(HostKind::SshRelay, None, &v, 1).is_err());
+
+        let mut v = values();
+        v.ssh_remote_port = "not-a-port".into();
+        assert!(build_host_profile(HostKind::SshRelay, None, &v, 1).is_err());
+    }
+
+    #[test]
+    fn editing_preserves_id_created_at_and_last_connected() {
+        let existing = HostProfile {
+            id: "host-7".into(),
+            name: "Old".into(),
+            kind: HostKind::Direct,
+            address: "ws://old:34123".into(),
+            token: None,
+            tailscale: None,
+            cloudflare: None,
+            ssh: None,
+            created_at: 10,
+            updated_at: 20,
+            last_connected_at: Some(42),
+        };
+        let profile =
+            build_host_profile(HostKind::Direct, Some(&existing), &values(), 999).unwrap();
+        assert_eq!(profile.id, "host-7");
+        assert_eq!(profile.created_at, 10);
+        assert_eq!(profile.last_connected_at, Some(42));
+        assert_eq!(profile.updated_at, 999);
+    }
+
+    #[test]
+    fn switching_kind_drops_the_previous_transport_block() {
+        let existing = HostProfile {
+            id: "host-9".into(),
+            name: "Tunnel".into(),
+            kind: HostKind::Cloudflare,
+            address: "wss://old.trycloudflare.com".into(),
+            token: None,
+            tailscale: None,
+            cloudflare: Some(CloudflareHostConfig {
+                hostname: "old.trycloudflare.com".into(),
+                quick_tunnel: true,
+            }),
+            ssh: None,
+            created_at: 1,
+            updated_at: 1,
+            last_connected_at: None,
+        };
+        let profile = build_host_profile(HostKind::Direct, Some(&existing), &values(), 2).unwrap();
+        assert_eq!(profile.kind, HostKind::Direct);
+        assert!(profile.cloudflare.is_none(), "stale block must be cleared");
+    }
+
+    #[test]
+    fn split_host_port_handles_ipv6_literals() {
+        assert_eq!(
+            split_host_port("wss://[::1]:34123").unwrap(),
+            ("[::1]".to_string(), 34123)
+        );
+        assert!(split_host_port("wss://[::1]").is_err());
+        assert!(split_host_port("wss://host:0").is_err());
+        assert!(split_host_port("wss://host:abc").is_err());
     }
 }

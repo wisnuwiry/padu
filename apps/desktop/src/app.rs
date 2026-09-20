@@ -1320,6 +1320,10 @@ pub struct Padu {
     host_dialog_request: Option<dialogs::host::HostDialogRequest>,
     project_action_dialog: Option<dialogs::project_action::ProjectActionDialogState>,
     project_action_dialog_request: Option<dialogs::project_action::ProjectActionDialogRequest>,
+    /// Live transports (SSH relays, Cloudflare tunnels) keyed by host id.
+    /// Started when a remote host is provisioned or activated, torn down on
+    /// host switch and on app shutdown.
+    host_transports: padu_client::transport::TransportRegistry,
     host_switch_pending: bool,
     host_switch_generation: u64,
     onboarding: onboarding::OnboardingState,
@@ -3333,6 +3337,7 @@ impl Padu {
                 host_dialog_request: None,
                 project_action_dialog: None,
                 project_action_dialog_request: None,
+                host_transports: padu_client::transport::TransportRegistry::new(),
                 host_switch_pending: false,
                 host_switch_generation: 0,
                 onboarding,

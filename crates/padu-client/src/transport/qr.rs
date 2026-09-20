@@ -211,6 +211,24 @@ mod tests {
         assert!(svg.contains("<svg"));
         assert!(svg.contains("viewBox"));
         assert!(svg.contains("xmlns=\"http://www.w3.org/2000/svg\""));
+        // resvg (which GPUI uses for ImageFormat::Svg) needs a concrete,
+        // square width/height or the code rasterizes blank or distorted.
+        // `min_dimensions` rounds up to whole modules, so the result is at
+        // least the requested size, never exactly it.
+        let attr = |name: &str| -> u32 {
+            svg.split(&format!("{name}=\""))
+                .nth(1)
+                .and_then(|rest| rest.split('"').next())
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0)
+        };
+        let width = attr("width");
+        let height = attr("height");
+        assert_eq!(width, height, "QR SVG must be square");
+        assert!(
+            width >= 180,
+            "QR SVG must honor the minimum size, got {width}"
+        );
     }
 
     #[test]

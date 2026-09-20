@@ -233,6 +233,15 @@ impl TransportRegistry {
             .cloned()
     }
 
+    /// Drop a transport slot without stopping it. Callers that need a graceful
+    /// shutdown should `stop()` the transport first.
+    pub fn remove(&self, host_id: &str) -> Option<TransportSlot> {
+        self.inner
+            .lock()
+            .expect("transport registry poisoned")
+            .remove(host_id)
+    }
+
     /// Number of registered hosts.
     pub fn len(&self) -> usize {
         self.inner

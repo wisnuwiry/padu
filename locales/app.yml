@@ -716,6 +716,46 @@ host.switch_host:
   en: Switch Host
 host.connect:
   en: Connect
+host.transport:
+  en: Transport
+host.transport_direct:
+  en: Direct
+host.transport_tailscale:
+  en: Tailscale
+host.transport_cloudflare:
+  en: Cloudflare
+host.transport_ssh:
+  en: SSH
+host.tailscale_hint:
+  en: Enter the MagicDNS name or 100.x address with the daemon port, e.g. my-mac.tail-abc.ts.net:34123
+host.ssh_user:
+  en: User
+host.ssh_user_placeholder:
+  en: e.g. alice
+host.ssh_host:
+  en: Jump host
+host.ssh_host_placeholder:
+  en: e.g. jump.example.com
+host.ssh_remote_port:
+  en: Remote port
+host.ssh_remote_port_placeholder:
+  en: e.g. 19999
+host.ssh_identity_file:
+  en: Identity file
+host.ssh_identity_placeholder:
+  en: Optional path to an SSH private key
+host.tunnel_idle_hint:
+  en: Start a Cloudflare Quick Tunnel, then scan the QR code from the Padu mobile app. The URL rotates each time the tunnel restarts.
+host.tunnel_starting:
+  en: Starting tunnel...
+host.tunnel_ready:
+  en: Tunnel ready
+host.qr_scan_hint:
+  en: Scan this code in Padu Mobile to add this host without typing the token.
+host.start_tunnel:
+  en: Start Tunnel
+host.restart_tunnel:
+  en: Restart Tunnel
 web.connect_title:
   en: Connect to Padu daemon
 web.connect_description:
