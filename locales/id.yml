@@ -1519,3 +1519,9 @@ host.tunnel_connected: Tunnel tersambung
 host.tunnel_failed: Tunnel tidak tersedia
 host.transport_web_hint: Gunakan Tailscale jika daemon ini dapat dijangkau melalui tailnet Anda. Relay Cloudflare dan SSH ditambahkan dari Padu Desktop.
 host.transport_relay_hint: Host ini disediakan oleh Padu Desktop. Tunnel-nya dikelola di sana.
+host.connection_section: Koneksi
+host.qr_pane_title: Pindai untuk terhubung
+host.qr_needs_tunnel: Mulai tunnel untuk mendapatkan kode.
+host.qr_label: Kode QR koneksi
+host.token_included: Token disertakan
+host.token_missing: Tidak ada token — klien akan diminta mengisinya

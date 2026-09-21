@@ -1577,3 +1577,9 @@ host.tunnel_connected: トンネル接続済み
 host.tunnel_failed: トンネル利用不可
 host.transport_web_hint: このデーモンにテールネット経由で到達できる場合は Tailscale を使用してください。Cloudflare と SSH のリレーは Padu Desktop から追加します。
 host.transport_relay_hint: このホストは Padu Desktop によってプロビジョニングされました。トンネルはそこで管理されます。
+host.connection_section: 接続
+host.qr_pane_title: スキャンして接続
+host.qr_needs_tunnel: トンネルを開始するとコードが表示されます。
+host.qr_label: 接続用 QR コード
+host.token_included: トークンを含む
+host.token_missing: トークンがありません — クライアント側で入力を求められます

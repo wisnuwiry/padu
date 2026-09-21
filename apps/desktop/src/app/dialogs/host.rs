@@ -20,7 +20,9 @@ actions!(padu_host_dialog, [ConfirmHostDialog, DismissHostDialog]);
 const DIALOG_CONTEXT: &str = "HostDialog";
 const DIALOG_INPUT_CONTEXT: &str = "HostDialog > TextInput";
 /// Edge length, in pixels, of the rendered QR code.
-const QR_TARGET_PX: f32 = 168.0;
+const QR_TARGET_PX: f32 = 180.0;
+/// Width of the right-hand "scan to connect" pane.
+const QR_PANE_WIDTH: f32 = 236.0;
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
@@ -40,8 +42,8 @@ pub(crate) struct HostDialogRequest {
     pub editing_profile_id: Option<String>,
 }
 
-/// Live Cloudflare tunnel state for the dialog. The tunnel is spawned lazily
-/// when the user asks for one, and kept alive in the app's transport registry.
+/// Live tunnel state for the dialog. The tunnel is spawned lazily when the
+/// user asks for one, and kept alive in the app's transport registry.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) enum TunnelState {
     #[default]
@@ -49,10 +51,23 @@ pub(crate) enum TunnelState {
     Starting,
     Ready {
         address: String,
-        /// Self-contained SVG, rasterized by GPUI through resvg.
-        qr_svg: String,
     },
     Failed(String),
+}
+
+/// What the "scan to connect" pane should show for the dialog's live values.
+enum QrPanel {
+    /// The form is not complete yet; `reason` says what is missing.
+    Unavailable { reason: String },
+    /// A tunnel is being provisioned, so no address exists yet.
+    Pending,
+    Ready {
+        svg: String,
+        address: String,
+        has_token: bool,
+    },
+    /// No dialog is open.
+    Empty,
 }
 
 pub(crate) struct HostDialogState {
@@ -69,6 +84,11 @@ pub(crate) struct HostDialogState {
     /// stopped when the dialog closes.
     pub tunnel_key: String,
     pub tunnel: TunnelState,
+    /// `(encoded payload, rendered SVG)` for the last payload the panel drew.
+    ///
+    /// The QR is regenerated only when the encoded payload changes, so typing
+    /// in an unrelated field does not re-encode the matrix every frame.
+    pub qr_cache: Option<(String, String)>,
     pub error: Option<String>,
     pub save_focus: FocusHandle,
     pub cancel_focus: FocusHandle,
@@ -225,6 +245,28 @@ pub(crate) fn build_host_profile(
     })
 }
 
+/// The payload a phone would import for the dialog's current values.
+///
+/// Built through [`build_host_profile`] so the QR always matches what saving
+/// would produce — a code that scanned into a different address than the saved
+/// profile would be worse than no code at all. The error is the same
+/// human-readable reason the save path would report, so the panel can say why
+/// no code is available yet (most often: the tunnel has not been started).
+pub(crate) fn qr_payload_for(
+    kind: HostKind,
+    editing: Option<&HostProfile>,
+    values: &HostFormValues,
+    now: u64,
+) -> Result<QrPayload, String> {
+    let profile = build_host_profile(kind, editing, values, now)?;
+    Ok(QrPayload {
+        kind: profile.kind,
+        url: profile.address,
+        token: profile.token.unwrap_or_default(),
+        name: profile.name,
+    })
+}
+
 /// Transport options shown in the dialog's segmented control.
 const TRANSPORT_OPTIONS: [HostKind; 4] = [
     HostKind::Direct,
@@ -375,6 +417,7 @@ impl Padu {
             ssh_identity_input,
             tunnel_key: format!("host-dialog-{}", Uuid::new_v4()),
             tunnel: TunnelState::Idle,
+            qr_cache: None,
             error: None,
             save_focus: cx.focus_handle(),
             cancel_focus: cx.focus_handle(),
@@ -450,24 +493,14 @@ impl Padu {
             let _ = this.update(cx, |this, cx| {
                 match outcome {
                     Ok(handle) => {
-                        let payload = QrPayload {
-                            kind: HostKind::Cloudflare,
-                            url: handle.address.clone(),
-                            token,
-                            name: String::new(),
-                        };
-                        let qr_svg = render_svg(&payload, QR_TARGET_PX as u32).ok();
                         registry.register(tunnel_key, Box::new(transport));
                         if let Some(dialog) = this.host_dialog.as_mut() {
-                            dialog.tunnel = match qr_svg {
-                                Some(qr_svg) => TunnelState::Ready {
-                                    address: handle.address,
-                                    qr_svg,
-                                },
-                                None => TunnelState::Failed(
-                                    "Could not render a QR code for the tunnel".to_string(),
-                                ),
+                            dialog.tunnel = TunnelState::Ready {
+                                address: handle.address,
                             };
+                            // The panel re-derives the code from the new
+                            // address, so the cache must not outlive it.
+                            dialog.qr_cache = None;
                         }
                     }
                     Err(error) => {
@@ -573,10 +606,44 @@ impl Padu {
         if let Some(request) = self.host_dialog_request.take() {
             self.materialize_host_dialog(request, window, cx);
         }
-        let dialog = self.host_dialog.as_ref()?;
         let theme = Theme::current(cx);
-        let is_editing = dialog.editing_profile_id.is_some();
-        let kind = dialog.kind;
+        // Snapshot the dialog so the borrow ends before `current_qr_pane`,
+        // which needs `&mut self` to refresh its cache.
+        let (is_editing, kind, tunnel, error_message) = {
+            let dialog = self.host_dialog.as_ref()?;
+            (
+                dialog.editing_profile_id.is_some(),
+                dialog.kind,
+                dialog.tunnel.clone(),
+                dialog.error.clone(),
+            )
+        };
+        let (name_input, address_input, token_input) = {
+            let dialog = self.host_dialog.as_ref()?;
+            (
+                dialog.name_input.clone(),
+                dialog.address_input.clone(),
+                dialog.token_input.clone(),
+            )
+        };
+        let (ssh_user_input, ssh_host_input, ssh_port_input, ssh_identity_input) = {
+            let dialog = self.host_dialog.as_ref()?;
+            (
+                dialog.ssh_user_input.clone(),
+                dialog.ssh_host_input.clone(),
+                dialog.ssh_port_input.clone(),
+                dialog.ssh_identity_input.clone(),
+            )
+        };
+        let (save_focus, cancel_focus, delete_focus) = {
+            let dialog = self.host_dialog.as_ref()?;
+            (
+                dialog.save_focus.clone(),
+                dialog.cancel_focus.clone(),
+                dialog.delete_focus.clone(),
+            )
+        };
+
         let title = if is_editing {
             tr!("host.edit_host")
         } else {
@@ -588,19 +655,8 @@ impl Padu {
             tr!("host.save_and_connect")
         };
 
-        let name_input = dialog.name_input.clone();
-        let address_input = dialog.address_input.clone();
-        let token_input = dialog.token_input.clone();
-        let ssh_user_input = dialog.ssh_user_input.clone();
-        let ssh_host_input = dialog.ssh_host_input.clone();
-        let ssh_port_input = dialog.ssh_port_input.clone();
-        let ssh_identity_input = dialog.ssh_identity_input.clone();
-        let tunnel = dialog.tunnel.clone();
-        let error_message = dialog.error.clone();
-
-        let save_focus = dialog.save_focus.clone();
-        let cancel_focus = dialog.cancel_focus.clone();
-        let delete_focus = dialog.delete_focus.clone();
+        let panel = self.current_qr_panel(cx, &tunnel);
+        let qr_pane = self.render_qr_pane(&panel, kind, &tunnel, &theme, cx);
 
         let mut fields = div().flex().flex_col().gap(px(12.0)).child(labelled_field(
             tr!("host.name"),
@@ -625,12 +681,16 @@ impl Padu {
                 ));
             }
             HostKind::Cloudflare => {
-                fields = fields.child(self.render_tunnel_section(&tunnel, &theme, cx));
-                fields = fields.child(labelled_field(
-                    tr!("host.token"),
-                    theme.text_secondary,
-                    text_field_box(&theme, false, token_input),
-                ));
+                // The tunnel lives in the right pane: the address it reports
+                // is what the code encodes, so keeping them together makes
+                // "start the tunnel, then scan" one continuous step.
+                fields = fields
+                    .child(hint_text(tr!("host.tunnel_idle_hint"), &theme))
+                    .child(labelled_field(
+                        tr!("host.token"),
+                        theme.text_secondary,
+                        text_field_box(&theme, false, token_input),
+                    ));
             }
             HostKind::SshRelay => {
                 fields = fields
@@ -680,7 +740,7 @@ impl Padu {
                 this.close_host_dialog(window, cx);
             }))
             .id("host-dialog-card")
-            .w(px(480.0))
+            .w(px(760.0))
             .rounded(px(14.0))
             .border_1()
             .border_color(theme.border_strong)
@@ -723,8 +783,26 @@ impl Padu {
             )
             // Transport selector
             .child(self.render_transport_selector(kind, &theme, cx))
-            // Fields
-            .child(fields)
+            // Two panes: what to connect to on the left, the code a phone
+            // scans on the right. The code is live for every transport, so
+            // adding a host and handing it to a device is one pass.
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .gap(px(20.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap(px(12.0))
+                            .child(section_label(tr!("host.connection_section"), &theme))
+                            .child(fields),
+                    )
+                    .child(qr_pane),
+            )
             // Footer Actions
             .child(
                 div()
@@ -871,6 +949,170 @@ impl Padu {
         ))
     }
 
+    /// Snapshot for the "scan to connect" pane.
+    ///
+    /// The SVG is regenerated only when the encoded payload changes, so typing
+    /// in an unrelated field costs a string compare rather than a QR encode
+    /// plus a fresh image allocation on every frame.
+    fn current_qr_panel(&mut self, cx: &App, tunnel: &TunnelState) -> QrPanel {
+        let Some(dialog) = self.host_dialog.as_ref() else {
+            return QrPanel::Empty;
+        };
+        let kind = dialog.kind;
+        let editing_id = dialog.editing_profile_id.clone();
+        let values = self.host_form_values(cx);
+        let editing = editing_id
+            .as_ref()
+            .and_then(|id| self.state.hosts.iter().find(|h| &h.id == id))
+            .cloned();
+
+        // A Cloudflare address only exists once cloudflared reports it, so say
+        // that instead of echoing the save path's "start the tunnel" error.
+        if kind == HostKind::Cloudflare && !matches!(tunnel, TunnelState::Ready { .. }) {
+            return match tunnel {
+                TunnelState::Starting => QrPanel::Pending,
+                TunnelState::Failed(reason) => QrPanel::Unavailable {
+                    reason: reason.clone(),
+                },
+                _ => QrPanel::Unavailable {
+                    reason: tr!("host.qr_needs_tunnel"),
+                },
+            };
+        }
+
+        match qr_payload_for(kind, editing.as_ref(), &values, unix_time()) {
+            Ok(payload) => {
+                let key = payload.encode().unwrap_or_default();
+                let cached = self.host_dialog.as_ref().and_then(|d| d.qr_cache.clone());
+                let svg = match cached {
+                    Some((cached_key, svg)) if cached_key == key => svg,
+                    _ => {
+                        let svg = render_svg(&payload, QR_TARGET_PX as u32).unwrap_or_default();
+                        if let Some(dialog) = self.host_dialog.as_mut() {
+                            dialog.qr_cache = Some((key, svg.clone()));
+                        }
+                        svg
+                    }
+                };
+                QrPanel::Ready {
+                    svg,
+                    address: payload.url,
+                    has_token: !payload.token.is_empty(),
+                }
+            }
+            Err(reason) => QrPanel::Unavailable { reason },
+        }
+    }
+
+    /// The right-hand pane: a live code for whatever the form currently
+    /// describes, so a phone can be handed the host without typing anything.
+    fn render_qr_pane(
+        &self,
+        panel: &QrPanel,
+        kind: HostKind,
+        tunnel: &TunnelState,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let mut pane = div()
+            .w(px(QR_PANE_WIDTH))
+            .flex_none()
+            .flex()
+            .flex_col()
+            .gap(px(10.0))
+            .child(section_label(tr!("host.qr_pane_title"), theme));
+
+        match panel {
+            QrPanel::Ready {
+                svg,
+                address,
+                has_token,
+            } => {
+                pane = pane
+                    .child(render_qr_image(svg, theme))
+                    .child(
+                        div()
+                            .font_family(crate::md::render::MONO_FAMILY)
+                            .text_size(sp(11.5))
+                            .text_color(theme.text_secondary)
+                            .truncate()
+                            .child(SharedString::from(address.clone())),
+                    )
+                    .child(status_row(
+                        if *has_token {
+                            tr!("host.token_included")
+                        } else {
+                            tr!("host.token_missing")
+                        },
+                        *has_token,
+                        theme,
+                    ));
+            }
+            QrPanel::Pending => {
+                pane = pane.child(pane_placeholder(tr!("host.tunnel_starting"), theme));
+            }
+            QrPanel::Unavailable { reason } => {
+                pane = pane.child(pane_placeholder(reason.clone(), theme));
+            }
+            QrPanel::Empty => {}
+        }
+
+        // Only Cloudflare has to be started from here; every other transport
+        // resolves its address from the fields and needs no extra step.
+        if kind == HostKind::Cloudflare {
+            pane = pane.child(self.render_tunnel_button(tunnel, theme, cx));
+        }
+
+        pane
+    }
+
+    fn render_tunnel_button(
+        &self,
+        tunnel: &TunnelState,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let starting = matches!(tunnel, TunnelState::Starting);
+        let label = if matches!(tunnel, TunnelState::Idle | TunnelState::Failed(_)) {
+            tr!("host.start_tunnel")
+        } else {
+            tr!("host.restart_tunnel")
+        };
+        div()
+            .id("start-tunnel-button")
+            .tab_index(0)
+            .h(px(30.0))
+            .w_full()
+            .rounded(px(7.0))
+            .border_1()
+            .border_color(theme.border_strong)
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(6.0))
+            .cursor_pointer()
+            .text_size(sp(12.5))
+            .text_color(theme.text_secondary)
+            .opacity(if starting { 0.55 } else { 1.0 })
+            .focus_visible(|style| style.border_color(theme.accent))
+            .when(!starting, |element| {
+                element
+                    .hover(|e| e.bg(theme.overlay))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.start_host_tunnel(cx);
+                    }))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                        if !event.keystroke.modifiers.modified()
+                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                        {
+                            this.start_host_tunnel(cx);
+                            cx.stop_propagation();
+                        }
+                    }))
+            })
+            .child(label)
+    }
+
     fn render_transport_selector(
         &self,
         active: HostKind,
@@ -947,102 +1189,62 @@ impl Padu {
         }
         row
     }
+}
 
-    fn render_tunnel_section(
-        &self,
-        tunnel: &TunnelState,
-        theme: &Theme,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let mut section = div().flex().flex_col().gap(px(8.0));
+fn section_label(text: impl Into<SharedString>, theme: &Theme) -> Div {
+    div()
+        .text_size(sp(11.5))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(theme.text_tertiary)
+        .child(text.into())
+}
 
-        match tunnel {
-            TunnelState::Idle => {
-                section = section.child(hint_text(tr!("host.tunnel_idle_hint"), theme));
-            }
-            TunnelState::Starting => {
-                section = section.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .text_size(sp(12.0))
-                        .text_color(theme.text_secondary)
-                        .child(tr!("host.tunnel_starting")),
-                );
-            }
-            TunnelState::Ready { address, qr_svg } => {
-                section = section
-                    .child(
-                        div()
-                            .text_size(sp(12.0))
-                            .text_color(theme.text_secondary)
-                            .child(tr!("host.tunnel_ready")),
-                    )
-                    .child(
-                        div()
-                            .font_family(crate::md::render::MONO_FAMILY)
-                            .text_size(sp(12.0))
-                            .text_color(theme.text)
-                            .truncate()
-                            .child(address.clone()),
-                    )
-                    .child(render_qr_image(qr_svg, theme))
-                    .child(hint_text(tr!("host.qr_scan_hint"), theme));
-            }
-            TunnelState::Failed(error) => {
-                section = section.child(
-                    div()
-                        .text_size(sp(11.5))
-                        .text_color(gpui::hsla(0.0, 0.7, 0.55, 1.0))
-                        .child(error.clone()),
-                );
-            }
-        }
-
-        let label = if matches!(tunnel, TunnelState::Idle | TunnelState::Failed(_)) {
-            tr!("host.start_tunnel")
-        } else {
-            tr!("host.restart_tunnel")
-        };
-        let starting = matches!(tunnel, TunnelState::Starting);
-
-        section.child(
+/// A quiet box standing in for the code while it cannot be drawn yet.
+fn pane_placeholder(message: impl Into<SharedString>, theme: &Theme) -> Div {
+    div()
+        .w(px(QR_TARGET_PX))
+        .h(px(QR_TARGET_PX))
+        .rounded(px(6.0))
+        .border_1()
+        .border_color(theme.border)
+        .bg(theme.overlay.opacity(0.35))
+        .flex()
+        .items_center()
+        .justify_center()
+        .p(px(14.0))
+        .child(
             div()
-                .id("start-tunnel-button")
-                .tab_index(0)
-                .h(px(28.0))
-                .px(px(12.0))
-                .rounded(px(7.0))
-                .border_1()
-                .border_color(theme.border_strong)
-                .flex()
-                .items_center()
-                .justify_center()
-                .gap(px(6.0))
-                .cursor_pointer()
-                .text_size(sp(12.5))
-                .text_color(theme.text_secondary)
-                .opacity(if starting { 0.55 } else { 1.0 })
-                .focus_visible(|style| style.border_color(theme.accent))
-                .when(!starting, |element| {
-                    element
-                        .hover(|e| e.bg(theme.overlay))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.start_host_tunnel(cx);
-                        }))
-                        .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                            if !event.keystroke.modifiers.modified()
-                                && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                            {
-                                this.start_host_tunnel(cx);
-                                cx.stop_propagation();
-                            }
-                        }))
-                })
-                .child(label),
+                .text_center()
+                .text_size(sp(11.5))
+                .line_height(sp(16.0))
+                .text_color(theme.text_tertiary)
+                .child(message.into()),
         )
-    }
+}
+
+/// One line of pane status. `ok` selects the icon as well as the color, so the
+/// meaning survives for anyone who cannot distinguish the two.
+fn status_row(text: impl Into<SharedString>, ok: bool, theme: &Theme) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(5.0))
+        .text_size(sp(11.5))
+        .text_color(if ok {
+            theme.text_secondary
+        } else {
+            theme.warning
+        })
+        .child(icon(
+            if ok {
+                "icons/check.svg"
+            } else {
+                "icons/alert.svg"
+            },
+            10.5,
+            if ok { theme.success } else { theme.warning },
+        ))
+        .child(text.into())
 }
 
 fn labelled_field(label: impl Into<SharedString>, label_color: Hsla, control: Div) -> Div {
@@ -1267,6 +1469,65 @@ mod tests {
         let profile = build_host_profile(HostKind::Direct, Some(&existing), &values(), 2).unwrap();
         assert_eq!(profile.kind, HostKind::Direct);
         assert!(profile.cloudflare.is_none(), "stale block must be cleared");
+    }
+
+    #[test]
+    fn qr_payload_matches_what_saving_would_write() {
+        // A code that scanned into a different address than the saved profile
+        // would be worse than no code at all.
+        let values = values();
+        let payload = qr_payload_for(HostKind::Direct, None, &values, 1).unwrap();
+        let profile = build_host_profile(HostKind::Direct, None, &values, 1).unwrap();
+        assert_eq!(payload.kind, profile.kind);
+        assert_eq!(payload.url, profile.address);
+        assert_eq!(payload.name, profile.name);
+        assert_eq!(payload.token, profile.token.unwrap());
+    }
+
+    #[test]
+    fn qr_payload_works_for_every_address_based_transport() {
+        // Direct and Tailscale come straight from the address field; SSH
+        // derives its address and needs no tunnel to produce a code.
+        for kind in [HostKind::Direct, HostKind::Tailscale, HostKind::SshRelay] {
+            let payload = qr_payload_for(kind, None, &values(), 1)
+                .unwrap_or_else(|error| panic!("{kind:?} should produce a code: {error}"));
+            assert_eq!(payload.kind, kind);
+            assert!(payload.url.starts_with("ws"));
+        }
+    }
+
+    #[test]
+    fn qr_payload_for_cloudflare_needs_a_started_tunnel() {
+        // No tunnel yet: the address is unknown, so there is nothing honest to
+        // encode. The panel shows this reason.
+        let error = qr_payload_for(HostKind::Cloudflare, None, &values(), 1).unwrap_err();
+        assert!(
+            error.contains("Start the tunnel"),
+            "unexpected error: {error}"
+        );
+
+        let mut started = values();
+        started.cloudflare_address = Some("wss://abc.trycloudflare.com".into());
+        let payload = qr_payload_for(HostKind::Cloudflare, None, &started, 1).unwrap();
+        assert_eq!(payload.url, "wss://abc.trycloudflare.com");
+    }
+
+    #[test]
+    fn qr_payload_carries_an_empty_token_rather_than_failing() {
+        // A token-less host is still importable; the pane warns instead of
+        // refusing to draw a code.
+        let mut v = values();
+        v.token = "   ".into();
+        let payload = qr_payload_for(HostKind::Direct, None, &v, 1).unwrap();
+        assert!(payload.token.is_empty());
+    }
+
+    #[test]
+    fn qr_payload_surfaces_the_missing_field() {
+        let mut v = values();
+        v.ssh_user = String::new();
+        let error = qr_payload_for(HostKind::SshRelay, None, &v, 1).unwrap_err();
+        assert!(error.contains("SSH user"), "unexpected error: {error}");
     }
 
     #[test]

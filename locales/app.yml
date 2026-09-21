@@ -762,6 +762,18 @@ host.tunnel_connected:
   en: Tunnel connected
 host.tunnel_failed:
   en: Tunnel unavailable
+host.connection_section:
+  en: Connection
+host.qr_pane_title:
+  en: Scan to connect
+host.qr_needs_tunnel:
+  en: Start the tunnel to get a code.
+host.qr_label:
+  en: Connect QR code
+host.token_included:
+  en: Token included
+host.token_missing:
+  en: No token — clients will be asked for one
 host.transport_web_hint:
   en: Use Tailscale when this daemon is reachable over your tailnet. Cloudflare and SSH relays are added from Padu Desktop.
 host.transport_relay_hint:

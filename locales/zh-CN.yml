@@ -1524,3 +1524,9 @@ host.tunnel_connected: 隧道已连接
 host.tunnel_failed: 隧道不可用
 host.transport_web_hint: 如果该守护进程可通过你的 tailnet 访问，请使用 Tailscale。Cloudflare 和 SSH 中继需在 Padu Desktop 中添加。
 host.transport_relay_hint: 该主机由 Padu Desktop 配置，其隧道在那里管理。
+host.connection_section: 连接
+host.qr_pane_title: 扫描以连接
+host.qr_needs_tunnel: 启动隧道后可获取二维码。
+host.qr_label: 连接二维码
+host.token_included: 已包含令牌
+host.token_missing: 未设置令牌 — 客户端将被要求输入
