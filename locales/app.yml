@@ -662,10 +662,36 @@ daemon.show_qr:
   en: Show QR Code
 daemon.hide_qr:
   en: Hide QR Code
-daemon.qr_hint:
-  en: Scan this with the Padu mobile app to connect this device — it carries the address and token, so nothing needs typing.
+daemon.qr_tailscale_name:
+  en: Tailnet name
+daemon.qr_ssh_host:
+  en: Jump host
+daemon.qr_ssh_port:
+  en: Remote port
+daemon.qr_need_name:
+  en: Enter the tailnet name another device should use.
+daemon.qr_need_host:
+  en: Enter the jump host another device should use.
+daemon.qr_need_port:
+  en: Enter the remote port (1–65535).
+daemon.qr_needs_tunnel:
+  en: Start the tunnel to get a code.
+daemon.qr_tunnel_starting:
+  en: Starting tunnel…
+daemon.qr_start_tunnel:
+  en: Start Tunnel
+daemon.qr_restart_tunnel:
+  en: Restart Tunnel
+daemon.qr_tunnel_failed:
+  en: "Could not start the tunnel: %{error}"
+daemon.qr_field_placeholder:
+  en: e.g. my-mac.tail-abc.ts.net
+daemon.qr_port_placeholder:
+  en: e.g. 19999
 daemon.qr_unavailable:
   en: This daemon address cannot be encoded as a QR code.
+daemon.qr_hint:
+  en: Scan this with the Padu mobile app to connect this device — it carries the address and token, so nothing needs typing.
 host.hosts:
   en: Hosts
 host.local:

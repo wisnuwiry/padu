@@ -2,12 +2,49 @@ use std::sync::Arc;
 
 use gpui::{Image, ImageFormat};
 use padu_client::persistence::HostKind;
-use padu_client::transport::{QrPayload, render_svg};
+use padu_client::transport::{
+    CloudflareTransport, QrPayload, Transport, TransportContext, TransportStatus, render_svg,
+};
 
 use super::*;
 
 /// Edge length, in pixels, of the credentials card's QR code.
 const DAEMON_QR_PX: u32 = 180;
+/// Registry key for the tunnel that fronts this desktop's own daemon.
+const DAEMON_QR_TUNNEL_KEY: &str = "daemon-exposure";
+/// How another device can be told to reach this daemon.
+const DAEMON_QR_TRANSPORTS: [HostKind; 4] = [
+    HostKind::Direct,
+    HostKind::Tailscale,
+    HostKind::Cloudflare,
+    HostKind::SshRelay,
+];
+
+/// `tr!` needs a literal key, so the label is resolved through a match.
+fn host_transport_label(kind: HostKind) -> String {
+    match kind {
+        HostKind::Direct => tr!("host.transport_direct"),
+        HostKind::Tailscale => tr!("host.transport_tailscale"),
+        HostKind::Cloudflare => tr!("host.transport_cloudflare"),
+        HostKind::SshRelay => tr!("host.transport_ssh"),
+    }
+}
+
+fn qr_input_row(label: String, input: Entity<TextInput>, theme: &Theme) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(10.0))
+        .child(
+            div()
+                .w(px(120.0))
+                .flex_none()
+                .text_size(sp(12.0))
+                .text_color(theme.text_tertiary)
+                .child(label),
+        )
+        .child(div().flex_1().min_w_0().child(input))
+}
 
 impl Padu {
     fn render_remote_hosts_section(&self, cx: &mut Context<Self>) -> Div {
@@ -510,9 +547,6 @@ impl Padu {
         let fields_dirty = self.daemon_exposure_fields_dirty(cx);
         let port = self.state.daemon_exposure.port;
         let websocket_url = format!("ws://{}:{port}", self.daemon_hostname);
-        // The copy/reveal listeners below take `websocket_url` by move; the
-        // QR section is built after them and needs its own handle.
-        let qr_url = websocket_url.clone();
         let token = self.state.daemon_exposure.token.clone();
 
         let exposure_toggle = toggle_switch(
@@ -1086,7 +1120,7 @@ impl Padu {
                                         .child(tr!("daemon.security_warning")),
                                 ),
                         )
-                        .child(self.render_daemon_qr_section(&qr_url, &token, &theme, cx)),
+                        .child(self.render_daemon_qr_section(&token, &theme, cx)),
                 )
             })
             .into_any_element()
@@ -1098,15 +1132,9 @@ impl Padu {
     /// the code carries the address and token the card already displays, so
     /// nothing has to be typed on a glass keyboard. It is not part of adding a
     /// remote host — a host profile describes a daemon reached *from* here.
-    fn render_daemon_qr_section(
-        &self,
-        websocket_url: &str,
-        token: &str,
-        theme: &Theme,
-        cx: &mut Context<Self>,
-    ) -> Div {
+    fn render_daemon_qr_section(&self, token: &str, theme: &Theme, cx: &mut Context<Self>) -> Div {
         let revealed = self.daemon_qr_revealed;
-        let section = div().flex().flex_col().gap(px(10.0)).child(
+        let mut section = div().flex().flex_col().gap(px(10.0)).child(
             div()
                 .id("toggle-daemon-qr")
                 .tab_index(0)
@@ -1156,9 +1184,106 @@ impl Padu {
             return section;
         }
 
+        // Which transport the *other* device should use. Each one expresses the
+        // same exposed daemon at a different address, which is exactly what the
+        // scan code has to carry.
+        let mut tabs = div().flex().items_center().gap(px(6.0));
+        for kind in DAEMON_QR_TRANSPORTS {
+            let active = kind == self.daemon_qr_transport;
+            tabs = tabs.child(
+                div()
+                    .id(SharedString::from(format!("daemon-qr-tab-{kind:?}")))
+                    .tab_index(0)
+                    .h(px(26.0))
+                    .px(px(9.0))
+                    .rounded(px(6.0))
+                    .border_1()
+                    .border_color(if active { theme.accent } else { theme.border })
+                    .bg(if active {
+                        theme.accent.opacity(0.12)
+                    } else {
+                        theme.surface
+                    })
+                    .text_color(if active {
+                        theme.accent
+                    } else {
+                        theme.text_secondary
+                    })
+                    .text_size(sp(12.0))
+                    .font_weight(if active {
+                        FontWeight::MEDIUM
+                    } else {
+                        FontWeight::NORMAL
+                    })
+                    .cursor_pointer()
+                    .focus_visible(|style| style.border_color(theme.accent))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .hover(|e| e.bg(theme.overlay))
+                    .child(host_transport_label(kind))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if this.daemon_qr_transport != kind {
+                            this.daemon_qr_transport = kind;
+                            // Addresses differ per transport, so the previous
+                            // one must not linger as a stale value.
+                            this.daemon_qr_field_input
+                                .update(cx, |input, cx| input.set_content("", cx));
+                            this.daemon_qr_cache.replace(None);
+                            cx.notify();
+                        }
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                        if !event.keystroke.modifiers.modified()
+                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                        {
+                            this.daemon_qr_transport = kind;
+                            this.daemon_qr_field_input
+                                .update(cx, |input, cx| input.set_content("", cx));
+                            this.daemon_qr_cache.replace(None);
+                            cx.notify();
+                            cx.stop_propagation();
+                        }
+                    })),
+            );
+        }
+        section = section.child(tabs);
+
+        match self.daemon_qr_transport {
+            HostKind::Tailscale => {
+                section = section.child(qr_input_row(
+                    tr!("daemon.qr_tailscale_name"),
+                    self.daemon_qr_field_input.clone(),
+                    theme,
+                ));
+            }
+            HostKind::SshRelay => {
+                section = section
+                    .child(qr_input_row(
+                        tr!("daemon.qr_ssh_host"),
+                        self.daemon_qr_field_input.clone(),
+                        theme,
+                    ))
+                    .child(qr_input_row(
+                        tr!("daemon.qr_ssh_port"),
+                        self.daemon_qr_port_input.clone(),
+                        theme,
+                    ));
+            }
+            HostKind::Cloudflare => {
+                section = section.child(self.render_daemon_qr_tunnel_button(theme, cx));
+            }
+            HostKind::Direct => {}
+        }
+
+        let address = match self.daemon_qr_address(cx) {
+            Ok(address) => address,
+            Err(reason) => return section.child(hint_text(reason, theme)),
+        };
+
         let payload = QrPayload {
-            kind: HostKind::Direct,
-            url: websocket_url.to_owned(),
+            kind: self.daemon_qr_transport,
+            url: address.clone(),
             token: token.to_owned(),
             name: self.daemon_hostname.clone(),
         };
@@ -1179,8 +1304,165 @@ impl Padu {
         drop(cache);
 
         section
+            .child(
+                div()
+                    .font_family(crate::md::render::MONO_FAMILY)
+                    .text_size(sp(11.5))
+                    .text_color(theme.text_secondary)
+                    .truncate()
+                    .child(SharedString::from(address)),
+            )
             .child(render_qr_image(&svg, theme))
             .child(hint_text(tr!("daemon.qr_hint"), theme))
+    }
+
+    /// The address another device should use for the selected transport.
+    ///
+    /// Direct, Tailscale and SSH only *describe* where the exposed daemon can
+    /// already be reached, so they are derived here. Cloudflare has to open a
+    /// tunnel before an address exists at all.
+    fn daemon_qr_address(&self, cx: &App) -> Result<String, String> {
+        let port = self.state.daemon_exposure.port;
+        let field = || {
+            self.daemon_qr_field_input
+                .read(cx)
+                .content()
+                .trim()
+                .to_owned()
+        };
+        match self.daemon_qr_transport {
+            HostKind::Direct => Ok(format!("ws://{}:{port}", self.daemon_hostname)),
+            HostKind::Tailscale => {
+                let name = field();
+                if name.is_empty() {
+                    return Err(tr!("daemon.qr_need_name"));
+                }
+                Ok(format!("ws://{name}:{port}"))
+            }
+            HostKind::SshRelay => {
+                let host = field();
+                if host.is_empty() {
+                    return Err(tr!("daemon.qr_need_host"));
+                }
+                let remote_port: u16 = self
+                    .daemon_qr_port_input
+                    .read(cx)
+                    .content()
+                    .trim()
+                    .parse()
+                    .map_err(|_| tr!("daemon.qr_need_port"))?;
+                if remote_port == 0 {
+                    return Err(tr!("daemon.qr_need_port"));
+                }
+                Ok(format!("ws://{host}:{remote_port}"))
+            }
+            HostKind::Cloudflare => {
+                let slot = self
+                    .host_transports
+                    .get(DAEMON_QR_TUNNEL_KEY)
+                    .ok_or_else(|| tr!("daemon.qr_needs_tunnel"))?;
+                let guard = slot
+                    .try_lock()
+                    .ok_or_else(|| tr!("daemon.qr_tunnel_starting"))?;
+                match guard.status() {
+                    TransportStatus::Ready { address, .. } => Ok(address),
+                    TransportStatus::Starting => Err(tr!("daemon.qr_tunnel_starting")),
+                    _ => Err(tr!("daemon.qr_needs_tunnel")),
+                }
+            }
+        }
+    }
+
+    fn render_daemon_qr_tunnel_button(
+        &self,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let starting = self
+            .host_transports
+            .get(DAEMON_QR_TUNNEL_KEY)
+            .and_then(|slot| slot.try_lock().map(|guard| guard.is_starting()))
+            .unwrap_or(false);
+        let started = self.host_transports.get(DAEMON_QR_TUNNEL_KEY).is_some();
+        div()
+            .id("daemon-qr-tunnel-button")
+            .tab_index(0)
+            .h(px(28.0))
+            .px(px(12.0))
+            .rounded(px(6.0))
+            .border_1()
+            .border_color(theme.border_strong)
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(6.0))
+            .cursor_pointer()
+            .text_size(sp(12.5))
+            .text_color(theme.text_secondary)
+            .opacity(if starting { 0.55 } else { 1.0 })
+            .focus_visible(|style| style.border_color(theme.accent))
+            .when(!starting, |element| {
+                element
+                    .hover(|e| e.bg(theme.overlay))
+                    .on_click(cx.listener(|this, _, _, cx| this.start_daemon_qr_tunnel(cx)))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                        if !event.keystroke.modifiers.modified()
+                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                        {
+                            this.start_daemon_qr_tunnel(cx);
+                            cx.stop_propagation();
+                        }
+                    }))
+            })
+            .child(if started {
+                tr!("daemon.qr_restart_tunnel")
+            } else {
+                tr!("daemon.qr_start_tunnel")
+            })
+    }
+
+    /// Open (or reopen) the Cloudflare tunnel that fronts this daemon.
+    fn start_daemon_qr_tunnel(&mut self, cx: &mut Context<Self>) {
+        let local_port = self.state.daemon_exposure.port;
+        let token = self.state.daemon_exposure.token.clone();
+        if self
+            .host_transports
+            .get(DAEMON_QR_TUNNEL_KEY)
+            .is_some_and(|slot| slot.try_lock().is_some_and(|guard| guard.is_starting()))
+        {
+            return;
+        }
+        // A restart must not reuse the old tunnel's now-dead address.
+        self.host_transports.remove(DAEMON_QR_TUNNEL_KEY);
+        self.daemon_qr_cache.replace(None);
+
+        let registry = self.host_transports.clone();
+        cx.spawn(async move |this, cx| {
+            let (transport, outcome) = cx
+                .background_executor()
+                .spawn(async move {
+                    let mut transport = CloudflareTransport::new();
+                    let context = TransportContext { local_port, token };
+                    let outcome = transport.start(&context).await;
+                    (transport, outcome)
+                })
+                .await;
+            match outcome {
+                Ok(_) => registry.register(DAEMON_QR_TUNNEL_KEY, Box::new(transport)),
+                Err(error) => {
+                    let _ = this.update(cx, |this, cx| {
+                        this.show_toast(tr!("daemon.qr_tunnel_failed", error = error.to_string()));
+                        cx.notify();
+                    });
+                    return;
+                }
+            }
+            let _ = this.update(cx, |this, cx| {
+                this.daemon_qr_cache.replace(None);
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     pub(crate) fn add_daemon_origin(&mut self, window: &mut Window, cx: &mut Context<Self>) {

@@ -1527,3 +1527,16 @@ daemon.show_qr: 显示二维码
 daemon.hide_qr: 隐藏二维码
 daemon.qr_hint: 用 Padu 移动应用扫描此二维码即可连接本设备 — 其中包含地址和令牌，无需手动输入。
 daemon.qr_unavailable: 无法将该守护进程地址编码为二维码。
+daemon.qr_tailscale_name: Tailnet 名称
+daemon.qr_ssh_host: 跳板主机
+daemon.qr_ssh_port: 远程端口
+daemon.qr_need_name: 请输入其它设备要使用的 tailnet 名称。
+daemon.qr_need_host: 请输入其它设备要使用的跳板主机。
+daemon.qr_need_port: 请输入远程端口（1–65535）。
+daemon.qr_needs_tunnel: 启动隧道后可获取二维码。
+daemon.qr_tunnel_starting: 正在启动隧道…
+daemon.qr_start_tunnel: 启动隧道
+daemon.qr_restart_tunnel: 重启隧道
+daemon.qr_tunnel_failed: "无法启动隧道：%{error}"
+daemon.qr_field_placeholder: 例如 my-mac.tail-abc.ts.net
+daemon.qr_port_placeholder: 例如 19999

@@ -1148,6 +1148,11 @@ pub struct Padu {
     daemon_token_revealed: bool,
     /// Whether the credentials card's connection QR is expanded.
     daemon_qr_revealed: bool,
+    /// Which transport the credentials QR tells another device to use.
+    daemon_qr_transport: padu_client::persistence::HostKind,
+    /// Tailscale name or `host:port` for the credentials QR's address.
+    daemon_qr_field_input: Entity<TextInput>,
+    daemon_qr_port_input: Entity<TextInput>,
     /// `(encoded payload, rendered SVG)` for the last QR the credentials card
     /// drew, so the matrix is only re-encoded when the payload changes.
     /// `RefCell` because the settings renderer takes `&self`.
@@ -2821,6 +2826,15 @@ impl Padu {
             .and_then(|state| state.0.as_ref())
             .map(|updater| (updater.status(), Some(updater.events())))
             .unwrap_or_default();
+        let qr_field_input =
+            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("daemon.qr_field_placeholder")));
+        let qr_port_input = cx.new(|cx| {
+            let mut input =
+                TextInput::new(window, cx).placeholder(tr!("daemon.qr_port_placeholder"));
+            input.set_content("19999", cx);
+            input
+        });
+
         let entity = cx.new(|cx| {
             let settings_focus = cx.focus_handle();
             let onboarding_add_project_focus = cx.focus_handle();
@@ -3333,6 +3347,9 @@ impl Padu {
                 daemon_token_revealed: false,
                 daemon_qr_revealed: false,
                 daemon_qr_cache: RefCell::new(None),
+                daemon_qr_transport: padu_client::persistence::HostKind::Direct,
+                daemon_qr_field_input: qr_field_input,
+                daemon_qr_port_input: qr_port_input,
                 settings_focus,
                 onboarding_add_project_focus,
                 onboarding_projectless_focus,

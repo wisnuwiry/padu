@@ -1522,3 +1522,16 @@ daemon.show_qr: Tampilkan Kode QR
 daemon.hide_qr: Sembunyikan Kode QR
 daemon.qr_hint: Pindai ini dengan aplikasi Padu Mobile untuk menghubungkan perangkat ini — kode ini membawa alamat dan token, jadi tidak perlu mengetik apa pun.
 daemon.qr_unavailable: Alamat daemon ini tidak dapat dijadikan kode QR.
+daemon.qr_tailscale_name: Nama tailnet
+daemon.qr_ssh_host: Host lompatan
+daemon.qr_ssh_port: Porta jarak jauh
+daemon.qr_need_name: Masukkan nama tailnet yang akan dipakai perangkat lain.
+daemon.qr_need_host: Masukkan host lompatan yang akan dipakai perangkat lain.
+daemon.qr_need_port: Masukkan porta jarak jauh (1–65535).
+daemon.qr_needs_tunnel: Mulai tunnel untuk mendapatkan kode.
+daemon.qr_tunnel_starting: Memulai tunnel…
+daemon.qr_start_tunnel: Mulai Tunnel
+daemon.qr_restart_tunnel: Mulai Ulang Tunnel
+daemon.qr_tunnel_failed: "Tidak dapat memulai tunnel: %{error}"
+daemon.qr_field_placeholder: mis. my-mac.tail-abc.ts.net
+daemon.qr_port_placeholder: mis. 19999
