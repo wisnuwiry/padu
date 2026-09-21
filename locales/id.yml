@@ -1510,8 +1510,6 @@ host.ssh_identity_file: Berkas identitas
 host.ssh_identity_placeholder: Jalur opsional ke kunci privat SSH
 host.tunnel_idle_hint: Mulai Cloudflare Quick Tunnel, lalu pindai kode QR dari aplikasi Padu Mobile. URL berubah setiap kali tunnel dimulai ulang.
 host.tunnel_starting: Memulai tunnel…
-host.tunnel_ready: Tunnel siap
-host.qr_scan_hint: Pindai kode ini di Padu Mobile untuk menambahkan host ini tanpa mengetik token.
 host.start_tunnel: Mulai Tunnel
 host.restart_tunnel: Mulai Ulang Tunnel
 host.tunnel_url_changed: URL tunnel berubah — pindai ulang kode QR di perangkat lain.
@@ -1520,10 +1518,7 @@ host.tunnel_failed: Tunnel tidak tersedia
 host.transport_web_hint: Gunakan Tailscale jika daemon ini dapat dijangkau melalui tailnet Anda. Relay Cloudflare dan SSH ditambahkan dari Padu Desktop.
 host.transport_relay_hint: Host ini disediakan oleh Padu Desktop. Tunnel-nya dikelola di sana.
 host.connection_section: Koneksi
-host.qr_pane_title: Pindai untuk terhubung
-host.qr_needs_tunnel: Mulai tunnel untuk mendapatkan kode.
-host.qr_label: Kode QR koneksi
-host.token_included: Token disertakan
-host.token_missing: Tidak ada token — klien akan diminta mengisinya
-host.show_qr: Tampilkan Kode QR
-host.hide_qr: Sembunyikan Kode QR
+daemon.show_qr: Tampilkan Kode QR
+daemon.hide_qr: Sembunyikan Kode QR
+daemon.qr_hint: Pindai ini dengan aplikasi Padu Mobile untuk menghubungkan perangkat ini — kode ini membawa alamat dan token, jadi tidak perlu mengetik apa pun.
+daemon.qr_unavailable: Alamat daemon ini tidak dapat dijadikan kode QR.

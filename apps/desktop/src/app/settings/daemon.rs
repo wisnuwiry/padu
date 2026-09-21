@@ -1,4 +1,13 @@
+use std::sync::Arc;
+
+use gpui::{Image, ImageFormat};
+use padu_client::persistence::HostKind;
+use padu_client::transport::{QrPayload, render_svg};
+
 use super::*;
+
+/// Edge length, in pixels, of the credentials card's QR code.
+const DAEMON_QR_PX: u32 = 180;
 
 impl Padu {
     fn render_remote_hosts_section(&self, cx: &mut Context<Self>) -> Div {
@@ -501,6 +510,9 @@ impl Padu {
         let fields_dirty = self.daemon_exposure_fields_dirty(cx);
         let port = self.state.daemon_exposure.port;
         let websocket_url = format!("ws://{}:{port}", self.daemon_hostname);
+        // The copy/reveal listeners below take `websocket_url` by move; the
+        // QR section is built after them and needs its own handle.
+        let qr_url = websocket_url.clone();
         let token = self.state.daemon_exposure.token.clone();
 
         let exposure_toggle = toggle_switch(
@@ -1073,10 +1085,102 @@ impl Padu {
                                         .text_color(theme.text_secondary)
                                         .child(tr!("daemon.security_warning")),
                                 ),
-                        ),
+                        )
+                        .child(self.render_daemon_qr_section(&qr_url, &token, &theme, cx)),
                 )
             })
             .into_any_element()
+    }
+
+    /// The connection code for this daemon, shown where its URL and token are.
+    ///
+    /// This exists to get a *phone* onto the daemon this desktop is exposing:
+    /// the code carries the address and token the card already displays, so
+    /// nothing has to be typed on a glass keyboard. It is not part of adding a
+    /// remote host — a host profile describes a daemon reached *from* here.
+    fn render_daemon_qr_section(
+        &self,
+        websocket_url: &str,
+        token: &str,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let revealed = self.daemon_qr_revealed;
+        let section = div().flex().flex_col().gap(px(10.0)).child(
+            div()
+                .id("toggle-daemon-qr")
+                .tab_index(0)
+                .h(px(28.0))
+                .px(px(10.0))
+                .rounded(px(6.0))
+                .border_1()
+                .border_color(theme.border_strong)
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .cursor_pointer()
+                .text_size(sp(12.5))
+                .text_color(theme.text_secondary)
+                .focus_visible(|style| style.border_color(theme.accent))
+                .hover(|e| e.bg(theme.overlay))
+                .child(icon(
+                    if revealed {
+                        "icons/chevron-down.svg"
+                    } else {
+                        "icons/chevron-right.svg"
+                    },
+                    11.0,
+                    theme.text_tertiary,
+                ))
+                .child(if revealed {
+                    tr!("daemon.hide_qr")
+                } else {
+                    tr!("daemon.show_qr")
+                })
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.daemon_qr_revealed = !this.daemon_qr_revealed;
+                    cx.notify();
+                }))
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                    if !event.keystroke.modifiers.modified()
+                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                    {
+                        this.daemon_qr_revealed = !this.daemon_qr_revealed;
+                        cx.notify();
+                        cx.stop_propagation();
+                    }
+                })),
+        );
+
+        if !revealed {
+            return section;
+        }
+
+        let payload = QrPayload {
+            kind: HostKind::Direct,
+            url: websocket_url.to_owned(),
+            token: token.to_owned(),
+            name: self.daemon_hostname.clone(),
+        };
+        let Ok(encoded) = payload.encode() else {
+            return section.child(hint_text(tr!("daemon.qr_unavailable"), theme));
+        };
+        // Re-encode only when the address or token actually changed, so an
+        // unrelated repaint does not rebuild the matrix.
+        let mut cache = self.daemon_qr_cache.borrow_mut();
+        if cache.as_ref().is_none_or(|(cached, _)| cached != &encoded) {
+            let svg = render_svg(&payload, DAEMON_QR_PX).unwrap_or_default();
+            *cache = Some((encoded, svg));
+        }
+        let svg = cache
+            .as_ref()
+            .map(|(_, svg)| svg.clone())
+            .unwrap_or_default();
+        drop(cache);
+
+        section
+            .child(render_qr_image(&svg, theme))
+            .child(hint_text(tr!("daemon.qr_hint"), theme))
     }
 
     pub(crate) fn add_daemon_origin(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1277,4 +1381,32 @@ fn host_last_connected_label(last_connected: Option<u64>) -> String {
         format!("{}d ago", seconds / 86400)
     };
     tr!("host.last_connected", time = time_str)
+}
+
+fn hint_text(message: impl Into<SharedString>, theme: &Theme) -> Div {
+    div()
+        .text_size(sp(11.5))
+        .line_height(sp(16.0))
+        .text_color(theme.text_tertiary)
+        .child(message.into())
+}
+
+/// Paint a QR SVG. GPUI rasterizes `ImageFormat::Svg` through resvg, and
+/// `Image::from_bytes` keys its cache on the content hash, so a rebuilt image
+/// is a cache hit rather than a re-rasterization.
+fn render_qr_image(svg: &str, theme: &Theme) -> Div {
+    let image = Arc::new(Image::from_bytes(ImageFormat::Svg, svg.as_bytes().to_vec()));
+    div()
+        .rounded(px(6.0))
+        .border_1()
+        .border_color(theme.border_strong)
+        // A QR has to be scanned on white, whatever the app theme is.
+        .bg(gpui::hsla(0.0, 0.0, 1.0, 1.0))
+        .p(px(8.0))
+        .child(
+            img(image)
+                .id("daemon-credentials-qr")
+                .w(px(DAEMON_QR_PX as f32))
+                .h(px(DAEMON_QR_PX as f32)),
+        )
 }

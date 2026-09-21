@@ -1146,6 +1146,12 @@ pub struct Padu {
     daemon_origin_inputs: Vec<Entity<TextInput>>,
     daemon_reconfigure_pending: bool,
     daemon_token_revealed: bool,
+    /// Whether the credentials card's connection QR is expanded.
+    daemon_qr_revealed: bool,
+    /// `(encoded payload, rendered SVG)` for the last QR the credentials card
+    /// drew, so the matrix is only re-encoded when the payload changes.
+    /// `RefCell` because the settings renderer takes `&self`.
+    daemon_qr_cache: RefCell<Option<(String, String)>>,
     settings_focus: FocusHandle,
     onboarding_add_project_focus: FocusHandle,
     onboarding_projectless_focus: FocusHandle,
@@ -3325,6 +3331,8 @@ impl Padu {
                 daemon_origin_inputs,
                 daemon_reconfigure_pending: false,
                 daemon_token_revealed: false,
+                daemon_qr_revealed: false,
+                daemon_qr_cache: RefCell::new(None),
                 settings_focus,
                 onboarding_add_project_focus,
                 onboarding_projectless_focus,

@@ -658,6 +658,14 @@ daemon.url_copied:
   en: WebSocket URL copied
 daemon.token_copied:
   en: Daemon token copied
+daemon.show_qr:
+  en: Show QR Code
+daemon.hide_qr:
+  en: Hide QR Code
+daemon.qr_hint:
+  en: Scan this with the Padu mobile app to connect this device — it carries the address and token, so nothing needs typing.
+daemon.qr_unavailable:
+  en: This daemon address cannot be encoded as a QR code.
 host.hosts:
   en: Hosts
 host.local:
@@ -748,10 +756,6 @@ host.tunnel_idle_hint:
   en: Start a Cloudflare Quick Tunnel, then scan the QR code from the Padu mobile app. The URL rotates each time the tunnel restarts.
 host.tunnel_starting:
   en: Starting tunnel...
-host.tunnel_ready:
-  en: Tunnel ready
-host.qr_scan_hint:
-  en: Scan this code in Padu Mobile to add this host without typing the token.
 host.start_tunnel:
   en: Start Tunnel
 host.restart_tunnel:
@@ -764,20 +768,6 @@ host.tunnel_failed:
   en: Tunnel unavailable
 host.connection_section:
   en: Connection
-host.qr_pane_title:
-  en: Scan to connect
-host.show_qr:
-  en: Show QR Code
-host.hide_qr:
-  en: Hide QR Code
-host.qr_needs_tunnel:
-  en: Start the tunnel to get a code.
-host.qr_label:
-  en: Connect QR code
-host.token_included:
-  en: Token included
-host.token_missing:
-  en: No token — clients will be asked for one
 host.transport_web_hint:
   en: Use Tailscale when this daemon is reachable over your tailnet. Cloudflare and SSH relays are added from Padu Desktop.
 host.transport_relay_hint:

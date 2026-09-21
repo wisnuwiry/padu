@@ -2,7 +2,7 @@ use std::io::Write as _;
 use std::net::{SocketAddr, TcpListener};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, anyhow, bail};
 use padu_protocol::{DAEMON_TOKEN_ENV, DaemonReady, PROTOCOL_VERSION};
@@ -15,8 +15,7 @@ fn main() -> anyhow::Result<()> {
     // before any provider or workspace subprocess can inherit the daemon's
     // environment.
     unsafe { std::env::remove_var(DAEMON_TOKEN_ENV) };
-    let listener = TcpListener::bind(&arguments.bind)
-        .with_context(|| format!("could not bind Padu daemon to {}", arguments.bind))?;
+    let listener = bind_with_retry(&arguments.bind)?;
     let address = listener.local_addr()?;
     ensure_bind_allowed(address, arguments.allow_non_loopback)?;
     let ready = DaemonReady {
@@ -60,6 +59,44 @@ fn main() -> anyhow::Result<()> {
             allow_shutdown: arguments.parent_pid.is_some(),
         },
     )
+}
+
+/// How long to keep trying when the requested address is still held.
+///
+/// The desktop relaunches this process immediately after a rebuild, and a
+/// previous daemon keeps its listener until its parent-poll notices the old
+/// app is gone — up to one poll interval later. Without this window that
+/// overlap fails the new daemon at startup and surfaces as "the daemon exited
+/// before becoming ready", which says nothing about the real cause.
+const BIND_RETRY_WINDOW: Duration = Duration::from_secs(5);
+const BIND_RETRY_INTERVAL: Duration = Duration::from_millis(100);
+
+fn bind_with_retry(address: &str) -> anyhow::Result<TcpListener> {
+    bind_with_retry_for(address, BIND_RETRY_WINDOW, BIND_RETRY_INTERVAL)
+}
+
+fn bind_with_retry_for(
+    address: &str,
+    window: Duration,
+    interval: Duration,
+) -> anyhow::Result<TcpListener> {
+    let deadline = Instant::now() + window;
+    loop {
+        match TcpListener::bind(address) {
+            Ok(listener) => return Ok(listener),
+            Err(error) => {
+                if Instant::now() >= deadline {
+                    return Err(error).with_context(|| {
+                        format!(
+                            "could not bind Padu daemon to {address}; another daemon may still be \
+                             shutting down"
+                        )
+                    });
+                }
+                std::thread::sleep(interval);
+            }
+        }
+    }
 }
 
 fn ensure_bind_allowed(address: SocketAddr, allow_non_loopback: bool) -> anyhow::Result<()> {
@@ -169,6 +206,53 @@ fn process_is_alive(_pid: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bind_with_retry_takes_a_free_address() {
+        let listener = bind_with_retry_for(
+            "127.0.0.1:0",
+            Duration::from_millis(50),
+            Duration::from_millis(10),
+        )
+        .unwrap();
+        assert!(listener.local_addr().unwrap().port() > 0);
+    }
+
+    #[test]
+    fn bind_with_retry_reports_a_held_address_after_the_window() {
+        // Hold a concrete port, then confirm the retry gives up with a message
+        // that names the real cause rather than a bare OS error.
+        let held = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = held.local_addr().unwrap().to_string();
+        let error = bind_with_retry_for(
+            &address,
+            Duration::from_millis(50),
+            Duration::from_millis(10),
+        )
+        .unwrap_err();
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("another daemon may still be shutting down"),
+            "unexpected error: {message}"
+        );
+    }
+
+    #[test]
+    fn bind_with_retry_waits_out_a_listener_that_goes_away() {
+        // The relaunch race: the address is held briefly, then released. The
+        // retry must end up succeeding rather than failing the daemon.
+        let held = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = held.local_addr().unwrap().to_string();
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            drop(held);
+        });
+        let listener =
+            bind_with_retry_for(&address, Duration::from_secs(2), Duration::from_millis(20))
+                .expect("the retry should claim the address once it is released");
+        assert_eq!(listener.local_addr().unwrap().to_string(), address);
+        releaser.join().unwrap();
+    }
 
     #[test]
     fn non_loopback_listener_requires_an_explicit_flag() {

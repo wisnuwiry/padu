@@ -1515,8 +1515,6 @@ host.ssh_identity_file: 私钥文件
 host.ssh_identity_placeholder: SSH 私钥的可选路径
 host.tunnel_idle_hint: 启动 Cloudflare Quick Tunnel，然后用 Padu Mobile 应用扫描二维码。每次重启隧道后 URL 都会变化。
 host.tunnel_starting: 正在启动隧道…
-host.tunnel_ready: 隧道已就绪
-host.qr_scan_hint: 在 Padu Mobile 中扫描此代码即可添加该主机，无需输入令牌。
 host.start_tunnel: 启动隧道
 host.restart_tunnel: 重启隧道
 host.tunnel_url_changed: 隧道 URL 已更改 — 请在其它设备上重新扫描二维码。
@@ -1525,10 +1523,7 @@ host.tunnel_failed: 隧道不可用
 host.transport_web_hint: 如果该守护进程可通过你的 tailnet 访问，请使用 Tailscale。Cloudflare 和 SSH 中继需在 Padu Desktop 中添加。
 host.transport_relay_hint: 该主机由 Padu Desktop 配置，其隧道在那里管理。
 host.connection_section: 连接
-host.qr_pane_title: 扫描以连接
-host.qr_needs_tunnel: 启动隧道后可获取二维码。
-host.qr_label: 连接二维码
-host.token_included: 已包含令牌
-host.token_missing: 未设置令牌 — 客户端将被要求输入
-host.show_qr: 显示二维码
-host.hide_qr: 隐藏二维码
+daemon.show_qr: 显示二维码
+daemon.hide_qr: 隐藏二维码
+daemon.qr_hint: 用 Padu 移动应用扫描此二维码即可连接本设备 — 其中包含地址和令牌，无需手动输入。
+daemon.qr_unavailable: 无法将该守护进程地址编码为二维码。
