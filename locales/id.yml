@@ -1525,3 +1525,5 @@ host.qr_needs_tunnel: Mulai tunnel untuk mendapatkan kode.
 host.qr_label: Kode QR koneksi
 host.token_included: Token disertakan
 host.token_missing: Tidak ada token — klien akan diminta mengisinya
+host.show_qr: Tampilkan Kode QR
+host.hide_qr: Sembunyikan Kode QR

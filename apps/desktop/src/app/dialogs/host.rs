@@ -21,8 +21,6 @@ const DIALOG_CONTEXT: &str = "HostDialog";
 const DIALOG_INPUT_CONTEXT: &str = "HostDialog > TextInput";
 /// Edge length, in pixels, of the rendered QR code.
 const QR_TARGET_PX: f32 = 180.0;
-/// Width of the right-hand "scan to connect" pane.
-const QR_PANE_WIDTH: f32 = 236.0;
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
@@ -89,6 +87,9 @@ pub(crate) struct HostDialogState {
     /// The QR is regenerated only when the encoded payload changes, so typing
     /// in an unrelated field does not re-encode the matrix every frame.
     pub qr_cache: Option<(String, String)>,
+    /// Whether the "scan to connect" section is open. Collapsed by default so
+    /// the dialog stays a short column for the common case of editing fields.
+    pub qr_expanded: bool,
     pub error: Option<String>,
     pub save_focus: FocusHandle,
     pub cancel_focus: FocusHandle,
@@ -418,6 +419,7 @@ impl Padu {
             tunnel_key: format!("host-dialog-{}", Uuid::new_v4()),
             tunnel: TunnelState::Idle,
             qr_cache: None,
+            qr_expanded: false,
             error: None,
             save_focus: cx.focus_handle(),
             cancel_focus: cx.focus_handle(),
@@ -587,6 +589,14 @@ impl Padu {
         self.switch_to_host(Some(profile_id), cx);
     }
 
+    /// Open or close the "scan to connect" section.
+    fn toggle_host_qr(&mut self, cx: &mut Context<Self>) {
+        if let Some(dialog) = self.host_dialog.as_mut() {
+            dialog.qr_expanded = !dialog.qr_expanded;
+        }
+        cx.notify();
+    }
+
     pub(crate) fn host_dialog_delete(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(dialog) = &self.host_dialog else {
             return;
@@ -656,7 +666,11 @@ impl Padu {
         };
 
         let panel = self.current_qr_panel(cx, &tunnel);
-        let qr_pane = self.render_qr_pane(&panel, kind, &tunnel, &theme, cx);
+        let qr_expanded = self
+            .host_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.qr_expanded);
+        let qr_section = self.render_qr_section(&panel, kind, &tunnel, qr_expanded, &theme, cx);
 
         let mut fields = div().flex().flex_col().gap(px(12.0)).child(labelled_field(
             tr!("host.name"),
@@ -740,7 +754,7 @@ impl Padu {
                 this.close_host_dialog(window, cx);
             }))
             .id("host-dialog-card")
-            .w(px(760.0))
+            .w(px(500.0))
             .rounded(px(14.0))
             .border_1()
             .border_color(theme.border_strong)
@@ -783,26 +797,17 @@ impl Padu {
             )
             // Transport selector
             .child(self.render_transport_selector(kind, &theme, cx))
-            // Two panes: what to connect to on the left, the code a phone
-            // scans on the right. The code is live for every transport, so
-            // adding a host and handing it to a device is one pass.
+            // One column: what to connect to, then an optional code a phone
+            // can scan. Collapsed by default so editing a host stays short.
             .child(
                 div()
                     .flex()
-                    .items_start()
-                    .gap(px(20.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .gap(px(12.0))
-                            .child(section_label(tr!("host.connection_section"), &theme))
-                            .child(fields),
-                    )
-                    .child(qr_pane),
+                    .flex_col()
+                    .gap(px(12.0))
+                    .child(section_label(tr!("host.connection_section"), &theme))
+                    .child(fields),
             )
+            .child(qr_section)
             // Footer Actions
             .child(
                 div()
@@ -1004,19 +1009,68 @@ impl Padu {
         }
     }
 
-    /// The right-hand pane: a live code for whatever the form currently
-    /// describes, so a phone can be handed the host without typing anything.
-    fn render_qr_pane(
+    /// The collapsible "scan to connect" section: a live code for whatever the
+    /// form currently describes, so a phone can be handed the host without
+    /// typing anything.
+    ///
+    /// Collapsed by default — most visits only edit a field, and an expanded
+    /// QR would push the save button off a short window.
+    fn render_qr_section(
         &self,
         panel: &QrPanel,
         kind: HostKind,
         tunnel: &TunnelState,
+        expanded: bool,
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Div {
+        let section = div().flex().flex_col().gap(px(10.0)).child(
+            div()
+                .id("toggle-host-qr")
+                .tab_index(0)
+                .h(px(28.0))
+                .px(px(10.0))
+                .rounded(px(6.0))
+                .border_1()
+                .border_color(theme.border_strong)
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .cursor_pointer()
+                .text_size(sp(12.5))
+                .text_color(theme.text_secondary)
+                .focus_visible(|style| style.border_color(theme.accent))
+                .hover(|e| e.bg(theme.overlay))
+                .child(icon(
+                    if expanded {
+                        "icons/chevron-down.svg"
+                    } else {
+                        "icons/chevron-right.svg"
+                    },
+                    11.0,
+                    theme.text_tertiary,
+                ))
+                .child(if expanded {
+                    tr!("host.hide_qr")
+                } else {
+                    tr!("host.show_qr")
+                })
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_host_qr(cx)))
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                    if !event.keystroke.modifiers.modified()
+                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                    {
+                        this.toggle_host_qr(cx);
+                        cx.stop_propagation();
+                    }
+                })),
+        );
+
+        if !expanded {
+            return section;
+        }
+
         let mut pane = div()
-            .w(px(QR_PANE_WIDTH))
-            .flex_none()
             .flex()
             .flex_col()
             .gap(px(10.0))
@@ -1063,7 +1117,7 @@ impl Padu {
             pane = pane.child(self.render_tunnel_button(tunnel, theme, cx));
         }
 
-        pane
+        section.child(pane)
     }
 
     fn render_tunnel_button(

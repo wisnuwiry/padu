@@ -766,6 +766,10 @@ host.connection_section:
   en: Connection
 host.qr_pane_title:
   en: Scan to connect
+host.show_qr:
+  en: Show QR Code
+host.hide_qr:
+  en: Hide QR Code
 host.qr_needs_tunnel:
   en: Start the tunnel to get a code.
 host.qr_label:

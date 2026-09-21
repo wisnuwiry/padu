@@ -1530,3 +1530,5 @@ host.qr_needs_tunnel: 启动隧道后可获取二维码。
 host.qr_label: 连接二维码
 host.token_included: 已包含令牌
 host.token_missing: 未设置令牌 — 客户端将被要求输入
+host.show_qr: 显示二维码
+host.hide_qr: 隐藏二维码

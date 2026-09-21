@@ -1583,3 +1583,5 @@ host.qr_needs_tunnel: トンネルを開始するとコードが表示されま�
 host.qr_label: 接続用 QR コード
 host.token_included: トークンを含む
 host.token_missing: トークンがありません — クライアント側で入力を求められます
+host.show_qr: QR コードを表示
+host.hide_qr: QR コードを非表示
