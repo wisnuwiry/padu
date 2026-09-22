@@ -387,11 +387,21 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
       if (!link) return null;
       // The same daemon may already be saved — scanning its QR again should
       // switch to it, not trip the duplicate-address guard in `saveProfile`.
+      // A re-scan with a rotated token (or a changed transport) must update
+      // the saved credential instead of silently keeping the stale one.
       const existing = profilesRef.current.find(
         (item) => item.address === link.address,
       );
       if (existing) {
-        return { profile: existing, connected: await activate(existing.id) };
+        return saveProfile(
+          {
+            name: existing.name,
+            address: link.address,
+            token: link.token,
+            kind: link.kind,
+          },
+          existing.id,
+        );
       }
       return saveProfile({
         name: connectLinkFallbackName(link),
