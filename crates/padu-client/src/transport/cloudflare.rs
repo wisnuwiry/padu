@@ -24,7 +24,7 @@ use parking_lot::Mutex;
 
 use crate::transport::{
     QrPayload, Transport, TransportContext, TransportError, TransportHandle, TransportStatus,
-    watch_child,
+    terminate_process, watch_child,
 };
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
@@ -91,6 +91,10 @@ pub fn detect_account_required(stdout: &str) -> Option<&'static str> {
 /// status snapshot.
 pub struct CloudflareTransport {
     status: Arc<Mutex<TransportStatus>>,
+    /// PID of the running `cloudflared`, if any. The `Child` itself is owned
+    /// by the watcher thread, so `stop()` kills by pid and the watcher (which
+    /// respects `Stopped`) simply observes the exit.
+    pid: Arc<Mutex<Option<u32>>>,
 }
 
 impl Default for CloudflareTransport {
@@ -103,6 +107,7 @@ impl CloudflareTransport {
     pub fn new() -> Self {
         Self {
             status: Arc::new(Mutex::new(TransportStatus::Idle)),
+            pid: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -136,26 +141,49 @@ impl Transport for CloudflareTransport {
             why: " — install with `brew install cloudflared` or `apt install cloudflared`".into(),
         })?;
         *self.status.lock() = TransportStatus::Starting;
+        *self.pid.lock() = None;
         let mut child = Command::new(&binary)
             .args(Self::build_argv(ctx.local_port))
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            // `cloudflared` reports quota/auth errors on stderr far more often
+            // than stdout — discarding it turned real failures into a 30s
+            // timeout. Merge both streams into the startup scan.
+            .stderr(Stdio::piped())
             .spawn()
             .map_err(TransportError::from)?;
         let pid = child.id();
+        *self.pid.lock() = Some(pid);
         let stdout = child
             .stdout
             .take()
             .ok_or_else(|| TransportError::Io("cloudflared stdout pipe missing".into()))?;
+        let stderr = child.stderr.take();
 
         // Spawn a blocking reader thread that pushes each stdout line into a
         // bounded channel. This matches the existing pattern in
         // `crates/padu-client/src/process.rs:230` for the daemon supervisor.
-        let (line_tx, line_rx) = mpsc::sync_channel::<String>(64);
+        let (line_tx, line_rx) = mpsc::sync_channel::<String>(128);
         let reader_thread = thread::Builder::new()
             .name("cloudflared-stdout".into())
+            .spawn({
+                let line_tx = line_tx.clone();
+                move || {
+                    let reader = BufReader::new(stdout);
+                    for line in reader.lines().map_while(Result::ok) {
+                        if line_tx.send(line).is_err() {
+                            break;
+                        }
+                    }
+                }
+            })
+            .map_err(|e| TransportError::Io(e.to_string()))?;
+        // A second reader merges stderr into the same scan so account/quota
+        // errors fail fast instead of timing out.
+        let _stderr_thread = thread::Builder::new()
+            .name("cloudflared-stderr".into())
             .spawn(move || {
-                let reader = BufReader::new(stdout);
+                let Some(stderr) = stderr else { return };
+                let reader = BufReader::new(stderr);
                 for line in reader.lines().map_while(Result::ok) {
                     if line_tx.send(line).is_err() {
                         break;
@@ -214,11 +242,20 @@ impl Transport for CloudflareTransport {
                         let qr_payload = self.encode_qr_payload_for(ctx, &address).ok();
                         // Hand the child to a watcher so a later crash flips
                         // the status to `Failed` instead of leaving the UI
-                        // claiming a live tunnel. The reader thread exits on
-                        // its own once the channel closes, so dropping its
-                        // handle just detaches it.
-                        drop(line_rx);
+                        // claiming a live tunnel. A drain thread keeps
+                        // consuming the merged output for the life of the
+                        // process: dropping the receiver here would let the
+                        // reader threads exit and close the pipes, and
+                        // `cloudflared` would then die with SIGPIPE on its
+                        // next log write. The drain exits on its own once
+                        // `cloudflared` goes away (readers hit EOF and drop
+                        // their senders), so dropping these handles only
+                        // detaches them.
                         drop(reader_thread);
+                        thread::Builder::new()
+                            .name("cloudflared-drain".into())
+                            .spawn(move || while line_rx.recv().is_ok() {})
+                            .map_err(|e| TransportError::Io(e.to_string()))?;
                         watch_child(child, self.status.clone(), "cloudflared");
                         return Ok(TransportHandle {
                             address,
@@ -244,6 +281,9 @@ impl Transport for CloudflareTransport {
 
     async fn stop(&mut self) -> Result<(), TransportError> {
         *self.status.lock() = TransportStatus::Stopped;
+        if let Some(pid) = self.pid.lock().take() {
+            terminate_process(pid);
+        }
         Ok(())
     }
 

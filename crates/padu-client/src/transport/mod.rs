@@ -38,8 +38,38 @@ use serde::{Deserialize, Serialize};
 
 pub use cloudflare::CloudflareTransport;
 pub use qr::{QrPayload, render_svg};
-pub use ssh::SshTransport;
-pub use tailscale::TailscaleTransport;
+pub use ssh::{SshConfig, SshTransport};
+pub use tailscale::{TailscaleConfig, TailscaleTransport};
+
+/// Best-effort SIGTERM/taskkill for a transport subprocess by pid.
+///
+/// `stop()` only flips status; the actual `Child` is owned by a watcher
+/// thread/task, so killing by pid is the only way to guarantee the tunnel
+/// really closes when the user switches hosts or quits.
+pub(crate) fn terminate_process(pid: u32) {
+    if pid == 0 {
+        return;
+    }
+    #[cfg(unix)]
+    {
+        // SAFETY: kill(2) with SIGTERM on a numeric pid has no memory effects.
+        unsafe {
+            libc::kill(pid as libc::pid_t, libc::SIGTERM);
+        }
+    }
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = pid;
+    }
+}
 
 /// Inputs supplied to `Transport::start`.
 #[derive(Clone, Debug)]
@@ -176,12 +206,14 @@ pub trait Transport: Send {
 /// The address is whatever the user typed.
 pub struct DirectTransport {
     address: String,
+    since: Instant,
 }
 
 impl DirectTransport {
     pub fn new(address: impl Into<String>) -> Self {
         Self {
             address: address.into(),
+            since: Instant::now(),
         }
     }
 }
@@ -206,7 +238,7 @@ impl Transport for DirectTransport {
 
     fn status(&self) -> TransportStatus {
         TransportStatus::Ready {
-            since: Instant::now(),
+            since: self.since,
             address: self.address.clone(),
         }
     }
@@ -236,6 +268,9 @@ pub type TransportSlot = Arc<async_lock::Mutex<Box<dyn Transport>>>;
 #[derive(Clone, Default)]
 pub struct TransportRegistry {
     inner: Arc<Mutex<HashMap<String, TransportSlot>>>,
+    /// Serializes `ensure_started` so two concurrent host switches cannot
+    /// spawn duplicate `cloudflared`/`ssh` subprocesses for the same key.
+    ensure_lock: Arc<async_lock::Mutex<()>>,
 }
 
 impl TransportRegistry {
@@ -244,7 +279,9 @@ impl TransportRegistry {
     }
 
     /// Insert a transport for the given host id. If a transport already
-    /// exists for that id the new one replaces it (after stopping the old).
+    /// exists for that id it is replaced; the old one is stopped on a
+    /// background task so this stays non-blocking (never `block_on` — that
+    /// would stall the UI thread or deadlock the executor).
     pub fn register(&self, host_id: impl Into<String>, transport: Box<dyn Transport>) {
         let id = host_id.into();
         let previous = {
@@ -252,8 +289,11 @@ impl TransportRegistry {
             guard.remove(&id)
         };
         if let Some(prev) = previous {
-            let mut prev = futures_lite::future::block_on(prev.lock());
-            let _ = futures_lite::future::block_on(prev.stop());
+            smol::spawn(async move {
+                let mut prev = prev.lock().await;
+                let _ = prev.stop().await;
+            })
+            .detach();
         }
         self.inner
             .lock()
@@ -273,15 +313,28 @@ impl TransportRegistry {
     /// Move a running transport to a different key, preserving the subprocess.
     /// Used when a host dialog's provisional tunnel is handed off to the saved
     /// profile's id. Returns `false` when no transport exists under `from`.
+    /// A transport already registered under `to` is stopped first so it is
+    /// never leaked (replaced but still running).
     pub fn rekey(&self, from: &str, to: &str) -> bool {
-        let mut guard = self.inner.lock();
-        match guard.remove(from) {
-            Some(slot) => {
-                guard.insert(to.to_string(), slot);
-                true
-            }
-            None => false,
+        if from == to {
+            return self.inner.lock().contains_key(from);
         }
+        let mut guard = self.inner.lock();
+        let Some(slot) = guard.remove(from) else {
+            return false;
+        };
+        if let Some(old_target) = guard.remove(to) {
+            drop(guard);
+            smol::spawn(async move {
+                let mut old = old_target.lock().await;
+                let _ = old.stop().await;
+            })
+            .detach();
+            self.inner.lock().insert(to.to_string(), slot);
+        } else {
+            guard.insert(to.to_string(), slot);
+        }
+        true
     }
 
     /// Ensure a transport exists under `key` and is ready, returning its
@@ -295,6 +348,7 @@ impl TransportRegistry {
         make: impl FnOnce() -> Box<dyn Transport>,
         context: &TransportContext,
     ) -> Result<TransportHandle, TransportError> {
+        let _guard = self.ensure_lock.lock().await;
         if let Some(slot) = self.get(key) {
             let guard = slot.lock().await;
             if let TransportStatus::Ready { address, .. } = guard.status() {
@@ -551,7 +605,34 @@ mod tests {
         registry.register("host-a", t1);
         registry.register("host-a", t2);
         assert_eq!(registry.len(), 1);
-        // The old transport should have been stopped exactly once on replace.
-        assert_eq!(stops1.load(std::sync::atomic::Ordering::SeqCst), 1);
+        // The old transport is stopped on a background task so `register`
+        // never blocks the caller — poll briefly instead of asserting inline.
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        while stops1.load(std::sync::atomic::Ordering::SeqCst) != 1 {
+            assert!(Instant::now() < deadline, "old transport was not stopped");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn rekey_stops_a_colliding_target() {
+        let registry = TransportRegistry::new();
+        let (old_target, _, target_stops) = make_recorder();
+        let (moving, _, moving_stops) = make_recorder();
+        registry.register("host-a", old_target);
+        registry.register("draft-key", moving);
+        assert!(registry.rekey("draft-key", "host-a"));
+        assert!(registry.get("draft-key").is_none());
+        assert!(registry.get("host-a").is_some());
+        // The moved transport keeps running; the replaced target is stopped.
+        assert_eq!(moving_stops.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let deadline = Instant::now() + std::time::Duration::from_secs(5);
+        while target_stops.load(std::sync::atomic::Ordering::SeqCst) != 1 {
+            assert!(
+                Instant::now() < deadline,
+                "colliding target was not stopped"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
     }
 }

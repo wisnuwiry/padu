@@ -21,6 +21,7 @@ use smol::process::Command;
 
 use crate::transport::{
     QrPayload, Transport, TransportContext, TransportError, TransportHandle, TransportStatus,
+    terminate_process,
 };
 
 /// Knobs parsed out of the `HostProfile::ssh` block.
@@ -86,6 +87,9 @@ impl SshConfig {
 pub struct SshTransport {
     config: SshConfig,
     status: Arc<Mutex<TransportStatus>>,
+    /// PID of the running `ssh -R`, if any. The `Child` is owned by the
+    /// watcher task, so `stop()` kills by pid (see `terminate_process`).
+    pid: Arc<Mutex<Option<u32>>>,
 }
 
 impl SshTransport {
@@ -93,6 +97,7 @@ impl SshTransport {
         Self {
             config,
             status: Arc::new(Mutex::new(TransportStatus::Idle)),
+            pid: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -117,6 +122,7 @@ impl Transport for SshTransport {
             why: "".into(),
         })?;
         *self.status.lock() = TransportStatus::Starting;
+        *self.pid.lock() = None;
         let argv = self.config.argv(ctx.local_port);
         let mut child = Command::new(&binary)
             .args(&argv)
@@ -131,13 +137,20 @@ impl Transport for SshTransport {
             && !status.success()
         {
             let stderr = read_stderr_tail(&mut child).await.unwrap_or_default();
+            let trimmed = stderr.trim();
+            let hint = if trimmed.to_lowercase().contains("forward")
+                || trimmed.to_lowercase().contains("gatewayports")
+                || trimmed.to_lowercase().contains("address already in use")
+            {
+                " — the jump host must allow the bind (GatewayPorts yes / clientspecified) and the remote port must be free"
+            } else {
+                ""
+            };
             *self.status.lock() = TransportStatus::Failed {
-                error: format!("ssh exited {}: {}", status, stderr.trim()),
+                error: format!("ssh exited {status}: {trimmed}{hint}"),
             };
             return Err(TransportError::Crashed(format!(
-                "ssh exited {}: {}",
-                status,
-                stderr.trim()
+                "ssh exited {status}: {trimmed}{hint}"
             )));
         }
         let address = self.config.address();
@@ -146,6 +159,7 @@ impl Transport for SshTransport {
             address: address.clone(),
         };
         let pid = child.id();
+        *self.pid.lock() = Some(pid);
         // Watch the relay so a dropped connection flips the status to
         // `Failed` rather than leaving the UI claiming a live tunnel. The
         // task owns the child from here; `status()` reaps it.
@@ -176,6 +190,9 @@ impl Transport for SshTransport {
 
     async fn stop(&mut self) -> Result<(), TransportError> {
         *self.status.lock() = TransportStatus::Stopped;
+        if let Some(pid) = self.pid.lock().take() {
+            terminate_process(pid);
+        }
         Ok(())
     }
 

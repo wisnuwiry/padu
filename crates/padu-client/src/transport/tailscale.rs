@@ -25,9 +25,15 @@ pub struct TailscaleConfig {
 
 impl TailscaleConfig {
     pub fn validate(&self) -> Result<(), TransportError> {
-        if self.magic_dns.trim().is_empty() {
+        let host = self.magic_dns.trim();
+        if host.is_empty() {
             return Err(TransportError::InvalidInput(
                 "tailscale magic_dns must not be empty".into(),
+            ));
+        }
+        if !Self::is_tailnet_host(host) {
+            return Err(TransportError::InvalidInput(
+                "use Direct for LAN addresses — Tailscale needs a MagicDNS (*.ts.net) or 100.x tailnet IP".into(),
             ));
         }
         if self.port == 0 {
@@ -44,6 +50,20 @@ impl TailscaleConfig {
     /// is well-known to be `100.64.0.0/10`.
     pub fn address(&self) -> String {
         format!("wss://{}:{}", self.magic_dns, self.port)
+    }
+
+    /// Returns `true` for a MagicDNS name (`*.ts.net`, case-insensitive)
+    /// or a raw Tailnet IP inside `100.64.0.0/10`. Anything else (LAN IPs,
+    /// public hostnames) belongs on the Direct transport.
+    pub fn is_tailnet_host(magic_dns: &str) -> bool {
+        let host = magic_dns.trim().trim_end_matches('.').to_lowercase();
+        if host.is_empty() {
+            return false;
+        }
+        if host.ends_with(".ts.net") {
+            return true;
+        }
+        Self::looks_like_tailnet_ip(&host)
     }
 
     /// Returns `true` if `magic_dns` looks like a raw Tailnet IP. Useful for
@@ -160,6 +180,32 @@ mod tests {
             port: 34123,
         };
         assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn tailscale_rejects_non_tailnet_host() {
+        for host in ["192.168.1.10", "10.0.0.5", "example.com", "my-mac.local"] {
+            let c = TailscaleConfig {
+                magic_dns: host.into(),
+                port: 34123,
+            };
+            let err = c.validate().unwrap_err().to_string();
+            assert!(
+                err.contains("Direct"),
+                "expected Direct hint for {host}, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn tailscale_accepts_magic_dns_and_tailnet_ip() {
+        for host in ["mac.tail-abc.ts.net", "MAC.TAIL-ABC.TS.NET", "100.100.50.5"] {
+            let c = TailscaleConfig {
+                magic_dns: host.into(),
+                port: 34123,
+            };
+            assert!(c.validate().is_ok(), "expected ok for {host}");
+        }
     }
 
     #[test]
