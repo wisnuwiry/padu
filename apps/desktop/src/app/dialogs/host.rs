@@ -6,7 +6,7 @@ use padu_client::persistence::{
     CloudflareHostConfig, HostKind, HostProfile, SshHostConfig, TailscaleHostConfig,
     normalize_daemon_address,
 };
-use padu_client::transport::{CloudflareTransport, Transport, TransportContext};
+use padu_client::transport::TailscaleConfig;
 
 use crate::app::*;
 use crate::ui::dialog::dialog_backdrop;
@@ -34,22 +34,12 @@ pub(crate) struct HostDialogRequest {
     pub editing_profile_id: Option<String>,
 }
 
-/// Live tunnel state for the dialog. The tunnel is spawned lazily when the
-/// user asks for one, and kept alive in the app's transport registry.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) enum TunnelState {
-    #[default]
-    Idle,
-    Starting,
-    Ready {
-        address: String,
-    },
-    Failed(String),
-}
-
 pub(crate) struct HostDialogState {
     pub editing_profile_id: Option<String>,
-    pub kind: HostKind,
+    /// Which tab the dialog shows. `Default` covers Direct, Tailscale, and
+    /// Cloudflare — all three are the same inputs (name, address, token) and
+    /// the kind is inferred from the address at save time.
+    pub tab: HostTab,
     pub name_input: Entity<TextInput>,
     pub address_input: Entity<TextInput>,
     pub token_input: Entity<TextInput>,
@@ -57,10 +47,6 @@ pub(crate) struct HostDialogState {
     pub ssh_host_input: Entity<TextInput>,
     pub ssh_port_input: Entity<TextInput>,
     pub ssh_identity_input: Entity<TextInput>,
-    /// Registry key for a dialog-owned tunnel, so it can be replaced or
-    /// stopped when the dialog closes.
-    pub tunnel_key: String,
-    pub tunnel: TunnelState,
     pub error: Option<String>,
     pub save_focus: FocusHandle,
     pub cancel_focus: FocusHandle,
@@ -80,6 +66,29 @@ pub(crate) struct HostFormValues {
     pub ssh_identity_file: String,
     /// Resolved `wss://…` URL for a Cloudflare Quick Tunnel.
     pub cloudflare_address: Option<String>,
+}
+
+/// Host part of a normalized `ws(s)://host[:port]` address, without the port.
+/// Used to probe the transport kind when no port is present (a Quick Tunnel
+/// URL carries none, and only Tailscale/Direct need `host:port`).
+fn host_without_port(address: &str) -> String {
+    let rest = address
+        .strip_prefix("wss://")
+        .or_else(|| address.strip_prefix("ws://"))
+        .unwrap_or(address);
+    let host_part = rest.split('/').next().unwrap_or(rest);
+    if host_part.starts_with('[') {
+        if let Some(close) = host_part.find(']') {
+            return host_part[..=close].to_string();
+        }
+        return host_part.to_string();
+    }
+    match host_part.rsplit_once(':') {
+        Some((host, port)) if !port.is_empty() && port.chars().all(|c| c.is_ascii_digit()) => {
+            host.to_string()
+        }
+        _ => host_part.to_string(),
+    }
 }
 
 /// Split a normalized `ws(s)://host[:port]` address into `(host, port)`.
@@ -133,6 +142,11 @@ pub(crate) fn build_host_profile(
         HostKind::Tailscale => {
             let address = normalize_daemon_address(&values.address).map_err(|e| e.to_string())?;
             let (magic_dns, port) = split_host_port(&address)?;
+            if !TailscaleConfig::is_tailnet_host(&magic_dns) {
+                return Err(
+                    "Use Direct for LAN addresses — Tailscale needs a MagicDNS (*.ts.net) or 100.x tailnet IP".to_string(),
+                );
+            }
             (
                 address,
                 Some(TailscaleHostConfig { magic_dns, port }),
@@ -217,22 +231,112 @@ pub(crate) fn build_host_profile(
     })
 }
 
-/// Transport options shown in the dialog's segmented control.
-const TRANSPORT_OPTIONS: [HostKind; 4] = [
-    HostKind::Direct,
-    HostKind::Tailscale,
-    HostKind::Cloudflare,
-    HostKind::SshRelay,
-];
+/// Tabs in the host dialog. There are only two: `Default` handles Direct,
+/// Tailscale, and Cloudflare through the same name/address/token inputs
+/// (the transport kind is inferred from the address when saving), while
+/// `Ssh` keeps its own relay fields.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum HostTab {
+    #[default]
+    Default,
+    Ssh,
+}
+
+impl HostTab {
+    fn of_profile_kind(kind: HostKind) -> Self {
+        match kind {
+            HostKind::SshRelay => HostTab::Ssh,
+            HostKind::Direct | HostKind::Tailscale | HostKind::Cloudflare => HostTab::Default,
+        }
+    }
+}
+
+/// Build a `HostProfile` for the Default tab by inferring the transport kind
+/// from the address:
+///
+/// - `*.trycloudflare.com` → Cloudflare (Quick Tunnel hostname),
+/// - `*.ts.net` / `100.x` tailnet → Tailscale,
+/// - anything else → Direct.
+pub(crate) fn build_default_host_profile(
+    editing: Option<&HostProfile>,
+    values: &HostFormValues,
+    now: u64,
+) -> Result<HostProfile, String> {
+    let token = {
+        let trimmed = values.token.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    };
+
+    let address = normalize_daemon_address(&values.address).map_err(|e| e.to_string())?;
+    // A Quick Tunnel URL carries no port, so probe the hostname before
+    // requiring one — only Tailscale/Direct need `host:port`.
+    let bare_host = host_without_port(&address);
+    let probe = bare_host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_lowercase();
+    let (kind, tailscale, cloudflare) = if probe.ends_with(".trycloudflare.com") {
+        (
+            HostKind::Cloudflare,
+            None,
+            Some(CloudflareHostConfig {
+                hostname: bare_host.clone(),
+                quick_tunnel: true,
+            }),
+        )
+    } else {
+        let (host, port) = split_host_port(&address)?;
+        if TailscaleConfig::is_tailnet_host(
+            &host
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .to_lowercase(),
+        ) {
+            (
+                HostKind::Tailscale,
+                Some(TailscaleHostConfig {
+                    magic_dns: host.clone(),
+                    port,
+                }),
+                None,
+            )
+        } else {
+            (HostKind::Direct, None, None)
+        }
+    };
+
+    let name = if values.name.trim().is_empty() {
+        padu_client::persistence::display_host(&address)
+    } else {
+        values.name.trim().to_string()
+    };
+
+    Ok(HostProfile {
+        id: editing
+            .map(|profile| profile.id.clone())
+            .unwrap_or_else(|| Uuid::new_v4().to_string()),
+        name,
+        kind,
+        address,
+        token,
+        tailscale,
+        cloudflare,
+        ssh: None,
+        created_at: editing.map(|profile| profile.created_at).unwrap_or(now),
+        updated_at: now,
+        last_connected_at: editing.and_then(|profile| profile.last_connected_at),
+    })
+}
+
+/// Tabs shown in the dialog's segmented control.
+const TRANSPORT_OPTIONS: [HostTab; 2] = [HostTab::Default, HostTab::Ssh];
 
 /// `tr!` needs a literal key, so the label is resolved through a match rather
 /// than a dynamic lookup.
-fn transport_label(kind: HostKind) -> String {
-    match kind {
-        HostKind::Direct => tr!("host.transport_direct"),
-        HostKind::Tailscale => tr!("host.transport_tailscale"),
-        HostKind::Cloudflare => tr!("host.transport_cloudflare"),
-        HostKind::SshRelay => tr!("host.transport_ssh"),
+fn host_tab_label(tab: HostTab) -> String {
+    match tab {
+        HostTab::Default => tr!("host.transport_default"),
+        HostTab::Ssh => tr!("host.transport_ssh"),
     }
 }
 
@@ -270,7 +374,10 @@ impl Padu {
             .as_ref()
             .and_then(|h| h.token.clone())
             .unwrap_or_default();
-        let initial_kind = existing.as_ref().map(|h| h.kind).unwrap_or_default();
+        let initial_tab = existing
+            .as_ref()
+            .map(|h| HostTab::of_profile_kind(h.kind))
+            .unwrap_or_default();
         let initial_ssh = existing.as_ref().and_then(|h| h.ssh.clone());
         let initial_ssh_user = initial_ssh
             .as_ref()
@@ -357,7 +464,7 @@ impl Padu {
         let is_editing = request.editing_profile_id.is_some();
         self.host_dialog = Some(HostDialogState {
             editing_profile_id: request.editing_profile_id,
-            kind: initial_kind,
+            tab: initial_tab,
             name_input,
             address_input,
             token_input,
@@ -365,8 +472,6 @@ impl Padu {
             ssh_host_input,
             ssh_port_input,
             ssh_identity_input,
-            tunnel_key: format!("host-dialog-{}", Uuid::new_v4()),
-            tunnel: TunnelState::Idle,
             error: None,
             save_focus: cx.focus_handle(),
             cancel_focus: cx.focus_handle(),
@@ -396,88 +501,16 @@ impl Padu {
                 .content()
                 .trim()
                 .to_string(),
-            cloudflare_address: match &dialog.tunnel {
-                TunnelState::Ready { address, .. } => Some(address.clone()),
-                _ => None,
-            },
+            // The dialog never provisions tunnels (that lives in Settings),
+            // so this is always `None` here; kept for `build_host_profile`.
+            cloudflare_address: None,
         }
-    }
-
-    /// Provision a Cloudflare Quick Tunnel for the dialog's current fields.
-    /// The tunnel is registered in the app registry so it stays alive after
-    /// the dialog closes; the resolved hostname and QR land back in the dialog.
-    pub(crate) fn start_host_tunnel(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = &self.host_dialog else {
-            return;
-        };
-        if matches!(dialog.tunnel, TunnelState::Starting) {
-            return;
-        }
-        let tunnel_key = dialog.tunnel_key.clone();
-        let token = dialog.token_input.read(cx).content().trim().to_string();
-        let local_port = self.state.daemon_exposure.port;
-
-        if let Some(dialog) = self.host_dialog.as_mut() {
-            dialog.tunnel = TunnelState::Starting;
-            dialog.error = None;
-        }
-        cx.notify();
-
-        let registry = self.host_transports.clone();
-        let transport_token = token.clone();
-        cx.spawn(async move |this, cx| {
-            let (transport, outcome) = cx
-                .background_executor()
-                .spawn(async move {
-                    let mut transport = CloudflareTransport::new();
-                    let context = TransportContext {
-                        local_port,
-                        token: transport_token,
-                    };
-                    let outcome = transport.start(&context).await;
-                    (transport, outcome)
-                })
-                .await;
-
-            let _ = this.update(cx, |this, cx| {
-                match outcome {
-                    Ok(handle) => {
-                        registry.register(tunnel_key, Box::new(transport));
-                        if let Some(dialog) = this.host_dialog.as_mut() {
-                            dialog.tunnel = TunnelState::Ready {
-                                address: handle.address,
-                            };
-                        }
-                    }
-                    Err(error) => {
-                        if let Some(dialog) = this.host_dialog.as_mut() {
-                            dialog.tunnel = TunnelState::Failed(error.to_string());
-                        }
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
     }
 
     pub(crate) fn close_host_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.host_dialog_request = None;
-        let Some(dialog) = self.host_dialog.take() else {
+        if self.host_dialog.take().is_none() {
             return;
-        };
-        // A tunnel provisioned but not saved is discarded; one that was saved
-        // is re-registered under the profile id by `switch_to_host`.
-        if let Some(transport) = self.host_transports.get(&dialog.tunnel_key) {
-            let registry = self.host_transports.clone();
-            let key = dialog.tunnel_key.clone();
-            cx.spawn(async move |_, _| {
-                let mut transport = transport.lock().await;
-                let _ = transport.stop().await;
-                drop(transport);
-                registry.remove(&key);
-            })
-            .detach();
         }
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);
@@ -488,7 +521,7 @@ impl Padu {
         let Some(dialog) = &self.host_dialog else {
             return;
         };
-        let kind = dialog.kind;
+        let tab = dialog.tab;
         let editing_id = dialog.editing_profile_id.clone();
         let editing = editing_id
             .as_ref()
@@ -496,7 +529,13 @@ impl Padu {
             .cloned();
         let values = self.host_form_values(cx);
 
-        let profile = match build_host_profile(kind, editing.as_ref(), &values, unix_time()) {
+        let built = match tab {
+            HostTab::Default => build_default_host_profile(editing.as_ref(), &values, unix_time()),
+            HostTab::Ssh => {
+                build_host_profile(HostKind::SshRelay, editing.as_ref(), &values, unix_time())
+            }
+        };
+        let profile = match built {
             Ok(profile) => profile,
             Err(error) => {
                 if let Some(dialog) = self.host_dialog.as_mut() {
@@ -519,15 +558,6 @@ impl Padu {
         }
 
         let _ = self.store.write_app_settings(&self.state.app_settings());
-
-        // A tunnel provisioned in the dialog is handed to the saved profile
-        // instead of being torn down on close, so `switch_to_host` reuses it
-        // rather than spawning a second tunnel with a different URL.
-        if kind == HostKind::Cloudflare
-            && let Some(dialog) = &self.host_dialog
-        {
-            self.host_transports.rekey(&dialog.tunnel_key, &profile_id);
-        }
 
         self.close_host_dialog(window, cx);
         self.switch_to_host(Some(profile_id), cx);
@@ -555,12 +585,11 @@ impl Padu {
         let theme = Theme::current(cx);
         // Snapshot the dialog so the borrow ends before `current_qr_pane`,
         // which needs `&mut self` to refresh its cache.
-        let (is_editing, kind, tunnel, error_message) = {
+        let (is_editing, tab, error_message) = {
             let dialog = self.host_dialog.as_ref()?;
             (
                 dialog.editing_profile_id.is_some(),
-                dialog.kind,
-                dialog.tunnel.clone(),
+                dialog.tab,
                 dialog.error.clone(),
             )
         };
@@ -607,35 +636,25 @@ impl Padu {
             text_field_box(&theme, false, name_input),
         ));
 
-        match kind {
-            HostKind::Direct | HostKind::Tailscale => {
+        // The Default tab is one address field for every transport: Direct,
+        // Tailscale, and Cloudflare addresses are typed or pasted in, and
+        // the kind is inferred from the address at save time. Tunnels are
+        // provisioned from Settings, not from here.
+        match tab {
+            HostTab::Default => {
                 fields = fields.child(labelled_field(
                     tr!("host.address"),
                     theme.text_secondary,
                     text_field_box(&theme, error_message.is_some(), address_input),
                 ));
-                if kind == HostKind::Tailscale {
-                    fields = fields.child(hint_text(tr!("host.tailscale_hint"), &theme));
-                }
+                fields = fields.child(hint_text(tr!("host.default_hint"), &theme));
                 fields = fields.child(labelled_field(
                     tr!("host.token"),
                     theme.text_secondary,
                     text_field_box(&theme, false, token_input),
                 ));
             }
-            HostKind::Cloudflare => {
-                // The address only exists once cloudflared reports it, so the
-                // tunnel has to be started from here.
-                fields = fields
-                    .child(self.render_tunnel_button(&tunnel, &theme, cx))
-                    .child(hint_text(tr!("host.tunnel_idle_hint"), &theme))
-                    .child(labelled_field(
-                        tr!("host.token"),
-                        theme.text_secondary,
-                        text_field_box(&theme, false, token_input),
-                    ));
-            }
-            HostKind::SshRelay => {
+            HostTab::Ssh => {
                 fields = fields
                     .child(labelled_field(
                         tr!("host.ssh_user"),
@@ -725,7 +744,7 @@ impl Padu {
                     ),
             )
             // Transport selector
-            .child(self.render_transport_selector(kind, &theme, cx))
+            .child(self.render_transport_selector(tab, &theme, cx))
             // One column: what to connect to, then an optional code a phone
             // can scan. Collapsed by default so editing a host stays short.
             .child(
@@ -882,109 +901,47 @@ impl Padu {
         ))
     }
 
-    fn render_tunnel_button(
-        &self,
-        tunnel: &TunnelState,
-        theme: &Theme,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let starting = matches!(tunnel, TunnelState::Starting);
-        let label = if matches!(tunnel, TunnelState::Idle | TunnelState::Failed(_)) {
-            tr!("host.start_tunnel")
-        } else {
-            tr!("host.restart_tunnel")
-        };
-        div()
-            .id("start-tunnel-button")
-            .tab_index(0)
-            .h(px(30.0))
-            .w_full()
-            .rounded(px(7.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .items_center()
-            .justify_center()
-            .gap(px(6.0))
-            .cursor_pointer()
-            .text_size(sp(12.5))
-            .text_color(theme.text_secondary)
-            .opacity(if starting { 0.55 } else { 1.0 })
-            .focus_visible(|style| style.border_color(theme.accent))
-            .when(!starting, |element| {
-                element
-                    .hover(|e| e.bg(theme.overlay))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.start_host_tunnel(cx);
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                        if !event.keystroke.modifiers.modified()
-                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                        {
-                            this.start_host_tunnel(cx);
-                            cx.stop_propagation();
-                        }
-                    }))
-            })
-            .child(label)
-    }
-
     fn render_transport_selector(
         &self,
-        active: HostKind,
+        active: HostTab,
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Div {
-        let mut row = div().flex().items_center().gap(px(6.0)).child(
-            div()
-                .flex_none()
-                .text_size(sp(12.5))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(theme.text_secondary)
-                .child(tr!("host.transport")),
-        );
-        for kind in TRANSPORT_OPTIONS {
-            let is_active = kind == active;
-            let id = SharedString::from(format!("transport-option-{:?}", kind));
+        // Notes view-mode segmented style: one container, active option filled.
+        let mut row = div()
+            .flex()
+            .items_center()
+            .gap(px(1.0))
+            .p(px(2.0))
+            .rounded(px(7.0))
+            .bg(theme.overlay);
+        for tab in TRANSPORT_OPTIONS {
+            let is_active = tab == active;
+            let id = SharedString::from(format!("transport-option-{tab:?}"));
             row = row.child(
                 div()
                     .id(id)
                     .tab_index(0)
-                    .h(px(26.0))
-                    .px(px(9.0))
+                    .h(px(28.0))
+                    .px(px(10.0))
                     .rounded(px(6.0))
-                    .border_1()
-                    .border_color(if is_active {
-                        theme.accent
-                    } else {
-                        theme.border
-                    })
-                    .bg(if is_active {
-                        theme.accent.opacity(0.12)
-                    } else {
-                        theme.surface
-                    })
-                    .text_color(if is_active {
-                        theme.accent
-                    } else {
-                        theme.text_secondary
-                    })
-                    .text_size(sp(12.0))
-                    .font_weight(if is_active {
-                        FontWeight::MEDIUM
-                    } else {
-                        FontWeight::NORMAL
-                    })
-                    .cursor_pointer()
-                    .focus_visible(|style| style.border_color(theme.accent))
                     .flex()
                     .items_center()
                     .justify_center()
-                    .hover(|e| e.bg(theme.overlay))
-                    .child(transport_label(kind))
+                    .cursor_pointer()
+                    .text_size(sp(12.5))
+                    .text_color(if is_active {
+                        theme.text
+                    } else {
+                        theme.text_secondary
+                    })
+                    .when(is_active, |el| el.bg(theme.overlay_strong))
+                    .hover(|el| el.bg(theme.overlay_strong))
+                    .focus_visible(|style| style.border_color(theme.accent))
+                    .child(host_tab_label(tab))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if let Some(dialog) = this.host_dialog.as_mut() {
-                            dialog.kind = kind;
+                            dialog.tab = tab;
                             dialog.error = None;
                         }
                         cx.notify();
@@ -994,7 +951,7 @@ impl Padu {
                             && matches!(event.keystroke.key.as_str(), "enter" | "space")
                         {
                             if let Some(dialog) = this.host_dialog.as_mut() {
-                                dialog.kind = kind;
+                                dialog.tab = tab;
                                 dialog.error = None;
                             }
                             cx.notify();
@@ -1102,11 +1059,70 @@ mod tests {
     }
 
     #[test]
+    fn default_tab_infers_direct_for_lan() {
+        let mut v = values();
+        v.address = "192.168.1.10:34123".into();
+        let profile = build_default_host_profile(None, &v, 1).unwrap();
+        assert_eq!(profile.kind, HostKind::Direct);
+        assert_eq!(profile.address, "ws://192.168.1.10:34123");
+        assert!(profile.tailscale.is_none());
+        assert!(profile.cloudflare.is_none());
+    }
+
+    #[test]
+    fn default_tab_infers_tailscale_for_magic_dns() {
+        let mut v = values();
+        v.address = "wss://mac.tail-abc.ts.net:34123".into();
+        let profile = build_default_host_profile(None, &v, 1).unwrap();
+        assert_eq!(profile.kind, HostKind::Tailscale);
+        let tailscale = profile.tailscale.expect("tailscale block");
+        assert_eq!(tailscale.magic_dns, "mac.tail-abc.ts.net");
+        assert_eq!(tailscale.port, 34123);
+    }
+
+    #[test]
+    fn default_tab_infers_cloudflare_for_quick_tunnel() {
+        let mut v = values();
+        v.address = "wss://random-words.trycloudflare.com".into();
+        let profile = build_default_host_profile(None, &v, 1).unwrap();
+        assert_eq!(profile.kind, HostKind::Cloudflare);
+        assert_eq!(profile.address, "wss://random-words.trycloudflare.com");
+        let cloudflare = profile.cloudflare.expect("cloudflare block");
+        assert_eq!(cloudflare.hostname, "random-words.trycloudflare.com");
+        assert!(cloudflare.quick_tunnel);
+    }
+
+    #[test]
+    fn host_tab_maps_profile_kinds() {
+        assert_eq!(HostTab::of_profile_kind(HostKind::Direct), HostTab::Default);
+        assert_eq!(
+            HostTab::of_profile_kind(HostKind::Tailscale),
+            HostTab::Default
+        );
+        assert_eq!(
+            HostTab::of_profile_kind(HostKind::Cloudflare),
+            HostTab::Default
+        );
+        assert_eq!(HostTab::of_profile_kind(HostKind::SshRelay), HostTab::Ssh);
+    }
+
+    #[test]
     fn build_tailscale_profile_requires_a_port() {
         let mut v = values();
         v.address = "wss://mac.tail-abc.ts.net".into();
         let error = build_host_profile(HostKind::Tailscale, None, &v, 1).unwrap_err();
         assert!(error.contains("port"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn build_tailscale_profile_rejects_lan_address() {
+        let mut v = values();
+        v.address = "ws://192.168.1.10:34123".into();
+        let error = build_host_profile(HostKind::Tailscale, None, &v, 1).unwrap_err();
+        assert!(
+            error.contains("Direct"),
+            "expected Direct hint, got: {error}"
+        );
     }
 
     #[test]
