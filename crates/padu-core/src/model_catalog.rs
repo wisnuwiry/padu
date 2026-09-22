@@ -625,6 +625,15 @@ fn parse_opencode_models(output: &str) -> Vec<ProviderModel> {
 }
 
 fn discover_grok_models(binary: &Path) -> Vec<ProviderModel> {
+    // Grok's ACP `initialize` advertises the live catalog together with each
+    // model's reasoning menu, so it is authoritative. The plain-text listing
+    // remains the fallback for a CLI whose ACP server cannot start headlessly;
+    // it reports ids only, so its menu is limited to verified built-ins.
+    if let Ok(models) = crate::grok_session::discover_models(binary)
+        && !models.is_empty()
+    {
+        return models;
+    }
     let mut command = crate::command_env::command(binary);
     let command = command.arg("models");
     let Ok(output) = crate::command_env::output(command) else {
@@ -1158,9 +1167,10 @@ fn reasoning_options<const N: usize>(efforts: [&str; N]) -> Vec<ProviderModelOpt
         .collect()
 }
 
-/// The hardcoded reasoning menu is limited to the exact built-in models it
-/// was verified against. `grok models` also lists user-defined custom models,
-/// whose effort support is not knowable from the ID, so they get no menu.
+/// The plain-text fallback carries no effort metadata, so its hardcoded menu is
+/// limited to the exact built-in models it was verified against. `grok models`
+/// also lists user-defined custom models, whose effort support is not knowable
+/// from the ID, so they get no menu.
 fn grok_reasoning_model(model: ProviderModel) -> ProviderModel {
     match padu_protocol::model_catalog::grok_model_reasoning_efforts(&model.id) {
         Some(efforts) => model.reasoning(

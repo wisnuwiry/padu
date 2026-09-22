@@ -731,12 +731,17 @@ all. Grok is the exception: effort rides on `session/set_model` as
 `_meta.reasoningEffort` (and as `--reasoning-effort` at launch), not as a
 session config option.
 
-Grok's catalog comes from the plain-text `grok models` listing, which reports
-ids but no effort metadata. The hardcoded menu therefore covers only the exact
-built-ins (`grok-4.5` stops at high, `grok-4.6` offers xhigh): the listing also
-includes custom models from the user's config, whose effort support the id
-alone cannot establish, so they are offered without an effort menu. Discovery
-is authoritative — a stale fallback would name a model the CLI rejects.
+Grok's catalog comes from the ACP `initialize` response's
+`_meta.modelState.availableModels`, which reports each model's reasoning menu —
+effort ids, labels, descriptions, and the provider default — so the picker
+follows the installed CLI, including the newer `grok-4.7`. A CLI whose ACP
+server cannot start headlessly falls back to the plain-text `grok models`
+listing, which reports ids but no effort metadata; there the hardcoded menu
+covers only the exact built-ins it was verified against (`grok-4.5` stops at
+high, `grok-4.6` offers xhigh) and custom models from the user's config are
+offered without a menu, since the id alone cannot establish effort support.
+Discovery is authoritative — a stale fallback would name a model the CLI
+rejects.
 
 Kimi's catalog comes from `kimi provider list --json`, which covers both the
 managed plan and any registry the user imported with `kimi provider add`. Only
