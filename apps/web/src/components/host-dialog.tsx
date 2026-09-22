@@ -62,8 +62,11 @@ export function HostDialog({
 
   async function handleSave() {
     setError(null)
+    // A relay address is owned by the desktop tunnel — never let the browser
+    // overwrite it with a hand-typed value the tunnel no longer backs.
+    const effectiveAddress = isRelayHost && editingHost ? editingHost.address : address.trim()
     try {
-      normalizeDaemonAddress(address, (k) => t(k))
+      normalizeDaemonAddress(effectiveAddress, (k) => t(k))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
       return
@@ -73,7 +76,7 @@ export function HostDialog({
     try {
       await onSave({
         name: name.trim(),
-        address: address.trim(),
+        address: effectiveAddress,
         token: token.trim() || undefined,
         kind,
       })
@@ -168,8 +171,10 @@ export function HostDialog({
                 autoCapitalize="none"
                 autoCorrect="off"
                 className="h-8 bg-card"
+                disabled={isRelayHost}
                 inputMode="url"
                 placeholder={t('host.address_placeholder')}
+                title={isRelayHost ? t('host.transport_relay_hint') : undefined}
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
               />
