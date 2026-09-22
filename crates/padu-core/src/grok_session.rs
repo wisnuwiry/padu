@@ -15,7 +15,9 @@ use chrono::{SecondsFormat, Utc};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use crate::model::{ProviderResumeCursor, ProviderSessionSummary};
+use crate::model::{
+    ProviderModel, ProviderModelOption, ProviderResumeCursor, ProviderSessionSummary,
+};
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -131,6 +133,131 @@ pub fn generated_title_in(grok_home: &Path, session_id: &str) -> anyhow::Result<
         .get("generated_title")
         .and_then(Value::as_str)
         .and_then(crate::model::normalize_session_title))
+}
+
+/// Ascending effort order Padu renders across providers, so Grok's menu keeps
+/// the same low-to-high shape as its plain-text fallback.
+const EFFORT_ORDER: [&str; 8] = [
+    "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
+];
+
+/// Discovers Grok's catalog over ACP.
+///
+/// Grok advertises every model's reasoning menu — effort ids, labels,
+/// descriptions, and the provider's default — in the `initialize` response's
+/// `_meta.modelState`, so the picker follows the installed CLI instead of a
+/// hardcoded list of built-ins.
+pub fn discover_models(binary: &Path) -> anyhow::Result<Vec<ProviderModel>> {
+    let mut client = GrokRpc::start_with_args(binary, &["agent", "--no-leader", "stdio"])?;
+    let response = client.request(
+        1,
+        "initialize",
+        json!({
+            "protocolVersion": 1,
+            "clientCapabilities": {
+                "fs": {"readTextFile": false, "writeTextFile": false},
+                "terminal": false
+            }
+        }),
+    )?;
+    Ok(parse_model_state(&response))
+}
+
+fn parse_model_state(response: &Value) -> Vec<ProviderModel> {
+    let Some(state) = response.pointer("/result/_meta/modelState") else {
+        return Vec::new();
+    };
+    let current = state.get("currentModelId").and_then(Value::as_str);
+    state
+        .get("availableModels")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|value| model_from_state(value, current))
+        .collect()
+}
+
+fn model_from_state(value: &Value, current: Option<&str>) -> Option<ProviderModel> {
+    let id = value.get("modelId").and_then(Value::as_str)?.trim();
+    if id.is_empty() {
+        return None;
+    }
+    let name = value
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| crate::model_catalog::display_name_from_slug(id));
+    let mut model = ProviderModel::new(id, name);
+    model.is_default = current == Some(id);
+    if let Some((efforts, default)) = reasoning_menu(value) {
+        model = model.reasoning(efforts, default);
+    }
+    Some(model)
+}
+
+fn reasoning_menu(value: &Value) -> Option<(Vec<ProviderModelOption>, String)> {
+    let meta = value.get("_meta")?;
+    if meta.get("supportsReasoningEffort").and_then(Value::as_bool) == Some(false) {
+        return None;
+    }
+    let mut efforts = meta
+        .get("reasoningEfforts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(provider_option)
+        .collect::<Vec<_>>();
+    if efforts.is_empty() {
+        return None;
+    }
+    efforts.sort_by_key(|option| {
+        EFFORT_ORDER
+            .iter()
+            .position(|known| *known == option.id)
+            .unwrap_or(usize::MAX)
+    });
+    let default = default_effort(meta, &efforts);
+    Some((efforts, default))
+}
+
+fn provider_option(value: &Value) -> Option<ProviderModelOption> {
+    let id = effort_id(value)?;
+    if id.is_empty() {
+        return None;
+    }
+    let mut option = ProviderModelOption::new(id, crate::model_catalog::reasoning_effort_label(id));
+    if let Some(description) = value.get("description").and_then(Value::as_str) {
+        option = option.description(description);
+    }
+    Some(option)
+}
+
+fn effort_id(value: &Value) -> Option<&str> {
+    ["id", "value"]
+        .into_iter()
+        .find_map(|key| value.get(key).and_then(Value::as_str))
+        .map(str::trim)
+}
+
+fn default_effort(meta: &Value, efforts: &[ProviderModelOption]) -> String {
+    let flagged = meta
+        .get("reasoningEfforts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|effort| effort.get("default").and_then(Value::as_bool) == Some(true))
+        .and_then(effort_id);
+    flagged
+        .map(str::to_owned)
+        .or_else(|| {
+            meta.get("reasoningEffort")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .filter(|id| efforts.iter().any(|option| option.id == *id))
+        .unwrap_or_else(|| efforts[0].id.clone())
 }
 
 pub fn fork_session_at_turn(
@@ -345,9 +472,16 @@ struct GrokRpc {
 
 impl GrokRpc {
     fn start(binary: &Path) -> anyhow::Result<Self> {
+        Self::start_with_args(
+            binary,
+            &["agent", "--always-approve", "--no-leader", "stdio"],
+        )
+    }
+
+    fn start_with_args(binary: &Path, args: &[&str]) -> anyhow::Result<Self> {
         let mut command = crate::command_env::command(binary);
         let command = command
-            .args(["agent", "--always-approve", "--no-leader", "stdio"])
+            .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
@@ -503,5 +637,111 @@ mod tests {
         ] {
             assert!(provider_summary(&value).is_none());
         }
+    }
+
+    fn model_state() -> Value {
+        json!({
+            "result": {
+                "_meta": {
+                    "modelState": {
+                        "currentModelId": "grok-4.7",
+                        "availableModels": [
+                            {
+                                "modelId": "grok-4.7",
+                                "name": "Grok 4.7",
+                                "description": "SpaceXAI's latest frontier model",
+                                "_meta": {
+                                    "supportsReasoningEffort": true,
+                                    "reasoningEffort": "high",
+                                    "reasoningEfforts": [
+                                        {
+                                            "id": "xhigh",
+                                            "label": "Extra High",
+                                            "description": "Maximum reasoning for the hardest tasks.",
+                                            "default": false
+                                        },
+                                        {
+                                            "id": "high",
+                                            "label": "High",
+                                            "description": "Recommended.",
+                                            "default": true
+                                        },
+                                        {"id": "medium", "label": "Medium", "default": false},
+                                        {"id": "low", "label": "Low", "default": false}
+                                    ]
+                                }
+                            },
+                            {
+                                "modelId": "grok-legacy",
+                                "name": "Grok Legacy",
+                                "_meta": {
+                                    "supportsReasoningEffort": false,
+                                    "reasoningEffort": "high"
+                                }
+                            },
+                            {
+                                "modelId": "grok-unlabeled",
+                                "_meta": {
+                                    "supportsReasoningEffort": true,
+                                    "reasoningEffort": "medium",
+                                    "reasoningEfforts": [{"value": "medium"}, {"value": "low"}]
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn parses_grok_reasoning_menu_and_defaults_from_acp_model_state() {
+        let models = parse_model_state(&model_state());
+        assert_eq!(models.len(), 3);
+
+        let default = &models[0];
+        assert_eq!(default.id, "grok-4.7");
+        assert_eq!(default.name, "Grok 4.7");
+        assert!(default.is_default);
+        // The agent lists efforts highest-first; Padu renders them ascending.
+        assert_eq!(
+            default
+                .reasoning_efforts
+                .iter()
+                .map(|option| option.id.as_str())
+                .collect::<Vec<_>>(),
+            ["low", "medium", "high", "xhigh"]
+        );
+        assert_eq!(default.default_reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(
+            default.reasoning_efforts[3].description.as_deref(),
+            Some("Maximum reasoning for the hardest tasks.")
+        );
+    }
+
+    #[test]
+    fn grok_reasoning_menu_falls_back_to_the_current_effort() {
+        let models = parse_model_state(&model_state());
+
+        // No `default: true` marker, so the agent's current effort wins.
+        let unlabeled = &models[2];
+        assert_eq!(unlabeled.name, "Grok Unlabeled");
+        assert_eq!(
+            unlabeled
+                .reasoning_efforts
+                .iter()
+                .map(|option| option.id.as_str())
+                .collect::<Vec<_>>(),
+            ["low", "medium"]
+        );
+        assert_eq!(
+            unlabeled.default_reasoning_effort.as_deref(),
+            Some("medium")
+        );
+
+        // A model that opts out of effort gets no menu at all.
+        let legacy = &models[1];
+        assert!(legacy.reasoning_efforts.is_empty());
+        assert_eq!(legacy.default_reasoning_effort, None);
     }
 }
