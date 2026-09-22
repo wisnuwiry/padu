@@ -1145,9 +1145,6 @@ pub struct Padu {
     daemon_port_input: Entity<TextInput>,
     daemon_origin_inputs: Vec<Entity<TextInput>>,
     daemon_reconfigure_pending: bool,
-    daemon_token_revealed: bool,
-    /// Whether the credentials card's connection QR is expanded.
-    daemon_qr_revealed: bool,
     /// Which transport the credentials QR tells another device to use.
     daemon_qr_transport: padu_client::persistence::HostKind,
     /// Tailscale name or `host:port` for the credentials QR's address.
@@ -1157,6 +1154,14 @@ pub struct Padu {
     /// drew, so the matrix is only re-encoded when the payload changes.
     /// `RefCell` because the settings renderer takes `&self`.
     daemon_qr_cache: RefCell<Option<(String, String)>>,
+    /// True while the credential card's Cloudflare tunnel is starting. Kept
+    /// on the app (not derived from the registry) so the button shows
+    /// "Starting…" immediately on click — the registry key is removed first
+    /// and would otherwise read as idle for the whole startup window.
+    daemon_qr_tunnel_starting: bool,
+    /// Last Cloudflare tunnel failure, rendered inline under the button so a
+    /// failed start is never silent (toasts alone are easy to miss).
+    daemon_qr_tunnel_error: Option<String>,
     settings_focus: FocusHandle,
     onboarding_add_project_focus: FocusHandle,
     onboarding_projectless_focus: FocusHandle,
@@ -3344,9 +3349,9 @@ impl Padu {
                 daemon_port_input,
                 daemon_origin_inputs,
                 daemon_reconfigure_pending: false,
-                daemon_token_revealed: false,
-                daemon_qr_revealed: false,
                 daemon_qr_cache: RefCell::new(None),
+                daemon_qr_tunnel_starting: false,
+                daemon_qr_tunnel_error: None,
                 daemon_qr_transport: padu_client::persistence::HostKind::Direct,
                 daemon_qr_field_input: qr_field_input,
                 daemon_qr_port_input: qr_port_input,
