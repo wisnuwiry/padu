@@ -41,9 +41,13 @@ pub(super) enum HeadlessComputerUseConfig {
         base: computer_use_runtime::ComputerUseConfig,
         grok_home: PathBuf,
         auth_path: Option<PathBuf>,
-        rules: String,
     },
 }
+
+/// The agent-rules filename Grok discovers as global instructions under
+/// `GROK_HOME`. `grok agent` (ACP) rejects the TUI/headless `--rules` flag, so
+/// the Padu Computer Use skill is delivered through this file instead.
+const GROK_AGENT_RULES_FILE: &str = "AGENTS.md";
 
 pub(super) struct HeadlessComputerUseRuntime {
     runtime: computer_use_runtime::ComputerUseRuntime,
@@ -191,14 +195,17 @@ fn build_grok_computer_use_config(
             .with_context(|| format!("could not read Grok home {}", source_home.display()))?
         {
             let entry = entry?;
-            let name = entry.file_name();
-            if matches!(
-                name.to_str(),
-                Some("config.toml" | "auth.json" | "auth.json.lock")
-            ) {
+            let file_name = entry.file_name();
+            let name = file_name.to_str();
+            if matches!(name, Some("config.toml" | "auth.json" | "auth.json.lock")) {
                 continue;
             }
-            fs_ext::symlink(&entry.path(), &grok_home.join(name)).with_context(|| {
+            // The rules file is rewritten below, so mirroring it would only
+            // create a symlink this code would then write through.
+            if name.is_some_and(|name| name.eq_ignore_ascii_case(GROK_AGENT_RULES_FILE)) {
+                continue;
+            }
+            fs_ext::symlink(&entry.path(), &grok_home.join(&file_name)).with_context(|| {
                 format!(
                     "could not mirror Grok runtime resource {}",
                     entry.path().display()
@@ -231,18 +238,52 @@ fn build_grok_computer_use_config(
             let path = source_home.join("auth.json");
             path.is_file().then_some(path)
         });
+    let existing_rules = match fs::read_to_string(source_home.join(GROK_AGENT_RULES_FILE)) {
+        Ok(content) => Some(content),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "could not read {}",
+                    source_home.join(GROK_AGENT_RULES_FILE).display()
+                )
+            });
+        }
+    };
     let rules = fs::read_to_string(&base.skill_path).with_context(|| {
         format!(
             "could not read Padu Computer Use skill {}",
             base.skill_path.display()
         )
     })?;
+    let rules_path = grok_home.join(GROK_AGENT_RULES_FILE);
+    fs::write(
+        &rules_path,
+        grok_agent_rules(existing_rules.as_deref(), &rules),
+    )
+    .with_context(|| {
+        format!(
+            "could not write isolated Grok rules {}",
+            rules_path.display()
+        )
+    })?;
     Ok(HeadlessComputerUseConfig::Grok {
         base,
         grok_home,
         auth_path,
-        rules,
     })
+}
+
+/// Grok appends the agent-rules file to the system prompt, so the Padu skill
+/// layers on top of the user's own global rules instead of replacing them.
+fn grok_agent_rules(existing: Option<&str>, rules: &str) -> String {
+    match existing
+        .map(str::trim)
+        .filter(|content| !content.is_empty())
+    {
+        Some(existing) => format!("{existing}\n\n{rules}"),
+        None => rules.to_owned(),
+    }
 }
 
 fn build_grok_computer_use_toml(
@@ -294,10 +335,10 @@ pub(super) fn grok_computer_use_launch_configuration(
         base,
         grok_home,
         auth_path,
-        rules,
     }) = config
     {
-        let args = vec![format!("--rules={rules}")];
+        // The rules ride `GROK_HOME/AGENTS.md`; `grok agent` rejects the
+        // TUI/headless `--rules` flag with "unexpected argument".
         let mut environment = vec![
             ("GROK_HOME".to_owned(), grok_home.display().to_string()),
             (
@@ -312,7 +353,7 @@ pub(super) fn grok_computer_use_launch_configuration(
         if let Some(auth_path) = auth_path {
             environment.push(("GROK_AUTH_PATH".to_owned(), auth_path.display().to_string()));
         }
-        (args, environment)
+        (Vec::new(), environment)
     } else {
         (Vec::new(), Vec::new())
     }
@@ -508,15 +549,16 @@ mod tests {
     }
 
     #[test]
-    fn grok_computer_use_command_is_process_scoped_and_loads_rules() {
+    fn grok_computer_use_command_is_process_scoped() {
         let config = HeadlessComputerUseConfig::Grok {
             base: computer_use_config(),
             grok_home: PathBuf::from("/tmp/padu-computer-use/session/grok-home"),
             auth_path: Some(PathBuf::from("/Users/test/.grok/auth.json")),
-            rules: "Padu Computer Use rules".into(),
         };
         let (arguments, environment) = grok_computer_use_launch_configuration(Some(&config));
-        assert_eq!(arguments, ["--rules=Padu Computer Use rules"]);
+        // `grok agent` rejects the TUI/headless `--rules` flag, so the rules
+        // ride GROK_HOME/AGENTS.md and no argument is passed.
+        assert!(arguments.is_empty());
         let environment = environment.into_iter().collect::<HashMap<_, _>>();
         assert_eq!(
             environment.get("GROK_HOME"),
@@ -525,6 +567,16 @@ mod tests {
         assert_eq!(
             environment.get("GROK_AUTH_PATH"),
             Some(&"/Users/test/.grok/auth.json".into())
+        );
+    }
+
+    #[test]
+    fn grok_agent_rules_layer_onto_existing_global_rules() {
+        assert_eq!(grok_agent_rules(None, "Padu rules"), "Padu rules");
+        assert_eq!(grok_agent_rules(Some("  \n"), "Padu rules"), "Padu rules");
+        assert_eq!(
+            grok_agent_rules(Some("  User rules  \n"), "Padu rules"),
+            "User rules\n\nPadu rules"
         );
     }
 
