@@ -664,16 +664,34 @@ daemon.hide_qr:
   en: Hide QR Code
 daemon.qr_tailscale_name:
   en: Tailnet name
+daemon.qr_direct_address:
+  en: LAN address
 daemon.qr_ssh_host:
   en: Jump host
 daemon.qr_ssh_port:
   en: Remote port
+daemon.qr_need_direct:
+  en: Enter this machine's LAN address, e.g. 192.168.1.10. Leave blank to use the detected hostname.
 daemon.qr_need_name:
   en: Enter the tailnet name another device should use.
 daemon.qr_need_host:
   en: Enter the jump host another device should use.
 daemon.qr_need_port:
   en: Enter the remote port (1–65535).
+daemon.qr_direct_hint:
+  en: Same Wi-Fi/LAN only. Keep exposure on a network you trust — this code is plain ws:// and carries full-access token.
+daemon.qr_tailscale_hint:
+  en: Both devices must be on the same tailnet and exposure must be on. Enter the MagicDNS (*.ts.net) or 100.x address.
+daemon.qr_cloudflare_hint:
+  en: Requires cloudflared on this machine. No shared network needed — press Start Tunnel, wait for connected, then scan. The URL rotates on every restart.
+daemon.qr_cloudflare_install:
+  en: brew install cloudflared
+daemon.qr_title:
+  en: Connect another device
+daemon.qr_ssh_hint:
+  en: Needs an SSH relay to a jump host you own (GatewayPorts yes). This code only describes wss://jump:port — start the relay first.
+daemon.qr_ssh_needs_relay:
+  en: Start the SSH relay (Add Host → SSH) before sharing this code — otherwise it points at a closed port.
 daemon.qr_needs_tunnel:
   en: Start the tunnel to get a code.
 daemon.qr_tunnel_starting:
@@ -685,7 +703,7 @@ daemon.qr_restart_tunnel:
 daemon.qr_tunnel_failed:
   en: "Could not start the tunnel: %{error}"
 daemon.qr_field_placeholder:
-  en: e.g. my-mac.tail-abc.ts.net
+  en: e.g. 192.168.1.10 or my-mac.tail-abc.ts.net
 daemon.qr_port_placeholder:
   en: e.g. 19999
 daemon.qr_unavailable:
@@ -714,6 +732,8 @@ host.address:
   en: Address
 host.address_placeholder:
   en: e.g. 192.168.1.100:34123
+host.default_hint:
+  en: Enter a LAN address, tailnet name, or Cloudflare tunnel URL with the daemon port — the transport is detected from it.
 host.token:
   en: Token
 host.token_placeholder:
@@ -752,6 +772,8 @@ host.connect:
   en: Connect
 host.transport:
   en: Transport
+host.transport_default:
+  en: Default
 host.transport_direct:
   en: Direct
 host.transport_tailscale:

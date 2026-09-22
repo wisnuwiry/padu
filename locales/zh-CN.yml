@@ -329,6 +329,7 @@ host.name: 名称
 host.name_placeholder: 例如：开发服务器
 host.address: 地址
 host.address_placeholder: 例如：192.168.1.100:34123
+host.default_hint: 输入局域网地址、tailnet 名称或 Cloudflare 隧道 URL（含守护进程端口）— 传输方式将自动识别。
 host.token: 令牌
 host.token_placeholder: 守护进程认证令牌（可选）
 host.save_and_connect: 保存并连接
@@ -1500,6 +1501,7 @@ session.unpin: 取消置顶
 session.archive: 归档
 errors.update_task: "无法更新任务：%{error}"
 host.transport: 传输方式
+host.transport_default: 默认
 host.transport_direct: 直连
 host.transport_tailscale: Tailscale
 host.transport_cloudflare: Cloudflare
@@ -1528,15 +1530,24 @@ daemon.hide_qr: 隐藏二维码
 daemon.qr_hint: 用 Padu 移动应用扫描此二维码即可连接本设备 — 其中包含地址和令牌，无需手动输入。
 daemon.qr_unavailable: 无法将该守护进程地址编码为二维码。
 daemon.qr_tailscale_name: Tailnet 名称
+daemon.qr_direct_address: 局域网地址
 daemon.qr_ssh_host: 跳板主机
 daemon.qr_ssh_port: 远程端口
+daemon.qr_need_direct: 请输入本机的局域网地址，例如 192.168.1.10。留空则使用检测到的主机名。
 daemon.qr_need_name: 请输入其它设备要使用的 tailnet 名称。
 daemon.qr_need_host: 请输入其它设备要使用的跳板主机。
 daemon.qr_need_port: 请输入远程端口（1–65535）。
+daemon.qr_direct_hint: 仅限同一 Wi-Fi/局域网。请在可信网络中公开 — 该二维码为明文 ws:// 且携带完全访问令牌。
+daemon.qr_tailscale_hint: 两台设备须在同一 tailnet 且已开启公开。请输入 MagicDNS（*.ts.net）或 100.x 地址。
+daemon.qr_cloudflare_hint: 本机需要 cloudflared。无需共享网络 — 点击启动隧道，等待连接后再扫描。URL 每次重启都会变化。
+daemon.qr_cloudflare_install: brew install cloudflared
+daemon.qr_title: 连接其他设备
+daemon.qr_ssh_hint: 需要到自有跳板主机的 SSH 中继（GatewayPorts yes）。此二维码仅描述 wss://jump:port，请先启动中继。
+daemon.qr_ssh_needs_relay: 分享此二维码前请先启动 SSH 中继（添加主机 → SSH），否则它指向关闭的端口。
 daemon.qr_needs_tunnel: 启动隧道后可获取二维码。
 daemon.qr_tunnel_starting: 正在启动隧道…
 daemon.qr_start_tunnel: 启动隧道
 daemon.qr_restart_tunnel: 重启隧道
 daemon.qr_tunnel_failed: "无法启动隧道：%{error}"
-daemon.qr_field_placeholder: 例如 my-mac.tail-abc.ts.net
+daemon.qr_field_placeholder: 例如 192.168.1.10 或 my-mac.tail-abc.ts.net
 daemon.qr_port_placeholder: 例如 19999

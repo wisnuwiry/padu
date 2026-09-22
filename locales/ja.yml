@@ -333,6 +333,7 @@ host.name: 名前
 host.name_placeholder: 例：開発サーバー
 host.address: アドレス
 host.address_placeholder: 例：192.168.1.100:34123
+host.default_hint: LAN アドレス、テールネット名、または Cloudflare トンネル URL をデーモンのポート付きで入力してください。トランスポートは自動判別されます。
 host.token: トークン
 host.token_placeholder: デーモン認証トークン（省略可）
 host.save_and_connect: 保存して接続
@@ -1553,6 +1554,7 @@ session.unpin: ピン留めを外す
 session.archive: アーカイブ
 errors.update_task: "タスクを更新できませんでした：%{error}"
 host.transport: トランスポート
+host.transport_default: デフォルト
 host.transport_direct: 直接
 host.transport_tailscale: Tailscale
 host.transport_cloudflare: Cloudflare
@@ -1581,15 +1583,24 @@ daemon.hide_qr: QR コードを非表示
 daemon.qr_hint: Padu モバイルアプリでこれをスキャンするとこの端末を接続できます。アドレスとトークンが含まれるため、入力は不要です。
 daemon.qr_unavailable: このデーモンのアドレスは QR コードにできません。
 daemon.qr_tailscale_name: テールネット名
+daemon.qr_direct_address: LAN アドレス
 daemon.qr_ssh_host: 踏み台ホスト
 daemon.qr_ssh_port: リモートポート
+daemon.qr_need_direct: "このマシンの LAN アドレス（例: 192.168.1.10）を入力してください。空欄で検出ホスト名を使います。"
 daemon.qr_need_name: 他の端末が使用するテールネット名を入力してください。
 daemon.qr_need_host: 他の端末が使用する踏み台ホストを入力してください。
 daemon.qr_need_port: リモートポート（1〜65535）を入力してください。
+daemon.qr_direct_hint: 同一 Wi-Fi/LAN 専用。信頼できるネットワークで公開してください。このコードは平文 ws:// でフルアクセスのトークンを含みます。
+daemon.qr_tailscale_hint: 両端末が同一テールネットに参加し、公開が有効である必要があります。MagicDNS（*.ts.net）または 100.x を入力してください。
+daemon.qr_cloudflare_hint: このマシンに cloudflared が必要です。共通ネットワークは不要です。トンネルを開始し、接続後にスキャンしてください。URL は再起動ごとに変わります。
+daemon.qr_cloudflare_install: brew install cloudflared
+daemon.qr_title: 他の端末を接続
+daemon.qr_ssh_hint: 所有する踏み台ホストへの SSH リレーが必要です（GatewayPorts yes）。このコードは wss://jump:port の説明のみです。先にリレーを開始してください。
+daemon.qr_ssh_needs_relay: このコードを共有する前に SSH リレー（ホスト追加 → SSH）を開始してください。開始前は閉じたポートを指します。
 daemon.qr_needs_tunnel: トンネルを開始するとコードが表示されます。
 daemon.qr_tunnel_starting: トンネルを開始しています…
 daemon.qr_start_tunnel: トンネルを開始
 daemon.qr_restart_tunnel: トンネルを再起動
 daemon.qr_tunnel_failed: "トンネルを開始できませんでした: %{error}"
-daemon.qr_field_placeholder: "例: my-mac.tail-abc.ts.net"
+daemon.qr_field_placeholder: "例: 192.168.1.10 または my-mac.tail-abc.ts.net"
 daemon.qr_port_placeholder: "例: 19999"

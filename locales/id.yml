@@ -328,6 +328,7 @@ host.name: Nama
 host.name_placeholder: mis. Server Dev
 host.address: Alamat
 host.address_placeholder: "mis. 192.168.1.100:34123"
+host.default_hint: Masukkan alamat LAN, nama tailnet, atau URL tunnel Cloudflare beserta porta daemon — jenis transport terdeteksi darinya.
 host.token: Token
 host.token_placeholder: Token autentikasi daemon (opsional)
 host.save_and_connect: Simpan & Hubungkan
@@ -1495,6 +1496,7 @@ session.unpin: Lepas sematan
 session.archive: Arsipkan
 errors.update_task: "Tidak dapat memperbarui tugas: %{error}"
 host.transport: Transport
+host.transport_default: Default
 host.transport_direct: Langsung
 host.transport_tailscale: Tailscale
 host.transport_cloudflare: Cloudflare
@@ -1523,15 +1525,24 @@ daemon.hide_qr: Sembunyikan Kode QR
 daemon.qr_hint: Pindai ini dengan aplikasi Padu Mobile untuk menghubungkan perangkat ini — kode ini membawa alamat dan token, jadi tidak perlu mengetik apa pun.
 daemon.qr_unavailable: Alamat daemon ini tidak dapat dijadikan kode QR.
 daemon.qr_tailscale_name: Nama tailnet
+daemon.qr_direct_address: Alamat LAN
 daemon.qr_ssh_host: Host lompatan
 daemon.qr_ssh_port: Porta jarak jauh
+daemon.qr_need_direct: Masukkan alamat LAN mesin ini, mis. 192.168.1.10. Kosongkan untuk memakai hostname terdeteksi.
 daemon.qr_need_name: Masukkan nama tailnet yang akan dipakai perangkat lain.
 daemon.qr_need_host: Masukkan host lompatan yang akan dipakai perangkat lain.
 daemon.qr_need_port: Masukkan porta jarak jauh (1–65535).
+daemon.qr_direct_hint: Hanya satu Wi-Fi/LAN. Jaga exposure di jaringan tepercaya — kode ini ws:// polos dan membawa token akses penuh.
+daemon.qr_tailscale_hint: Kedua perangkat harus di tailnet yang sama dan exposure menyala. Isi MagicDNS (*.ts.net) atau IP 100.x.
+daemon.qr_cloudflare_hint: Butuh cloudflared di mesin ini. Tanpa jaringan bersama — tekan Mulai Tunnel, tunggu terhubung, lalu pindai. URL berubah setiap restart.
+daemon.qr_cloudflare_install: brew install cloudflared
+daemon.qr_title: Hubungkan perangkat lain
+daemon.qr_ssh_hint: Butuh relay SSH ke jump host milik Anda (GatewayPorts yes). Kode ini hanya menjelaskan wss://jump:port — jalankan relay dulu.
+daemon.qr_ssh_needs_relay: Jalankan relay SSH (Tambah Host → SSH) sebelum membagikan kode ini — kalau tidak, kode menunjuk ke porta tertutup.
 daemon.qr_needs_tunnel: Mulai tunnel untuk mendapatkan kode.
 daemon.qr_tunnel_starting: Memulai tunnel…
 daemon.qr_start_tunnel: Mulai Tunnel
 daemon.qr_restart_tunnel: Mulai Ulang Tunnel
 daemon.qr_tunnel_failed: "Tidak dapat memulai tunnel: %{error}"
-daemon.qr_field_placeholder: mis. my-mac.tail-abc.ts.net
+daemon.qr_field_placeholder: mis. 192.168.1.10 atau my-mac.tail-abc.ts.net
 daemon.qr_port_placeholder: mis. 19999
