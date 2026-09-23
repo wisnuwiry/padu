@@ -388,23 +388,25 @@ impl Padu {
         // Prefill wins over existing when opening a fresh dialog from the
         // credential card — address and token come from the live daemon, not
         // from a saved profile.
-        let (initial_name, initial_address, initial_token) = if let Some((addr, tok)) =
-            &request.prefill
-        {
-            (String::new(), addr.clone(), tok.clone())
-        } else {
-            (
-                existing.as_ref().map(|h| h.name.clone()).unwrap_or_default(),
-                existing
-                    .as_ref()
-                    .map(|h| h.address.clone())
-                    .unwrap_or_default(),
-                existing
-                    .as_ref()
-                    .and_then(|h| h.token.clone())
-                    .unwrap_or_default(),
-            )
-        };
+        let (initial_name, initial_address, initial_token) =
+            if let Some((addr, tok)) = &request.prefill {
+                (String::new(), addr.clone(), tok.clone())
+            } else {
+                (
+                    existing
+                        .as_ref()
+                        .map(|h| h.name.clone())
+                        .unwrap_or_default(),
+                    existing
+                        .as_ref()
+                        .map(|h| h.address.clone())
+                        .unwrap_or_default(),
+                    existing
+                        .as_ref()
+                        .and_then(|h| h.token.clone())
+                        .unwrap_or_default(),
+                )
+            };
 
         let initial_tab = existing
             .as_ref()
