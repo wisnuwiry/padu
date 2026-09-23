@@ -4,6 +4,9 @@ import { Stack } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
+  Linking,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -28,7 +31,7 @@ export default function ScanScreen() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const daemon = useDaemon();
-  const [permission, requestPermission] = useCameraPermissions();
+  const [permission, requestPermission, getPermission] = useCameraPermissions();
   const [scanning, setScanning] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -38,6 +41,14 @@ export default function ScanScreen() {
   useEffect(() => () => {
     if (unlockTimer.current) clearTimeout(unlockTimer.current);
   }, []);
+
+  // A grant made in Settings must take effect when the user comes back.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void getPermission();
+    });
+    return () => subscription.remove();
+  }, [getPermission]);
 
   function releaseSoon() {
     unlockTimer.current = setTimeout(() => setScanning(true), 1600);
@@ -73,6 +84,9 @@ export default function ScanScreen() {
 
   const frame = Math.min(260, width - 96);
   const live = (permission?.granted ?? false) && !mountFailed;
+  // Denied for good: the OS will not show the prompt again, so the only way
+  // back is the system settings app.
+  const blocked = permission !== null && !permission.granted && !permission.canAskAgain;
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.background }]}>
@@ -153,9 +167,11 @@ export default function ScanScreen() {
               </Text>
               <Text style={[styles.promptBody, { color: theme.textSecondary }]}>
                 {message
-                  ?? 'Padu needs the camera to scan the QR code. You can enter the link by hand instead.'}
+                  ?? (blocked
+                    ? 'Turn on camera access for Padu in Settings, or enter the link by hand.'
+                    : 'Padu needs the camera to scan the QR code. You can enter the link by hand instead.')}
               </Text>
-              {permission?.canAskAgain && (
+              {permission?.canAskAgain ? (
                 <Pressable
                   accessibilityLabel="Allow camera access"
                   accessibilityRole="button"
@@ -168,7 +184,20 @@ export default function ScanScreen() {
                     Allow camera access
                   </Text>
                 </Pressable>
-              )}
+              ) : blocked && Platform.OS !== 'web' ? (
+                <Pressable
+                  accessibilityLabel="Open settings"
+                  accessibilityRole="button"
+                  onPress={() => void Linking.openSettings()}
+                  style={({ pressed }) => [
+                    styles.promptAction,
+                    { backgroundColor: theme.inverse, opacity: pressed ? 0.78 : 1 },
+                  ]}>
+                  <Text style={[styles.promptActionText, { color: theme.onInverse }]}>
+                    Open Settings
+                  </Text>
+                </Pressable>
+              ) : null}
             </View>
           )}
         </View>
