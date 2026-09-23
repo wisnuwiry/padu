@@ -10,11 +10,13 @@ import {
   Platform,
   Pressable,
   RefreshControl,
+  ScrollView,
   SectionList,
   StyleSheet,
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -25,7 +27,7 @@ import { ProviderIcon, providerBrandColor } from '@/components/provider-icon';
 import { ConnectionStatus } from '@/components/connection-status';
 import { RenameDialog } from '@/components/rename-dialog';
 import { Sheet, SheetRow } from '@/components/sheet';
-import { NativeTint, Radius, Spacing } from '@/constants/theme';
+import { MaxContentWidth, NativeTint, Radius, Spacing } from '@/constants/theme';
 import { useTaskState } from '@/hooks/use-daemon-data';
 import { useTheme } from '@/hooks/use-theme';
 import { useDaemon } from '@/lib/daemon-context';
@@ -97,43 +99,47 @@ export default function TasksScreen() {
     );
   }
 
+  const showOnboarding = !daemon.profiles.length && daemon.phase !== 'booting';
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={[styles.screen, { backgroundColor: theme.background }]}>
-      <View
-        pointerEvents="box-none"
-        style={[styles.floatingActions, { top: insets.top + DaemonPickerTop }]}>
-        <GlassSurface interactive style={styles.daemonButton}>
-          <Pressable
-            accessibilityHint="Opens the daemon switcher"
-            accessibilityLabel={daemon.activeProfile
-              ? `Connected daemon: ${daemon.activeProfile.name}`
-              : 'Add a daemon'}
-            accessibilityRole="button"
-            hitSlop={8}
-            onPress={() => router.push('/daemons')}
-            style={({ pressed }) => [styles.daemonButtonInner, { opacity: pressed ? 0.62 : 1 }]}>
-            {daemon.activeProfile ? <ConnectionStatus compact phase={daemon.phase} /> : (
+      {!showOnboarding && (
+        <View
+          pointerEvents="box-none"
+          style={[styles.floatingActions, { top: insets.top + DaemonPickerTop }]}>
+          <GlassSurface interactive style={styles.daemonButton}>
+            <Pressable
+              accessibilityHint="Opens the daemon switcher"
+              accessibilityLabel={daemon.activeProfile
+                ? `Connected daemon: ${daemon.activeProfile.name}`
+                : 'Add a daemon'}
+              accessibilityRole="button"
+              hitSlop={8}
+              onPress={() => router.push('/daemons')}
+              style={({ pressed }) => [styles.daemonButtonInner, { opacity: pressed ? 0.62 : 1 }]}>
+              {daemon.activeProfile ? <ConnectionStatus compact phase={daemon.phase} /> : (
+                <AppSymbol
+                  name={{ ios: 'plus', android: 'add', web: 'add' }}
+                  size={14}
+                  tintColor={theme.text}
+                />
+              )}
+              <Text numberOfLines={1} style={[styles.daemonButtonText, { color: theme.text }]}>
+                {daemon.activeProfile?.name ?? 'Add daemon'}
+              </Text>
               <AppSymbol
-                name={{ ios: 'plus', android: 'add', web: 'add' }}
-                size={14}
-                tintColor={theme.text}
+                name={{ ios: 'chevron.down', android: 'keyboard_arrow_down', web: 'keyboard_arrow_down' }}
+                size={12}
+                tintColor={theme.textTertiary}
               />
-            )}
-            <Text numberOfLines={1} style={[styles.daemonButtonText, { color: theme.text }]}>
-              {daemon.activeProfile?.name ?? 'Add daemon'}
-            </Text>
-            <AppSymbol
-              name={{ ios: 'chevron.down', android: 'keyboard_arrow_down', web: 'keyboard_arrow_down' }}
-              size={12}
-              tintColor={theme.textTertiary}
-            />
-          </Pressable>
-        </GlassSurface>
-      </View>
+            </Pressable>
+          </GlassSurface>
+        </View>
+      )}
 
-      {!daemon.profiles.length && daemon.phase !== 'booting' ? (
+      {showOnboarding ? (
         <Onboarding />
       ) : (
         <SectionList
@@ -281,41 +287,117 @@ export default function TasksScreen() {
 
 function Onboarding() {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const wide = width >= 640;
   return (
-    <View style={styles.onboarding}>
-      <Image
-        accessibilityLabel="Padu"
-        source={require('@/assets/images/icon.png')}
-        style={styles.appIcon}
-      />
-      <Text style={[styles.onboardingTitle, { color: theme.text }]}>Your agents, everywhere.</Text>
-      <Text style={[styles.onboardingBody, { color: theme.textSecondary }]}>
-        Connect to Padu running on your Mac, workstation, or private server. Add more than one and
-        switch whenever you need.
-      </Text>
-      <Pressable
-        accessibilityRole="button"
-        onPress={() => router.push('/daemon-editor')}
-        style={({ pressed }) => [
-          styles.primaryButton,
-          { backgroundColor: theme.inverse, opacity: pressed ? 0.78 : 1 },
+    <ScrollView
+      contentContainerStyle={[
+        styles.onboardingContent,
+        {
+          paddingBottom: insets.bottom + Spacing.five,
+          paddingTop: insets.top + Spacing.four,
+        },
+      ]}
+      showsVerticalScrollIndicator={false}>
+      <View
+        style={[
+          styles.onboardingColumn,
+          { paddingHorizontal: wide ? Spacing.five : Spacing.four },
         ]}>
-        <AppSymbol
-          name={{ ios: 'plus', android: 'add', web: 'add' }}
-          size={17}
-          tintColor={theme.onInverse}
+        <Image
+          accessibilityLabel="Padu"
+          source={require('@/assets/images/icon.png')}
+          style={styles.appIcon}
         />
-        <Text style={[styles.primaryButtonText, { color: theme.onInverse }]}>Add a daemon</Text>
-      </Pressable>
-      <View style={styles.securityNote}>
-        <AppSymbol
-          name={{ ios: 'lock.shield', android: 'shield_lock', web: 'lock' }}
-          size={15}
-          tintColor={theme.textTertiary}
-        />
-        <Text style={[styles.securityText, { color: theme.textTertiary }]}>
-          Tokens stay on this device and go directly to the host you choose.
+        <Text style={[styles.onboardingTitle, { color: theme.text }]}>Your agents, everywhere.</Text>
+        <Text style={[styles.onboardingBody, { color: theme.textSecondary }]}>
+          Connect to Padu running on your Mac, workstation, or private server. Add more than one and
+          switch whenever you need.
         </Text>
+
+        <View style={styles.onboardingCards}>
+          <OnboardingHighlight
+            description="Padu lives on your computer, workstation, or private server — the phone just drives it."
+            icon={{ ios: 'laptopcomputer', android: 'laptop_mac', web: 'laptop_mac' }}
+            title="Runs on your machine"
+          />
+          <OnboardingHighlight
+            description="Save several hosts and move between them without re-entering credentials."
+            icon={{ ios: 'arrow.left.arrow.right', android: 'swap_horiz', web: 'swap_horiz' }}
+            title="Switch anytime"
+          />
+          <OnboardingHighlight
+            description="Tokens stay in this device’s keychain and go straight to the host you choose."
+            icon={{ ios: 'lock.shield', android: 'shield_lock', web: 'lock' }}
+            title="Private by default"
+          />
+        </View>
+
+        <View style={styles.onboardingActions}>
+          <Pressable
+            accessibilityHint="Opens the daemon editor"
+            accessibilityLabel="Add a daemon"
+            accessibilityRole="button"
+            onPress={() => router.push('/daemon-editor')}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              { backgroundColor: theme.inverse, opacity: pressed ? 0.78 : 1 },
+            ]}>
+            <AppSymbol
+              name={{ ios: 'plus', android: 'add', web: 'add' }}
+              size={17}
+              tintColor={theme.onInverse}
+            />
+            <Text style={[styles.primaryButtonText, { color: theme.onInverse }]}>Add a daemon</Text>
+          </Pressable>
+          <Pressable
+            accessibilityHint="Import a daemon from the desktop’s QR code"
+            accessibilityLabel="Import from link"
+            accessibilityRole="button"
+            onPress={() => router.push('/daemon-import')}
+            style={({ pressed }) => [
+              styles.secondaryButton,
+              {
+                backgroundColor: pressed ? theme.overlayStrong : theme.surface,
+                borderColor: theme.borderStrong,
+              },
+            ]}>
+            <AppSymbol
+              name={{ ios: 'qrcode.viewfinder', android: 'qr_code_scanner', web: 'qr_code_scanner' }}
+              size={16}
+              tintColor={theme.textSecondary}
+            />
+            <Text style={[styles.secondaryButtonText, { color: theme.text }]}>Import from link</Text>
+          </Pressable>
+        </View>
+      </View>
+    </ScrollView>
+  );
+}
+
+function OnboardingHighlight({
+  description,
+  icon,
+  title,
+}: {
+  description: string;
+  icon: Parameters<typeof AppSymbol>[0]['name'];
+  title: string;
+}) {
+  const theme = useTheme();
+  return (
+    <View style={[styles.highlight, { backgroundColor: theme.raised, borderColor: theme.border }]}>
+      <View
+        style={[
+          styles.highlightIcon,
+          { backgroundColor: theme.background, borderColor: theme.borderStrong },
+        ]}>
+        <AppSymbol name={icon} size={15} tintColor={theme.textSecondary} />
+      </View>
+      <View style={styles.highlightCopy}>
+        <Text style={[styles.highlightTitle, { color: theme.text }]}>{title}</Text>
+        <Text style={[styles.highlightBody, { color: theme.textSecondary }]}>{description}</Text>
       </View>
     </View>
   );
@@ -510,40 +592,57 @@ const styles = StyleSheet.create({
     marginHorizontal: Spacing.three,
     marginTop: 18,
   },
-  onboarding: {
-    alignItems: 'center',
-    flex: 1,
-    justifyContent: 'center',
-    paddingBottom: 48,
-    paddingHorizontal: 34,
-  },
-  appIcon: { borderRadius: 18, height: 72, marginBottom: 24, width: 72 },
+  onboardingContent: { alignItems: 'center', flexGrow: 1, justifyContent: 'center' },
+  onboardingColumn: { alignItems: 'center', maxWidth: MaxContentWidth, width: '100%' },
+  appIcon: { borderRadius: Radius.large, height: 72, marginBottom: Spacing.four, width: 72 },
   onboardingTitle: { fontSize: 28, fontWeight: '700', letterSpacing: -0.7, textAlign: 'center' },
   onboardingBody: {
-    fontSize: 16,
-    lineHeight: 23,
-    marginTop: 10,
-    maxWidth: 440,
+    fontSize: 15,
+    lineHeight: 21,
+    marginTop: Spacing.two,
+    maxWidth: 360,
     textAlign: 'center',
   },
+  onboardingCards: { gap: Spacing.two, marginTop: Spacing.five, maxWidth: 420, width: '100%' },
+  highlight: {
+    alignItems: 'flex-start',
+    borderRadius: Radius.medium,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: 12,
+    padding: 12,
+  },
+  highlightIcon: {
+    alignItems: 'center',
+    borderRadius: Radius.small,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 30,
+    justifyContent: 'center',
+    width: 30,
+  },
+  highlightCopy: { flex: 1, gap: Spacing.half, minWidth: 0 },
+  highlightTitle: { fontSize: 15, fontWeight: '600' },
+  highlightBody: { fontSize: 12.5, lineHeight: 17 },
+  onboardingActions: { gap: Spacing.two, marginTop: Spacing.five, maxWidth: 420, width: '100%' },
   primaryButton: {
     alignItems: 'center',
-    borderRadius: Radius.pill,
+    borderRadius: Radius.large,
     flexDirection: 'row',
-    gap: 8,
-    marginTop: 28,
+    gap: Spacing.two,
+    justifyContent: 'center',
     minHeight: 50,
-    paddingHorizontal: 22,
   },
-  primaryButtonText: { fontSize: 16, fontWeight: '700' },
-  securityNote: {
-    alignItems: 'flex-start',
+  primaryButtonText: { fontSize: 15, fontWeight: '700' },
+  secondaryButton: {
+    alignItems: 'center',
+    borderRadius: Radius.large,
+    borderWidth: 1.5,
     flexDirection: 'row',
-    gap: 8,
-    marginTop: 24,
-    maxWidth: 330,
+    gap: Spacing.two,
+    justifyContent: 'center',
+    minHeight: 50,
   },
-  securityText: { flex: 1, fontSize: 12, lineHeight: 17 },
+  secondaryButtonText: { fontSize: 15, fontWeight: '600' },
   emptyState: {
     alignItems: 'center',
     flex: 1,
