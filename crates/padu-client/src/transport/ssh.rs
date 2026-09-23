@@ -164,8 +164,20 @@ impl Transport for SshTransport {
         // `Failed` rather than leaving the UI claiming a live tunnel. The
         // task owns the child from here; `status()` reaps it.
         let watcher_status = self.status.clone();
+        let watcher_pid = self.pid.clone();
         smol::spawn(async move {
             let outcome = child.status().await;
+            // The child is reaped here, so clear the stored PID only when it
+            // still matches this child. A restart may have installed a new
+            // PID (or `stop()` already took it); clearing unconditionally
+            // would drop the new owner's handle, and leaving a stale PID
+            // would let a later `stop()` signal a reused PID.
+            {
+                let mut pid_guard = watcher_pid.lock();
+                if *pid_guard == Some(pid) {
+                    *pid_guard = None;
+                }
+            }
             let mut guard = watcher_status.lock();
             if !matches!(
                 *guard,

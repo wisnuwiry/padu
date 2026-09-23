@@ -256,7 +256,13 @@ impl Transport for CloudflareTransport {
                             .name("cloudflared-drain".into())
                             .spawn(move || while line_rx.recv().is_ok() {})
                             .map_err(|e| TransportError::Io(e.to_string()))?;
-                        watch_child(child, self.status.clone(), "cloudflared");
+                        watch_child(
+                            child,
+                            self.status.clone(),
+                            self.pid.clone(),
+                            pid,
+                            "cloudflared",
+                        );
                         return Ok(TransportHandle {
                             address,
                             qr_payload,

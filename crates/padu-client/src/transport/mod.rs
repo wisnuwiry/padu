@@ -145,12 +145,25 @@ impl From<std::io::Error> for TransportError {
 pub(crate) fn watch_child(
     mut child: std::process::Child,
     status: Arc<Mutex<TransportStatus>>,
+    pid_state: Arc<Mutex<Option<u32>>>,
+    expected_pid: u32,
     label: &'static str,
 ) {
     let spawned = std::thread::Builder::new()
         .name(format!("{label}-watch"))
         .spawn(move || {
             let outcome = child.wait();
+            // The child is reaped here, so its PID can be recycled by the OS.
+            // Clear the stored PID only when it still matches this child;
+            // otherwise a restart has already installed a new PID (or `stop()`
+            // already took it) and we must not touch it. This guarantees a
+            // later `stop()`/`shutdown_all()` cannot signal a reused PID.
+            {
+                let mut pid_guard = pid_state.lock();
+                if *pid_guard == Some(expected_pid) {
+                    *pid_guard = None;
+                }
+            }
             let mut guard = status.lock();
             if !matches!(
                 *guard,
@@ -569,7 +582,9 @@ mod tests {
             address: "wss://dead.test".into(),
         }));
         let child = std::process::Command::new("true").spawn().unwrap();
-        watch_child(child, status.clone(), "test");
+        let pid_state = Arc::new(Mutex::new(Some(child.id())));
+        let expected = pid_state.lock().expect("pid set");
+        watch_child(child, status.clone(), pid_state.clone(), expected, "test");
 
         let deadline = Instant::now() + std::time::Duration::from_secs(5);
         while Instant::now() < deadline {
@@ -582,6 +597,11 @@ mod tests {
             matches!(*status.lock(), TransportStatus::Failed { .. }),
             "a dead child must flip the status to Failed"
         );
+        assert_eq!(
+            *pid_state.lock(),
+            None,
+            "a reaped child must clear its PID so shutdown cannot signal a reused PID"
+        );
     }
 
     #[cfg(unix)]
@@ -591,7 +611,9 @@ mod tests {
         // watcher must not overwrite it with a failure.
         let status = Arc::new(Mutex::new(TransportStatus::Stopped));
         let child = std::process::Command::new("true").spawn().unwrap();
-        watch_child(child, status.clone(), "test");
+        let pid_state = Arc::new(Mutex::new(None));
+        let expected = child.id();
+        watch_child(child, status.clone(), pid_state.clone(), expected, "test");
 
         std::thread::sleep(std::time::Duration::from_millis(200));
         assert!(matches!(*status.lock(), TransportStatus::Stopped));
