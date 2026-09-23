@@ -280,6 +280,7 @@ daemon.status_exposed: 公開中
 daemon.status_restarting: 再起動中
 daemon.connection_title: ネットワークとオリジンポリシー
 daemon.connection_description: ブラウザのオリジンは完全一致が必要です。複数指定する場合はカンマで区切ります。
+daemon.connection_details: 接続の詳細
 daemon.port: ポート
 daemon.port_description: 公開中は、すべてのネットワークインターフェイスのこのポートで待ち受けます。
 daemon.port_placeholder: "34123"

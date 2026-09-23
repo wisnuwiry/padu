@@ -275,6 +275,7 @@ daemon.status_exposed: Terekspos
 daemon.status_restarting: Memulai ulang
 daemon.connection_title: Kebijakan Jaringan & Origin
 daemon.connection_description: Origin browser harus cocok persis. Pisahkan beberapa origin dengan tanda koma.
+daemon.connection_details: Detail koneksi
 daemon.port: Port
 daemon.port_description: Padu mendengarkan pada semua antarmuka jaringan di port ini selama eksposur diaktifkan.
 daemon.port_placeholder: 34123

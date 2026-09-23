@@ -276,6 +276,7 @@ daemon.status_exposed: 已暴露
 daemon.status_restarting: 正在重启
 daemon.connection_title: 网络与来源策略
 daemon.connection_description: 浏览器来源必须完全匹配。多个来源请用逗号分隔。
+daemon.connection_details: 连接详情
 daemon.port: 端口
 daemon.port_description: 启用暴露后，Padu 会在所有网络接口的此端口上监听。
 daemon.port_placeholder: "34123"
