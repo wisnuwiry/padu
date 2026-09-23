@@ -13,6 +13,8 @@ import { MarkdownView, TranscriptLinkContext } from '@/components/markdown-view'
 import { PreviewableImage } from '@/components/image-preview'
 import { FileTypeIcon, PaduIcon, type PaduIconName } from '@/components/padu-icon'
 import { Kbd } from '@/components/ui/kbd'
+import { useStoredBoolean } from '@/components/settings/shared'
+import { CODE_WORD_WRAP_KEY, codeOverflow } from '@/lib/appearance'
 import { readAttachmentImage } from '@/lib/attachments'
 import { useDaemon } from '@/lib/daemon-context'
 import { activitiesForBlock } from '@/lib/event-reducer'
@@ -1730,6 +1732,7 @@ function ActivityDiffView({
   t: Translator
 }) {
   const diff = useMemo(() => activityDiffSnapshot(activity), [activity])
+  const [wordWrap] = useStoredBoolean(CODE_WORD_WRAP_KEY, true)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [edges, setEdges] = useState({ atTop: true, atBottom: true })
 
@@ -1820,7 +1823,10 @@ function ActivityDiffView({
               </div>
               <div
                 className={cn(
-                  'min-w-0 flex-1 pl-2 pr-3 whitespace-pre overflow-x-auto',
+                  'min-w-0 flex-1 pl-2 pr-3',
+                  wordWrap
+                    ? 'whitespace-pre-wrap break-words'
+                    : 'whitespace-pre overflow-x-auto',
                   isAddition && 'text-foreground',
                   isDeletion && 'text-foreground',
                   !isAddition && !isDeletion && 'text-[var(--text-secondary)]',
@@ -1918,6 +1924,7 @@ function ActivitySection({
   const [copied, setCopied] = useState(false)
   const copiedTimeout = useRef<number | null>(null)
   const themeType = useResolvedTheme()
+  const [wordWrap] = useStoredBoolean(CODE_WORD_WRAP_KEY, true)
   const lang = activitySectionLanguage(activity, section.kind, section.content)
 
   useEffect(() => () => {
@@ -1982,10 +1989,10 @@ function ActivitySection({
                 contents: section.content,
               }}
               options={{
-                overflow: 'wrap',
-                preferredHighlighter: 'shiki-js',
                 disableFileHeader: true,
                 disableLineNumbers: true,
+                overflow: codeOverflow(wordWrap),
+                preferredHighlighter: 'shiki-js',
                 themeType,
               }}
             />
@@ -2022,10 +2029,19 @@ function ActivitySectionText({
   label: string | null
   t: Translator
 }) {
+  const [wordWrap] = useStoredBoolean(CODE_WORD_WRAP_KEY, true)
+  // Same choice as every other code surface: wrap long lines, or keep them on
+  // one line and pan.
+  const lineClassName = wordWrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'
   const rows = activityTextRows(content)
   if (!shouldVirtualizeActivityText(content, rows)) {
     return (
-      <pre className="max-h-72 min-w-0 overflow-auto whitespace-pre-wrap break-words font-mono text-[10.5px] leading-4">
+      <pre
+        className={cn(
+          'max-h-72 min-w-0 overflow-auto font-mono text-[10.5px] leading-4',
+          lineClassName,
+        )}
+      >
         {content}
       </pre>
     )
@@ -2040,7 +2056,7 @@ function ActivitySectionText({
       defaultItemHeight={16}
       increaseViewportBy={128}
       itemContent={(_, row) => (
-        <div className="min-h-4 whitespace-pre-wrap break-words">{row || '\u00a0'}</div>
+        <div className={cn('min-h-4', lineClassName)}>{row || '\u00a0'}</div>
       )}
     />
   )
