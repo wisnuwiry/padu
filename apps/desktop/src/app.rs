@@ -1117,6 +1117,12 @@ pub struct Padu {
     /// Cached once at construction for the Daemon settings connection URL;
     /// rendering must not query account or network configuration.
     daemon_hostname: String,
+    /// LAN IPv4 detected once at construction via the default route. Used as
+    /// the Direct tab's default so the user does not have to type 192.168.x.x.
+    daemon_lan_address: Option<String>,
+    /// Whether the credentials card's "Details to connect" disclosure is open.
+    /// Collapsed by default so the token stays out of sight until requested.
+    daemon_connection_details_expanded: bool,
     /// Session details currently being fetched from the daemon. Sidebar rows
     /// stay usable while the selected transcript hydrates asynchronously.
     session_hydrations: HashSet<Uuid>,
@@ -2440,6 +2446,7 @@ impl Padu {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let store = StateStore::remote(daemon.clone());
         let daemon_hostname = crate::daemon::local_hostname().unwrap_or_else(|| "this-mac".into());
+        let daemon_lan_address = crate::daemon::local_lan_address();
         let composer_draft_store = ComposerDraftStore::remote(daemon.clone());
         let composer_drafts = composer_draft_store.load().unwrap_or_default();
         let mut state = store.load_or_fresh(cwd);
@@ -2831,8 +2838,18 @@ impl Padu {
             .and_then(|state| state.0.as_ref())
             .map(|updater| (updater.status(), Some(updater.events())))
             .unwrap_or_default();
-        let qr_field_input =
-            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("daemon.qr_field_placeholder")));
+        // Pre-fill the Direct tab with the auto-detected LAN address so the
+        // QR works without typing. Tailscale/SSH still start blank — they
+        // need a MagicDNS or jump host the route probe cannot know.
+        let daemon_lan_prefill = daemon_lan_address.clone().unwrap_or_default();
+        let qr_field_input = cx.new(|cx| {
+            let mut input =
+                TextInput::new(window, cx).placeholder(tr!("daemon.qr_field_placeholder"));
+            if !daemon_lan_prefill.trim().is_empty() {
+                input.set_content(daemon_lan_prefill.clone(), cx);
+            }
+            input
+        });
         let qr_port_input = cx.new(|cx| {
             let mut input =
                 TextInput::new(window, cx).placeholder(tr!("daemon.qr_port_placeholder"));
@@ -3327,6 +3344,8 @@ impl Padu {
                 daemon,
                 local_daemon,
                 daemon_hostname,
+                daemon_lan_address,
+                daemon_connection_details_expanded: false,
                 session_hydrations: HashSet::new(),
                 pending_session_activation: None,
                 analytics,

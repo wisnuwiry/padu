@@ -356,8 +356,10 @@ impl Padu {
         cx.notify();
     }
 
-    /// Open the host dialog with `address` and `token` already filled in —
-    /// used by the "Add as Remote Host" shortcut in the daemon credential card.
+    /// Open the host dialog with `address` and `token` already filled in.
+    /// Kept for web parity and future credential-card shortcuts; the current
+    /// card exposes manual details instead of an inline add button.
+    #[allow(dead_code)]
     pub(crate) fn request_host_dialog_prefilled(
         &mut self,
         address: String,

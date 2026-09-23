@@ -1080,64 +1080,13 @@ impl Padu {
             .unwrap_or_default();
         drop(cache);
 
-        let address_click = address.clone();
-        let token_click = token.to_owned();
-        let address_key = address.clone();
-        let token_key = token.to_owned();
-
-        left = left
-            .child(
-                div()
-                    .font_family(crate::md::render::MONO_FAMILY)
-                    .text_size(sp(11.5))
-                    .text_color(theme.text_secondary)
-                    .truncate()
-                    .child(SharedString::from(address)),
-            )
-            // "Add as Remote Host" shortcut: opens the host dialog pre-filled
-            // with the credential so the user only types a friendly name.
-            .child(
-                div()
-                    .id("daemon-add-as-host-btn")
-                    .tab_index(0)
-                    .h(px(26.0))
-                    .px(px(10.0))
-                    .rounded(px(6.0))
-                    .border_1()
-                    .border_color(theme.border_strong)
-                    .flex()
-                    .items_center()
-                    .gap(px(5.0))
-                    .cursor_pointer()
-                    .text_size(sp(12.0))
-                    .text_color(theme.text_secondary)
-                    .hover(|e| e.bg(theme.overlay).text_color(theme.text))
-                    .focus_visible(|style| style.border_color(theme.accent))
-                    .child(icon("icons/plus.svg", 10.0, theme.text_tertiary))
-                    .child(tr!("daemon.add_as_remote_host"))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.request_host_dialog_prefilled(
-                            address_click.clone(),
-                            token_click.clone(),
-                            cx,
-                        );
-                    }))
-                    .on_key_down(cx.listener({
-                        move |this, event: &KeyDownEvent, _, cx| {
-                            if !event.keystroke.modifiers.modified()
-                                && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                            {
-                                this.request_host_dialog_prefilled(
-                                    address_key.clone(),
-                                    token_key.clone(),
-                                    cx,
-                                );
-                                cx.stop_propagation();
-                            }
-                        }
-                    })),
-            )
-            .child(render_qr_centered(&svg, theme));
+        // The raw `ws://` address stays out of the Direct tab — it is
+        // redundant with the QR and the expandable details below, and showing
+        // a plain-text URL next to a full-access token invites copy-paste
+        // over an untrusted channel. Other transports keep the same treatment:
+        // the QR is for scanning, the details disclosure is for typing.
+        left = left.child(render_qr_centered(&svg, theme));
+        left = left.child(self.render_daemon_connection_details(&address, token, &theme, cx));
         if self.daemon_qr_transport == HostKind::SshRelay {
             // The credential panel does not provision `ssh -R` itself — the
             // QR only *describes* the jump-host address. Without a running
@@ -1155,6 +1104,172 @@ impl Padu {
                 .child(left)
                 .child(right),
         )
+    }
+
+    /// Expandable manual-connection details: the QR is for scanning, this is
+    /// for typing. Collapsed by default so the token stays out of sight, and
+    /// each row carries its own copy button with inline copied feedback.
+    fn render_daemon_connection_details(
+        &self,
+        address: &str,
+        token: &str,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let expanded = self.daemon_connection_details_expanded;
+        let mut card = div()
+            .rounded(px(8.0))
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.surface)
+            .w_full()
+            .min_w_0();
+        let header = div()
+            .id("daemon-connection-details-toggle")
+            .tab_index(0)
+            .px(px(10.0))
+            .py(px(8.0))
+            .w_full()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .cursor_pointer()
+            .hover(|e| e.bg(theme.overlay.opacity(0.5)))
+            .focus_visible(|style| style.border_color(theme.accent))
+            .child(icon(
+                if expanded {
+                    "icons/chevron-down.svg"
+                } else {
+                    "icons/chevron-right.svg"
+                },
+                12.0,
+                theme.text_tertiary,
+            ))
+            .child(
+                div()
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(tr!("daemon.connection_details")),
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.daemon_connection_details_expanded = !this.daemon_connection_details_expanded;
+                cx.notify();
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if !event.keystroke.modifiers.modified()
+                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                {
+                    this.daemon_connection_details_expanded =
+                        !this.daemon_connection_details_expanded;
+                    cx.notify();
+                    cx.stop_propagation();
+                }
+            }));
+        card = card.child(header);
+        if expanded {
+            card = card
+                .child(div().h(px(1.0)).w_full().bg(theme.border.opacity(0.7)))
+                .child(self.daemon_detail_copy_row(
+                    "daemon-connection-details-address",
+                    tr!("daemon.websocket_url"),
+                    address,
+                    tr!("daemon.url_copied"),
+                    theme,
+                    cx,
+                ))
+                .child(self.daemon_detail_copy_row(
+                    "daemon-connection-details-token",
+                    tr!("daemon.token"),
+                    token,
+                    tr!("daemon.token_copied"),
+                    theme,
+                    cx,
+                ));
+        }
+        card
+    }
+
+    /// One copyable row inside the connection details: label + mono value on
+    /// the left, copy/check icon button on the right. Keyboard-operable so a
+    /// screen-reader-adjacent flow (tab + enter) works like the mouse.
+    fn daemon_detail_copy_row(
+        &self,
+        id: &str,
+        label: String,
+        value: &str,
+        copied_toast: String,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let copied = self.control_was_copied(id);
+        let copy_value = value.to_owned();
+        let copy_toast = copied_toast.clone();
+        let copy_id = id.to_owned();
+        let copy_value_key = value.to_owned();
+        let copy_id_key = id.to_owned();
+        let copy_button = icon_button(
+            SharedString::from(id.to_owned()),
+            if copied {
+                "icons/check.svg"
+            } else {
+                "icons/copy.svg"
+            },
+            *theme,
+        )
+        .tab_index(0)
+        .focus_visible(|style| style.border_color(theme.accent))
+        .tooltip(Tooltip::text(if copied {
+            tr!("common.copied")
+        } else {
+            tr!("common.copy")
+        }))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string(copy_value.clone()));
+            this.show_control_copied(copy_id.clone(), cx);
+            this.show_success_toast(copy_toast.clone());
+        }))
+        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+            if !event.keystroke.modifiers.modified()
+                && matches!(event.keystroke.key.as_str(), "enter" | "space")
+            {
+                cx.write_to_clipboard(ClipboardItem::new_string(copy_value_key.clone()));
+                this.show_control_copied(copy_id_key.clone(), cx);
+                cx.stop_propagation();
+            }
+        }));
+        div()
+            .px(px(10.0))
+            .py(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .min_w_0()
+            .w_full()
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .child(
+                        div()
+                            .text_size(sp(11.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text_tertiary)
+                            .child(label),
+                    )
+                    .child(
+                        div()
+                            .font_family(crate::md::render::MONO_FAMILY)
+                            .text_size(sp(12.0))
+                            .text_color(theme.text)
+                            .truncate()
+                            .child(SharedString::from(value.to_owned())),
+                    ),
+            )
+            .child(copy_button)
     }
 
     /// The address another device should use for the selected transport.
@@ -1177,7 +1292,12 @@ impl Padu {
             HostKind::Direct => {
                 let raw = field();
                 let host = if raw.is_empty() {
-                    self.daemon_hostname.clone()
+                    // Auto-detected LAN IP first (see `Padu::new`), hostname
+                    // as the offline fallback.
+                    self.daemon_lan_address
+                        .clone()
+                        .filter(|candidate| !candidate.trim().is_empty())
+                        .unwrap_or_else(|| self.daemon_hostname.clone())
                 } else {
                     strip_scheme(&raw)
                 };

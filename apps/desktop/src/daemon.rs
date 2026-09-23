@@ -97,6 +97,32 @@ pub fn local_hostname() -> Option<String> {
         .find(|hostname| !hostname.is_empty())
 }
 
+/// Detect this machine's LAN IPv4 address once during app construction.
+///
+/// Uses a UDP socket bound to `0.0.0.0:0` and "connected" to a public IP.
+/// No packet is sent — `connect` on a datagram socket only selects the
+/// default route — so this is a cheap, synchronous, cross-platform way to
+/// learn which local address another LAN device should use. Returns `None`
+/// when offline or when only loopback is available. Callers must cache the
+/// result; render frames must never do network I/O.
+pub fn local_lan_address() -> Option<String> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    // 8.8.8.8:80 is never contacted; it only forces route selection.
+    socket.connect("8.8.8.8:80").ok()?;
+    let ip = socket.local_addr().ok()?.ip();
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            if v4.is_loopback() || v4.is_unspecified() {
+                return None;
+            }
+            Some(v4.to_string())
+        }
+        // Prefer IPv4 for Direct LAN codes; an IPv6-only route would need
+        // bracket formatting and is still unreachable for most phones.
+        std::net::IpAddr::V6(_) => None,
+    }
+}
+
 fn daemon_executable_path() -> anyhow::Result<PathBuf> {
     if let Some(path) = std::env::var_os("PADU_DAEMON_PATH").filter(|path| !path.is_empty()) {
         return Ok(path.into());

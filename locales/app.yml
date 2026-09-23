@@ -671,7 +671,7 @@ daemon.qr_ssh_host:
 daemon.qr_ssh_port:
   en: Remote port
 daemon.qr_need_direct:
-  en: Enter this machine's LAN address, e.g. 192.168.1.10. Leave blank to use the detected hostname.
+  en: Enter this machine's LAN address, e.g. 192.168.1.10. Auto-detected from your network — leave as is unless it looks wrong.
 daemon.qr_need_name:
   en: Enter the tailnet name another device should use.
 daemon.qr_need_host:
@@ -710,6 +710,8 @@ daemon.qr_unavailable:
   en: This daemon address cannot be encoded as a QR code.
 daemon.qr_hint:
   en: Scan this with the Padu mobile app to connect this device — it carries the address and token, so nothing needs typing.
+daemon.connection_details:
+  en: Details to connect
 daemon.add_as_remote_host:
   en: Add as Remote Host
 host.hosts:
