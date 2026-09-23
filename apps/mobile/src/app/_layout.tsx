@@ -81,7 +81,7 @@ function AppNavigator() {
       <Stack.Screen name="index" options={{ headerShown: false, title: "Padu" }} />
       <Stack.Screen
         name="daemons"
-        options={{ headerLargeTitle: true, title: "Daemons" }}
+        options={{ headerShown: false, title: "Daemons" }}
       />
       <Stack.Screen name="new-task" options={{ headerShown: false }} />
       <Stack.Screen
