@@ -81,6 +81,32 @@
   models remain consistent across both surfaces, while respecting native GPUI
   idioms in `apps/desktop/` and modern web patterns in `apps/web/`.
 
+## Mobile UI
+
+- Treat `apps/mobile/` as the third surface of the same product. A mobile screen
+  must read as the same product as `apps/desktop/` and `apps/web/`, reusing the
+  same semantic color roles and the same hierarchy.
+- Take colors, spacing, and radii from `@/constants/theme` through `useTheme()`.
+  No literal hex or magic pixel values; `constants/theme.ts` is generated from
+  `themes.json`, so edit that and run `bun run theme:generate && bun run theme:check`.
+  Adding a base token also means updating the hand-written mirrors in
+  `apps/web/src/styles.css` and `apps/desktop/src/theme.rs`.
+- Adapt to **window width only** — never to device model, hinge, or orientation.
+  Read size with `useWindowDimensions()`; `Dimensions.get('screen')` is a defect
+  because it ignores fold state, Android split-screen, and iPad multitasking.
+- Support the whole range: phone portrait and landscape, flip cover screen,
+  flip/fold unfolded, half-open fold, and tablet in both orientations — down to
+  ~320pt wide and at 200% font scale, with nothing clipped and every action
+  still reachable.
+- On a wide window (≥ 1024) cap and center the reading column at
+  `MaxContentWidth`; a tablet is the same column with more margin, not a
+  stretched phone. Two panes are allowed only when they fit the desktop's
+  minima.
+- Every control carries `accessibilityRole`, an `accessibilityLabel`, and a
+  ≥ 44pt target; gate decorative motion on `useReducedMotion()`.
+- Full rules, token tables, and the required device matrix:
+  `.agents/skills/mobile-ui/SKILL.md`.
+
 ## Product reference
 
 - Use [T3 Code](https://github.com/pingdotgg/t3code) source code on github as a reference when a task
@@ -140,6 +166,9 @@ Use the specialized skills in `.agents/skills/` for core tasks:
   Implement and test AI agent provider drivers in `crates/padu-core/src/driver/`.
 - **`multiplatform-release`** (`.agents/skills/multiplatform-release/SKILL.md`):
   Package and test macOS, Linux, and Windows release bundles and appcasts.
+- **`mobile-ui`** (`.agents/skills/mobile-ui/SKILL.md`):
+  Keep `apps/mobile/` on one-product tokens with adaptive phone / flip-fold /
+  tablet layouts and the desktop-consistent hierarchy.
 
 ## Commit guidelines
 
