@@ -85,6 +85,36 @@ Visual validation on a device/simulator happens **only when the user asks**
 (see `AGENTS.md` → Development runtime). A passing typecheck is not evidence
 that a layout is clean at 320pt or on a tablet.
 
+## Native modules (Expo)
+
+Expo is the mobile tree's alone. `expo-*` dependencies belong in
+`apps/mobile/package.json` only — never add one to `apps/web/` or
+`apps/desktop/`, and never import `expo-*` from outside `apps/mobile/src/`. A
+native capability (camera, haptics, keychain) is platform-exclusive by design,
+so it is the one case that does **not** need a desktop/web counterpart.
+
+Adding one:
+
+1. `bunx expo install <package>` from `apps/mobile` — never a hand-typed
+   version, so the pin matches the pinned SDK.
+2. Declare its permissions through the package's config plugin in
+   `apps/mobile/app.json` (iOS usage strings, Android permissions). Declare
+   only what the app uses: `recordAudioAndroid: false` on `expo-camera`, for
+   instance, keeps `RECORD_AUDIO` out.
+3. `expo prebuild` and rebuild. `ios/` and `android/` are gitignored build
+   output, so a plugin edit is invisible until they are regenerated.
+
+At runtime, handle the permission explicitly and always leave a way out:
+
+- Gate the native view on the permission hook; never mount it before a grant.
+- Offer the OS prompt while `canAskAgain`, and `Linking.openSettings()` once it
+  is false — a denial the OS will not re-prompt for otherwise dead-ends.
+- Re-read the grant on foreground (`AppState`) so a grant made in Settings
+  takes effect when the user returns.
+- Keep a non-native fallback on the same screen.
+
+`apps/mobile/src/app/scan.tsx` is the worked example (QR scan on `expo-camera`).
+
 ## Review checklist
 
 - [ ] No literal hex/rgba, no magic spacing or radius values.
@@ -97,6 +127,8 @@ that a layout is clean at 320pt or on a tablet.
 - [ ] Safe-area insets applied; content clears the floating header.
 - [ ] Hierarchy matches the desktop/web equivalent; semantic color roles match.
 - [ ] Accessibility role/label on every control; ≥ 44pt targets.
+- [ ] Any `expo-*` native view is permission-gated, with a settings or manual
+      fallback path, and its dependency lives only in `apps/mobile`.
 - [ ] `bun run mobile:typecheck` and `bun run mobile:test` pass.
 
 ## Related
