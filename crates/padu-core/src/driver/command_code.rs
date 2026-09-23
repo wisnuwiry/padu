@@ -32,6 +32,8 @@ struct CommandCodeOptions {
     cwd: std::path::PathBuf,
     model: Option<String>,
     reasoning_effort: Option<String>,
+    service_tier: Option<String>,
+    context_window: Option<String>,
     mode: RuntimeMode,
     interaction_mode: InteractionMode,
     session_id: Option<String>,
@@ -44,11 +46,28 @@ pub struct CommandCodeDriver {
     options: Arc<Mutex<CommandCodeOptions>>,
 }
 
+/// How to point the next `--print` invocation at the live session.
+///
+/// The CLI scopes `--resume` to the current working directory's transcript
+/// slug, so a task that moved directories would fail to find its session.
+/// When the transcript lives under another slug, `--session <path>` resumes
+/// the exact file instead. An id unknown to disk keeps `--resume` so the CLI
+/// reports the missing session rather than silently starting fresh.
+fn resume_args(options: &CommandCodeOptions) -> Vec<String> {
+    match crate::command_code_session::resume_target(&options.cwd, options.session_id.as_deref()) {
+        crate::command_code_session::CommandCodeResume::Fresh => Vec::new(),
+        crate::command_code_session::CommandCodeResume::ResumeId(id) => {
+            ["--resume".into(), id].into()
+        }
+        crate::command_code_session::CommandCodeResume::SessionFile(path) => {
+            ["--session".into(), path.to_string_lossy().into_owned()].into()
+        }
+    }
+}
+
 fn command_code_args(options: &CommandCodeOptions, prompt: &str) -> Vec<String> {
     let mut args = vec!["--print".into(), "--output-format".into(), "json".into()];
-    if let Some(session_id) = options.session_id.as_deref() {
-        args.extend(["--resume".into(), session_id.into()]);
-    }
+    args.extend(resume_args(options));
     if let Some(model) = options.model.as_deref().filter(|value| !value.is_empty()) {
         args.extend(["--model".into(), model.into()]);
     }
@@ -93,8 +112,8 @@ impl CommandCodeDriver {
             model,
             reasoning_effort,
             provider_cursor,
-            service_tier: _,
-            context_window: _,
+            service_tier,
+            context_window,
             agent_preset: _,
             computer_use_enabled: _,
         } = options;
@@ -112,6 +131,8 @@ impl CommandCodeDriver {
             cwd,
             model,
             reasoning_effort,
+            service_tier,
+            context_window,
             mode,
             interaction_mode,
             session_id,
@@ -159,6 +180,8 @@ fn worker_loop(
                 let mut current = options.lock();
                 current.model = next.model;
                 current.reasoning_effort = next.reasoning_effort;
+                current.service_tier = next.service_tier;
+                current.context_window = next.context_window;
                 current.mode = next.mode;
                 current.interaction_mode = next.interaction_mode;
             }
@@ -372,6 +395,18 @@ fn format_user_input_answers(request_id: &str, answers: &[UserInputAnswer]) -> S
     )
 }
 
+fn emit_usage(usage: Option<&Value>, events: &DriverEventSender) {
+    if let Some(context_tokens) = usage.and_then(super::support::command_code_context_tokens) {
+        let _ = events.send(DriverEvent::UsageUpdated {
+            context_tokens: Some(context_tokens),
+            // The NDJSON stream carries token counts but no window size, so
+            // the app merges tokens the way it does Claude's mid-turn
+            // updates until a provider reports a window.
+            context_window: None,
+        });
+    }
+}
+
 fn handle_frame(
     value: &Value,
     events: &DriverEventSender,
@@ -385,6 +420,13 @@ fn handle_frame(
             .unwrap_or_default();
         if event_type.contains("tool") {
             handle_tool_event(event, event_type, events);
+        } else if matches!(event_type, "model_request_end" | "turn_end") {
+            emit_usage(event.get("usage"), events);
+        } else if event_type == "run_end" {
+            emit_usage(
+                event.get("result").and_then(|result| result.get("usage")),
+                events,
+            );
         }
         return false;
     }
@@ -416,6 +458,8 @@ fn handle_frame(
         let _ = events.send(DriverEvent::Error(message.clone()));
     }
     let _ = options;
+    // Ahead of TurnFinished, whose forced save should include it.
+    emit_usage(value.get("usage"), events);
     let _ = events.send(DriverEvent::TurnFinished {
         success,
         summary: None,
@@ -446,15 +490,44 @@ impl DriverControl for CommandCodeDriver {
         let mut current = self.options.lock();
         current.model = options.model;
         current.reasoning_effort = options.reasoning_effort;
+        current.service_tier = options.service_tier;
+        current.context_window = options.context_window;
         current.mode = options.mode;
         current.interaction_mode = options.interaction_mode;
         true
     }
 
-    fn rollback(&self, _turns: usize) -> anyhow::Result<Option<ProviderResumeCursor>> {
-        Err(anyhow!(
-            "conversation rollback is not supported by Command Code yet"
-        ))
+    fn rollback(&self, turns: usize) -> anyhow::Result<Option<ProviderResumeCursor>> {
+        if turns == 0 {
+            return Ok(None);
+        }
+        self.fork(turns).map(Some)
+    }
+
+    /// Branch the live transcript at the turn before the last
+    /// `turns_to_remove` native turns: the retained prefix is copied to a
+    /// fresh session id filed under the session cwd, leaving the source
+    /// untouched. Turn counting matches the transcript — one user prompt per
+    /// native turn — not Padu's turn list, which can hold turns the provider
+    /// never saw.
+    fn fork(&self, turns_to_remove: usize) -> anyhow::Result<ProviderResumeCursor> {
+        let (cwd, session_id) = {
+            let options = self.options.lock();
+            (options.cwd.clone(), options.session_id.clone())
+        };
+        let Some(session_id) = session_id else {
+            if turns_to_remove == 0 {
+                return crate::command_code_session::create_empty_session(&cwd);
+            }
+            anyhow::bail!("Command Code has no active session to fork");
+        };
+        let total = crate::command_code_session::count_native_turns(&session_id)?;
+        let retained = total.checked_sub(turns_to_remove).ok_or_else(|| {
+            anyhow!(
+                "cannot remove {turns_to_remove} turns from a {total}-turn Command Code session"
+            )
+        })?;
+        crate::command_code_session::fork_session_at_turn(&cwd, &session_id, retained)
     }
 }
 
@@ -479,6 +552,8 @@ mod tests {
             cwd: "/tmp".into(),
             model: Some("deepseek/deepseek-v4-flash".into()),
             reasoning_effort: Some("high".into()),
+            service_tier: None,
+            context_window: None,
             mode: RuntimeMode::FullAccess,
             interaction_mode: InteractionMode::Build,
             session_id: Some("session-1".into()),
@@ -634,6 +709,84 @@ mod tests {
             values
                 .iter()
                 .any(|event| matches!(event, DriverEvent::TurnFinished { success: true, .. }))
+        );
+    }
+
+    #[test]
+    fn usage_frames_report_context_tokens_without_a_window() {
+        let (events, received) = super::super::test_event_channel();
+        let mut options = options();
+        for frame in [
+            serde_json::json!({
+                "type": "event",
+                "event": {
+                    "type": "model_request_end",
+                    "model": "deepseek/deepseek-v4-flash",
+                    "usage": {"inputTokens": 1000, "outputTokens": 50}
+                }
+            }),
+            serde_json::json!({
+                "type": "event",
+                "event": {
+                    "type": "turn_end",
+                    "turnNumber": 1,
+                    "usage": {"inputTokens": 1100, "outputTokens": 60}
+                }
+            }),
+            serde_json::json!({
+                "type": "result",
+                "subtype": "success",
+                "sessionId": "abc",
+                "usage": {"inputTokens": 1200, "outputTokens": 70},
+                "finalText": "done"
+            }),
+        ] {
+            handle_frame(&frame, &events, &mut options);
+        }
+        let tokens = received
+            .try_iter()
+            .filter_map(|event| match event {
+                DriverEvent::UsageUpdated {
+                    context_tokens,
+                    context_window,
+                } => Some((context_tokens, context_window)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        // Every usage-bearing frame reports; the app keeps the latest.
+        assert_eq!(
+            tokens,
+            [(Some(1050), None), (Some(1160), None), (Some(1270), None)]
+        );
+    }
+
+    #[test]
+    fn rollback_without_turns_settles_without_a_cursor() {
+        let (events, _) = super::super::test_event_channel();
+        let driver = CommandCodeDriver::start(
+            DriverStartOptions {
+                binary: "/bin/false".into(),
+                cwd: "/tmp".into(),
+                mode: RuntimeMode::FullAccess,
+                interaction_mode: InteractionMode::Build,
+                model: None,
+                reasoning_effort: None,
+                service_tier: None,
+                context_window: None,
+                agent_preset: None,
+                computer_use_enabled: false,
+                provider_cursor: None,
+            },
+            events,
+        )
+        .expect("driver starts without a live session");
+        assert!(driver.rollback(0).expect("rollback(0) succeeds").is_none());
+        assert!(
+            driver
+                .fork(1)
+                .unwrap_err()
+                .to_string()
+                .contains("no active session")
         );
     }
 }
