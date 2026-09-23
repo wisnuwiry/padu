@@ -136,6 +136,7 @@ impl ProviderKind {
             Self::Amp
                 | Self::Claude
                 | Self::Codex
+                | Self::CommandCode
                 | Self::Cursor
                 | Self::DeepSeek
                 | Self::OpenCode
@@ -151,6 +152,7 @@ impl ProviderKind {
             Self::Amp
                 | Self::Claude
                 | Self::Codex
+                | Self::CommandCode
                 | Self::Cursor
                 | Self::DeepSeek
                 | Self::OpenCode
@@ -4785,6 +4787,7 @@ mod tests {
             ProviderKind::Amp,
             ProviderKind::Claude,
             ProviderKind::Codex,
+            ProviderKind::CommandCode,
             ProviderKind::Cursor,
             ProviderKind::DeepSeek,
             ProviderKind::OpenCode,
