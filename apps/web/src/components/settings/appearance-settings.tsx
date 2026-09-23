@@ -4,6 +4,7 @@ import { ControlMenu } from '@/components/control-menu'
 import { MarkdownView } from '@/components/markdown-view'
 import { PaduIcon } from '@/components/padu-icon'
 import {
+  CODE_WORD_WRAP_KEY,
   applyThemeChoice,
   readThemeChoice,
   type ThemeChoice,
@@ -27,6 +28,7 @@ import { SettingText, Toggle, useStoredBoolean } from './shared'
 export function AppearanceSettings() {
   const { language, locale, setLanguage, t } = useI18n()
   const [showProvider, setShowProvider] = useStoredBoolean('padu.sidebar_show_provider', true)
+  const [wordWrap, setWordWrap] = useStoredBoolean(CODE_WORD_WRAP_KEY, true)
   const [theme, setTheme] = useState<ThemeChoice>(() => typeof window === 'undefined'
     ? 'system'
     : readThemeChoice(window.localStorage))
@@ -98,6 +100,20 @@ export function AppearanceSettings() {
         />
       </div>
     </div>
+    <section className="mt-[15px] w-full rounded-[13px] bg-[var(--raised)] px-5 py-4">
+      <SettingText title={t('settings.code')} description={t('settings.code_description')} />
+      <div className="mt-3 flex min-h-[60px] items-center justify-between gap-6 border-t border-[var(--border)] pt-3">
+        <SettingText
+          title={t('settings.code_word_wrap')}
+          description={t('settings.code_word_wrap_description')}
+        />
+        <Toggle
+          checked={wordWrap}
+          label={t('settings.code_word_wrap')}
+          onChange={setWordWrap}
+        />
+      </div>
+    </section>
     <section className="mt-[15px] w-full rounded-[13px] bg-[var(--raised)] px-5 py-4">
       <SettingText title={t('settings.sidebar')} description={t('settings.sidebar_description')} />
       <div className="mt-3 flex min-h-[60px] items-center justify-between gap-6 border-t border-[var(--border)] pt-3">

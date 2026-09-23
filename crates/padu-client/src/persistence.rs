@@ -99,6 +99,10 @@ pub fn default_sidebar_show_provider() -> bool {
     true
 }
 
+fn default_code_word_wrap() -> bool {
+    true
+}
+
 fn default_right_panel_visibility() -> bool {
     false
 }
@@ -302,6 +306,10 @@ pub struct AppSettings {
     /// and tool output — in pixels. Hand-edited values are clamped when
     /// applied.
     pub code_font_size: f32,
+    /// Whether long lines soft-wrap in the file editor, diffs, and code
+    /// blocks. When off those surfaces scroll horizontally instead.
+    #[serde(default = "default_code_word_wrap")]
+    pub code_word_wrap: bool,
     pub daemon_exposure: DaemonExposureSettings,
     /// Preferred target of the header's "open project in app" control, by
     /// catalog id. `None` — and an id no longer installed — fall back to the
@@ -332,6 +340,7 @@ impl Default for AppSettings {
             language: AppLanguage::default(),
             ui_font_size: DEFAULT_UI_FONT_SIZE,
             code_font_size: DEFAULT_CODE_FONT_SIZE,
+            code_word_wrap: default_code_word_wrap(),
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
             hosts: Vec::new(),
@@ -495,6 +504,10 @@ pub struct PersistedState {
     pub ui_font_size: f32,
     #[serde(default = "default_code_font_size")]
     pub code_font_size: f32,
+    /// Whether long lines soft-wrap in the file editor, diffs, and code
+    /// blocks. When off those surfaces scroll horizontally instead.
+    #[serde(default = "default_code_word_wrap")]
+    pub code_word_wrap: bool,
     #[serde(default)]
     pub daemon_exposure: DaemonExposureSettings,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -609,6 +622,7 @@ impl PersistedState {
             language: AppLanguage::default(),
             ui_font_size: DEFAULT_UI_FONT_SIZE,
             code_font_size: DEFAULT_CODE_FONT_SIZE,
+            code_word_wrap: default_code_word_wrap(),
             daemon_exposure: DaemonExposureSettings::default(),
             open_in_app: None,
             hosts: Vec::new(),
@@ -741,6 +755,7 @@ impl PersistedState {
             language: self.language,
             ui_font_size: self.ui_font_size,
             code_font_size: self.code_font_size,
+            code_word_wrap: self.code_word_wrap,
             daemon_exposure: self.daemon_exposure.clone(),
             open_in_app: self.open_in_app.clone(),
             hosts: self.hosts.clone(),
@@ -785,6 +800,7 @@ impl PersistedState {
         self.language = settings.language;
         self.ui_font_size = sanitized_ui_font_size(settings.ui_font_size);
         self.code_font_size = sanitized_code_font_size(settings.code_font_size);
+        self.code_word_wrap = settings.code_word_wrap;
         self.daemon_exposure = settings.daemon_exposure;
         self.open_in_app = settings.open_in_app;
         self.hosts = settings.hosts;

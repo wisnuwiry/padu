@@ -312,32 +312,45 @@ pub(crate) struct DiffRowStyle {
     /// provider's before/after text: there the `+`/`-` marker stands in, which
     /// keeps the gutter from going blank and the meaning off color alone.
     pub(crate) marker_fallback: bool,
+    /// Whether rows soft-wrap. Off makes each row one line and lets the
+    /// surrounding pane pan horizontally instead.
+    pub(crate) wrap: bool,
 }
 
 impl DiffRowStyle {
     /// Review-tab rows at the user's code font size. The gutter holds a
     /// right-aligned line number: ~0.6em per mono digit, five digits, plus
     /// its padding and border.
-    pub(crate) fn review(text_size: f32) -> Self {
+    pub(crate) fn review(text_size: f32, wrap: bool) -> Self {
         Self {
             gutter_width: (text_size * 3.0 + 14.0).round(),
             row_height: (text_size * 1.5).round(),
             text_size,
             marker_fallback: false,
+            wrap,
         }
     }
 
     /// The same rows the Review tab draws, so an edit reads the same wherever
     /// it is opened.
-    pub(crate) fn activity(text_size: f32) -> Self {
+    pub(crate) fn activity(text_size: f32, wrap: bool) -> Self {
         Self {
             marker_fallback: true,
-            ..Self::review(text_size)
+            ..Self::review(text_size, wrap)
         }
     }
 
     pub(crate) fn gutter_width(&self) -> f32 {
         self.gutter_width
+    }
+
+    /// Width of a row whose content spans `columns` monospace columns, used to
+    /// size the horizontal scroll range while word wrap is off. One extra
+    /// column of slack keeps a rounding-short estimate from clipping the last
+    /// glyph.
+    pub(crate) fn panning_width(&self, columns: usize) -> f32 {
+        let advance = (self.text_size * 0.6).ceil();
+        self.gutter_width + 12.0 + advance * (columns + 1) as f32 + 10.0
     }
 }
 
@@ -437,7 +450,7 @@ pub(crate) fn render_diff_code_row(
     let body = div()
         .min_h(px(style.row_height))
         .self_stretch()
-        .min_w_0()
+        .when(style.wrap, |body| body.min_w_0())
         .flex_1()
         .pl(px(12.0))
         .flex()
@@ -449,19 +462,28 @@ pub(crate) fn render_diff_code_row(
                     "{key_prefix}-line-content-{index}"
                 )))
                 .min_h(px(style.row_height))
-                .min_w_0()
-                .flex_1()
+                .when(style.wrap, |content| content.min_w_0().flex_1())
+                .when(!style.wrap, |content| content.flex_none())
                 .pr(px(10.0))
                 .flex()
                 .items_start()
-                .overflow_hidden()
-                .whitespace_normal()
+                // Wrapping rows clip their own overflow because the wrap
+                // makes it impossible; unwrapped rows keep their whole line
+                // and are panned by the owning pane, which sizes its scroll
+                // range to the widest row.
+                .when(style.wrap, |content| {
+                    content.overflow_hidden().whitespace_normal()
+                })
+                .when(!style.wrap, |content| content.whitespace_nowrap())
                 .child(selectable),
         );
     div()
         .id(SharedString::from(format!("{key_prefix}-row-{index}")))
         .w_full()
-        .min_w_0()
+        // Wrapping rows may shrink so their text can wrap; unwrapped rows keep
+        // at least the pane's scroll range, so their whole line stays on one
+        // row.
+        .when(style.wrap, |row| row.min_w_0())
         .min_h(px(style.row_height))
         // A wrapped line makes the row taller than one line. Stacked in a
         // scrolling column, a shrinkable row would be squeezed back to one

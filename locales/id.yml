@@ -373,8 +373,12 @@ settings.theme: Tema
 settings.theme_description: Pilih tema sistem, terang, atau gelap
 settings.ui_font_size: Ukuran font UI
 settings.ui_font_size_description: Ukuran teks di seluruh antarmuka dan pesan
+settings.code: Kode
+settings.code_description: Opsi tampilan kode di editor, diff, blok kode, dan output alat
 settings.code_font_size: Ukuran font kode
 settings.code_font_size_description: Ukuran teks di editor berkas, diff, blok kode, dan output alat
+settings.code_word_wrap: Bungkus baris
+settings.code_word_wrap_description: Bungkus baris panjang alih-alih menggulir secara horizontal
 settings.theme_system: Sistem
 settings.theme_light: Terang
 settings.theme_dark: Gelap

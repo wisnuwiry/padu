@@ -465,6 +465,25 @@ impl Padu {
                 .into_any_element();
         }
         let entity = cx.entity().downgrade();
+        // With word wrap off the whole panel pans sideways as one unit: the
+        // virtualized list is the sole vertical scroller, and it sits inside a
+        // horizontally scrolling viewport sized to the widest row so every
+        // row stays aligned.
+        let wrap = self.state.code_word_wrap;
+        let panning_width = DiffRowStyle::review(self.state.code_font_size, wrap)
+            .panning_width(snapshot.max_content_columns);
+        let rows = list(
+            self.right_panel_diff_list_state.clone(),
+            move |index, _window, cx| {
+                entity
+                    .upgrade()
+                    .map(|entity| {
+                        entity.update(cx, |this, cx| this.render_right_panel_diff_line(index, cx))
+                    })
+                    .unwrap_or_else(|| div().into_any_element())
+            },
+        )
+        .size_full();
         div()
             .id("right-panel-unified-diff")
             .on_mouse_down(
@@ -479,25 +498,39 @@ impl Padu {
             .min_w_0()
             .relative()
             .child(
-                list(
-                    self.right_panel_diff_list_state.clone(),
-                    move |index, _window, cx| {
-                        entity
-                            .upgrade()
-                            .map(|entity| {
-                                entity.update(cx, |this, cx| {
-                                    this.render_right_panel_diff_line(index, cx)
-                                })
+                div()
+                    .id("right-panel-unified-diff-pan")
+                    .size_full()
+                    .when(!wrap, |viewport| {
+                        let pan = self.right_panel_diff_h_scroll_handle.clone();
+                        viewport
+                            .overflow_x_scroll()
+                            .track_scroll(&pan)
+                            // A vertical wheel keeps scrolling the list; only
+                            // a horizontal gesture pans, and it stops here
+                            // rather than jumping the page too.
+                            .restrict_scroll_to_axis()
+                            .on_scroll_wheel(move |event, window, cx| {
+                                contain_horizontal_scroll(&pan, event, window, cx)
                             })
-                            .unwrap_or_else(|| div().into_any_element())
-                    },
-                )
-                .size_full(),
+                    })
+                    .child(
+                        div()
+                            .h_full()
+                            .when(!wrap, |content| content.min_w(px(panning_width)))
+                            .child(rows),
+                    ),
             )
             .child(scrollbar::vertical(
                 &self.right_panel_diff_list_state,
                 &self.right_panel_diff_scrollbar,
             ))
+            .when(!wrap, |pane| {
+                pane.child(scrollbar::horizontal(
+                    &self.right_panel_diff_h_scroll_handle,
+                    &self.right_panel_diff_h_scrollbar,
+                ))
+            })
             .into_any_element()
     }
 
@@ -521,7 +554,7 @@ impl Padu {
             return div().into_any_element();
         };
         let theme = Theme::current(cx);
-        let style = DiffRowStyle::review(self.state.code_font_size);
+        let style = DiffRowStyle::review(self.state.code_font_size, self.state.code_word_wrap);
         // Chrome rows keep their gutters flush with the code rows'.
         let gutter_width = style.gutter_width();
 
@@ -649,7 +682,8 @@ impl Padu {
                         .flex()
                         .items_start()
                         .overflow_hidden()
-                        .whitespace_normal()
+                        .when(style.wrap, |label| label.whitespace_normal())
+                        .when(!style.wrap, |label| label.whitespace_nowrap())
                         .bg(theme.overlay)
                         .child(line.content.clone()),
                 )
@@ -678,7 +712,8 @@ impl Padu {
                         .flex_1()
                         .py(px(4.0))
                         .overflow_hidden()
-                        .whitespace_normal()
+                        .when(style.wrap, |label| label.whitespace_normal())
+                        .when(!style.wrap, |label| label.whitespace_nowrap())
                         .pr(px(10.0))
                         .child(line.content.clone()),
                 )

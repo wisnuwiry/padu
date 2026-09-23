@@ -148,6 +148,48 @@ fn offset_for_thumb_top(track_top: Pixels, thumb_top: Pixels, geometry: &Geometr
     geometry.max_offset * progress
 }
 
+/// Horizontal analogue of [`geometry`]. `thumb_thickness` is the bar's fixed
+/// cross-axis size; the thumb's extent along the track is what varies with the
+/// visible fraction.
+fn geometry_h(
+    track: Bounds<Pixels>,
+    viewport_width: Pixels,
+    max_offset: Pixels,
+    offset: Pixels,
+    thumb_thickness: Pixels,
+) -> Option<Geometry> {
+    if viewport_width <= Pixels::ZERO || max_offset <= px(0.5) || track.size.width <= Pixels::ZERO {
+        return None;
+    }
+    let content_width = viewport_width + max_offset;
+    let track_width = track.size.width;
+    let thumb_width = (track_width * (viewport_width / content_width))
+        .max(px(THUMB_MIN_HEIGHT))
+        .min(track_width);
+    let travel = (track_width - thumb_width).max(Pixels::ZERO);
+    let progress = (offset / max_offset).clamp(0.0, 1.0);
+    Some(Geometry {
+        thumb: Bounds::new(
+            point(
+                track.left() + travel * progress,
+                track.bottom() - thumb_thickness - px(TRACK_INSET),
+            ),
+            size(thumb_width, thumb_thickness),
+        ),
+        travel,
+        max_offset,
+    })
+}
+
+/// How far along the content a thumb left of `thumb_left` corresponds to.
+fn offset_for_thumb_left(track_left: Pixels, thumb_left: Pixels, geometry: &Geometry) -> Pixels {
+    if geometry.travel <= Pixels::ZERO {
+        return Pixels::ZERO;
+    }
+    let progress = ((thumb_left - track_left) / geometry.travel).clamp(0.0, 1.0);
+    geometry.max_offset * progress
+}
+
 /// The two things a scrollable surface has to expose. GPUI stores both kinds of
 /// offset as a non-positive y; implementations report a downward distance so the
 /// geometry above reads the obvious way.
@@ -195,6 +237,38 @@ impl Scrollable for ScrollHandle {
     fn scroll_to(&self, offset: Pixels) {
         let x = self.offset().x;
         self.set_offset(Point::new(x, -offset));
+    }
+}
+
+/// The horizontal counterpart of [`Scrollable`], for code panes that scroll
+/// sideways when word wrap is off. Offsets are reported as a rightward
+/// distance, matching GPUI's non-positive x storage.
+pub trait HorizontalScrollable {
+    /// Width of the visible area.
+    fn viewport_width(&self) -> Pixels;
+    /// Content width beyond the viewport.
+    fn max_offset_x(&self) -> Pixels;
+    /// How far the content is currently scrolled right.
+    fn scrolled_x(&self) -> Pixels;
+    fn scroll_to_x(&self, offset: Pixels);
+}
+
+impl HorizontalScrollable for ScrollHandle {
+    fn viewport_width(&self) -> Pixels {
+        self.bounds().size.width
+    }
+
+    fn max_offset_x(&self) -> Pixels {
+        self.max_offset().x
+    }
+
+    fn scrolled_x(&self) -> Pixels {
+        -self.offset().x
+    }
+
+    fn scroll_to_x(&self, offset: Pixels) {
+        let y = self.offset().y;
+        self.set_offset(Point::new(-offset, y));
     }
 }
 
@@ -378,12 +452,161 @@ where
     .w(px(TRACK_WIDTH))
 }
 
+/// An overlay horizontal scrollbar pinned to the bottom edge of its parent.
+///
+/// The parent must be `relative()`; like [`vertical`] it positions itself
+/// absolutely and never participates in layout. Used by the file editor and
+/// the Review diff when code word wrap is off.
+pub fn horizontal<S>(surface: &S, state: &Rc<ScrollbarState>) -> impl IntoElement + use<S>
+where
+    S: HorizontalScrollable + Clone + 'static,
+{
+    let pane = surface.clone();
+    let state = state.clone();
+    canvas(
+        |_, _, _| (),
+        move |track: Bounds<Pixels>, _, window: &mut Window, cx: &mut App| {
+            let theme = Theme::current(cx);
+            let viewport_width = pane.viewport_width();
+            let max_offset = pane.max_offset_x();
+            let offset = pane.scrolled_x();
+            let now = Instant::now();
+            state.observe(offset, now);
+
+            let hovered = state.hovered.get();
+            let grabbed = state.is_grabbed();
+            let active = hovered || grabbed;
+            let thumb_thickness = px(if active {
+                THUMB_WIDTH_ACTIVE
+            } else {
+                THUMB_WIDTH
+            });
+
+            let Some(geometry) =
+                geometry_h(track, viewport_width, max_offset, offset, thumb_thickness)
+            else {
+                state.grab_offset.set(None);
+                state.hovered.set(false);
+                return;
+            };
+
+            let since_scroll = state
+                .last_scroll
+                .get()
+                .map(|last| now.saturating_duration_since(last));
+            let opacity = opacity(since_scroll, hovered, grabbed);
+            if opacity > 0.0 {
+                window.paint_quad(quad(
+                    geometry.thumb,
+                    thumb_thickness / 2.0,
+                    if active {
+                        theme.text_tertiary
+                    } else {
+                        theme.text_ghost.opacity(0.55)
+                    }
+                    .opacity(opacity),
+                    px(0.0),
+                    gpui::transparent_black(),
+                    BorderStyle::default(),
+                ));
+                if !active {
+                    match since_scroll {
+                        Some(elapsed) if elapsed < HOLD => {
+                            arm_fade_wake(&state, window.current_view(), HOLD - elapsed, cx);
+                        }
+                        _ => super::motion::pulse_lease(window.current_view(), cx),
+                    }
+                }
+            }
+
+            window.on_mouse_event({
+                let state = state.clone();
+                move |event: &MouseMoveEvent, phase, window, _| {
+                    if phase != gpui::DispatchPhase::Bubble {
+                        return;
+                    }
+                    let hovering = track.contains(&event.position);
+                    if state.hovered.replace(hovering) != hovering {
+                        window.refresh();
+                    }
+                }
+            });
+
+            window.on_mouse_event({
+                let pane = pane.clone();
+                let state = state.clone();
+                move |event: &MouseDownEvent, phase, window, _| {
+                    if phase != gpui::DispatchPhase::Bubble
+                        || event.button != MouseButton::Left
+                        || !track.contains(&event.position)
+                    {
+                        return;
+                    }
+                    if geometry.thumb.contains(&event.position) {
+                        state
+                            .grab_offset
+                            .set(Some(f32::from(event.position.x - geometry.thumb.left())));
+                    } else {
+                        // A click on bare track centres the thumb there and
+                        // begins dragging from its middle.
+                        let half = geometry.thumb.size.width / 2.0;
+                        state.grab_offset.set(Some(f32::from(half)));
+                        pane.scroll_to_x(
+                            offset_for_thumb_left(track.left(), event.position.x - half, &geometry)
+                                .clamp(Pixels::ZERO, geometry.max_offset),
+                        );
+                    }
+                    window.refresh();
+                }
+            });
+
+            window.on_mouse_event({
+                let pane = pane.clone();
+                let state = state.clone();
+                move |event: &MouseMoveEvent, phase, window, _| {
+                    if phase != gpui::DispatchPhase::Bubble {
+                        return;
+                    }
+                    let Some(grab) = state.grab_offset.get() else {
+                        return;
+                    };
+                    pane.scroll_to_x(
+                        offset_for_thumb_left(track.left(), event.position.x - px(grab), &geometry)
+                            .clamp(Pixels::ZERO, geometry.max_offset),
+                    );
+                    window.refresh();
+                }
+            });
+
+            window.on_mouse_event({
+                let state = state.clone();
+                move |_: &MouseUpEvent, phase, window, _| {
+                    if phase != gpui::DispatchPhase::Bubble || state.grab_offset.get().is_none() {
+                        return;
+                    }
+                    state.grab_offset.set(None);
+                    window.refresh();
+                }
+            });
+        },
+    )
+    .absolute()
+    .bottom_0()
+    .left_0()
+    .w_full()
+    .h(px(TRACK_WIDTH))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn track() -> Bounds<Pixels> {
         Bounds::new(point(px(500.0), px(100.0)), size(px(11.0), px(400.0)))
+    }
+
+    fn track_h() -> Bounds<Pixels> {
+        Bounds::new(point(px(100.0), px(500.0)), size(px(400.0), px(11.0)))
     }
 
     #[test]
@@ -496,5 +719,74 @@ mod tests {
         // A momentum overscroll can report more than max for a frame.
         let geometry = geometry(track, px(400.0), px(1200.0), px(5000.0), px(5.0)).unwrap();
         assert!(geometry.thumb.bottom() <= track.bottom() + px(0.001));
+    }
+
+    #[test]
+    fn the_horizontal_bar_mirrors_the_vertical_mapping() {
+        let track = track_h();
+        let geometry = geometry_h(track, px(400.0), px(1200.0), px(600.0), px(5.0)).unwrap();
+        // A quarter of the content visible leaves a quarter of the track.
+        assert_eq!(geometry.thumb.size.width, px(100.0));
+        // Halfway through the content puts the thumb halfway along its travel.
+        assert_eq!(geometry.thumb.left(), track.left() + px(150.0));
+        assert_eq!(
+            offset_for_thumb_left(track.left(), geometry.thumb.left(), &geometry),
+            px(600.0)
+        );
+        // The bar hugs the bottom edge at its resting thickness.
+        assert_eq!(geometry.thumb.bottom(), track.bottom() - px(TRACK_INSET));
+    }
+
+    #[test]
+    fn a_horizontal_surface_that_does_not_scroll_has_no_thumb() {
+        assert!(geometry_h(track_h(), px(400.0), Pixels::ZERO, Pixels::ZERO, px(5.0)).is_none());
+        assert!(geometry_h(track_h(), Pixels::ZERO, px(900.0), Pixels::ZERO, px(5.0)).is_none());
+    }
+
+    /// Every unwrapped code pane depends on this: a nowrap, non-shrinking
+    /// child inside an `overflow_x_scroll` flex parent must give the pane a
+    /// real horizontal scroll range. Without it "word wrap off" is a pane that
+    /// cannot move, which is exactly the regression this pins.
+    #[gpui::test]
+    fn a_nowrap_child_gives_the_pane_a_horizontal_range(cx: &mut gpui::TestAppContext) {
+        use gpui::{SharedString, StyledText, div, prelude::*};
+
+        struct Harness {
+            pane: ScrollHandle,
+        }
+        impl gpui::Render for Harness {
+            fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+                div().w(px(200.0)).h(px(60.0)).child(
+                    // The shape every panning pane uses: a flex parent with
+                    // `overflow_x_scroll`, and a `flex_none` nowrap child that
+                    // keeps its intrinsic width.
+                    div()
+                        .id("pan-a")
+                        .size_full()
+                        .flex()
+                        .overflow_x_scroll()
+                        .track_scroll(&self.pane)
+                        .child(
+                            div()
+                                .flex_none()
+                                .whitespace_nowrap()
+                                .text_size(px(14.0))
+                                .line_height(px(20.0))
+                                .child(StyledText::new(SharedString::from("x".repeat(400)))),
+                        ),
+                )
+            }
+        }
+
+        let (view, cx) = cx.add_window_view(|_, _| Harness {
+            pane: ScrollHandle::new(),
+        });
+        cx.run_until_parked();
+
+        let max = view.read_with(cx, |harness, _| harness.pane.max_offset());
+        assert!(
+            max.x > px(0.0),
+            "pane with a flex_none nowrap child must pan, got {max:?}"
+        );
     }
 }

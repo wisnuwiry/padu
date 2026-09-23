@@ -552,6 +552,11 @@ const AUTO_HEIGHT_MAX: Pixels = px(300.);
 pub struct TextInput {
     focus_handle: FocusHandle,
     mode: FieldMode,
+    /// Whether multi-line text soft-wraps. Off lays each logical line out on a
+    /// single row and lets the embedding view pan horizontally.
+    wrap: bool,
+    /// Viewport to keep the caret inside while [`wrap`](Self::wrap) is off.
+    h_scroll: Option<ScrollHandle>,
     read_only: bool,
     /// Enter submits this multi-line field instead of inserting a newline;
     /// Shift+Enter still breaks the line. (One-line fields always submit.)
@@ -668,6 +673,8 @@ impl TextInput {
         Self {
             focus_handle,
             mode: FieldMode::SingleLine,
+            wrap: true,
+            h_scroll: None,
             read_only: false,
             submit_on_enter: false,
             auto_height: false,
@@ -790,6 +797,31 @@ impl TextInput {
     /// gutter beside an editor can rely on the same line height.
     pub fn multi_line(mut self) -> Self {
         self.mode = FieldMode::MultiLine;
+        self
+    }
+
+    /// Whether long lines soft-wrap. On by default; turn it off for a code
+    /// editor that pans horizontally instead, and pair it with
+    /// [`horizontal_scroll`](Self::horizontal_scroll) so the caret stays in
+    /// view while typing.
+    pub fn soft_wrap(mut self, wrap: bool) -> Self {
+        self.wrap = wrap;
+        self
+    }
+
+    /// Re-point the field at the setting after construction. A long-lived
+    /// editor follows the word-wrap preference without being rebuilt.
+    pub fn set_soft_wrap(&mut self, wrap: bool, cx: &mut Context<Self>) {
+        if self.wrap == wrap {
+            return;
+        }
+        self.wrap = wrap;
+        cx.notify();
+    }
+
+    /// The viewport to keep the caret inside while soft wrap is off.
+    pub fn horizontal_scroll(mut self, handle: ScrollHandle) -> Self {
+        self.h_scroll = Some(handle);
         self
     }
 
@@ -2192,6 +2224,30 @@ fn follow_caret(
     }
 }
 
+/// Horizontal analogue of [`follow_caret`], for a field whose soft wrap is
+/// off: pan the viewport the minimum needed to keep the caret inside it. Like
+/// its vertical counterpart, the correction lands on the next frame, which it
+/// requests.
+fn follow_caret_x(caret: Point<Pixels>, scroll_handle: &ScrollHandle, window: &mut Window) {
+    let viewport = scroll_handle.bounds();
+    if viewport.size.width <= px(0.) {
+        return;
+    }
+    let offset = scroll_handle.offset();
+    let mut x = offset.x;
+    let caret_right = caret.x + px(1.5);
+    if caret_right > viewport.right() {
+        x -= caret_right - viewport.right();
+    } else if caret.x < viewport.left() {
+        x += viewport.left() - caret.x;
+    }
+    let x = x.clamp(-scroll_handle.max_offset().x, px(0.));
+    if (x - offset.x).abs() > px(0.5) {
+        scroll_handle.set_offset(point(x, offset.y));
+        window.request_animation_frame();
+    }
+}
+
 struct InputElement {
     input: Entity<TextInput>,
 }
@@ -2568,7 +2624,7 @@ impl Element for InputElement {
         );
         let theme = Theme::current(cx);
         let layout = layout_state.text.layout().clone();
-        let (cursor_position, cursor, follow) = {
+        let (cursor_position, cursor, follow, follow_x) = {
             let input = self.input.read(cx);
             let cursor = input.cursor_offset();
             let display_cursor = layout_state.projection.source_to_display(cursor);
@@ -2610,7 +2666,10 @@ impl Element for InputElement {
                     input.scroll_handle.clone(),
                 )
             });
-            (cursor_position, quad, follow)
+            // Only an unwrapped field pans horizontally, and only when the
+            // embedding view gave it a viewport to follow.
+            let follow_x = (!input.wrap).then(|| input.h_scroll.clone()).flatten();
+            (cursor_position, quad, follow, follow_x)
         };
         if let Some((follow_state, reconciled, scroll_handle)) = follow
             && reconciled != Some(follow_state)
@@ -2620,6 +2679,11 @@ impl Element for InputElement {
             }
             self.input
                 .update(cx, |input, _| input.caret_reconciled = Some(follow_state));
+        }
+        if let Some(scroll_handle) = follow_x
+            && let Some(position) = cursor_position
+        {
+            follow_caret_x(position, &scroll_handle, window);
         }
         PrepaintState { cursor }
     }
@@ -2809,7 +2873,10 @@ impl Render for TextInput {
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
-            .w_full()
+            // A wrapping field fills its parent; an unwrapped one keeps its
+            // intrinsic width so the embedding view has something to pan.
+            .when(self.wrap, |field| field.w_full())
+            .when(!self.wrap, |field| field.flex_none().whitespace_nowrap())
             .text_color(theme.text)
             // An auto-height field owns its metrics; any other multi-line
             // field inherits the caller's, so a gutter beside an editor can
@@ -2836,7 +2903,11 @@ impl Render for TextInput {
             .child(InputElement { input });
 
         context_menu(
-            div().w_full().child(field).children(scrollbar),
+            div()
+                .when(self.wrap, |wrapper| wrapper.w_full())
+                .when(!self.wrap, |wrapper| wrapper.flex().flex_none())
+                .child(field)
+                .children(scrollbar),
             "composer-context-menu",
             &self.context_menu,
             move |cx| {
@@ -3106,8 +3177,8 @@ mod tests {
 
     use gpui::{
         ClipboardEntry, ClipboardItem, Context, Entity, EntityInputHandler, ExternalPaths, Image,
-        ImageFormat, Pixels, Render, TestAppContext, TextRun, Window, div, font, hsla, prelude::*,
-        px,
+        ImageFormat, Pixels, Render, ScrollHandle, TestAppContext, TextRun, Window, div, font,
+        hsla, prelude::*, px,
     };
 
     use super::TokenClass;
@@ -3172,6 +3243,51 @@ mod tests {
         cx.update(|window, cx| window.focus(&composer.read(cx).focus(), cx));
         cx.run_until_parked();
         (composer, cx)
+    }
+
+    /// With soft wrap off the field must keep its intrinsic width, or the pane
+    /// around it has nothing to pan. This is the layout the unwrapped file
+    /// editor and Notes body depend on: `flex_none` field, `flex` pane.
+    #[gpui::test]
+    fn an_unwrapped_field_gives_its_pane_a_horizontal_range(cx: &mut TestAppContext) {
+        struct PanningHarness {
+            input: Entity<TextInput>,
+            pane: ScrollHandle,
+        }
+        impl Render for PanningHarness {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().w(px(200.)).h(px(120.)).child(
+                    div()
+                        .id("pan")
+                        .size_full()
+                        .flex()
+                        .overflow_x_scroll()
+                        .track_scroll(&self.pane)
+                        .child(self.input.clone()),
+                )
+            }
+        }
+
+        cx.update(super::init);
+        let (harness, cx) = cx.add_window_view(|window, cx| {
+            let pane = ScrollHandle::new();
+            let input = cx.new(|cx| {
+                let mut input = TextInput::new(window, cx)
+                    .multi_line()
+                    .soft_wrap(false)
+                    .horizontal_scroll(pane.clone());
+                input.set_content("x".repeat(400), cx);
+                input
+            });
+            PanningHarness { input, pane }
+        });
+        cx.run_until_parked();
+
+        let max = cx.read_entity(&harness, |harness, _| harness.pane.max_offset());
+        assert!(
+            max.x > px(0.),
+            "an unwrapped field must give its pane something to pan, got {max:?}"
+        );
     }
 
     #[gpui::test]

@@ -26,13 +26,14 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import { PaduIcon } from '@/components/padu-icon'
+import { useStoredBoolean } from '@/components/settings/shared'
+import { CODE_WORD_WRAP_KEY, codeOverflow } from '@/lib/appearance'
 import { usePrimaryShortcut } from '@/lib/platform'
 import { useI18n } from '../lib/i18n'
 import { compactReviewPatch, createReviewDiffLoader } from '../lib/review-diff'
 import { useResolvedTheme } from '../lib/theme'
 
 const sharedOptions = {
-  overflow: 'wrap' as const,
   preferredHighlighter: 'shiki-js' as const,
 }
 
@@ -129,6 +130,7 @@ export function CodeFileSurface({
 }) {
   const { t } = useI18n()
   const themeType = useResolvedTheme()
+  const [wordWrap] = useStoredBoolean(CODE_WORD_WRAP_KEY, true)
   const editorRef = useRef<Editor<undefined> | null>(null)
   const [createFileEditor] = useState(() => (options: EditorOptions<undefined>) => {
     const nextEditor = editor ?? new Editor<undefined>({ ...options, persistState: true })
@@ -149,6 +151,7 @@ export function CodeFileSurface({
     ...sharedOptions,
     disableFileHeader: true,
     onPostRender: () => setRenderReady(true),
+    overflow: codeOverflow(wordWrap),
     themeType,
     unsafeCSS: fullHeightEditorCSS,
   }
@@ -205,6 +208,9 @@ interface CodeDiffSurfaceProps {
 
 export const CodeDiffSurface = forwardRef<CodeDiffSurfaceHandle, CodeDiffSurfaceProps>(
   function CodeDiffSurface(props, ref) {
+    // Remount the diff when the wrap mode flips, so every file re-lays out
+    // with the new overflow instead of keeping rows measured for the old one.
+    const [wordWrap] = useStoredBoolean(CODE_WORD_WRAP_KEY, true)
     return (
       <WorkerPoolContextProvider
         highlighterOptions={workerHighlighterOptions}
@@ -216,7 +222,7 @@ export const CodeDiffSurface = forwardRef<CodeDiffSurfaceHandle, CodeDiffSurface
               {...props}
               disableWorkerPool={disableWorkerPool}
               forwardedRef={ref}
-              key={`${Number(disableWorkerPool)}:${Number(props.completeContext)}:${props.patch.length}:${fastHash(props.patch)}`}
+              key={`${Number(disableWorkerPool)}:${Number(props.completeContext)}:${Number(wordWrap)}:${props.patch.length}:${fastHash(props.patch)}`}
             />
           )}
         </CodeSurfaceWorkerBoundary>
@@ -240,6 +246,7 @@ function CodeDiffSurfaceContent({
   const { t } = useI18n()
   const fileShortcut = usePrimaryShortcut('⇧⌘K', 'Ctrl+Shift+K')
   const themeType = useResolvedTheme()
+  const [wordWrap] = useStoredBoolean(CODE_WORD_WRAP_KEY, true)
   const codeView = useRef<CodeViewHandle<undefined>>(null)
   const [renderReady, setRenderReady] = useState(false)
   const [model] = useState(() => {
@@ -285,6 +292,7 @@ function CodeDiffSurfaceContent({
     layout: { paddingTop: 0, paddingBottom: 0, gap: 0 },
     lineDiffType: 'word-alt' as const,
     loadDiffFiles: model.loadDiffFiles,
+    overflow: codeOverflow(wordWrap),
     stickyHeaders: true,
     themeType,
   }

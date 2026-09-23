@@ -389,6 +389,125 @@ fn render_theme_section(
         .into_any_element()
 }
 
+/// One label/description row of a settings card, with its control on the end.
+fn code_setting_row(title: String, description: String, control: AnyElement, theme: Theme) -> Div {
+    div()
+        .w_full()
+        .min_h(px(60.0))
+        .px(px(20.0))
+        .py(px(12.0))
+        .flex()
+        .items_center()
+        .gap(px(24.0))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .child(
+                    div()
+                        .text_size(sp(13.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .mt(px(5.0))
+                        .text_size(sp(12.5))
+                        .line_height(sp(18.0))
+                        .text_color(theme.text_secondary)
+                        .child(description),
+                ),
+        )
+        .child(control)
+}
+
+/// Code surfaces: text size and soft wrapping, shared by the file editor,
+/// diffs, and code blocks.
+fn render_code_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) -> AnyElement {
+    let selected_code_font_size = padu.state.code_font_size;
+    let weak = cx.entity().downgrade();
+    let code_font_size_handle = padu.menu_handle("code-font-size-selector", cx);
+    let code_font_size_selector = dropdown_menu(
+        MenuChip::new("code-font-size-selector")
+            .label(font_size_label(selected_code_font_size))
+            .outlined()
+            .selected(code_font_size_handle.is_open())
+            .w(px(116.0))
+            .justify_between(),
+        "code-font-size-selector-menu",
+        &code_font_size_handle,
+        MenuAlign::BelowRight,
+        move |_| {
+            FONT_SIZES
+                .into_iter()
+                .map(|size| {
+                    let weak = weak.clone();
+                    MenuItem::new(font_size_label(size), move |_, cx| {
+                        let _ = weak.update(cx, |this, cx| {
+                            this.set_code_font_size(size, cx);
+                        });
+                    })
+                    .selected(size == selected_code_font_size)
+                })
+                .collect()
+        },
+    );
+
+    let wrap = padu.state.code_word_wrap;
+    let wrap_toggle = toggle_switch(
+        "code-word-wrap-toggle",
+        wrap,
+        false,
+        theme,
+        cx,
+        move |this, _, cx| this.set_code_word_wrap(!wrap, cx),
+    );
+
+    div()
+        .mt(px(15.0))
+        .w_full()
+        .rounded(px(13.0))
+        .overflow_hidden()
+        .bg(theme.raised)
+        .child(
+            div()
+                .w_full()
+                .px(px(20.0))
+                .py(px(14.0))
+                .child(
+                    div()
+                        .text_size(sp(13.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(tr!("settings.code")),
+                )
+                .child(
+                    div()
+                        .mt(px(5.0))
+                        .text_size(sp(12.5))
+                        .line_height(sp(18.0))
+                        .text_color(theme.text_secondary)
+                        .child(tr!("settings.code_description")),
+                ),
+        )
+        .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+        .child(code_setting_row(
+            tr!("settings.code_font_size"),
+            tr!("settings.code_font_size_description"),
+            code_font_size_selector,
+            theme,
+        ))
+        .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+        .child(code_setting_row(
+            tr!("settings.code_word_wrap"),
+            tr!("settings.code_word_wrap_description"),
+            wrap_toggle.into_any_element(),
+            theme,
+        ))
+        .into_any_element()
+}
+
 fn render_sidebar_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) -> AnyElement {
     let show_provider = padu.state.sidebar_show_provider;
     let toggle = toggle_switch(
@@ -499,35 +618,6 @@ impl Padu {
             },
         );
 
-        let selected_code_font_size = self.state.code_font_size;
-        let weak = cx.entity().downgrade();
-        let code_font_size_handle = self.menu_handle("code-font-size-selector", cx);
-        let code_font_size_selector = dropdown_menu(
-            MenuChip::new("code-font-size-selector")
-                .label(font_size_label(selected_code_font_size))
-                .outlined()
-                .selected(code_font_size_handle.is_open())
-                .w(px(116.0))
-                .justify_between(),
-            "code-font-size-selector-menu",
-            &code_font_size_handle,
-            MenuAlign::BelowRight,
-            move |_| {
-                FONT_SIZES
-                    .into_iter()
-                    .map(|size| {
-                        let weak = weak.clone();
-                        MenuItem::new(font_size_label(size), move |_, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.set_code_font_size(size, cx);
-                            });
-                        })
-                        .selected(size == selected_code_font_size)
-                    })
-                    .collect()
-            },
-        );
-
         let weak = cx.entity().downgrade();
         let language_handle = self.menu_handle("language-selector", cx);
         let language_selector = dropdown_menu(
@@ -629,38 +719,6 @@ impl Padu {
                     )
                     .child(ui_font_size_selector),
             )
-            .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
-            .child(
-                div()
-                    .w_full()
-                    .min_h(px(60.0))
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("settings.code_font_size")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("settings.code_font_size_description")),
-                            ),
-                    )
-                    .child(code_font_size_selector),
-            )
             .into_any_element();
 
         div()
@@ -668,6 +726,7 @@ impl Padu {
             .flex()
             .flex_col()
             .child(appearance_card)
+            .child(render_code_section(self, theme, cx))
             .child(render_sidebar_section(self, theme, cx))
             .child(render_background_section(self, theme, cx))
             .into_any_element()
@@ -707,10 +766,27 @@ impl Padu {
         cx.notify();
     }
 
-    /// Drop every cached row height that a font size participates in. The
-    /// virtualized lists remember measured heights, so a stale entry would
-    /// misplace scroll anchors until the row happened to remeasure. The
-    /// sidebar list keeps its uniform row height and needs no reset.
+    fn set_code_word_wrap(&mut self, wrap: bool, cx: &mut Context<Self>) {
+        if self.state.code_word_wrap == wrap {
+            return;
+        }
+        self.state.code_word_wrap = wrap;
+        // Open editors pick the setting up on their next render — see
+        // `render_file_editor_body` — so nothing has to be rebuilt here and no
+        // caret, selection, or scroll position is lost.
+        //
+        // Wrap changes how tall every code row is, exactly like a font size
+        // change does, so the same height caches have to be dropped.
+        self.remeasure_font_sized_surfaces();
+        self.save();
+        cx.notify();
+    }
+
+    /// Drop every cached row height that a code setting — font size or word
+    /// wrap — participates in. The virtualized lists remember measured
+    /// heights, so a stale entry would misplace scroll anchors until the row
+    /// happened to remeasure. The sidebar list keeps its uniform row height
+    /// and needs no reset.
     fn remeasure_font_sized_surfaces(&self) {
         self.reset_transcript_rows(self.transcript_row_count());
         let line_count = self

@@ -26,9 +26,9 @@ use std::time::{Duration, Instant};
 use gpui::{
     AnyElement, App, BorderStyle, Bounds, ClipboardItem, CursorStyle, DispatchPhase, Font,
     FontStyle, FontWeight, Hsla, InteractiveText, IntoElement, KeyDownEvent, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, SharedString,
-    StrikethroughStyle, StyledText, TextLayout, TextRun, TransformationMatrix, UnderlineStyle,
-    Window, canvas, div, font, img, point, prelude::*, px, quad, relative, size,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, ScrollHandle,
+    SharedString, StrikethroughStyle, StyledText, TextLayout, TextRun, TransformationMatrix,
+    UnderlineStyle, Window, canvas, div, font, img, point, prelude::*, px, quad, relative, size,
 };
 use regex::Regex;
 
@@ -43,6 +43,8 @@ use super::selection::{
 };
 use super::veil::{RowVeil, apply_veil};
 use crate::theme::Theme;
+use crate::ui::contain_horizontal_scroll;
+use crate::ui::scrollbar;
 use crate::ui::tooltip::Tooltip;
 
 /// Selection geometry: the laid-out text handle for one painted element.
@@ -72,6 +74,11 @@ pub struct Metrics {
     pub code_line_height: f32,
     /// Vertical gap between sibling blocks.
     pub block_gap: f32,
+    /// Whether fenced code blocks soft-wrap. Off makes them pan horizontally
+    /// instead, following the code word-wrap setting. Part of `Metrics` so it
+    /// travels with the code scale every markdown surface already threads
+    /// through `scaled_markdown_metrics`.
+    pub code_wrap: bool,
 }
 
 impl Metrics {
@@ -82,6 +89,7 @@ impl Metrics {
         code_text_size: 13.0,
         code_line_height: 19.5,
         block_gap: 10.0,
+        code_wrap: true,
     };
 
     /// User-message scale. Markdown blocks keep the bubble's established body
@@ -92,6 +100,7 @@ impl Metrics {
         code_text_size: 13.0,
         code_line_height: 19.5,
         block_gap: 10.0,
+        code_wrap: true,
     };
 
     /// Compact scale for reasoning, tool detail, and other secondary content.
@@ -103,6 +112,7 @@ impl Metrics {
         code_text_size: 13.0,
         code_line_height: 19.5,
         block_gap: 7.0,
+        code_wrap: true,
     };
 
     /// The UI and code font sizes the constants above were authored against.
@@ -125,6 +135,7 @@ impl Metrics {
             code_text_size: half(self.code_text_size * code),
             code_line_height: half(self.code_line_height * code),
             block_gap: half(self.block_gap * ui),
+            code_wrap: self.code_wrap,
         }
     }
 
@@ -138,7 +149,15 @@ impl Metrics {
             code_text_size,
             code_line_height: (code_text_size * 1.5).round(),
             block_gap: (text_size * 0.72).round(),
+            code_wrap: true,
         }
+    }
+
+    /// Set whether fenced code blocks wrap. Callers apply the user's code
+    /// word-wrap setting after [`Metrics::scaled`] or [`Metrics::document`].
+    pub fn with_code_wrap(mut self, wrap: bool) -> Self {
+        self.code_wrap = wrap;
+        self
     }
 }
 
@@ -730,7 +749,19 @@ pub struct MarkdownView {
     /// outside the parsed/flattened caches so a three-second icon change never
     /// invalidates text shaping.
     copied_code_blocks: Rc<RefCell<HashMap<usize, u64>>>,
+    /// Horizontal pan state for unwrapped code blocks, one per element
+    /// ordinal. Keyed and pruned with `flats`, so a re-parse cannot leave a
+    /// stale handle pointing at a block that moved.
+    code_pan: RefCell<HashMap<usize, CodePan>>,
     streaming: Cell<bool>,
+}
+
+/// Horizontal scroll state for one unwrapped code block: where it is panned
+/// to, and the overlay scrollbar drawn along its bottom edge.
+#[derive(Clone)]
+struct CodePan {
+    handle: ScrollHandle,
+    scrollbar: Rc<scrollbar::ScrollbarState>,
 }
 
 impl Default for MarkdownView {
@@ -749,8 +780,24 @@ impl MarkdownView {
             style: Cell::new(None),
             veil: RefCell::new(RowVeil::default()),
             copied_code_blocks: Rc::new(RefCell::new(HashMap::new())),
+            code_pan: RefCell::new(HashMap::new()),
             streaming: Cell::new(false),
         }
+    }
+
+    /// The horizontal pan state for the element at `ordinal`, created on first
+    /// use. Code blocks keep their scroll position across frames this way, and
+    /// the handle is what lets a wheel gesture be held in the block instead of
+    /// scrolling the transcript behind it.
+    fn code_pan(&self, ordinal: usize) -> CodePan {
+        self.code_pan
+            .borrow_mut()
+            .entry(ordinal)
+            .or_insert_with(|| CodePan {
+                handle: ScrollHandle::new(),
+                scrollbar: scrollbar::ScrollbarState::new(),
+            })
+            .clone()
     }
 
     /// A view attached to an already-streaming body. Its first rendered text
@@ -793,6 +840,7 @@ impl MarkdownView {
             let prefix_stable = self.parser.set_text(text);
             if !prefix_stable {
                 self.flats.borrow_mut().clear();
+                self.code_pan.borrow_mut().clear();
                 self.volatile_from.set(0);
             }
         }
@@ -816,6 +864,9 @@ impl MarkdownView {
                 self.flats
                     .borrow_mut()
                     .retain(|ordinal, _| *ordinal < boundary);
+                self.code_pan
+                    .borrow_mut()
+                    .retain(|ordinal, _| *ordinal < boundary);
             }
         }
     }
@@ -830,6 +881,7 @@ impl MarkdownView {
         if self.style.get() != Some(current) {
             self.style.set(Some(current));
             self.flats.borrow_mut().clear();
+            self.code_pan.borrow_mut().clear();
         }
     }
 
@@ -954,6 +1006,14 @@ impl<'a> Ctx<'a> {
             Some(view) => view.flat(ordinal, build),
             None => Rc::new(build()),
         }
+    }
+
+    /// [`MarkdownView::code_pan`] through this render's cache. `None` for a
+    /// render with no cache to keep the state in; such a block falls back to
+    /// GPUI's own element-state scrolling and gives up the wheel hold and
+    /// scrollbar.
+    fn code_pan_handle(&self, ordinal: usize) -> Option<CodePan> {
+        self.cache.map(|view| view.code_pan(ordinal))
     }
 }
 
@@ -2328,6 +2388,11 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
     let gutter_width = 22.0 + (line_count.to_string().len() as f32 * code_text_size * 0.6).ceil();
     let code_height = px(line_height * line_count as f32);
     let number_color = ctx.palette.ghost;
+    // Horizontal pan state for this block, kept in the render cache so the
+    // scroll position survives frames.
+    let pan = (!ctx.metrics.code_wrap)
+        .then(|| ctx.code_pan_handle(key.index))
+        .flatten();
     let line_numbers = canvas(
         |_, _, _| (),
         move |bounds: gpui::Bounds<Pixels>, _, window: &mut Window, cx: &mut App| {
@@ -2469,16 +2534,60 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &Ctx) -> AnyElemen
                 .items_start()
                 .child(line_numbers)
                 .child(
+                    // With word wrap off the code pans sideways. The scroller
+                    // is the flex parent so the code can keep its intrinsic
+                    // width; the gutter above stays outside it, so line
+                    // numbers never slide away. Its handle also holds a wheel
+                    // gesture in the block instead of scrolling the transcript
+                    // behind it.
                     div()
+                        .id(SharedString::from(format!(
+                            "code-pan-{}-{}",
+                            key.row, key.index
+                        )))
                         .flex_1()
                         .min_w_0()
-                        .pl(px(10.0))
-                        .whitespace_normal()
-                        .text_size(px(ctx.metrics.code_text_size))
-                        .line_height(px(ctx.metrics.code_line_height))
-                        .text_color(ctx.palette.secondary)
-                        .child(text_element(&flat, key, ctx)),
-                ),
+                        .when(!ctx.metrics.code_wrap, |container| {
+                            let container = container.flex().overflow_x_scroll();
+                            match pan.as_ref() {
+                                Some(pan) => {
+                                    let handle = pan.handle.clone();
+                                    container
+                                        .track_scroll(&handle)
+                                        // A vertical wheel keeps scrolling the
+                                        // transcript; only a horizontal
+                                        // gesture pans the block, and it stops
+                                        // here rather than moving both.
+                                        .restrict_scroll_to_axis()
+                                        .on_scroll_wheel(move |event, window, cx| {
+                                            contain_horizontal_scroll(&handle, event, window, cx)
+                                        })
+                                }
+                                None => container,
+                            }
+                        })
+                        .child(
+                            div()
+                                .pl(px(10.0))
+                                .when(ctx.metrics.code_wrap, |code| {
+                                    code.flex_1().min_w_0().whitespace_normal()
+                                })
+                                .when(!ctx.metrics.code_wrap, |code| {
+                                    code.flex_none().whitespace_nowrap()
+                                })
+                                .text_size(px(ctx.metrics.code_text_size))
+                                .line_height(px(ctx.metrics.code_line_height))
+                                .text_color(ctx.palette.secondary)
+                                .child(text_element(&flat, key, ctx)),
+                        ),
+                )
+                // The overlay bar sits on the row, not inside the scroller, so
+                // panning the code does not drag it along. It draws nothing
+                // unless the block actually overflows.
+                .when_some(pan.as_ref(), |row, pan| {
+                    row.relative()
+                        .child(scrollbar::horizontal(&pan.handle, &pan.scrollbar))
+                }),
         )
         .into_any_element()
 }
@@ -2923,8 +3032,12 @@ mod tests {
         assert_eq!(plain.len(), 1);
     }
 
+    /// The code block follows the word-wrap setting: wrapping text when on,
+    /// and a horizontally scrolling code column when off — never clipped, and
+    /// never panning the line-number gutter with it. Copy stays keyboard
+    /// reachable either way.
     #[test]
-    fn code_block_rendering_wraps_and_exposes_a_keyboard_copy_control() {
+    fn code_block_rendering_wraps_or_pans_and_exposes_a_keyboard_copy_control() {
         let source = include_str!("render.rs");
         let start = source
             .find("\nfn render_code_block(")
@@ -2935,9 +3048,15 @@ mod tests {
             .expect("code block renderer end");
         let body = &body[..end];
 
+        // Both branches exist, gated on `Metrics::code_wrap`.
         assert!(body.contains(".whitespace_normal()"));
-        assert!(!body.contains(".overflow_x_scroll()"));
-        assert!(!body.contains(".whitespace_nowrap()"));
+        assert!(body.contains(".whitespace_nowrap()"));
+        assert!(body.contains(".overflow_x_scroll()"));
+        assert!(body.contains("ctx.metrics.code_wrap"));
+        // An overflowing block advertises the pan with an overlay scrollbar,
+        // placed on the row so panning cannot drag it along.
+        assert!(body.contains("scrollbar::horizontal"));
+        assert!(body.contains(".when_some(pan.as_ref()"));
         assert!(body.contains("\"icons/copy.svg\""));
         assert!(body.contains("\"icons/check.svg\""));
         assert!(body.contains("ClipboardItem::new_string"));

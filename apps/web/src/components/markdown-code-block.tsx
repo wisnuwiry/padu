@@ -1,7 +1,9 @@
 import { File, type FileOptions } from '@pierre/diffs/react'
 import { useEffect, useState } from 'react'
 import { FileTypeIcon, PaduIcon } from '@/components/padu-icon'
+import { useStoredBoolean } from '@/components/settings/shared'
 import { Tooltip } from '@/components/ui/tooltip'
+import { CODE_WORD_WRAP_KEY, codeOverflow } from '@/lib/appearance'
 import { useI18n } from '@/lib/i18n'
 import { useResolvedTheme } from '@/lib/theme'
 
@@ -11,6 +13,7 @@ import { useResolvedTheme } from '@/lib/theme'
 export function MarkdownCodeBlock({ language, code }: { language?: string; code: string }) {
   const { t } = useI18n()
   const themeType = useResolvedTheme()
+  const [wordWrap] = useStoredBoolean(CODE_WORD_WRAP_KEY, true)
   const [copied, setCopied] = useState(false)
   const name = snippetFilename(language)
   const label = language?.toLowerCase() || 'text'
@@ -27,9 +30,9 @@ export function MarkdownCodeBlock({ language, code }: { language?: string; code:
   }
 
   const options: FileOptions<undefined> = {
-    overflow: 'wrap',
-    preferredHighlighter: 'shiki-js',
     disableFileHeader: true,
+    overflow: codeOverflow(wordWrap),
+    preferredHighlighter: 'shiki-js',
     themeType,
   }
 
