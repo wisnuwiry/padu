@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  classifyConnection,
   displayHost,
   isPrivateDaemonAddress,
   normalizeDaemonAddress,
@@ -33,11 +34,32 @@ describe('daemon profiles', () => {
       id: 'daemon-id',
       name: 'work.example.com',
       address: 'wss://work.example.com',
+      kind: 'direct',
       createdAt: 100,
       updatedAt: 100,
       lastConnectedAt: null,
     });
     expect(displayHost('ws://10.0.0.4:34123/v1')).toBe('10.0.0.4:34123');
+  });
+
+  test('keeps an imported transport kind, including when editing', () => {
+    const imported = normalizeDaemonProfile(
+      { name: 'Tunnel', address: 'wss://abc.trycloudflare.com', kind: 'cloudflare' },
+      undefined,
+      'daemon-id',
+      100,
+    );
+    expect(imported.kind).toBe('cloudflare');
+
+    // Renaming an imported profile must not drop its transport.
+    const edited = normalizeDaemonProfile(
+      { name: 'Renamed', address: 'wss://abc.trycloudflare.com' },
+      imported,
+      'daemon-id',
+      200,
+    );
+    expect(edited.kind).toBe('cloudflare');
+    expect(edited.createdAt).toBe(100);
   });
 
   test('identifies LAN and tailnet addresses', () => {
@@ -70,10 +92,60 @@ describe('daemon profiles', () => {
         id: 'one',
         name: 'Home',
         address: 'ws://home.local:34123',
+        kind: 'direct',
         createdAt: 1,
         updatedAt: 2,
         lastConnectedAt: null,
       },
     ]);
+  });
+
+  test('preserves a stored transport and degrades an unknown one', () => {
+    const profiles = parseDaemonProfiles([
+      {
+        id: 'tunnel',
+        name: 'Tunnel',
+        address: 'wss://abc.trycloudflare.com',
+        kind: 'cloudflare',
+        createdAt: 1,
+        updatedAt: 1,
+        lastConnectedAt: null,
+      },
+      {
+        id: 'future',
+        name: 'Future',
+        address: 'wss://future.example.com',
+        kind: 'quantum-entanglement',
+        createdAt: 1,
+        updatedAt: 1,
+        lastConnectedAt: null,
+      },
+    ]);
+    expect(profiles.map((profile) => profile.kind)).toEqual([
+      'cloudflare',
+      'direct',
+    ]);
+  });
+
+  test('classifies connections from the stored transport', () => {
+    expect(classifyConnection('wss://abc.trycloudflare.com', 'cloudflare')).toBe(
+      'cloudflare',
+    );
+    expect(classifyConnection('wss://jump.example.com:19999', 'ssh_relay')).toBe(
+      'ssh_relay',
+    );
+    expect(classifyConnection('wss://mac.tail-abc.ts.net', 'tailscale')).toBe(
+      'tailscale',
+    );
+  });
+
+  test('classifies connections from the address when no transport is stored', () => {
+    expect(classifyConnection('wss://abc.trycloudflare.com')).toBe('cloudflare');
+    expect(classifyConnection('wss://mac.tail-abc.ts.net')).toBe('tailscale');
+    expect(classifyConnection('wss://100.100.50.5:34123')).toBe('tailscale');
+    expect(classifyConnection('wss://app.example.com')).toBe('public_wss');
+    expect(classifyConnection('ws://10.0.0.5:34123')).toBe('private_ws');
+    expect(classifyConnection('ws://app.example.com')).toBe('insecure_public_ws');
+    expect(classifyConnection('ftp://nope')).toBe('invalid');
   });
 });

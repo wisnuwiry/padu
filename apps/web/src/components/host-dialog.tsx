@@ -1,4 +1,4 @@
-import type { HostProfile } from '@padu/client'
+import type { HostKind, HostProfile } from '@padu/client'
 import { useEffect, useState } from 'react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -8,6 +8,8 @@ import { Kbd } from '@/components/ui/kbd'
 import { PaduIcon } from '@/components/padu-icon'
 import { useI18n } from '@/lib/i18n'
 import { normalizeDaemonAddress } from '@/lib/connection'
+import { WEB_EDITABLE_KINDS, transportLabelKey } from '@/lib/daemon-transport'
+import { cn } from '@/lib/utils'
 
 export function HostDialog({
   open,
@@ -19,13 +21,19 @@ export function HostDialog({
   open: boolean
   editingHost: HostProfile | null
   onOpenChange: (open: boolean) => void
-  onSave: (data: { name: string; address: string; token?: string }) => Promise<void>
+  onSave: (data: {
+    name: string
+    address: string
+    token?: string
+    kind?: HostKind
+  }) => Promise<void>
   onDelete?: (id: string) => Promise<void>
 }) {
   const { t } = useI18n()
   const [name, setName] = useState('')
   const [address, setAddress] = useState('')
   const [token, setToken] = useState('')
+  const [kind, setKind] = useState<HostKind>('direct')
   const [tokenRevealed, setTokenRevealed] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -36,11 +44,17 @@ export function HostDialog({
     setName(editingHost?.name ?? '')
     setAddress(editingHost?.address ?? '')
     setToken(editingHost?.token ?? '')
+    setKind(editingHost?.kind ?? 'direct')
     setTokenRevealed(false)
     setError(null)
     setBusy(false)
     setConfirmDeleteOpen(false)
   }, [open, editingHost])
+
+  // A relay host was provisioned by the desktop. Editing it here would let the
+  // user save an address the desktop's tunnel no longer backs, so the selector
+  // shows the transport read-only instead.
+  const isRelayHost = kind === 'cloudflare' || kind === 'ssh_relay'
 
   const isEditing = Boolean(editingHost)
   const title = isEditing ? t('host.edit_host') : t('host.add_host')
@@ -48,8 +62,11 @@ export function HostDialog({
 
   async function handleSave() {
     setError(null)
+    // A relay address is owned by the desktop tunnel — never let the browser
+    // overwrite it with a hand-typed value the tunnel no longer backs.
+    const effectiveAddress = isRelayHost && editingHost ? editingHost.address : address.trim()
     try {
-      normalizeDaemonAddress(address, (k) => t(k))
+      normalizeDaemonAddress(effectiveAddress, (k) => t(k))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
       return
@@ -59,8 +76,9 @@ export function HostDialog({
     try {
       await onSave({
         name: name.trim(),
-        address: address.trim(),
+        address: effectiveAddress,
         token: token.trim() || undefined,
+        kind,
       })
       onOpenChange(false)
     } catch (cause) {
@@ -109,14 +127,54 @@ export function HostDialog({
               />
             </label>
 
+            <div className="flex flex-col gap-1">
+              <span className="text-[12.5px] font-medium text-[var(--text-secondary)]">
+                {t('host.transport')}
+              </span>
+              <div className="flex items-center gap-1.5">
+                {isRelayHost ? (
+                  <span className="rounded-md border border-border px-2.5 py-1 text-[12px] text-[var(--text-secondary)]">
+                    {t(transportLabelKey(kind)!)}
+                  </span>
+                ) : (
+                  WEB_EDITABLE_KINDS.map((option) => {
+                    const selected = option === kind
+                    return (
+                      <button
+                        key={option}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => setKind(option)}
+                        className={cn(
+                          'rounded-md border px-2.5 py-1 text-[12px] transition-colors',
+                          selected
+                            ? 'border-ring bg-[var(--accent)] font-medium text-foreground'
+                            : 'border-border bg-card text-[var(--text-secondary)] hover:bg-[var(--overlay)]',
+                        )}
+                      >
+                        {t(`host.transport_${option}`)}
+                      </button>
+                    )
+                  })
+                )}
+              </div>
+              <p className="text-[11.5px] leading-[15px] text-[var(--text-tertiary)]">
+                {isRelayHost
+                  ? t('host.transport_relay_hint')
+                  : t('host.transport_web_hint')}
+              </p>
+            </div>
+
             <label className="flex flex-col gap-1 text-[12.5px] font-medium text-[var(--text-secondary)]">
               <span>{t('host.address')}</span>
               <Input
                 autoCapitalize="none"
                 autoCorrect="off"
                 className="h-8 bg-card"
+                disabled={isRelayHost}
                 inputMode="url"
                 placeholder={t('host.address_placeholder')}
+                title={isRelayHost ? t('host.transport_relay_hint') : undefined}
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
               />

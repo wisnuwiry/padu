@@ -19,7 +19,24 @@ import { DaemonAvatar } from '@/components/daemon-avatar';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useDaemon } from '@/lib/daemon-context';
-import { displayHost, type DaemonProfile } from '@/lib/daemon-profile';
+import {
+  displayHost,
+  type DaemonProfile,
+  type DaemonTransport,
+} from '@/lib/daemon-profile';
+
+function transportLabel(kind: DaemonTransport): string {
+  switch (kind) {
+    case 'cloudflare':
+      return 'Cloudflare';
+    case 'tailscale':
+      return 'Tailscale';
+    case 'ssh_relay':
+      return 'SSH';
+    default:
+      return '';
+  }
+}
 
 export default function DaemonsScreen() {
   const theme = useTheme();
@@ -48,17 +65,35 @@ export default function DaemonsScreen() {
       <Stack.Screen
         options={{
           headerRight: () => (
-            <Pressable
-              accessibilityLabel="Add daemon"
-              accessibilityRole="button"
-              hitSlop={10}
-              onPress={() => router.push('/daemon-editor')}>
-              <AppSymbol
-                name={{ ios: 'plus', android: 'add', web: 'add' }}
-                size={21}
-                tintColor={theme.accent}
-              />
-            </Pressable>
+            <View style={styles.headerActions}>
+              <Pressable
+                accessibilityHint="Import a daemon from the desktop's QR code"
+                accessibilityLabel="Import from link"
+                accessibilityRole="button"
+                hitSlop={10}
+                onPress={() => router.push('/daemon-import')}>
+                <AppSymbol
+                  name={{
+                    ios: 'qrcode.viewfinder',
+                    android: 'qr_code_scanner',
+                    web: 'qr_code_scanner',
+                  }}
+                  size={21}
+                  tintColor={theme.accent}
+                />
+              </Pressable>
+              <Pressable
+                accessibilityLabel="Add daemon"
+                accessibilityRole="button"
+                hitSlop={10}
+                onPress={() => router.push('/daemon-editor')}>
+                <AppSymbol
+                  name={{ ios: 'plus', android: 'add', web: 'add' }}
+                  size={21}
+                  tintColor={theme.accent}
+                />
+              </Pressable>
+            </View>
           ),
         }}
       />
@@ -79,8 +114,21 @@ export default function DaemonsScreen() {
           <View style={styles.empty}>
             <Text style={[styles.emptyTitle, { color: theme.text }]}>No saved daemons</Text>
             <Text style={[styles.emptyBody, { color: theme.textSecondary }]}>
-              Add the address and token shown in Padu Desktop’s Daemon settings.
+              Scan the QR code in Padu Desktop’s host dialog with your camera,
+              or add the address and token by hand.
             </Text>
+            <Pressable
+              accessibilityLabel="Import from link"
+              accessibilityRole="button"
+              onPress={() => router.push('/daemon-import')}
+              style={({ pressed }) => [
+                styles.emptyAction,
+                { backgroundColor: theme.inverse, opacity: pressed ? 0.8 : 1 },
+              ]}>
+              <Text style={[styles.emptyActionLabel, { color: theme.onInverse }]}>
+                Import from Link
+              </Text>
+            </Pressable>
           </View>
         )}
         ListFooterComponent={daemon.profiles.length ? (
@@ -113,6 +161,13 @@ export default function DaemonsScreen() {
               <View style={styles.copy}>
                 <View style={styles.nameLine}>
                   <Text numberOfLines={1} style={[styles.name, { color: theme.text }]}>{item.name}</Text>
+                  {item.kind !== 'direct' ? (
+                    <View style={[styles.transportBadge, { backgroundColor: theme.backgroundElement }]}>
+                      <Text style={[styles.transportBadgeLabel, { color: theme.textSecondary }]}>
+                        {transportLabel(item.kind)}
+                      </Text>
+                    </View>
+                  ) : null}
                   {active && <ConnectionStatus phase={daemon.phase} />}
                 </View>
                 <Text numberOfLines={1} style={[styles.host, { color: theme.textSecondary }]}>
@@ -154,6 +209,7 @@ export default function DaemonsScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  headerActions: { alignItems: 'center', flexDirection: 'row', gap: 18 },
   listContent: { paddingBottom: 36 },
   intro: { fontSize: 13.5, lineHeight: 19, margin: Spacing.three, marginBottom: 12 },
   row: {
@@ -170,6 +226,12 @@ const styles = StyleSheet.create({
   copy: { flex: 1, minWidth: 0 },
   nameLine: { alignItems: 'center', flexDirection: 'row', gap: 9 },
   name: { flexShrink: 1, fontSize: 16, fontWeight: '700' },
+  transportBadge: {
+    borderRadius: 5,
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+  },
+  transportBadgeLabel: { fontSize: 11, fontWeight: '600' },
   host: { fontSize: 12.5, marginTop: 5 },
   editButton: { alignItems: 'center', height: 42, justifyContent: 'center', width: 34 },
   footer: {
@@ -183,4 +245,11 @@ const styles = StyleSheet.create({
   empty: { alignItems: 'center', paddingHorizontal: 40, paddingTop: 100 },
   emptyTitle: { fontSize: 18, fontWeight: '700' },
   emptyBody: { fontSize: 14, lineHeight: 20, marginTop: 8, maxWidth: 320, textAlign: 'center' },
+  emptyAction: {
+    borderRadius: Radius.large,
+    marginTop: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  emptyActionLabel: { fontSize: 14, fontWeight: '700' },
 });

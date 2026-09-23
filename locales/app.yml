@@ -658,6 +658,62 @@ daemon.url_copied:
   en: WebSocket URL copied
 daemon.token_copied:
   en: Daemon token copied
+daemon.show_qr:
+  en: Show QR Code
+daemon.hide_qr:
+  en: Hide QR Code
+daemon.qr_tailscale_name:
+  en: Tailnet name
+daemon.qr_direct_address:
+  en: LAN address
+daemon.qr_ssh_host:
+  en: Jump host
+daemon.qr_ssh_port:
+  en: Remote port
+daemon.qr_need_direct:
+  en: Enter this machine's LAN address, e.g. 192.168.1.10. Auto-detected from your network — leave as is unless it looks wrong.
+daemon.qr_need_name:
+  en: Enter the tailnet name another device should use.
+daemon.qr_need_host:
+  en: Enter the jump host another device should use.
+daemon.qr_need_port:
+  en: Enter the remote port (1–65535).
+daemon.qr_direct_hint:
+  en: Same Wi-Fi/LAN only. Keep exposure on a network you trust — this code is plain ws:// and carries full-access token.
+daemon.qr_tailscale_hint:
+  en: Both devices must be on the same tailnet and exposure must be on. Enter the MagicDNS (*.ts.net) or 100.x address.
+daemon.qr_cloudflare_hint:
+  en: Requires cloudflared on this machine. No shared network needed — press Start Tunnel, wait for connected, then scan. The URL rotates on every restart.
+daemon.qr_cloudflare_install:
+  en: brew install cloudflared
+daemon.qr_title:
+  en: Connect another device
+daemon.qr_ssh_hint:
+  en: Needs an SSH relay to a jump host you own (GatewayPorts yes). This code only describes wss://jump:port — start the relay first.
+daemon.qr_ssh_needs_relay:
+  en: Start the SSH relay (Add Host → SSH) before sharing this code — otherwise it points at a closed port.
+daemon.qr_needs_tunnel:
+  en: Start the tunnel to get a code.
+daemon.qr_tunnel_starting:
+  en: Starting tunnel…
+daemon.qr_start_tunnel:
+  en: Start Tunnel
+daemon.qr_restart_tunnel:
+  en: Restart Tunnel
+daemon.qr_tunnel_failed:
+  en: "Could not start the tunnel: %{error}"
+daemon.qr_field_placeholder:
+  en: e.g. 192.168.1.10 or my-mac.tail-abc.ts.net
+daemon.qr_port_placeholder:
+  en: e.g. 19999
+daemon.qr_unavailable:
+  en: This daemon address cannot be encoded as a QR code.
+daemon.qr_hint:
+  en: Scan this with the Padu mobile app to connect this device — it carries the address and token, so nothing needs typing.
+daemon.connection_details:
+  en: Details to connect
+daemon.add_as_remote_host:
+  en: Add as Remote Host
 host.hosts:
   en: Hosts
 host.local:
@@ -680,6 +736,8 @@ host.address:
   en: Address
 host.address_placeholder:
   en: e.g. 192.168.1.100:34123
+host.default_hint:
+  en: Enter a LAN address, tailnet name, or Cloudflare tunnel URL with the daemon port — the transport is detected from it.
 host.token:
   en: Token
 host.token_placeholder:
@@ -716,6 +774,56 @@ host.switch_host:
   en: Switch Host
 host.connect:
   en: Connect
+host.transport:
+  en: Transport
+host.transport_default:
+  en: Default
+host.transport_direct:
+  en: Direct
+host.transport_tailscale:
+  en: Tailscale
+host.transport_cloudflare:
+  en: Cloudflare
+host.transport_ssh:
+  en: SSH
+host.tailscale_hint:
+  en: Enter the MagicDNS name or 100.x address with the daemon port, e.g. my-mac.tail-abc.ts.net:34123
+host.ssh_user:
+  en: User
+host.ssh_user_placeholder:
+  en: e.g. alice
+host.ssh_host:
+  en: Jump host
+host.ssh_host_placeholder:
+  en: e.g. jump.example.com
+host.ssh_remote_port:
+  en: Remote port
+host.ssh_remote_port_placeholder:
+  en: e.g. 19999
+host.ssh_identity_file:
+  en: Identity file
+host.ssh_identity_placeholder:
+  en: Optional path to an SSH private key
+host.tunnel_idle_hint:
+  en: Start a Cloudflare Quick Tunnel, then scan the QR code from the Padu mobile app. The URL rotates each time the tunnel restarts.
+host.tunnel_starting:
+  en: Starting tunnel...
+host.start_tunnel:
+  en: Start Tunnel
+host.restart_tunnel:
+  en: Restart Tunnel
+host.tunnel_url_changed:
+  en: Tunnel URL changed — re-scan the QR code on your other devices.
+host.tunnel_connected:
+  en: Tunnel connected
+host.tunnel_failed:
+  en: Tunnel unavailable
+host.connection_section:
+  en: Connection
+host.transport_web_hint:
+  en: Use Tailscale when this daemon is reachable over your tailnet. Cloudflare and SSH relays are added from Padu Desktop.
+host.transport_relay_hint:
+  en: This host was provisioned by Padu Desktop. Its tunnel is managed there.
 web.connect_title:
   en: Connect to Padu daemon
 web.connect_description:

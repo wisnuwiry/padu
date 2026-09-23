@@ -1,4 +1,49 @@
+use std::sync::Arc;
+
+use gpui::{Image, ImageFormat};
+use padu_client::persistence::HostKind;
+use padu_client::transport::{
+    CloudflareTransport, QrPayload, Transport, TransportContext, TransportStatus, render_svg,
+};
+
 use super::*;
+
+/// Edge length, in pixels, of the credentials card's QR code.
+const DAEMON_QR_PX: u32 = 180;
+/// Registry key for the tunnel that fronts this desktop's own daemon.
+const DAEMON_QR_TUNNEL_KEY: &str = "daemon-exposure";
+/// How another device can be told to reach this daemon.
+const DAEMON_QR_TRANSPORTS: [HostKind; 4] = [
+    HostKind::Direct,
+    HostKind::Tailscale,
+    HostKind::Cloudflare,
+    HostKind::SshRelay,
+];
+
+/// `tr!` needs a literal key, so the label is resolved through a match.
+fn host_transport_label(kind: HostKind) -> String {
+    match kind {
+        HostKind::Direct => tr!("host.transport_direct"),
+        HostKind::Tailscale => tr!("host.transport_tailscale"),
+        HostKind::Cloudflare => tr!("host.transport_cloudflare"),
+        HostKind::SshRelay => tr!("host.transport_ssh"),
+    }
+}
+
+fn qr_input_row(label: String, input: Entity<TextInput>, theme: &Theme) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(4.0))
+        .child(
+            div()
+                .text_size(sp(12.5))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text_secondary)
+                .child(label),
+        )
+        .child(input)
+}
 
 impl Padu {
     fn render_remote_hosts_section(&self, cx: &mut Context<Self>) -> Div {
@@ -248,7 +293,35 @@ impl Padu {
                                                             }),
                                                     )
                                                     .child(SharedString::from("·"))
-                                                    .child(last_conn_label),
+                                                    .child(last_conn_label)
+                                                    .when_some(
+                                                        self.host_transport_status(&host.id),
+                                                        |row, (label, healthy)| {
+                                                            row.child(SharedString::from("·"))
+                                                                .child(
+                                                                    div()
+                                                                        .flex()
+                                                                        .items_center()
+                                                                        .gap(px(3.5))
+                                                                        .child(icon(
+                                                                            if healthy {
+                                                                                "icons/check.svg"
+                                                                            } else {
+                                                                                "icons/alert.svg"
+                                                                            },
+                                                                            10.5,
+                                                                            if healthy {
+                                                                                theme.success
+                                                                            } else {
+                                                                                theme.warning
+                                                                            },
+                                                                        ))
+                                                                        .child(SharedString::from(
+                                                                            label,
+                                                                        )),
+                                                                )
+                                                        },
+                                                    ),
                                             ),
                                     ),
                             )
@@ -322,6 +395,22 @@ impl Padu {
                             )
                     }))
             })
+    }
+
+    /// Compact tunnel state for the host list row.
+    ///
+    /// Uses `try_lock` so the render path never blocks on a transport that is
+    /// mid-start; a contended lock simply renders no status this frame.
+    fn host_transport_status(&self, host_id: &str) -> Option<(String, bool)> {
+        use padu_client::transport::TransportStatus;
+        let slot = self.host_transports.get(host_id)?;
+        let guard = slot.try_lock()?;
+        match guard.status() {
+            TransportStatus::Ready { .. } => Some((tr!("host.tunnel_connected"), true)),
+            TransportStatus::Starting => Some((tr!("host.tunnel_starting"), true)),
+            TransportStatus::Failed { .. } => Some((tr!("host.tunnel_failed"), false)),
+            _ => None,
+        }
     }
 
     pub(super) fn render_daemon_settings(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -455,8 +544,6 @@ impl Padu {
         let enabled = self.state.daemon_exposure.enabled;
         let pending = self.daemon_reconfigure_pending;
         let fields_dirty = self.daemon_exposure_fields_dirty(cx);
-        let port = self.state.daemon_exposure.port;
-        let websocket_url = format!("ws://{}:{port}", self.daemon_hostname);
         let token = self.state.daemon_exposure.token.clone();
 
         let exposure_toggle = toggle_switch(
@@ -505,144 +592,6 @@ impl Padu {
             } else {
                 tr!("daemon.apply")
             });
-
-        let copy_url_feedback_id = "daemon-url";
-        let url_copied = self.control_was_copied(copy_url_feedback_id);
-        let copy_url = websocket_url.clone();
-        let copy_url_button = div()
-            .id("copy-daemon-url")
-            .tab_index(0)
-            .h(px(27.0))
-            .px(px(9.0))
-            .rounded(px(6.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .items_center()
-            .gap(px(5.0))
-            .cursor_pointer()
-            .text_size(sp(12.5))
-            .text_color(theme.text_secondary)
-            .focus_visible(|style| style.border_color(theme.accent))
-            .hover(|element| element.bg(theme.overlay))
-            .child(icon(
-                if url_copied {
-                    "icons/check.svg"
-                } else {
-                    "icons/copy.svg"
-                },
-                11.0,
-                theme.text_tertiary,
-            ))
-            .child(if url_copied {
-                tr!("common.copied")
-            } else {
-                tr!("common.copy")
-            })
-            .on_click(cx.listener(move |this, _, _, cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(copy_url.clone()));
-                this.show_control_copied(copy_url_feedback_id, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                if !event.keystroke.modifiers.modified()
-                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                {
-                    cx.write_to_clipboard(ClipboardItem::new_string(websocket_url.clone()));
-                    this.show_control_copied(copy_url_feedback_id, cx);
-                    cx.stop_propagation();
-                }
-            }));
-
-        let copy_token_feedback_id = "daemon-token";
-        let token_copied = self.control_was_copied(copy_token_feedback_id);
-        let click_token = token.clone();
-        let key_token = token.clone();
-        let token_revealed = self.daemon_token_revealed;
-        let reveal_token_button = div()
-            .id("reveal-daemon-token")
-            .tab_index(0)
-            .size(px(27.0))
-            .rounded(px(6.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_pointer()
-            .text_color(theme.text_secondary)
-            .focus_visible(|style| style.border_color(theme.accent))
-            .hover(|element| element.bg(theme.overlay))
-            .active(|element| element.bg(theme.overlay_strong))
-            .child(icon(
-                if token_revealed {
-                    "icons/eye-off.svg"
-                } else {
-                    "icons/eye.svg"
-                },
-                12.0,
-                theme.text_tertiary,
-            ))
-            .tooltip(Tooltip::text(if token_revealed {
-                tr!("daemon.hide_token")
-            } else {
-                tr!("daemon.reveal_token")
-            }))
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.daemon_token_revealed = !this.daemon_token_revealed;
-                cx.notify();
-            }))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                if !event.keystroke.modifiers.modified()
-                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                {
-                    this.daemon_token_revealed = !this.daemon_token_revealed;
-                    cx.stop_propagation();
-                    cx.notify();
-                }
-            }));
-        let copy_token_button = div()
-            .id("copy-daemon-token")
-            .tab_index(0)
-            .h(px(27.0))
-            .px(px(9.0))
-            .rounded(px(6.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .items_center()
-            .gap(px(5.0))
-            .cursor_pointer()
-            .text_size(sp(12.5))
-            .text_color(theme.text_secondary)
-            .focus_visible(|style| style.border_color(theme.accent))
-            .hover(|element| element.bg(theme.overlay))
-            .child(icon(
-                if token_copied {
-                    "icons/check.svg"
-                } else {
-                    "icons/copy.svg"
-                },
-                11.0,
-                theme.text_tertiary,
-            ))
-            .child(if token_copied {
-                tr!("common.copied")
-            } else {
-                tr!("common.copy")
-            })
-            .on_click(cx.listener(move |this, _, _, cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(click_token.clone()));
-                this.show_control_copied(copy_token_feedback_id, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                if !event.keystroke.modifiers.modified()
-                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                {
-                    cx.write_to_clipboard(ClipboardItem::new_string(key_token.clone()));
-                    this.show_control_copied(copy_token_feedback_id, cx);
-                    cx.stop_propagation();
-                }
-            }));
 
         let regenerate_button = div()
             .id("regenerate-daemon-token")
@@ -945,70 +894,6 @@ impl Padu {
                         )
                         .child(
                             div()
-                                .mt(px(13.0))
-                                .py(px(8.0))
-                                .flex()
-                                .items_center()
-                                .gap(px(10.0))
-                                .child(
-                                    div()
-                                        .w(px(80.0))
-                                        .flex_none()
-                                        .text_size(sp(12.5))
-                                        .text_color(theme.text_tertiary)
-                                        .child(tr!("daemon.websocket_url")),
-                                )
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .truncate()
-                                        .font_family(".SystemUIFontMonospaced")
-                                        .text_size(sp(12.5))
-                                        .text_color(theme.text)
-                                        .child(SharedString::from(format!(
-                                            "ws://{}:{port}",
-                                            self.daemon_hostname
-                                        ))),
-                                )
-                                .child(copy_url_button),
-                        )
-                        .child(
-                            div()
-                                .py(px(8.0))
-                                .border_t_1()
-                                .border_color(theme.border)
-                                .flex()
-                                .items_center()
-                                .gap(px(10.0))
-                                .child(
-                                    div()
-                                        .w(px(80.0))
-                                        .flex_none()
-                                        .text_size(sp(12.5))
-                                        .text_color(theme.text_tertiary)
-                                        .child(tr!("daemon.token")),
-                                )
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .truncate()
-                                        .font_family(".SystemUIFontMonospaced")
-                                        .text_size(sp(12.5))
-                                        .text_color(theme.text)
-                                        .child(SharedString::from(if token_revealed {
-                                            token.clone()
-                                        } else {
-                                            "••••••••••••••••••••••••••••••••".to_owned()
-                                        })),
-                                )
-                                .child(reveal_token_button)
-                                .child(copy_token_button)
-                                .child(regenerate_button),
-                        )
-                        .child(
-                            div()
                                 .mt(px(7.0))
                                 .px(px(10.0))
                                 .py(px(8.0))
@@ -1029,10 +914,559 @@ impl Padu {
                                         .text_color(theme.text_secondary)
                                         .child(tr!("daemon.security_warning")),
                                 ),
+                        )
+                        .child(self.render_daemon_qr_section(&token, &theme, cx))
+                        .child(
+                            div()
+                                .mt(px(10.0))
+                                .flex()
+                                .justify_end()
+                                .child(regenerate_button),
                         ),
                 )
             })
             .into_any_element()
+    }
+
+    /// The connection code for this daemon — the only place its address and
+    /// token are shown.
+    ///
+    /// This exists to get a *phone* onto the daemon this desktop is exposing:
+    /// the code carries the address and token the card already displays, so
+    /// nothing has to be typed on a glass keyboard. It is not part of adding a
+    /// remote host — a host profile describes a daemon reached *from* here.
+    fn render_daemon_qr_section(&self, token: &str, theme: &Theme, cx: &mut Context<Self>) -> Div {
+        // The code is always visible: no expand/hide toggle. Header pairs the
+        // section title with a notes view-mode style segmented transport
+        // picker, then the body splits into code (left) and instructions
+        // (right).
+        let mut header_tabs = div()
+            .flex()
+            .items_center()
+            .gap(px(1.0))
+            .p(px(2.0))
+            .rounded(px(7.0))
+            .bg(theme.overlay);
+        for kind in DAEMON_QR_TRANSPORTS {
+            let active = kind == self.daemon_qr_transport;
+            header_tabs = header_tabs.child(
+                div()
+                    .id(SharedString::from(format!("daemon-qr-tab-{kind:?}")))
+                    .tab_index(0)
+                    .h(px(28.0))
+                    .px(px(10.0))
+                    .rounded(px(6.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_pointer()
+                    .text_size(sp(12.5))
+                    .text_color(if active {
+                        theme.text
+                    } else {
+                        theme.text_secondary
+                    })
+                    .when(active, |el| el.bg(theme.overlay_strong))
+                    .hover(|el| el.bg(theme.overlay_strong))
+                    .focus_visible(|style| style.border_color(theme.accent))
+                    .child(host_transport_label(kind))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if this.daemon_qr_transport != kind {
+                            this.daemon_qr_transport = kind;
+                            // Addresses differ per transport, so the previous
+                            // one must not linger as a stale value.
+                            this.daemon_qr_field_input
+                                .update(cx, |input, cx| input.set_content("", cx));
+                            this.daemon_qr_cache.replace(None);
+                            this.daemon_qr_tunnel_error = None;
+                            cx.notify();
+                        }
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                        if !event.keystroke.modifiers.modified()
+                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                        {
+                            this.daemon_qr_transport = kind;
+                            this.daemon_qr_field_input
+                                .update(cx, |input, cx| input.set_content("", cx));
+                            this.daemon_qr_cache.replace(None);
+                            this.daemon_qr_tunnel_error = None;
+                            cx.notify();
+                            cx.stop_propagation();
+                        }
+                    })),
+            );
+        }
+        // Left column: transport inputs, tunnel action, address, and code.
+        // Right column: what the other device needs for this transport.
+        let header = div().mt(px(10.0)).child(header_tabs);
+        let mut left = div().flex().flex_col().gap(px(10.0)).flex_1().min_w_0();
+        let right = qr_instruction_panel(self.daemon_qr_transport, theme);
+
+        match self.daemon_qr_transport {
+            HostKind::Direct => {
+                left = left.child(qr_input_row(
+                    tr!("daemon.qr_direct_address"),
+                    self.daemon_qr_field_input.clone(),
+                    theme,
+                ));
+            }
+            HostKind::Tailscale => {
+                left = left.child(qr_input_row(
+                    tr!("daemon.qr_tailscale_name"),
+                    self.daemon_qr_field_input.clone(),
+                    theme,
+                ));
+            }
+            HostKind::SshRelay => {
+                left = left
+                    .child(qr_input_row(
+                        tr!("daemon.qr_ssh_host"),
+                        self.daemon_qr_field_input.clone(),
+                        theme,
+                    ))
+                    .child(qr_input_row(
+                        tr!("daemon.qr_ssh_port"),
+                        self.daemon_qr_port_input.clone(),
+                        theme,
+                    ));
+            }
+            HostKind::Cloudflare => {
+                left = left.child(self.render_daemon_qr_tunnel_button(theme, cx));
+            }
+        }
+
+        let address = match self.daemon_qr_address(cx) {
+            Ok(address) => address,
+            Err(reason) => {
+                left = left.child(hint_text(reason, theme));
+                return div().flex().flex_col().gap(px(10.0)).child(header).child(
+                    div()
+                        .flex()
+                        .items_start()
+                        .gap(px(16.0))
+                        .child(left)
+                        .child(right),
+                );
+            }
+        };
+
+        let payload = QrPayload {
+            kind: self.daemon_qr_transport,
+            url: address.clone(),
+            token: token.to_owned(),
+            name: self.daemon_hostname.clone(),
+        };
+        let Ok(encoded) = payload.encode() else {
+            return div().flex().flex_col().gap(px(10.0)).child(header).child(
+                div()
+                    .flex()
+                    .items_start()
+                    .gap(px(16.0))
+                    .child(left.child(hint_text(tr!("daemon.qr_unavailable"), theme)))
+                    .child(right),
+            );
+        };
+        // Re-encode only when the address or token actually changed, so an
+        // unrelated repaint does not rebuild the matrix.
+        let mut cache = self.daemon_qr_cache.borrow_mut();
+        if cache.as_ref().is_none_or(|(cached, _)| cached != &encoded) {
+            let svg = render_svg(&payload, DAEMON_QR_PX).unwrap_or_default();
+            *cache = Some((encoded, svg));
+        }
+        let svg = cache
+            .as_ref()
+            .map(|(_, svg)| svg.clone())
+            .unwrap_or_default();
+        drop(cache);
+
+        // The raw `ws://` address stays out of the Direct tab — it is
+        // redundant with the QR and the expandable details below, and showing
+        // a plain-text URL next to a full-access token invites copy-paste
+        // over an untrusted channel. Other transports keep the same treatment:
+        // the QR is for scanning, the details disclosure is for typing.
+        left = left.child(render_qr_centered(&svg, theme));
+        left = left.child(self.render_daemon_connection_details(&address, token, &theme, cx));
+        if self.daemon_qr_transport == HostKind::SshRelay {
+            // The credential panel does not provision `ssh -R` itself — the
+            // QR only *describes* the jump-host address. Without a running
+            // relay the code points at nothing, so say so explicitly instead
+            // of rendering a scannable-but-dead code silently.
+            left = left.child(hint_text(tr!("daemon.qr_ssh_needs_relay"), theme));
+        }
+        left = left.child(hint_text(tr!("daemon.qr_hint"), theme));
+
+        div().flex().flex_col().gap(px(10.0)).child(header).child(
+            div()
+                .flex()
+                .items_start()
+                .gap(px(16.0))
+                .child(left)
+                .child(right),
+        )
+    }
+
+    /// Expandable manual-connection details: the QR is for scanning, this is
+    /// for typing. Collapsed by default so the token stays out of sight, and
+    /// each row carries its own copy button with inline copied feedback.
+    fn render_daemon_connection_details(
+        &self,
+        address: &str,
+        token: &str,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let expanded = self.daemon_connection_details_expanded;
+        let mut card = div()
+            .rounded(px(8.0))
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.surface)
+            .w_full()
+            .min_w_0();
+        let header = div()
+            .id("daemon-connection-details-toggle")
+            .tab_index(0)
+            .px(px(10.0))
+            .py(px(8.0))
+            .w_full()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .cursor_pointer()
+            .hover(|e| e.bg(theme.overlay.opacity(0.5)))
+            .focus_visible(|style| style.border_color(theme.accent))
+            .child(icon(
+                if expanded {
+                    "icons/chevron-down.svg"
+                } else {
+                    "icons/chevron-right.svg"
+                },
+                12.0,
+                theme.text_tertiary,
+            ))
+            .child(
+                div()
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(tr!("daemon.connection_details")),
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.daemon_connection_details_expanded = !this.daemon_connection_details_expanded;
+                cx.notify();
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if !event.keystroke.modifiers.modified()
+                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                {
+                    this.daemon_connection_details_expanded =
+                        !this.daemon_connection_details_expanded;
+                    cx.notify();
+                    cx.stop_propagation();
+                }
+            }));
+        card = card.child(header);
+        if expanded {
+            card = card
+                .child(div().h(px(1.0)).w_full().bg(theme.border.opacity(0.7)))
+                .child(self.daemon_detail_copy_row(
+                    "daemon-connection-details-address",
+                    tr!("daemon.websocket_url"),
+                    address,
+                    tr!("daemon.url_copied"),
+                    theme,
+                    cx,
+                ))
+                .child(self.daemon_detail_copy_row(
+                    "daemon-connection-details-token",
+                    tr!("daemon.token"),
+                    token,
+                    tr!("daemon.token_copied"),
+                    theme,
+                    cx,
+                ));
+        }
+        card
+    }
+
+    /// One copyable row inside the connection details: label + mono value on
+    /// the left, copy/check icon button on the right. Keyboard-operable so a
+    /// screen-reader-adjacent flow (tab + enter) works like the mouse.
+    fn daemon_detail_copy_row(
+        &self,
+        id: &str,
+        label: String,
+        value: &str,
+        copied_toast: String,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let copied = self.control_was_copied(id);
+        let copy_value = value.to_owned();
+        let copy_toast = copied_toast.clone();
+        let copy_id = id.to_owned();
+        let copy_value_key = value.to_owned();
+        let copy_id_key = id.to_owned();
+        let copy_button = icon_button(
+            SharedString::from(id.to_owned()),
+            if copied {
+                "icons/check.svg"
+            } else {
+                "icons/copy.svg"
+            },
+            *theme,
+        )
+        .tab_index(0)
+        .focus_visible(|style| style.border_color(theme.accent))
+        .tooltip(Tooltip::text(if copied {
+            tr!("common.copied")
+        } else {
+            tr!("common.copy")
+        }))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string(copy_value.clone()));
+            this.show_control_copied(copy_id.clone(), cx);
+            this.show_success_toast(copy_toast.clone());
+        }))
+        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+            if !event.keystroke.modifiers.modified()
+                && matches!(event.keystroke.key.as_str(), "enter" | "space")
+            {
+                cx.write_to_clipboard(ClipboardItem::new_string(copy_value_key.clone()));
+                this.show_control_copied(copy_id_key.clone(), cx);
+                cx.stop_propagation();
+            }
+        }));
+        div()
+            .px(px(10.0))
+            .py(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .min_w_0()
+            .w_full()
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.0))
+                    .child(
+                        div()
+                            .text_size(sp(11.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text_tertiary)
+                            .child(label),
+                    )
+                    .child(
+                        div()
+                            .font_family(crate::md::render::MONO_FAMILY)
+                            .text_size(sp(12.0))
+                            .text_color(theme.text)
+                            .truncate()
+                            .child(SharedString::from(value.to_owned())),
+                    ),
+            )
+            .child(copy_button)
+    }
+
+    /// The address another device should use for the selected transport.
+    ///
+    /// Direct, Tailscale and SSH only *describe* where the exposed daemon can
+    /// already be reached, so they are derived here. Cloudflare has to open a
+    /// tunnel before an address exists at all. Remote transports always use
+    /// `wss://`; Direct stays `ws://` and is only safe on a private network
+    /// (the mobile client blocks public `ws://`).
+    fn daemon_qr_address(&self, cx: &App) -> Result<String, String> {
+        let port = self.state.daemon_exposure.port;
+        let field = || {
+            self.daemon_qr_field_input
+                .read(cx)
+                .content()
+                .trim()
+                .to_owned()
+        };
+        match self.daemon_qr_transport {
+            HostKind::Direct => {
+                let raw = field();
+                let host = if raw.is_empty() {
+                    // Auto-detected LAN IP first (see `Padu::new`), hostname
+                    // as the offline fallback.
+                    self.daemon_lan_address
+                        .clone()
+                        .filter(|candidate| !candidate.trim().is_empty())
+                        .unwrap_or_else(|| self.daemon_hostname.clone())
+                } else {
+                    strip_scheme(&raw)
+                };
+                if host.is_empty() {
+                    return Err(tr!("daemon.qr_need_direct"));
+                }
+                // Accept either a bare hostname (`192.168.1.10`) or a full
+                // `host:port` so a pasted LAN URL does not double the port.
+                if host.contains(':') && !host.starts_with('[') {
+                    Ok(format!("ws://{host}"))
+                } else {
+                    Ok(format!("ws://{host}:{port}"))
+                }
+            }
+            HostKind::Tailscale => {
+                let name = field();
+                if name.is_empty() {
+                    return Err(tr!("daemon.qr_need_name"));
+                }
+                let host = strip_scheme(&name);
+                Ok(format!("wss://{host}:{port}"))
+            }
+            HostKind::SshRelay => {
+                let host = field();
+                if host.is_empty() {
+                    return Err(tr!("daemon.qr_need_host"));
+                }
+                let host = strip_scheme(&host);
+                let remote_port: u16 = self
+                    .daemon_qr_port_input
+                    .read(cx)
+                    .content()
+                    .trim()
+                    .parse()
+                    .map_err(|_| tr!("daemon.qr_need_port"))?;
+                if remote_port == 0 {
+                    return Err(tr!("daemon.qr_need_port"));
+                }
+                Ok(format!("wss://{host}:{remote_port}"))
+            }
+            HostKind::Cloudflare => {
+                let slot = self
+                    .host_transports
+                    .get(DAEMON_QR_TUNNEL_KEY)
+                    .ok_or_else(|| tr!("daemon.qr_needs_tunnel"))?;
+                let guard = slot
+                    .try_lock()
+                    .ok_or_else(|| tr!("daemon.qr_tunnel_starting"))?;
+                match guard.status() {
+                    TransportStatus::Ready { address, .. } => Ok(address),
+                    TransportStatus::Starting => Err(tr!("daemon.qr_tunnel_starting")),
+                    // A tunnel that published a URL and then died must surface
+                    // its real reason — not the generic "start the tunnel"
+                    // hint — or the QR silently never comes back.
+                    TransportStatus::Failed { error } => Err(error),
+                    TransportStatus::Stopped | TransportStatus::Idle => {
+                        Err(tr!("daemon.qr_needs_tunnel"))
+                    }
+                }
+            }
+        }
+    }
+
+    fn render_daemon_qr_tunnel_button(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
+        let starting = self.daemon_qr_tunnel_starting;
+        let started = self.host_transports.get(DAEMON_QR_TUNNEL_KEY).is_some();
+        let button = div()
+            .id("daemon-qr-tunnel-button")
+            .tab_index(0)
+            .h(px(28.0))
+            .px(px(12.0))
+            .rounded(px(6.0))
+            .border_1()
+            .border_color(theme.border_strong)
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(6.0))
+            .cursor_pointer()
+            .text_size(sp(12.5))
+            .text_color(theme.text_secondary)
+            .opacity(if starting { 0.55 } else { 1.0 })
+            .focus_visible(|style| style.border_color(theme.accent))
+            .when(!starting, |element| {
+                element
+                    .hover(|e| e.bg(theme.overlay))
+                    .on_click(cx.listener(|this, _, _, cx| this.start_daemon_qr_tunnel(cx)))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                        if !event.keystroke.modifiers.modified()
+                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                        {
+                            this.start_daemon_qr_tunnel(cx);
+                            cx.stop_propagation();
+                        }
+                    }))
+            })
+            .child(if starting {
+                tr!("daemon.qr_tunnel_starting")
+            } else if started {
+                tr!("daemon.qr_restart_tunnel")
+            } else {
+                tr!("daemon.qr_start_tunnel")
+            });
+        let mut column = div().flex().flex_col().gap(px(6.0)).child(button);
+        if let Some(error) = self.daemon_qr_tunnel_error.clone() {
+            column = column.child(
+                div()
+                    .text_size(sp(11.5))
+                    .line_height(sp(15.0))
+                    .text_color(gpui::hsla(0.0, 0.7, 0.55, 1.0))
+                    .child(error),
+            );
+        }
+        column
+    }
+
+    /// Open (or reopen) the Cloudflare tunnel that fronts this daemon.
+    fn start_daemon_qr_tunnel(&mut self, cx: &mut Context<Self>) {
+        let local_port = self.state.daemon_exposure.port;
+        let token = self.state.daemon_exposure.token.clone();
+        if self.daemon_qr_tunnel_starting {
+            return;
+        }
+        // A restart must not reuse the old tunnel's now-dead address — and
+        // must not leak it either: `remove` alone would leave the old
+        // `cloudflared` running with the stale URL.
+        if let Some(old) = self.host_transports.remove(DAEMON_QR_TUNNEL_KEY) {
+            smol::spawn(async move {
+                let mut old = old.lock().await;
+                let _ = old.stop().await;
+            })
+            .detach();
+        }
+        self.daemon_qr_cache.replace(None);
+        self.daemon_qr_tunnel_error = None;
+        self.daemon_qr_tunnel_starting = true;
+        cx.notify();
+
+        let registry = self.host_transports.clone();
+        cx.spawn(async move |this, cx| {
+            let (transport, outcome) = cx
+                .background_executor()
+                .spawn(async move {
+                    let mut transport = CloudflareTransport::new();
+                    let context = TransportContext { local_port, token };
+                    let outcome = transport.start(&context).await;
+                    (transport, outcome)
+                })
+                .await;
+            match outcome {
+                Ok(_) => {
+                    registry.register(DAEMON_QR_TUNNEL_KEY, Box::new(transport));
+                    let _ = this.update(cx, |this, cx| {
+                        this.daemon_qr_tunnel_starting = false;
+                        this.daemon_qr_cache.replace(None);
+                        cx.notify();
+                    });
+                }
+                Err(error) => {
+                    let _ = this.update(cx, |this, cx| {
+                        this.daemon_qr_tunnel_starting = false;
+                        this.daemon_qr_tunnel_error = Some(error.to_string());
+                        this.show_toast(tr!("daemon.qr_tunnel_failed", error = error.to_string()));
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
     }
 
     pub(crate) fn add_daemon_origin(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1099,9 +1533,6 @@ impl Padu {
     }
 
     fn set_daemon_exposure_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        if !enabled {
-            self.daemon_token_revealed = false;
-        }
         let settings = if enabled {
             match self.daemon_exposure_from_fields(cx) {
                 Ok(mut settings) => {
@@ -1141,7 +1572,10 @@ impl Padu {
             }
         };
         settings.token = padu_client::DaemonExposureSettings::new_token();
-        self.daemon_token_revealed = false;
+        // The QR caches its rendered SVG keyed on the encoded payload (which
+        // carries the token), so it refreshes on the next frame regardless —
+        // clear it eagerly so no stale code lingers.
+        self.daemon_qr_cache.replace(None);
         self.apply_daemon_exposure(settings, cx);
     }
 
@@ -1233,4 +1667,115 @@ fn host_last_connected_label(last_connected: Option<u64>) -> String {
         format!("{}d ago", seconds / 86400)
     };
     tr!("host.last_connected", time = time_str)
+}
+
+fn hint_text(message: impl Into<SharedString>, theme: &Theme) -> Div {
+    div()
+        .text_size(sp(11.5))
+        .line_height(sp(16.0))
+        .text_color(theme.text_tertiary)
+        .child(message.into())
+}
+
+/// Strip a pasted URL scheme (`ws://`, `wss://`, `http(s)://`) so a full LAN
+/// URL pasted into a hostname field does not produce `ws://ws://…`.
+fn strip_scheme(raw: &str) -> String {
+    let trimmed = raw.trim();
+    for prefix in ["wss://", "ws://", "https://", "http://"] {
+        if let Some(rest) = trimmed.strip_prefix(prefix) {
+            return rest.trim_end_matches('/').to_owned();
+        }
+    }
+    trimmed.trim_end_matches('/').to_owned()
+}
+
+/// Instruction panel on the right of the credential code: what the other
+/// device needs for this transport. `tr!` needs a literal key, so the copy
+/// is resolved through a match.
+fn qr_instruction_panel(kind: HostKind, theme: &Theme) -> Div {
+    let (title, body) = match kind {
+        HostKind::Direct => (tr!("host.transport_direct"), tr!("daemon.qr_direct_hint")),
+        HostKind::Tailscale => (
+            tr!("host.transport_tailscale"),
+            tr!("daemon.qr_tailscale_hint"),
+        ),
+        HostKind::Cloudflare => (
+            tr!("host.transport_cloudflare"),
+            tr!("daemon.qr_cloudflare_hint"),
+        ),
+        HostKind::SshRelay => (tr!("host.transport_ssh"), tr!("daemon.qr_ssh_hint")),
+    };
+    let mut panel = div()
+        .flex_1()
+        .min_w_0()
+        .px(px(12.0))
+        .py(px(10.0))
+        .rounded(px(8.0))
+        .bg(theme.inset)
+        .flex()
+        .flex_col()
+        .gap(px(6.0))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .child(icon("icons/info.svg", 13.0, theme.text_tertiary))
+                .child(
+                    div()
+                        .text_size(sp(12.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(title),
+                ),
+        )
+        .child(
+            div()
+                .whitespace_normal()
+                .text_size(sp(12.0))
+                .line_height(sp(17.0))
+                .text_color(theme.text_secondary)
+                .child(body),
+        );
+    if kind == HostKind::Cloudflare {
+        // The one prerequisite that blocks everyone: no binary, no tunnel.
+        panel = panel.child(
+            div()
+                .font_family(crate::md::render::MONO_FAMILY)
+                .text_size(sp(11.5))
+                .text_color(theme.text_tertiary)
+                .child(SharedString::from(tr!("daemon.qr_cloudflare_install"))),
+        );
+    }
+    panel
+}
+
+/// Centered wrapper for the credential QR: the code keeps its natural size
+/// and never stretches with the column.
+fn render_qr_centered(svg: &str, theme: &Theme) -> Div {
+    div()
+        .w_full()
+        .flex()
+        .justify_center()
+        .child(render_qr_image(svg, theme))
+}
+
+/// Paint a QR SVG. GPUI rasterizes `ImageFormat::Svg` through resvg, and
+/// `Image::from_bytes` keys its cache on the content hash, so a rebuilt image
+/// is a cache hit rather than a re-rasterization.
+fn render_qr_image(svg: &str, theme: &Theme) -> Div {
+    let image = Arc::new(Image::from_bytes(ImageFormat::Svg, svg.as_bytes().to_vec()));
+    div()
+        .rounded(px(6.0))
+        .border_1()
+        .border_color(theme.border_strong)
+        // A QR has to be scanned on white, whatever the app theme is.
+        .bg(gpui::hsla(0.0, 0.0, 1.0, 1.0))
+        .p(px(8.0))
+        .child(
+            img(image)
+                .id("daemon-credentials-qr")
+                .w(px(DAEMON_QR_PX as f32))
+                .h(px(DAEMON_QR_PX as f32)),
+        )
 }

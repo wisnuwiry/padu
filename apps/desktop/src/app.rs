@@ -1128,6 +1128,12 @@ pub struct Padu {
     /// Cached once at construction for the Daemon settings connection URL;
     /// rendering must not query account or network configuration.
     daemon_hostname: String,
+    /// LAN IPv4 detected once at construction via the default route. Used as
+    /// the Direct tab's default so the user does not have to type 192.168.x.x.
+    daemon_lan_address: Option<String>,
+    /// Whether the credentials card's "Details to connect" disclosure is open.
+    /// Collapsed by default so the token stays out of sight until requested.
+    daemon_connection_details_expanded: bool,
     /// Session details currently being fetched from the daemon. Sidebar rows
     /// stay usable while the selected transcript hydrates asynchronously.
     session_hydrations: HashSet<Uuid>,
@@ -1156,7 +1162,23 @@ pub struct Padu {
     daemon_port_input: Entity<TextInput>,
     daemon_origin_inputs: Vec<Entity<TextInput>>,
     daemon_reconfigure_pending: bool,
-    daemon_token_revealed: bool,
+    /// Which transport the credentials QR tells another device to use.
+    daemon_qr_transport: padu_client::persistence::HostKind,
+    /// Tailscale name or `host:port` for the credentials QR's address.
+    daemon_qr_field_input: Entity<TextInput>,
+    daemon_qr_port_input: Entity<TextInput>,
+    /// `(encoded payload, rendered SVG)` for the last QR the credentials card
+    /// drew, so the matrix is only re-encoded when the payload changes.
+    /// `RefCell` because the settings renderer takes `&self`.
+    daemon_qr_cache: RefCell<Option<(String, String)>>,
+    /// True while the credential card's Cloudflare tunnel is starting. Kept
+    /// on the app (not derived from the registry) so the button shows
+    /// "Starting…" immediately on click — the registry key is removed first
+    /// and would otherwise read as idle for the whole startup window.
+    daemon_qr_tunnel_starting: bool,
+    /// Last Cloudflare tunnel failure, rendered inline under the button so a
+    /// failed start is never silent (toasts alone are easy to miss).
+    daemon_qr_tunnel_error: Option<String>,
     settings_focus: FocusHandle,
     onboarding_add_project_focus: FocusHandle,
     onboarding_projectless_focus: FocusHandle,
@@ -1336,6 +1358,10 @@ pub struct Padu {
     host_dialog_request: Option<dialogs::host::HostDialogRequest>,
     project_action_dialog: Option<dialogs::project_action::ProjectActionDialogState>,
     project_action_dialog_request: Option<dialogs::project_action::ProjectActionDialogRequest>,
+    /// Live transports (SSH relays, Cloudflare tunnels) keyed by host id.
+    /// Started when a remote host is provisioned or activated, torn down on
+    /// host switch and on app shutdown.
+    host_transports: padu_client::transport::TransportRegistry,
     host_switch_pending: bool,
     host_switch_generation: u64,
     onboarding: onboarding::OnboardingState,
@@ -2064,11 +2090,38 @@ impl Padu {
         self.assistant_footer_fingerprint.set(None);
     }
 
+    /// Live transports for remote hosts. Exposed so the app's quit hook can
+    /// tear every tunnel down without reaching into `Padu`.
+    pub(crate) fn host_transports(&self) -> &padu_client::transport::TransportRegistry {
+        &self.host_transports
+    }
+
+    /// Stop and forget the transport backing `host_id`, if one is running.
+    /// A relay host's tunnel is only valid while that host is active, so this
+    /// runs when switching away rather than leaving the subprocess behind.
+    fn stop_host_transport(&self, host_id: &str) {
+        let Some(slot) = self.host_transports.remove(host_id) else {
+            return;
+        };
+        smol::spawn(async move {
+            let mut transport = slot.lock().await;
+            let _ = transport.stop().await;
+        })
+        .detach();
+    }
+
     pub(super) fn switch_to_host(&mut self, host_id: Option<String>, cx: &mut Context<Self>) {
         self.save();
 
+        let previous_host = self.state.active_host_id.clone();
         self.state.set_active_host(host_id.clone());
         let _ = self.store.write_app_settings(&self.state.app_settings());
+
+        if let Some(previous) = previous_host
+            && host_id.as_deref() != Some(previous.as_str())
+        {
+            self.stop_host_transport(&previous);
+        }
 
         self.teardown_all_runtimes();
 
@@ -2083,24 +2136,65 @@ impl Padu {
             .cloned();
 
         let existing_local = self.local_daemon.clone();
+        let registry = self.host_transports.clone();
+        let local_port = self.state.daemon_exposure.port;
 
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    match profile {
-                        None => {
-                            if let Some(local) = existing_local {
-                                Ok(local)
-                            } else {
-                                crate::daemon::start_process()
-                            }
+                    let Some(profile) = profile else {
+                        return if let Some(local) = existing_local {
+                            Ok((local, None))
+                        } else {
+                            crate::daemon::start_process().map(|daemon| (daemon, None))
+                        };
+                    };
+
+                    let token = profile.token.clone().unwrap_or_default();
+                    let context = padu_client::transport::TransportContext {
+                        local_port,
+                        token: token.clone(),
+                    };
+
+                    // Relay transports open their tunnel before the client
+                    // connects, and report the address actually carrying
+                    // traffic. A stale saved address — most often a Quick
+                    // Tunnel rotated by a restart — is replaced.
+                    let address = match profile.kind {
+                        padu_client::persistence::HostKind::Direct
+                        | padu_client::persistence::HostKind::Tailscale => profile.address.clone(),
+                        padu_client::persistence::HostKind::SshRelay => {
+                            let ssh = profile.ssh.clone().ok_or_else(|| {
+                                anyhow::anyhow!("host has no SSH relay configuration")
+                            })?;
+                            let transport = padu_client::transport::SshTransport::new(
+                                padu_client::transport::ssh::SshConfig {
+                                    user: ssh.user,
+                                    host: ssh.host,
+                                    remote_port: ssh.remote_port,
+                                    identity_file: ssh.identity_file,
+                                },
+                            );
+                            registry
+                                .ensure_started(&profile.id, || Box::new(transport), &context)
+                                .await
+                                .map_err(anyhow::Error::from)?
+                                .address
                         }
-                        Some(p) => {
-                            let token = p.token.unwrap_or_default();
-                            padu_client::DaemonSupervisor::connect(&p.address, token)
+                        padu_client::persistence::HostKind::Cloudflare => {
+                            let transport = padu_client::transport::CloudflareTransport::new();
+                            registry
+                                .ensure_started(&profile.id, || Box::new(transport), &context)
+                                .await
+                                .map_err(anyhow::Error::from)?
+                                .address
                         }
-                    }
+                    };
+
+                    let rotated = (address != profile.address).then(|| address.clone());
+                    let daemon = padu_client::DaemonSupervisor::connect(&address, token)?;
+                    Ok((daemon, rotated))
                 })
                 .await;
 
@@ -2110,7 +2204,21 @@ impl Padu {
                 }
                 this.host_switch_pending = false;
                 match result {
-                    Ok(daemon) => {
+                    Ok((daemon, rotated)) => {
+                        if let Some(address) = rotated
+                            && let Some(id) = this.state.active_host_id.clone()
+                            && let Some(profile) = this.state.hosts.iter_mut().find(|h| h.id == id)
+                        {
+                            profile.address = address.clone();
+                            if let Some(cloudflare) = profile.cloudflare.as_mut() {
+                                cloudflare.hostname = address
+                                    .trim_start_matches("wss://")
+                                    .trim_start_matches("ws://")
+                                    .to_string();
+                            }
+                            let _ = this.store.write_app_settings(&this.state.app_settings());
+                            this.show_toast(tr!("host.tunnel_url_changed"));
+                        }
                         if !daemon.is_remote() {
                             this.local_daemon = Some(daemon.clone());
                         }
@@ -2354,6 +2462,7 @@ impl Padu {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let store = StateStore::remote(daemon.clone());
         let daemon_hostname = crate::daemon::local_hostname().unwrap_or_else(|| "this-mac".into());
+        let daemon_lan_address = crate::daemon::local_lan_address();
         let composer_draft_store = ComposerDraftStore::remote(daemon.clone());
         let composer_drafts = composer_draft_store.load().unwrap_or_default();
         let mut state = store.load_or_fresh(cwd);
@@ -2745,6 +2854,25 @@ impl Padu {
             .and_then(|state| state.0.as_ref())
             .map(|updater| (updater.status(), Some(updater.events())))
             .unwrap_or_default();
+        // Pre-fill the Direct tab with the auto-detected LAN address so the
+        // QR works without typing. Tailscale/SSH still start blank — they
+        // need a MagicDNS or jump host the route probe cannot know.
+        let daemon_lan_prefill = daemon_lan_address.clone().unwrap_or_default();
+        let qr_field_input = cx.new(|cx| {
+            let mut input =
+                TextInput::new(window, cx).placeholder(tr!("daemon.qr_field_placeholder"));
+            if !daemon_lan_prefill.trim().is_empty() {
+                input.set_content(daemon_lan_prefill.clone(), cx);
+            }
+            input
+        });
+        let qr_port_input = cx.new(|cx| {
+            let mut input =
+                TextInput::new(window, cx).placeholder(tr!("daemon.qr_port_placeholder"));
+            input.set_content("19999", cx);
+            input
+        });
+
         let entity = cx.new(|cx| {
             let settings_focus = cx.focus_handle();
             let onboarding_add_project_focus = cx.focus_handle();
@@ -3232,6 +3360,8 @@ impl Padu {
                 daemon,
                 local_daemon,
                 daemon_hostname,
+                daemon_lan_address,
+                daemon_connection_details_expanded: false,
                 session_hydrations: HashSet::new(),
                 pending_session_activation: None,
                 analytics,
@@ -3254,7 +3384,12 @@ impl Padu {
                 daemon_port_input,
                 daemon_origin_inputs,
                 daemon_reconfigure_pending: false,
-                daemon_token_revealed: false,
+                daemon_qr_cache: RefCell::new(None),
+                daemon_qr_tunnel_starting: false,
+                daemon_qr_tunnel_error: None,
+                daemon_qr_transport: padu_client::persistence::HostKind::Direct,
+                daemon_qr_field_input: qr_field_input,
+                daemon_qr_port_input: qr_port_input,
                 settings_focus,
                 onboarding_add_project_focus,
                 onboarding_projectless_focus,
@@ -3350,6 +3485,7 @@ impl Padu {
                 host_dialog_request: None,
                 project_action_dialog: None,
                 project_action_dialog_request: None,
+                host_transports: padu_client::transport::TransportRegistry::new(),
                 host_switch_pending: false,
                 host_switch_generation: 0,
                 onboarding,

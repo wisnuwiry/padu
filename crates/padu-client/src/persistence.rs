@@ -25,8 +25,9 @@ use padu_protocol::model::{
 use padu_protocol::theme::ThemePreference;
 
 pub use padu_protocol::persistence::{
-    ComposerDraft, ComposerDraftAttachment, ComposerDraftChange, ComposerDraftKey,
-    ComposerDraftTarget, ComposerDrafts, HostProfile, SessionMessageMatch,
+    CloudflareHostConfig, ComposerDraft, ComposerDraftAttachment, ComposerDraftChange,
+    ComposerDraftKey, ComposerDraftTarget, ComposerDrafts, HostKind, HostProfile,
+    SessionMessageMatch, SshHostConfig, TailscaleHostConfig,
 };
 
 const STATE_VERSION: u32 = 5;
@@ -1512,8 +1513,12 @@ mod tests {
         let profile = HostProfile {
             id: "host-1".into(),
             name: "Dev Box".into(),
+            kind: padu_protocol::persistence::HostKind::Direct,
             address: "ws://192.168.1.10:34123".into(),
             token: Some("secret-token".into()),
+            tailscale: None,
+            cloudflare: None,
+            ssh: None,
             created_at: 100,
             updated_at: 100,
             last_connected_at: None,

@@ -397,6 +397,17 @@ pub fn run() {
                         let padu = Padu::new(window, cx, daemon);
                         let composer_focus = padu.read(cx).composer_focus(cx);
                         window.focus(&composer_focus, cx);
+                        // Relay tunnels (`cloudflared`, `ssh -R`) are child
+                        // processes, so they must be reaped explicitly or they
+                        // outlive the app.
+                        let transports = padu.read(cx).host_transports().clone();
+                        cx.on_app_quit(move |_| {
+                            let transports = transports.clone();
+                            async move {
+                                transports.shutdown_all().await;
+                            }
+                        })
+                        .detach();
                         padu
                     },
                 )

@@ -280,6 +280,7 @@ daemon.status_exposed: 公開中
 daemon.status_restarting: 再起動中
 daemon.connection_title: ネットワークとオリジンポリシー
 daemon.connection_description: ブラウザのオリジンは完全一致が必要です。複数指定する場合はカンマで区切ります。
+daemon.connection_details: 接続の詳細
 daemon.port: ポート
 daemon.port_description: 公開中は、すべてのネットワークインターフェイスのこのポートで待ち受けます。
 daemon.port_placeholder: "34123"
@@ -333,6 +334,7 @@ host.name: 名前
 host.name_placeholder: 例：開発サーバー
 host.address: アドレス
 host.address_placeholder: 例：192.168.1.100:34123
+host.default_hint: LAN アドレス、テールネット名、または Cloudflare トンネル URL をデーモンのポート付きで入力してください。トランスポートは自動判別されます。
 host.token: トークン
 host.token_placeholder: デーモン認証トークン（省略可）
 host.save_and_connect: 保存して接続
@@ -1556,3 +1558,56 @@ session.pin: ピン留め
 session.unpin: ピン留めを外す
 session.archive: アーカイブ
 errors.update_task: "タスクを更新できませんでした：%{error}"
+host.transport: トランスポート
+host.transport_default: デフォルト
+host.transport_direct: 直接
+host.transport_tailscale: Tailscale
+host.transport_cloudflare: Cloudflare
+host.transport_ssh: SSH
+host.tailscale_hint: "MagicDNS 名または 100.x アドレスとデーモンのポートを入力してください（例: my-mac.tail-abc.ts.net:34123）"
+host.ssh_user: ユーザー
+host.ssh_user_placeholder: "例: alice"
+host.ssh_host: 踏み台ホスト
+host.ssh_host_placeholder: "例: jump.example.com"
+host.ssh_remote_port: リモートポート
+host.ssh_remote_port_placeholder: "例: 19999"
+host.ssh_identity_file: 秘密鍵ファイル
+host.ssh_identity_placeholder: SSH 秘密鍵へのパス（任意）
+host.tunnel_idle_hint: Cloudflare Quick Tunnel を開始し、Padu Mobile アプリで QR コードをスキャンしてください。URL はトンネルを再起動するたびに変わります。
+host.tunnel_starting: トンネルを開始しています…
+host.start_tunnel: トンネルを開始
+host.restart_tunnel: トンネルを再起動
+host.tunnel_url_changed: トンネル URL が変わりました — 他のデバイスで QR コードを再スキャンしてください。
+host.tunnel_connected: トンネル接続済み
+host.tunnel_failed: トンネル利用不可
+host.transport_web_hint: このデーモンにテールネット経由で到達できる場合は Tailscale を使用してください。Cloudflare と SSH のリレーは Padu Desktop から追加します。
+host.transport_relay_hint: このホストは Padu Desktop によってプロビジョニングされました。トンネルはそこで管理されます。
+host.connection_section: 接続
+daemon.show_qr: QR コードを表示
+daemon.hide_qr: QR コードを非表示
+daemon.qr_hint: Padu モバイルアプリでこれをスキャンするとこの端末を接続できます。アドレスとトークンが含まれるため、入力は不要です。
+daemon.add_as_remote_host: リモートホストとして追加
+
+daemon.qr_unavailable: このデーモンのアドレスは QR コードにできません。
+daemon.qr_tailscale_name: テールネット名
+daemon.qr_direct_address: LAN アドレス
+daemon.qr_ssh_host: 踏み台ホスト
+daemon.qr_ssh_port: リモートポート
+daemon.qr_need_direct: "このマシンの LAN アドレス（例: 192.168.1.10）を入力してください。空欄で検出ホスト名を使います。"
+daemon.qr_need_name: 他の端末が使用するテールネット名を入力してください。
+daemon.qr_need_host: 他の端末が使用する踏み台ホストを入力してください。
+daemon.qr_need_port: リモートポート（1〜65535）を入力してください。
+daemon.qr_direct_hint: 同一 Wi-Fi/LAN 専用。信頼できるネットワークで公開してください。このコードは平文 ws:// でフルアクセスのトークンを含みます。
+daemon.qr_tailscale_hint: 両端末が同一テールネットに参加し、公開が有効である必要があります。MagicDNS（*.ts.net）または 100.x を入力してください。
+daemon.qr_cloudflare_hint: このマシンに cloudflared が必要です。共通ネットワークは不要です。トンネルを開始し、接続後にスキャンしてください。URL は再起動ごとに変わります。
+daemon.qr_cloudflare_install: brew install cloudflared
+daemon.qr_title: 他の端末を接続
+daemon.qr_ssh_hint: 所有する踏み台ホストへの SSH リレーが必要です（GatewayPorts yes）。このコードは wss://jump:port の説明のみです。先にリレーを開始してください。
+daemon.qr_ssh_needs_relay: このコードを共有する前に SSH リレー（ホスト追加 → SSH）を開始してください。開始前は閉じたポートを指します。
+daemon.qr_needs_tunnel: トンネルを開始するとコードが表示されます。
+daemon.qr_tunnel_starting: トンネルを開始しています…
+daemon.qr_start_tunnel: トンネルを開始
+daemon.qr_restart_tunnel: トンネルを再起動
+daemon.qr_tunnel_failed: "トンネルを開始できませんでした: %{error}"
+daemon.qr_field_placeholder: "例: 192.168.1.10 または my-mac.tail-abc.ts.net"
+daemon.qr_port_placeholder: "例: 19999"

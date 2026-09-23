@@ -4,6 +4,7 @@ import { HostDialog } from '@/components/host-dialog'
 import { PaduIcon } from '@/components/padu-icon'
 import { Button } from '@/components/ui/button'
 import { useDaemon } from '@/lib/daemon-context'
+import { transportLabelKey } from '@/lib/daemon-transport'
 import { useI18n } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
 import { DetailRow, SettingsCard, SettingText, errorMessage, formatHostLastConnected } from './shared'
@@ -77,6 +78,11 @@ export function RemoteHostsCard() {
                       <span className="truncate text-[13.5px] font-medium text-foreground">
                         {host.name || host.address}
                       </span>
+                      {transportLabelKey(host.kind) && (
+                        <span className="shrink-0 rounded bg-[var(--overlay)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--text-secondary)]">
+                          {t(transportLabelKey(host.kind)!)}
+                        </span>
+                      )}
                       {isActive && (
                         <span className="rounded bg-[var(--success-soft)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--success)]">
                           {t('host.active')}
@@ -150,8 +156,17 @@ export function RemoteHostsCard() {
 
 export function DaemonSettings() {
   const { t } = useI18n()
-  const { config, phase, reconnect, disconnect, forget } = useDaemon()
+  const { config, phase, reconnect, disconnect, forget, hosts, addHost, switchHost } = useDaemon()
   const [error, setError] = useState<string | null>(null)
+  const [addHostOpen, setAddHostOpen] = useState(false)
+  const [prefillHost, setPrefillHost] = useState<{ address: string; token: string } | null>(null)
+
+  function openAddAsRemoteHost() {
+    if (!config?.address) return
+    setPrefillHost({ address: config.address, token: config.token ?? '' })
+    setAddHostOpen(true)
+  }
+
   return (
     <div>
       <RemoteHostsCard />
@@ -168,20 +183,70 @@ export function DaemonSettings() {
           <DetailRow label={t('daemon.status')} value={t(`daemon.phase_${phase}`)} />
         </div>
         {error && <p className="mt-3 text-[11.5px] text-destructive">{error}</p>}
-        <div className="mt-4 flex flex-wrap justify-end gap-2">
-          <Button variant="ghost" onClick={disconnect}>{t('daemon.disconnect')}</Button>
-          <Button variant="destructive" onClick={forget}>{t('daemon.forget')}</Button>
-          <Button
-            disabled={phase === 'connecting'}
-            onClick={() => {
-              setError(null)
-              void reconnect().catch((cause) => setError(errorMessage(cause)))
-            }}
-          >
-            {t('daemon.reconnect')}
-          </Button>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+          {/* Add as Remote Host — only shown when connected so there is a real credential to save */}
+          {config?.address ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={openAddAsRemoteHost}
+            >
+              <PaduIcon className="size-3 text-[var(--text-secondary)]" name="plus" />
+              {t('daemon.add_as_remote_host')}
+            </Button>
+          ) : (
+            <span />
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button variant="ghost" onClick={disconnect}>{t('daemon.disconnect')}</Button>
+            <Button variant="destructive" onClick={forget}>{t('daemon.forget')}</Button>
+            <Button
+              disabled={phase === 'connecting'}
+              onClick={() => {
+                setError(null)
+                void reconnect().catch((cause) => setError(errorMessage(cause)))
+              }}
+            >
+              {t('daemon.reconnect')}
+            </Button>
+          </div>
         </div>
       </SettingsCard>
+
+      {/* Pre-filled host dialog opened from "Add as Remote Host" */}
+      <HostDialog
+        editingHost={
+          prefillHost
+            ? {
+                id: '',
+                name: '',
+                address: prefillHost.address,
+                token: prefillHost.token || undefined,
+                kind: 'direct',
+                createdAt: 0,
+                updatedAt: 0,
+                lastConnectedAt: null,
+              }
+            : null
+        }
+        open={addHostOpen}
+        onOpenChange={(open) => {
+          setAddHostOpen(open)
+          if (!open) setPrefillHost(null)
+        }}
+        onSave={async (data) => {
+          // For a prefill-based save, always create a new profile even if the
+          // address matches an existing one — the user explicitly asked to save it.
+          const existingByAddress = hosts.find((h) => h.address === data.address)
+          if (existingByAddress) {
+            await switchHost(existingByAddress.id)
+          } else {
+            const created = await addHost(data)
+            await switchHost(created.id)
+          }
+        }}
+      />
     </div>
   )
 }

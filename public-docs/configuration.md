@@ -48,7 +48,7 @@ List of application bundle IDs granted permission for automated UI interaction.
 
 When starting the standalone daemon binary (`padu-daemon`), the following command-line flags are supported:
 
-- `--bind <ADDRESS>`: Network socket address to bind (e.g. `127.0.0.1:4789`).
+- `--bind <ADDRESS>`: Network socket address to bind (e.g. `127.0.0.1:34123`).
 - `--allow-non-loopback`: Permits binding to external or VPN interfaces (such as Tailscale).
 - `--allow-origin <ORIGIN>`: Restricts allowed browser origins for WebSocket connections.
 - `--parent-pid <PID>`: Shuts down the daemon automatically when the parent process exits.
