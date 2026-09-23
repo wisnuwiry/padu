@@ -1,9 +1,9 @@
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { StyleSheet, View, type ViewProps } from 'react-native';
 
 interface AppSymbolProps extends Omit<SymbolViewProps, 'size' | 'style'> {
   size?: number;
-  style?: StyleProp<ViewStyle>;
+  style?: ViewProps['style'];
 }
 
 export function AppSymbol({ size = 18, style, ...props }: AppSymbolProps) {

@@ -167,11 +167,11 @@ export function SessionView({ sessionId }: { sessionId: string | undefined }) {
               onRefresh={() => void query.refetch()}
             />
           )}
-          ListHeaderComponent={daemon.phase === 'error' ? <OfflineBanner /> : null}
+          ListHeaderComponent={daemon.phase === 'error' ? <OfflineBanner /> : undefined}
           ListEmptyComponent={(
             <SessionEmpty loading={query.isPending} error={query.error} missing={query.data === null} />
           )}
-          ListFooterComponent={running && session ? <WorkingFooter session={session} /> : null}
+          ListFooterComponent={running && session ? <WorkingFooter session={session} /> : undefined}
           renderItem={({ item }) => <TranscriptRowView row={item} onToggleFold={toggleFold} />}
           onContentSizeChange={(_, height) => {
             if (!laidOut.current || nearBottom.current) {

@@ -1,6 +1,6 @@
 import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
 import type { ReactNode } from 'react';
-import { Platform, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { Platform, StyleSheet, View, type ViewProps } from 'react-native';
 
 import { useTheme } from '@/hooks/use-theme';
 
@@ -19,7 +19,7 @@ export function GlassSurface({
   interactive = false,
   fallbackColor,
 }: {
-  style?: StyleProp<ViewStyle>;
+  style?: ViewProps['style'];
   children: ReactNode;
   interactive?: boolean;
   fallbackColor?: string;

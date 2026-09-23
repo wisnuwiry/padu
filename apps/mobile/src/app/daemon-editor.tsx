@@ -15,6 +15,7 @@ import {
   TextInput,
   View,
   type ColorValue,
+  type TextInputInstance,
 } from "react-native";
 
 import { AppSymbol } from "@/components/app-symbol";
@@ -41,8 +42,8 @@ export default function DaemonEditorScreen() {
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
-  const addressInput = useRef<TextInput>(null);
-  const tokenInput = useRef<TextInput>(null);
+  const addressInput = useRef<TextInputInstance>(null);
+  const tokenInput = useRef<TextInputInstance>(null);
 
   const security = useMemo<ConnectionSecurity>(() => {
     if (!address.trim()) return null;

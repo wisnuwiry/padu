@@ -142,7 +142,7 @@ export default function DaemonsScreen() {
               Tokens never pass through a Padu service. Native apps protect them with the device keychain.
             </Text>
           </View>
-        ) : null}
+        ) : undefined}
         renderItem={({ item }) => {
           const active = item.id === daemon.activeProfile?.id;
           return (

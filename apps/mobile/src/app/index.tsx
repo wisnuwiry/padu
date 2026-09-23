@@ -171,7 +171,7 @@ export default function TasksScreen() {
               }}
             />
           )}
-          ListHeaderComponent={daemon.error ? <ConnectionErrorCard /> : null}
+          ListHeaderComponent={daemon.error ? <ConnectionErrorCard /> : undefined}
           ListEmptyComponent={(
             <TaskListEmpty
               connecting={daemon.phase === 'booting' || daemon.phase === 'connecting'}
