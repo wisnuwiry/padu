@@ -133,7 +133,8 @@ impl ProviderKind {
     pub fn supports_conversation_rollback(self) -> bool {
         matches!(
             self,
-            Self::Amp
+            Self::Agy
+                | Self::Amp
                 | Self::Claude
                 | Self::Codex
                 | Self::CommandCode
@@ -149,7 +150,8 @@ impl ProviderKind {
     pub fn supports_conversation_fork(self) -> bool {
         matches!(
             self,
-            Self::Amp
+            Self::Agy
+                | Self::Amp
                 | Self::Claude
                 | Self::Codex
                 | Self::CommandCode
@@ -191,6 +193,8 @@ impl ProviderKind {
 pub enum ProviderResumeCursor {
     Agy {
         session_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fork_context: Option<String>,
     },
     Amp {
         thread_id: String,
@@ -246,7 +250,10 @@ pub enum ProviderResumeCursor {
 impl ProviderResumeCursor {
     pub fn from_session_id(provider: ProviderKind, id: String) -> Self {
         match provider {
-            ProviderKind::Agy => Self::Agy { session_id: id },
+            ProviderKind::Agy => Self::Agy {
+                session_id: id,
+                fork_context: None,
+            },
             ProviderKind::Amp => Self::Amp {
                 thread_id: id,
                 fork_context: None,
@@ -299,7 +306,7 @@ impl ProviderResumeCursor {
 
     pub fn native_id(&self) -> &str {
         match self {
-            Self::Agy { session_id } => session_id,
+            Self::Agy { session_id, .. } => session_id,
             Self::Amp { thread_id, .. } => thread_id,
             Self::Claude { session_id, .. }
             | Self::Cursor { session_id, .. }
@@ -4784,6 +4791,7 @@ mod tests {
     #[test]
     fn native_conversation_actions_include_every_provider() {
         for provider in [
+            ProviderKind::Agy,
             ProviderKind::Amp,
             ProviderKind::Claude,
             ProviderKind::Codex,
@@ -4797,7 +4805,7 @@ mod tests {
             assert!(provider.supports_conversation_fork());
             assert!(provider.supports_conversation_rollback());
         }
-        for provider in [ProviderKind::Agy, ProviderKind::Fx, ProviderKind::Kimi] {
+        for provider in [ProviderKind::Fx, ProviderKind::Kimi] {
             assert!(!provider.supports_conversation_fork());
             assert!(!provider.supports_conversation_rollback());
         }
@@ -5055,6 +5063,7 @@ mod tests {
 
         let cursor = ProviderResumeCursor::Agy {
             session_id: "agy-sess-42".into(),
+            fork_context: None,
         };
         let value = serde_json::to_value(&cursor).unwrap();
         assert_eq!(value["provider"], "agy");

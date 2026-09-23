@@ -750,7 +750,14 @@ mod tests {
     fn summaries_skip_non_session_files_and_prefer_the_first_prompt() {
         let root = temp_root();
         let session_id = Uuid::new_v4().to_string();
-        let path = write_transcript(&root, "slug", &session_id, &two_turn_lines(&session_id));
+        // `/work` is not absolute on Windows (`Path::is_absolute` needs a drive
+        // prefix), so file the transcript under a platform-absolute cwd.
+        let cwd = root.join("work");
+        fs::create_dir_all(&cwd).unwrap();
+        let cwd_str = cwd.to_string_lossy().to_string();
+        let mut lines = two_turn_lines(&session_id);
+        lines[0] = header(&session_id, &cwd_str);
+        let path = write_transcript(&root, "slug", &session_id, &lines);
         // Checkpoint sidecars share the extension but never parse as sessions.
         fs::write(
             root.join("slug")
@@ -761,7 +768,7 @@ mod tests {
 
         let summary = summary_for_transcript(&path).expect("session transcript");
         assert_eq!(summary.title, "first question");
-        assert_eq!(summary.cwd, PathBuf::from("/work"));
+        assert_eq!(summary.cwd, cwd);
         assert!(summary.updated_at >= summary.created_at);
         assert!(summary.cursor.native_id() == session_id);
 

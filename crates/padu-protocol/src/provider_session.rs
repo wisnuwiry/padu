@@ -27,6 +27,10 @@ pub enum ProviderSessionForkRequest {
         source: AgentSession,
         turn_count: usize,
     },
+    Agy {
+        source: AgentSession,
+        turn_count: usize,
+    },
     OpenCode {
         binary: PathBuf,
         cwd: PathBuf,
