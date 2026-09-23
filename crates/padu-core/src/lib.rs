@@ -19,6 +19,7 @@ macro_rules! tr {
 
 pub mod acp_session;
 pub mod agy_install;
+pub mod agy_session;
 pub mod amp_session;
 pub mod attachments;
 pub mod blob_store;

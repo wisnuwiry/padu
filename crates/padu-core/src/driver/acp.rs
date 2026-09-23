@@ -139,6 +139,7 @@ impl AcpDriver {
         } = options;
         let fork_context = match &provider_cursor {
             Some(ProviderResumeCursor::Cursor { fork_context, .. }) => fork_context.clone(),
+            Some(ProviderResumeCursor::Agy { fork_context, .. }) => fork_context.clone(),
             _ => None,
         };
         let resume_session_id = match provider_cursor {
@@ -628,9 +629,7 @@ async fn run_sdk_connection(
                     CommandMessage::Prompt(text) => {
                         let mut text = fork_context
                             .take()
-                            .map(|context| {
-                                crate::cursor_session::prompt_with_fork_context(&context, &text)
-                            })
+                            .map(|context| prompt_with_fork_context(provider, &context, &text))
                             .unwrap_or(text);
                         if provider == ProviderKind::Agy
                             && (interaction_mode == InteractionMode::Plan
@@ -787,6 +786,14 @@ async fn run_sdk_connection(
 /// 3. If only `refresh_token` is present in ACP credentials (e.g. macOS Keychain or
 ///    acp_token.json), resolves the user's email via a token refresh request,
 ///    caches it to `account_identity.json`, and returns it.
+fn prompt_with_fork_context(provider: ProviderKind, context: &str, prompt: &str) -> String {
+    if provider == ProviderKind::Agy {
+        crate::agy_session::prompt_with_fork_context(context, prompt)
+    } else {
+        crate::cursor_session::prompt_with_fork_context(context, prompt)
+    }
+}
+
 async fn establish_session(
     connection: &ConnectionTo<Agent>,
     initialize: &InitializeResponse,
@@ -2266,6 +2273,17 @@ mod tests {
             launch_for(ProviderKind::Qoder, None, None).expect("Qoder launch should succeed");
         assert_eq!(launch.args, vec!["--acp"]);
         assert!(launch.env.is_empty());
+    }
+
+    #[test]
+    fn fork_context_envelope_is_provider_specific() {
+        let agy = prompt_with_fork_context(ProviderKind::Agy, "[]", "go");
+        assert!(agy.starts_with("PADU_AGY_BRANCH_CONTEXT_V1 "));
+        assert!(agy.contains("PADU_AGY_CURRENT_PROMPT_V1 "));
+
+        let cursor = prompt_with_fork_context(ProviderKind::Cursor, "[]", "go");
+        assert!(cursor.starts_with("PADU_CURSOR_BRANCH_CONTEXT_V1 "));
+        assert!(!cursor.contains("PADU_AGY"));
     }
 
     #[test]

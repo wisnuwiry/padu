@@ -717,7 +717,7 @@ impl Backend for PaduBackend {
                         messages: Vec::new(),
                         turns: Vec::new(),
                     },
-                    ProviderResumeCursor::Agy { session_id }
+                    ProviderResumeCursor::Agy { session_id, .. }
                     | ProviderResumeCursor::Cursor { session_id, .. }
                     | ProviderResumeCursor::Fx { session_id }
                     | ProviderResumeCursor::OpenCode { session_id }
@@ -1364,6 +1364,13 @@ impl PaduBackend {
                 })?;
                 Ok((fork.cursor, HashMap::new()))
             }
+            ProviderKind::Agy => {
+                let fork = fork_provider_session(ProviderSessionForkRequest::Agy {
+                    source: source.clone(),
+                    turn_count,
+                })?;
+                Ok((fork.cursor, HashMap::new()))
+            }
             ProviderKind::Amp => {
                 let Some(ProviderResumeCursor::Amp {
                     thread_id,
@@ -1411,7 +1418,7 @@ impl PaduBackend {
             }
             // Unreachable through the UI, which hides branching for providers
             // that answer `supports_conversation_fork` with false.
-            ProviderKind::Agy | ProviderKind::Fx | ProviderKind::Kimi | ProviderKind::Qoder => {
+            ProviderKind::Fx | ProviderKind::Kimi | ProviderKind::Qoder => {
                 bail!(
                     "{} cannot branch a conversation at a turn",
                     source.provider.display_name()
@@ -1597,6 +1604,14 @@ impl PaduBackend {
                 .cursor;
                 Ok((Some(cursor), HashMap::new(), false))
             }
+            ProviderKind::Agy => {
+                let cursor = fork_provider_session(ProviderSessionForkRequest::Agy {
+                    source: source.clone(),
+                    turn_count: retained_turn_count,
+                })?
+                .cursor;
+                Ok((Some(cursor), HashMap::new(), false))
+            }
             ProviderKind::Grok => {
                 let Some(ProviderResumeCursor::Grok { session_id }) =
                     source.provider_cursor.as_ref()
@@ -1623,7 +1638,7 @@ impl PaduBackend {
             )),
             // Unreachable through the UI, which hides rewinding for providers
             // that answer `supports_conversation_rollback` with false.
-            ProviderKind::Agy | ProviderKind::Fx | ProviderKind::Kimi | ProviderKind::Qoder => {
+            ProviderKind::Fx | ProviderKind::Kimi | ProviderKind::Qoder => {
                 bail!(
                     "{} cannot rewind a conversation to a turn",
                     source.provider.display_name()
@@ -1824,6 +1839,11 @@ fn fork_provider_session(
         ),
         ProviderSessionForkRequest::Cursor { source, turn_count } => (
             crate::cursor_session::fork_session_at_turn(&source, turn_count)?,
+            HashMap::new(),
+            None,
+        ),
+        ProviderSessionForkRequest::Agy { source, turn_count } => (
+            crate::agy_session::fork_session_at_turn(&source, turn_count)?,
             HashMap::new(),
             None,
         ),
