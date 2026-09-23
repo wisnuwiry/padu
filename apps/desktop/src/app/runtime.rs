@@ -511,6 +511,29 @@ fn perform_provider_rewind(
                 None,
             ))
         }
+        ProviderKind::Agy => {
+            let source = request.cursor_source.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(tr!(
+                    "errors.provider_padu_task_unavailable",
+                    provider = "Antigravity"
+                ))
+            })?;
+            Ok((
+                Some(
+                    request
+                        .workspace_client
+                        .fork_provider_session(
+                            padu_client::provider_session::ProviderSessionForkRequest::Agy {
+                                source: source.clone(),
+                                turn_count: request.retained_turn_count,
+                            },
+                        )?
+                        .cursor,
+                ),
+                None,
+                None,
+            ))
+        }
         ProviderKind::Grok => {
             let Some(ProviderResumeCursor::Grok {
                 session_id: native_session_id,
@@ -562,12 +585,10 @@ fn perform_provider_rewind(
         }
         // Unreachable through the UI, which hides rewinding for providers that
         // answer `supports_conversation_rollback` with false.
-        ProviderKind::Agy | ProviderKind::Fx | ProviderKind::Kimi | ProviderKind::Qoder => {
-            Err(anyhow::anyhow!(tr!(
-                "errors.provider_turn_branching_unsupported",
-                provider = provider.display_name()
-            )))
-        }
+        ProviderKind::Fx | ProviderKind::Kimi | ProviderKind::Qoder => Err(anyhow::anyhow!(tr!(
+            "errors.provider_turn_branching_unsupported",
+            provider = provider.display_name()
+        ))),
     }
 }
 
@@ -742,6 +763,19 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
                 None,
                 None,
             )),
+            ProviderKind::Agy => Ok((
+                request
+                    .workspace_client
+                    .fork_provider_session(
+                        padu_client::provider_session::ProviderSessionForkRequest::Agy {
+                            source: request.source.clone(),
+                            turn_count: request.turn_count,
+                        },
+                    )?
+                    .cursor,
+                None,
+                None,
+            )),
             ProviderKind::Amp => {
                 let Some(ProviderResumeCursor::Amp {
                     thread_id: native_thread_id,
@@ -868,7 +902,7 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
             }
             // Unreachable through the UI, which hides branching for providers
             // that answer `supports_conversation_fork` with false.
-            ProviderKind::Agy | ProviderKind::Fx | ProviderKind::Kimi | ProviderKind::Qoder => {
+            ProviderKind::Fx | ProviderKind::Kimi | ProviderKind::Qoder => {
                 anyhow::bail!(tr!(
                     "errors.provider_turn_branching_unsupported",
                     provider = provider.display_name()
@@ -2338,7 +2372,8 @@ impl Padu {
         let provider = source.provider;
         let provider_cursor = source.provider_cursor.clone();
         let session_title = source.display_title().to_owned();
-        let cursor_source = (provider == ProviderKind::Cursor).then(|| source.clone());
+        let cursor_source =
+            matches!(provider, ProviderKind::Agy | ProviderKind::Cursor).then(|| source.clone());
         let edited_message_id = edit.message_id;
         let Some(edited_message_index) = source
             .turns
