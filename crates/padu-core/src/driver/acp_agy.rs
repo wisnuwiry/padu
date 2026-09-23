@@ -6,14 +6,16 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
     AuthenticateRequest, ClientCapabilities, Implementation, InitializeRequest, InitializeResponse,
-    LogoutRequest, NewSessionRequest, RequestPermissionOutcome, RequestPermissionRequest,
-    RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigOption,
-    SessionConfigOptionCategory,
+    LogoutRequest, NewSessionRequest, RequestId, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
+    SessionConfigOption, SessionConfigOptionCategory,
 };
 use agent_client_protocol::{Agent, Client, ConnectionTo};
 use anyhow::anyhow;
@@ -21,10 +23,10 @@ use parking_lot::Mutex;
 use serde_json::{Map, Value};
 
 use super::acp::{
-    AcpLaunch, find_config_option, launch_for, sdk_agent, sdk_agent_with_stderr_callback,
-    session_config_select_values,
+    AcpLaunch, AcpStreamState, find_config_option, launch_for, sdk_agent,
+    sdk_agent_with_stderr_callback, session_config_select_values,
 };
-use crate::driver::DriverEventSink;
+use crate::driver::{DriverEventSender, DriverEventSink};
 use crate::model::{
     DriverEvent, ProviderKind, ProviderModel, ProviderModelOption, UserInputAnswer,
     UserInputOption, UserInputQuestion,
@@ -811,6 +813,9 @@ pub(crate) struct AgyPlanState {
     path: Option<PathBuf>,
     text_buffer: String,
     inlined: bool,
+    /// When this turn last received a stream update. The turn watchdog reads it
+    /// to tell a provider that went silent from one that is still working.
+    last_update: Option<Instant>,
 }
 
 impl AgyPlanState {
@@ -819,6 +824,14 @@ impl AgyPlanState {
         self.path = None;
         self.text_buffer.clear();
         self.inlined = false;
+        // Sending the prompt starts this turn's clock even if the provider
+        // never answers, so the watchdog measures silence from the request.
+        self.last_update = Some(Instant::now());
+    }
+
+    /// Records a stream update so a stalled turn can be told from a live one.
+    pub(crate) fn note_activity(&mut self) {
+        self.last_update = Some(Instant::now());
     }
 
     /// Buffer a streamed text chunk, harvesting a plan-file link on first sight.
@@ -1032,6 +1045,91 @@ pub(crate) fn maybe_inline_agy_plan(
 }
 
 // __AGY_APPEND__
+
+/// How often the turn watchdog samples the stream for silence.
+const AGY_WATCHDOG_TICK: Duration = Duration::from_secs(1);
+
+/// How long an Agy turn may stay quiet, with its visible work already finished,
+/// before Padu stops waiting for the `session/prompt` response that ends it.
+///
+/// The response is the turn's only terminator: Antigravity sends it once its
+/// harness reports the conversation fully idle, and on Windows that report can
+/// go missing. The answer then streams to completion while the turn hangs — no
+/// protocol error, no process exit, no further traffic — leaving the session
+/// spinning until the user cancels.
+///
+/// Silence alone cannot decide this, so the watchdog also requires the shape of
+/// a finished turn: output already streamed, and no announced tool call left
+/// open. A turn that is still generating keeps emitting message and thought
+/// deltas, and one running a tool keeps that call open, so neither reads as
+/// quiet. The window is generous on purpose — it also covers a long silent pause
+/// such as context compaction — because settling a turn that is still running
+/// would drop the rest of its output.
+pub(crate) const AGY_TURN_QUIET: Duration = Duration::from_secs(120);
+
+/// Whether `state` has gone quiet long enough to settle its turn.
+fn turn_went_quiet(
+    state: &AcpStreamState,
+    armed_at: Instant,
+    now: Instant,
+    quiet: Duration,
+) -> bool {
+    state.agy_turn_looks_settled()
+        && now.saturating_duration_since(state.agy.last_update.unwrap_or(armed_at)) >= quiet
+}
+
+/// Settles one outstanding Agy prompt whose turn the provider never finished.
+///
+/// Returns immediately; the sampling runs on its own thread. `is_pending`
+/// reports whether the ACP request is still outstanding and `settle` claims it,
+/// returning false when someone else already did — so a real response arriving
+/// at any point wins the race and no turn is ever finished twice. `live` is the
+/// connection's own flag, which lets a watchdog outlive its driver by at most
+/// one tick, and `cancel_turn` tells the provider to abandon the turn it still
+/// believes is running.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn watch_agy_turn(
+    quiet: Duration,
+    state: Arc<Mutex<AcpStreamState>>,
+    request_id: RequestId,
+    live: Arc<AtomicBool>,
+    is_pending: impl Fn(&RequestId) -> bool + Send + 'static,
+    settle: impl Fn(&RequestId) -> bool + Send + 'static,
+    cancel_turn: impl Fn() + Send + 'static,
+    events: DriverEventSender,
+) {
+    let _ = thread::Builder::new()
+        .name("padu-agy-turn".into())
+        .spawn(move || {
+            let armed_at = Instant::now();
+            loop {
+                thread::sleep(AGY_WATCHDOG_TICK);
+                if !live.load(Ordering::Acquire) || !is_pending(&request_id) {
+                    return;
+                }
+                if !turn_went_quiet(&state.lock(), armed_at, Instant::now(), quiet) {
+                    continue;
+                }
+                if !settle(&request_id) {
+                    return;
+                }
+                // Antigravity still holds this turn open, and its step stream
+                // stays latched until that turn ends — which is what would make
+                // every later prompt on this session fail. Tell it to stop; the
+                // response it then sends is absorbed by the claim above.
+                cancel_turn();
+                // The turn is over by every measure Padu can take, so it ends
+                // the way a completed turn does: the plan artifact lands in the
+                // transcript first, then the turn settles with no summary.
+                maybe_inline_agy_plan(ProviderKind::Agy, &mut state.lock().agy, &events);
+                let _ = events.send(DriverEvent::TurnFinished {
+                    success: true,
+                    summary: None,
+                });
+                return;
+            }
+        });
+}
 
 #[cfg(test)]
 mod tests {

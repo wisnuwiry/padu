@@ -16,6 +16,10 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+### Fixed
+
+- **Antigravity Turn Completion**: A turn whose answer had already streamed to completion no longer stays stuck as running when the provider never sends its final response; the driver settles it from the stream and tells the provider to abandon the turn, while a turn that is still working or waiting on the user is left alone.
+
 ## [0.1.8] - 2026-09-19
 
 ### Added
