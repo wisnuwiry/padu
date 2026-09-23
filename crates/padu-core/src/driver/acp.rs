@@ -370,6 +370,10 @@ impl PendingPrompts {
         self.0.is_empty()
     }
 
+    fn is_pending(&self, request_id: &RequestId) -> bool {
+        self.0.iter().any(|prompt| &prompt.request_id == request_id)
+    }
+
     fn settle_request(&mut self, request_id: &RequestId) -> bool {
         let Some(index) = self
             .0
@@ -438,8 +442,11 @@ async fn run_sdk_connection(
     let prompt_requests = Arc::new(Mutex::new(PendingPrompts::default()));
     let title_refresh = super::title_refresh::NativeTitleRefresh::default();
     let auto_approve = should_auto_approve(provider, mode, interaction_mode);
+    // Lets an Agy turn watchdog stop sampling the moment this connection ends.
+    let turn_watchdogs_live = Arc::new(AtomicBool::new(true));
+    let watchdog_live = turn_watchdogs_live.clone();
 
-    Client
+    let result = Client
         .builder()
         .name("padu")
         .on_receive_notification(
@@ -650,6 +657,7 @@ async fn run_sdk_connection(
                             grok_title_home.clone(),
                             title_refresh.clone(),
                             stream_state.clone(),
+                            watchdog_live.clone(),
                         ) {
                             let _ = events.send(DriverEvent::Error(error.to_string()));
                             let _ = events.send(DriverEvent::TurnFinished {
@@ -688,6 +696,7 @@ async fn run_sdk_connection(
                             grok_title_home.clone(),
                             title_refresh.clone(),
                             stream_state.clone(),
+                            watchdog_live.clone(),
                         ) {
                             Ok(()) => {
                                 let _ = events.send(DriverEvent::SteerAccepted { message: text });
@@ -773,7 +782,10 @@ async fn run_sdk_connection(
             cancel_pending_user_inputs(&pending_user_inputs);
             Ok(())
         })
-        .await
+        .await;
+    // Any Agy turn watchdog still sampling belongs to a connection that is gone.
+    turn_watchdogs_live.store(false, Ordering::Release);
+    result
 }
 
 /// Logged-in Google identity for Antigravity, scoped strictly to the ACP
@@ -1392,6 +1404,7 @@ fn send_prompt(
     grok_title_home: Option<std::path::PathBuf>,
     title_refresh: super::title_refresh::NativeTitleRefresh,
     stream_state: Arc<Mutex<AcpStreamState>>,
+    turn_watchdogs_live: Arc<AtomicBool>,
 ) -> agent_client_protocol::Result<()> {
     {
         let mut state = stream_state.lock();
@@ -1424,6 +1437,7 @@ fn send_prompt(
     let callback_request_id = request_id.clone();
     let callback_requests = prompt_requests.clone();
     let callback_events = events.clone();
+    let watchdog_state = stream_state.clone();
     let native_session_id = native_session_id.to_owned();
     let registered = sent.on_receiving_result(async move |result| {
         if settle_prompt_request(&callback_requests, &callback_request_id) {
@@ -1451,6 +1465,27 @@ fn send_prompt(
     });
     if registered.is_err() {
         prompt_requests.lock().settle_request(&request_id);
+    } else if provider == ProviderKind::Agy {
+        // The reply is this turn's only terminator, and Antigravity does not
+        // always send one. Watch the stream so a turn whose work is visibly
+        // finished can still be settled instead of spinning forever.
+        let pending_requests = prompt_requests.clone();
+        let settling_requests = prompt_requests.clone();
+        let cancel_connection = connection.clone();
+        let cancel_session = session_id.clone();
+        super::acp_agy::watch_agy_turn(
+            super::acp_agy::AGY_TURN_QUIET,
+            watchdog_state,
+            request_id,
+            turn_watchdogs_live,
+            move |id| pending_requests.lock().is_pending(id),
+            move |id| settle_prompt_request(&settling_requests, id),
+            move || {
+                let _ = cancel_connection
+                    .send_notification(CancelNotification::new(cancel_session.clone()));
+            },
+            events.clone(),
+        );
     }
     registered
 }
@@ -1946,6 +1981,11 @@ pub(crate) fn handle_session_update(
 ) -> agent_client_protocol::Result<()> {
     let update = serde_json::to_value(notification.update)?;
     let kind = update.get("sessionUpdate").and_then(Value::as_str);
+    if provider == ProviderKind::Agy {
+        // Every update, whatever its kind, is evidence that the turn is alive:
+        // the watchdog reads this stamp to tell a stalled turn from a live one.
+        state.agy.note_activity();
+    }
     if provider == ProviderKind::Fx
         && !state.produced_content
         && kind == Some("agent_message_chunk")
@@ -2075,6 +2115,17 @@ pub(crate) struct AcpStreamState {
     pub(crate) agy: super::acp_agy::AgyPlanState,
 }
 
+impl AcpStreamState {
+    /// Whether the running turn already looks finished: something streamed, and
+    /// no announced tool call is still open. Antigravity closes a tool call with
+    /// a terminal `tool_call_update`, so an empty table means every tool this
+    /// turn started has reported its outcome. The Agy turn watchdog settles a
+    /// turn that is shaped this way and has then gone quiet.
+    pub(crate) fn agy_turn_looks_settled(&self) -> bool {
+        self.produced_content && self.tools.is_empty()
+    }
+}
+
 /// Pull the agent's explanation out of a permission request's tool call.
 fn permission_reason(params: &Value) -> Option<String> {
     let content = params
@@ -2110,12 +2161,12 @@ fn tool_activity(update: &Value, events: &impl DriverEventSink, state: &mut AcpS
         .get("toolCallId")
         .and_then(Value::as_str)
         .map(str::to_owned);
-    if id
+    // Antigravity frames an interactive question as a dummy tool call that must
+    // never reach the transcript. It is still tracked as open below, because the
+    // agent waits on the user for as long as that frame is unanswered.
+    let is_interaction = id
         .as_deref()
-        .is_some_and(|id| id.starts_with("interaction_"))
-    {
-        return;
-    }
+        .is_some_and(|id| id.starts_with("interaction_"));
     let status = update
         .get("status")
         .and_then(Value::as_str)
@@ -2159,6 +2210,9 @@ fn tool_activity(update: &Value, events: &impl DriverEventSink, state: &mut AcpS
         .unwrap_or_else(|| "Tool".to_owned());
     if !complete && let Some(id) = id.as_ref() {
         state.tools.insert(id.clone(), (kind, title.clone()));
+    }
+    if is_interaction {
+        return;
     }
 
     let output = update
@@ -2825,6 +2879,259 @@ mod tests {
         ));
         assert!(!settle_prompt_request(&requests, &request_id));
         assert!(event_rx.try_recv().is_err());
+    }
+
+    /// Antigravity can stream a whole answer and then never send the
+    /// `session/prompt` response that ends the turn. The watchdog settles the
+    /// turn from the stream alone so the session cannot spin forever.
+    #[test]
+    fn the_turn_watchdog_settles_a_quiet_finished_agy_turn() {
+        let (events, event_rx) = crate::driver::test_event_channel();
+        let state = Arc::new(Mutex::new(AcpStreamState::default()));
+        let requests = Arc::new(Mutex::new(PendingPrompts::default()));
+        let request_id = RequestId::Str("agy-request".into());
+        requests
+            .lock()
+            .insert(request_id.clone(), None, "agy-session".into());
+
+        // The shape of a finished turn: something streamed, nothing left open.
+        handle_session_update(
+            ProviderKind::Agy,
+            agy_message_update("all done"),
+            &events,
+            &mut state.lock(),
+        )
+        .unwrap();
+
+        let pending = requests.clone();
+        let settling = requests.clone();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let cancel_signal = cancelled.clone();
+        crate::driver::acp_agy::watch_agy_turn(
+            Duration::ZERO,
+            state,
+            request_id.clone(),
+            Arc::new(AtomicBool::new(true)),
+            move |id| pending.lock().is_pending(id),
+            move |id| settle_prompt_request(&settling, id),
+            move || cancel_signal.store(true, Ordering::Release),
+            events,
+        );
+
+        assert_eq!(
+            wait_for_turn_finished(&event_rx, Duration::from_secs(10)),
+            Some(true)
+        );
+        assert!(!requests.lock().is_pending(&request_id));
+        // The provider is told to abandon the turn it still believes is open, so
+        // the session can take another prompt.
+        assert!(cancelled.load(Ordering::Acquire));
+    }
+
+    /// Silence alone must not end a turn: an announced tool call keeps the turn
+    /// open until the provider reports its outcome, exactly as it does on the
+    /// wire.
+    #[test]
+    fn an_open_agy_tool_call_holds_the_turn_watchdog_off() {
+        let (events, event_rx) = crate::driver::test_event_channel();
+        let state = Arc::new(Mutex::new(AcpStreamState::default()));
+        let requests = Arc::new(Mutex::new(PendingPrompts::default()));
+        let request_id = RequestId::Str("agy-request".into());
+        requests
+            .lock()
+            .insert(request_id.clone(), None, "agy-session".into());
+
+        handle_session_update(
+            ProviderKind::Agy,
+            SessionNotification::new(
+                "s",
+                serde_json::from_value(json!({
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "call_1",
+                    "title": "run_command",
+                    "kind": "execute",
+                    "status": "pending",
+                    "rawInput": {}
+                }))
+                .unwrap(),
+            ),
+            &events,
+            &mut state.lock(),
+        )
+        .unwrap();
+
+        let pending = requests.clone();
+        let settling = requests.clone();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let cancel_signal = cancelled.clone();
+        crate::driver::acp_agy::watch_agy_turn(
+            Duration::ZERO,
+            state.clone(),
+            request_id.clone(),
+            Arc::new(AtomicBool::new(true)),
+            move |id| pending.lock().is_pending(id),
+            move |id| settle_prompt_request(&settling, id),
+            move || cancel_signal.store(true, Ordering::Release),
+            events.clone(),
+        );
+
+        // Several watchdog samples pass without the turn being settled.
+        std::thread::sleep(Duration::from_millis(1_500));
+        assert!(requests.lock().is_pending(&request_id));
+        assert!(!cancelled.load(Ordering::Acquire));
+        assert!(
+            event_rx
+                .try_iter()
+                .all(|event| !matches!(event, DriverEvent::TurnFinished { .. }))
+        );
+
+        // The tool reports its outcome, and the now-quiet turn settles.
+        handle_session_update(
+            ProviderKind::Agy,
+            SessionNotification::new(
+                "s",
+                serde_json::from_value(json!({
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "call_1",
+                    "status": "completed"
+                }))
+                .unwrap(),
+            ),
+            &events,
+            &mut state.lock(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            wait_for_turn_finished(&event_rx, Duration::from_secs(10)),
+            Some(true)
+        );
+        assert!(cancelled.load(Ordering::Acquire));
+    }
+
+    /// A turn that is still producing output is never settled, however long the
+    /// watchdog has been sampling.
+    #[test]
+    fn a_still_producing_agy_turn_is_not_settled() {
+        let (events, event_rx) = crate::driver::test_event_channel();
+        let state = Arc::new(Mutex::new(AcpStreamState::default()));
+        let requests = Arc::new(Mutex::new(PendingPrompts::default()));
+        let request_id = RequestId::Str("agy-request".into());
+        requests
+            .lock()
+            .insert(request_id.clone(), None, "agy-session".into());
+
+        handle_session_update(
+            ProviderKind::Agy,
+            agy_message_update("working"),
+            &events,
+            &mut state.lock(),
+        )
+        .unwrap();
+
+        let pending = requests.clone();
+        let settling = requests.clone();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let cancel_signal = cancelled.clone();
+        crate::driver::acp_agy::watch_agy_turn(
+            Duration::from_secs(30),
+            state,
+            request_id.clone(),
+            Arc::new(AtomicBool::new(true)),
+            move |id| pending.lock().is_pending(id),
+            move |id| settle_prompt_request(&settling, id),
+            move || cancel_signal.store(true, Ordering::Release),
+            events,
+        );
+
+        std::thread::sleep(Duration::from_millis(1_500));
+        assert!(requests.lock().is_pending(&request_id));
+        assert!(!cancelled.load(Ordering::Acquire));
+        assert!(
+            event_rx
+                .try_iter()
+                .all(|event| !matches!(event, DriverEvent::TurnFinished { .. }))
+        );
+    }
+
+    /// A question the agent is waiting on is not the silence of a finished
+    /// turn: the frame stays open until the user answers it.
+    #[test]
+    fn an_unanswered_agy_question_keeps_the_turn_open() {
+        let (events, event_rx) = crate::driver::test_event_channel();
+        let mut state = AcpStreamState::default();
+
+        feed_agy_update(
+            &mut state,
+            &events,
+            json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": "interaction_abc123",
+                "title": "Which database?",
+                "status": "pending"
+            }),
+        );
+        assert!(!state.agy_turn_looks_settled());
+
+        feed_agy_update(
+            &mut state,
+            &events,
+            json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "interaction_abc123",
+                "status": "completed"
+            }),
+        );
+        assert!(state.agy_turn_looks_settled());
+
+        // Neither update belongs in the transcript.
+        assert!(
+            event_rx
+                .try_iter()
+                .all(|event| !matches!(event, DriverEvent::RichActivity(_)))
+        );
+    }
+
+    fn feed_agy_update(state: &mut AcpStreamState, events: &DriverEventSender, update: Value) {
+        handle_session_update(
+            ProviderKind::Agy,
+            SessionNotification::new("s", serde_json::from_value(update).unwrap()),
+            events,
+            state,
+        )
+        .unwrap();
+    }
+
+    fn agy_message_update(text: &str) -> SessionNotification {
+        SessionNotification::new(
+            "s",
+            serde_json::from_value(json!({
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": text}
+            }))
+            .unwrap(),
+        )
+    }
+
+    /// Waits up to `deadline` for the turn to settle, ignoring everything else
+    /// the stream emitted.
+    fn wait_for_turn_finished(
+        event_rx: &crossbeam_channel::Receiver<DriverEvent>,
+        deadline: Duration,
+    ) -> Option<bool> {
+        let until = std::time::Instant::now() + deadline;
+        loop {
+            let remaining = until.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                return None;
+            }
+            let Ok(event) = event_rx.recv_timeout(remaining.min(Duration::from_millis(50))) else {
+                continue;
+            };
+            if let DriverEvent::TurnFinished { success, .. } = event {
+                return Some(success);
+            }
+        }
     }
 
     /// Kimi ends a failed turn with `end_turn` and no content at all, so the
