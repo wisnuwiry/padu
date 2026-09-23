@@ -124,6 +124,34 @@ pub struct Snapshot {
     pub additions: u64,
     pub deletions: u64,
     pub truncated: bool,
+    /// Widest row in display columns (tabs counted to four-column stops).
+    /// Computed once here, off the UI thread, so the Review panel can size its
+    /// horizontal scroll range while word wrap is off without scanning every
+    /// line on every frame.
+    pub max_content_columns: usize,
+}
+
+/// Display width of one row's content in monospace columns. Tabs advance to
+/// the next four-column stop, which overestimates a single-glyph tab rather
+/// than undersizing the scroll range.
+fn content_columns(content: &str) -> usize {
+    let mut columns = 0;
+    for ch in content.chars() {
+        if ch == '\t' {
+            columns += 4 - (columns % 4);
+        } else {
+            columns += 1;
+        }
+    }
+    columns
+}
+
+fn max_content_columns(lines: &[Line]) -> usize {
+    lines
+        .iter()
+        .map(|line| content_columns(&line.content))
+        .max()
+        .unwrap_or(0)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -230,6 +258,11 @@ impl Snapshot {
                     *diff_line = diff_line.saturating_add(inserted);
                 }
             }
+            // A revealed context line may be the widest row now on screen. This
+            // runs on a click, not a frame, so one scan is fine.
+            self.max_content_columns = self
+                .max_content_columns
+                .max(max_content_columns(&self.lines));
         }
         Some(GapExpansion { replacement_count })
     }
@@ -532,6 +565,7 @@ fn parse(source: Source, numstat: &str, patch: &str, complete_context: bool) -> 
     recompute_diff_lines(&mut files, &lines);
     let additions = files.iter().map(|file| file.additions).sum();
     let deletions = files.iter().map(|file| file.deletions).sum();
+    let max_content_columns = max_content_columns(&lines);
     Snapshot {
         source,
         files,
@@ -539,6 +573,7 @@ fn parse(source: Source, numstat: &str, patch: &str, complete_context: bool) -> 
         additions,
         deletions,
         truncated,
+        max_content_columns,
     }
 }
 
@@ -814,6 +849,29 @@ index 1111111..2222222 100644
                 .any(|token| token.class == crate::md::highlight::TokenClass::Keyword)
         );
         assert_eq!((snapshot.additions, snapshot.deletions), (2, 1));
+    }
+
+    /// The unwrapped Review pane sizes its horizontal range from this column
+    /// count. If it were left at zero the pane would silently have nothing to
+    /// pan, which is what "word wrap off" must never be.
+    #[test]
+    fn the_snapshot_records_its_widest_row_in_columns() {
+        let patch = "diff --git a/src/lib.rs b/src/lib.rs\n\
+                     --- a/src/lib.rs\n\
+                     +++ b/src/lib.rs\n\
+                     @@ -1,2 +1,2 @@\n\
+                     -short\n\
+                     +a much longer replacement line\n\
+                     \ttabbed\n";
+        let snapshot = parse(Source::Uncommitted, "2\t1\tsrc/lib.rs\n", patch, false);
+        // The tab counts to the next four-column stop, so four here.
+        assert_eq!(
+            snapshot.max_content_columns,
+            "a much longer replacement line".len().max(4)
+        );
+
+        let empty = parse(Source::Uncommitted, "", "", false);
+        assert_eq!(empty.max_content_columns, 0);
     }
 
     fn full_patch(total_lines: u32, changes: &[u32]) -> String {

@@ -1,8 +1,8 @@
 use gpui::{
     AnyElement, App, Context, Div, ElementId, FontWeight, Hsla, Img, InteractiveElement,
     Interactivity, KeyDownEvent, ParentElement, PathBuilder, Pixels, RenderOnce, ScrollHandle,
-    SharedString, Stateful, StyleRefinement, Styled, Svg, Window, canvas, div, img, point,
-    prelude::*, px, rgb, svg,
+    ScrollWheelEvent, SharedString, Stateful, StyleRefinement, Styled, Svg, Window, canvas, div,
+    img, point, prelude::*, px, rgb, svg,
 };
 
 pub mod dialog;
@@ -128,6 +128,51 @@ pub fn contain_scroll(handle: &ScrollHandle, cx: &mut App) {
     if nested_scroll_consumed_delta(handle.offset().y, handle.max_offset().y) {
         cx.stop_propagation();
     }
+}
+
+/// [`contain_scroll`] for a pane that pans horizontally — an unwrapped code
+/// surface.
+///
+/// A plain vertical wheel is none of this pane's business: it belongs to the
+/// editor, list, or transcript around it, so it keeps bubbling even though the
+/// pane has room to pan. Two gestures do belong to it, and both stop here when
+/// the pane takes them, so the ancestor cannot scroll at the same time:
+///
+/// - a horizontal wheel or trackpad gesture, which GPUI has already applied;
+/// - shift plus a vertical wheel, the conventional "scroll this axis instead"
+///   chord, which the pane's axis restriction leaves to us.
+///
+/// At either end the event is released, exactly like the vertical case.
+pub fn contain_horizontal_scroll(
+    handle: &ScrollHandle,
+    event: &ScrollWheelEvent,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let max_offset = handle.max_offset().x;
+    if max_offset <= px(0.5) {
+        return;
+    }
+    let delta = event.delta.pixel_delta(window.line_height());
+    if delta.x != Pixels::ZERO {
+        // GPUI's own handler already moved the pane by this delta.
+        if nested_scroll_consumed_delta(handle.offset().x, max_offset) {
+            cx.stop_propagation();
+        }
+        return;
+    }
+    if !event.modifiers.shift {
+        return;
+    }
+    let offset = handle.offset();
+    let scrolled = -offset.x;
+    let next = (scrolled + delta.y).clamp(Pixels::ZERO, max_offset);
+    if next == scrolled {
+        return;
+    }
+    handle.set_offset(point(-next, offset.y));
+    cx.stop_propagation();
+    window.refresh();
 }
 
 fn nested_scroll_consumed_delta(offset: Pixels, max_offset: Pixels) -> bool {
@@ -544,6 +589,13 @@ mod tests {
         assert!(nested_scroll_consumed_delta(px(-50.0), max_offset));
         assert!(nested_scroll_consumed_delta(px(-100.0), max_offset));
         assert!(!nested_scroll_consumed_delta(px(1.0), max_offset));
+        assert!(!nested_scroll_consumed_delta(px(-101.0), max_offset));
+        assert!(!nested_scroll_consumed_delta(px(0.0), px(0.0)));
+
+        // The same predicate gates `contain_horizontal_scroll`: a wheel gesture
+        // stays in an unwrapped code pane while its horizontal offset is inside
+        // the clamp, and chains to the page once the pane is pinned at an end.
+        assert!(nested_scroll_consumed_delta(px(-50.0), max_offset));
         assert!(!nested_scroll_consumed_delta(px(-101.0), max_offset));
         assert!(!nested_scroll_consumed_delta(px(0.0), px(0.0)));
     }

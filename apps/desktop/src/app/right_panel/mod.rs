@@ -371,9 +371,10 @@ mod tests {
         }
     }
 
-    /// A wrapped diff line must grow its row rather than be clipped by it.
-    /// Both the panel's own rows and the shared code row have to hold this,
-    /// and the shared one is also what the transcript's diff paints with.
+    /// Diff rows follow the code word-wrap setting: wrapping rows grow to fit
+    /// their wrapped lines, and unwrapped rows keep one line and let the pane
+    /// pan. Both the panel's own rows and the shared code row have to hold
+    /// this, and the shared one is also what the transcript's diff paints with.
     #[test]
     fn diff_text_rows_soft_wrap() {
         let diff_source = include_str!("diff.rs");
@@ -394,10 +395,12 @@ mod tests {
             .0;
 
         for body in [panel, shared] {
-            assert!(!body.contains(".whitespace_nowrap()"));
+            // Both branches exist, so neither surface can hard-code one mode.
+            assert!(body.contains(".whitespace_normal()"));
+            assert!(body.contains(".whitespace_nowrap()"));
+            assert!(body.contains("style.wrap"), "the branch must be gated");
         }
-        assert!(panel.matches(".whitespace_normal()").count() >= 2);
-        assert!(shared.contains(".whitespace_normal()"));
+        // A wrapped line must still grow its row rather than be clipped by it.
         assert!(shared.contains(".min_h(px(style.row_height))"));
         assert!(!shared.contains(".h(px(style.row_height))"));
     }

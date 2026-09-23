@@ -990,9 +990,13 @@ impl Padu {
         // starts empty and locked, and `read_right_panel_file_into_editor`
         // fills it in from the background executor a frame or two later.
         let language = file_highlighter_language(relative_path);
+        let wrap = self.state.code_word_wrap;
+        let h_scroll = self.right_panel_editor_h_scroll_handle.clone();
         let state = cx.new(|cx| {
             TextInput::new(window, cx)
                 .multi_line()
+                .soft_wrap(wrap)
+                .horizontal_scroll(h_scroll)
                 .syntax(Some(language))
                 .read_only(true)
         });
@@ -1173,6 +1177,12 @@ impl Padu {
 
         let text_size = self.state.code_font_size;
         let line_height = (text_size * 1.5).round();
+        // Every editor this body can show follows the setting, wherever its
+        // entity lives — the right panel's file tabs and the Notes body both
+        // render through here, and only the former sit in the editor map the
+        // settings page can reach. A no-op unless the value changed.
+        let wrap = self.state.code_word_wrap;
+        editor_state.update(cx, |input, cx| input.set_soft_wrap(wrap, cx));
 
         // An open find bar follows whichever file this body is showing; a
         // cheap comparison every frame, one recompute on the frame after the
@@ -1274,19 +1284,58 @@ impl Padu {
                                     .items_start()
                                     .child(gutter)
                                     .child(div().w(px(GUTTER_PAD_RIGHT)).flex_none())
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .pr(px(10.0))
-                                            .child(editor_state.clone()),
-                                    ),
+                                    .child({
+                                        // With word wrap off, the text column
+                                        // pans sideways while the gutter above
+                                        // stays put, so line numbers never
+                                        // slide away.
+                                        if wrap {
+                                            div()
+                                                .flex_1()
+                                                .min_w_0()
+                                                .pr(px(10.0))
+                                                .child(editor_state.clone())
+                                                .into_any_element()
+                                        } else {
+                                            let pan =
+                                                self.right_panel_editor_h_scroll_handle.clone();
+                                            div()
+                                                .id(SharedString::from(format!(
+                                                    "file-editor-pan-{relative_path}"
+                                                )))
+                                                .flex_1()
+                                                .min_w_0()
+                                                .pr(px(10.0))
+                                                .flex()
+                                                .overflow_x_scroll()
+                                                .track_scroll(&pan)
+                                                // A vertical wheel keeps
+                                                // scrolling the editor; only a
+                                                // horizontal gesture pans, and
+                                                // it stops here rather than
+                                                // jumping the page too.
+                                                .restrict_scroll_to_axis()
+                                                .on_scroll_wheel(move |event, window, cx| {
+                                                    contain_horizontal_scroll(
+                                                        &pan, event, window, cx,
+                                                    )
+                                                })
+                                                .child(editor_state.clone())
+                                                .into_any_element()
+                                        }
+                                    }),
                             ),
                     )
                     .child(scrollbar::vertical(
                         &self.right_panel_editor_scroll_handle,
                         &self.right_panel_editor_scrollbar,
-                    )),
+                    ))
+                    .when(!wrap, |pane| {
+                        pane.child(scrollbar::horizontal(
+                            &self.right_panel_editor_h_scroll_handle,
+                            &self.right_panel_editor_h_scrollbar,
+                        ))
+                    }),
             )
     }
 
@@ -1326,7 +1375,8 @@ impl Padu {
         let ctx = MarkdownCtx::new(
             format!("file-preview-{relative_path}"),
             &palette,
-            MarkdownMetrics::document(self.state.ui_font_size, self.state.code_font_size),
+            MarkdownMetrics::document(self.state.ui_font_size, self.state.code_font_size)
+                .with_code_wrap(self.state.code_word_wrap),
             self.file_preview_selection.clone(),
         )
         .with_link_handler(self.markdown_link_handler.clone());

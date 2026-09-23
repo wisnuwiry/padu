@@ -1256,9 +1256,12 @@ impl Padu {
         })
     }
 
-    /// `metrics` rescaled to the user's UI and code font size settings.
+    /// `metrics` rescaled to the user's UI and code font size settings, and
+    /// carrying the code word-wrap setting for fenced code blocks.
     pub(super) fn scaled_markdown_metrics(&self, metrics: MarkdownMetrics) -> MarkdownMetrics {
-        metrics.scaled(self.state.ui_font_size, self.state.code_font_size)
+        metrics
+            .scaled(self.state.ui_font_size, self.state.code_font_size)
+            .with_code_wrap(self.state.code_word_wrap)
     }
 
     /// Mono text scale for plain tool-output sections: the code font size
@@ -2515,6 +2518,9 @@ impl Padu {
                                 .clone();
                             let wheel_scroll = output_viewport.scroll_handle.clone();
                             let wheel_follow_tail = output_viewport.follow_tail.clone();
+                            let pan = output_viewport.pan_handle.clone();
+                            let pan_scrollbar = output_viewport.pan_scrollbar.clone();
+                            let wraps = self.state.code_word_wrap;
                             section_view = section_view.child(
                                 div()
                                     .w_full()
@@ -2534,7 +2540,16 @@ impl Padu {
                                             .track_scroll(&output_viewport.scroll_handle)
                                             .py(px(4.0))
                                             .pr(px(8.0))
-                                            .child(rendered_text)
+                                            .child(tool_output_pane(
+                                                SharedString::from(format!(
+                                                    "activity-detail-{}-{}",
+                                                    id,
+                                                    section_kind.id()
+                                                )),
+                                                rendered_text,
+                                                self.state.code_word_wrap,
+                                                pan.clone(),
+                                            ))
                                             .on_scroll_wheel(move |_, window, cx| {
                                                 contain_scroll(&wheel_scroll, cx);
                                                 let scroll = wheel_scroll.clone();
@@ -2559,6 +2574,13 @@ impl Padu {
                                         &output_viewport.scroll_handle,
                                         &output_viewport.scrollbar,
                                     ))
+                                    // A panning pane advertises itself with an
+                                    // overlay bar along the card's bottom edge;
+                                    // it draws nothing unless the output really
+                                    // overflows.
+                                    .when(!wraps, |card| {
+                                        card.child(scrollbar::horizontal(&pan, &pan_scrollbar))
+                                    })
                                     .child(activity_scroll_guard(
                                         output_viewport,
                                         !activity.complete,
@@ -2657,6 +2679,13 @@ impl Padu {
                     .child(SharedString::from(note)),
             );
         }
+        // With word wrap off the whole diff pans sideways as one unit: `rows`
+        // stays the vertical scroller, and it sits inside a horizontally
+        // scrolling viewport sized to the widest row so every row stays
+        // aligned.
+        let wrap = self.state.code_word_wrap;
+        let panning_width = DiffRowStyle::activity(self.state.code_font_size, wrap)
+            .panning_width(diff.snapshot.max_content_columns);
         div()
             .w_full()
             .min_w_0()
@@ -2665,7 +2694,30 @@ impl Padu {
             .overflow_hidden()
             .border_t_1()
             .border_color(theme.border_strong)
-            .child(rows)
+            .child(
+                div()
+                    .id(SharedString::from(format!("activity-diff-pan-{id}")))
+                    .w_full()
+                    .min_w_0()
+                    .when(!wrap, |pane| {
+                        let pan = viewport.pan_handle.clone();
+                        pane.overflow_x_scroll()
+                            .track_scroll(&pan)
+                            // A vertical wheel keeps scrolling the row; only a
+                            // horizontal gesture pans, and it stops here rather
+                            // than jumping the transcript too.
+                            .restrict_scroll_to_axis()
+                            .on_scroll_wheel(move |event, window, cx| {
+                                contain_horizontal_scroll(&pan, event, window, cx)
+                            })
+                    })
+                    .child(
+                        div()
+                            .w_full()
+                            .when(!wrap, |content| content.min_w(px(panning_width)))
+                            .child(rows),
+                    ),
+            )
             .child(activity_scroll_fade(
                 viewport.scroll_handle.clone(),
                 ActivityScrollFadeSide::Top,
@@ -2680,6 +2732,12 @@ impl Padu {
                 &viewport.scroll_handle,
                 &viewport.scrollbar,
             ))
+            .when(!wrap, |card| {
+                card.child(scrollbar::horizontal(
+                    &viewport.pan_handle,
+                    &viewport.pan_scrollbar,
+                ))
+            })
             .into_any_element()
     }
 
@@ -2759,11 +2817,50 @@ impl Padu {
                 index,
                 &format!("activity-diff-{id}"),
                 &self.transcript_selection,
-                DiffRowStyle::activity(self.state.code_font_size),
+                DiffRowStyle::activity(self.state.code_font_size, self.state.code_word_wrap),
                 theme,
             ),
         }
     }
+}
+
+/// A tool-output block: it wraps normally, or becomes a horizontally scrolling
+/// pane when code word wrap is off so long output stays on one line instead of
+/// breaking mid-token.
+///
+/// The pane is the flex parent and its content is `flex_none` with nowrap text,
+/// so the content keeps its intrinsic width and the pane has something to pan.
+/// `pan` is the pane's horizontal scroll state; holding the wheel event while
+/// the pane can still move keeps the transcript from scrolling underneath it.
+fn tool_output_pane(
+    pane_id: SharedString,
+    rendered: AnyElement,
+    wrap: bool,
+    pan: ScrollHandle,
+) -> AnyElement {
+    if wrap {
+        return div()
+            .w_full()
+            .min_w_0()
+            .whitespace_normal()
+            .child(rendered)
+            .into_any_element();
+    }
+    div()
+        .id(pane_id)
+        .w_full()
+        .min_w_0()
+        .flex()
+        .overflow_x_scroll()
+        .track_scroll(&pan)
+        // A vertical wheel keeps scrolling the transcript; only a horizontal
+        // gesture pans the output, and it stops here rather than moving both.
+        .restrict_scroll_to_axis()
+        .on_scroll_wheel(move |event, window, cx| {
+            contain_horizontal_scroll(&pan, event, window, cx)
+        })
+        .child(div().flex_none().whitespace_nowrap().child(rendered))
+        .into_any_element()
 }
 
 /// The separator between two hunks of the same file.

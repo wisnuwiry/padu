@@ -62,8 +62,9 @@ use crate::terminal::TerminalView;
 use crate::theme::{Theme, ThemePreference, sp};
 use crate::ui::text_field::TextField;
 use crate::ui::{
-    MenuChip, ProjectNameSelector, activity_icon, activity_noun, contain_scroll, file_icon, icon,
-    icon_button, motion, provider_color, provider_icon, status_color, toggle_switch,
+    MenuChip, ProjectNameSelector, activity_icon, activity_noun, contain_horizontal_scroll,
+    contain_scroll, file_icon, icon, icon_button, motion, provider_color, provider_icon,
+    status_color, toggle_switch,
 };
 use crate::{
     CancelTaskSwitch, CancelTurn, CloseFind, CloseWindow, ConfirmTaskSwitch, CopySelection,
@@ -1100,6 +1101,9 @@ struct PendingSessionActivation {
 struct ActivityScrollViewport {
     scroll_handle: ScrollHandle,
     scrollbar: Rc<ScrollbarState>,
+    /// Horizontal pan for an expanded diff whose rows do not wrap.
+    pan_handle: ScrollHandle,
+    pan_scrollbar: Rc<ScrollbarState>,
     follow_tail: Rc<Cell<bool>>,
     last_scrolled: Rc<Cell<Option<Pixels>>>,
     last_max_offset: Rc<Cell<Option<Pixels>>>,
@@ -1110,6 +1114,8 @@ impl Default for ActivityScrollViewport {
         Self {
             scroll_handle: ScrollHandle::new(),
             scrollbar: ScrollbarState::new(),
+            pan_handle: ScrollHandle::new(),
+            pan_scrollbar: ScrollbarState::new(),
             follow_tail: Rc::new(Cell::new(true)),
             last_scrolled: Rc::new(Cell::new(None)),
             last_max_offset: Rc::new(Cell::new(None)),
@@ -1523,6 +1529,11 @@ pub struct Padu {
     /// screen rather than the size of the repository change.
     right_panel_diff_list_state: ListState,
     right_panel_diff_scrollbar: Rc<ScrollbarState>,
+    /// Horizontal pan for the Review diff while code word wrap is off. The
+    /// vertical `list` above owns vertical scrolling; this moves the whole
+    /// panel sideways so every row stays aligned.
+    right_panel_diff_h_scroll_handle: ScrollHandle,
+    right_panel_diff_h_scrollbar: Rc<ScrollbarState>,
     /// Selection spans and visible glyph geometry for the Review surface.
     /// Kept separate from the transcript because both surfaces paint at once.
     right_panel_diff_selection: TranscriptSelection,
@@ -1530,6 +1541,10 @@ pub struct Padu {
     right_panel_diff_tree_scrollbar: Rc<ScrollbarState>,
     right_panel_editor_scroll_handle: ScrollHandle,
     right_panel_editor_scrollbar: Rc<ScrollbarState>,
+    /// Horizontal pan for the file editor's text column while word wrap is
+    /// off. The line-number gutter stays outside it, so numbers never move.
+    right_panel_editor_h_scroll_handle: ScrollHandle,
+    right_panel_editor_h_scrollbar: Rc<ScrollbarState>,
     /// Rendered-markdown preview of the visible file editor, cached per path
     /// the way `skills_detail_markdown` caches the skill document.
     file_preview_markdown: RefCell<Option<(String, MarkdownView)>>,
@@ -2258,6 +2273,7 @@ impl Padu {
         new_state.language = self.state.language;
         new_state.ui_font_size = self.state.ui_font_size;
         new_state.code_font_size = self.state.code_font_size;
+        new_state.code_word_wrap = self.state.code_word_wrap;
         new_state.daemon_exposure = self.state.daemon_exposure.clone();
         new_state.open_in_app = self.state.open_in_app.clone();
         new_state.sidebar_visible = self.state.sidebar_visible;
@@ -3567,12 +3583,16 @@ impl Padu {
                 right_panel_diff_filter,
                 right_panel_diff_list_state: ListState::new(0, ListAlignment::Top, px(512.0)),
                 right_panel_diff_scrollbar: ScrollbarState::new(),
+                right_panel_diff_h_scroll_handle: ScrollHandle::new(),
+                right_panel_diff_h_scrollbar: ScrollbarState::new(),
                 right_panel_diff_selection: TranscriptSelection::default(),
                 right_panel_diff_tree_list_state: ListState::new(0, ListAlignment::Top, px(180.0))
                     .with_uniform_item_height(px(30.0)),
                 right_panel_diff_tree_scrollbar: ScrollbarState::new(),
                 right_panel_editor_scroll_handle: ScrollHandle::new(),
                 right_panel_editor_scrollbar: ScrollbarState::new(),
+                right_panel_editor_h_scroll_handle: ScrollHandle::new(),
+                right_panel_editor_h_scrollbar: ScrollbarState::new(),
                 file_preview_markdown: RefCell::new(None),
                 file_preview_selection: TranscriptSelection::default(),
                 file_preview_scroll_handle: ScrollHandle::new(),
