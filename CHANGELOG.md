@@ -16,9 +16,31 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.1.9] - 2026-09-23
+
+### Added
+
+- **Remote Host Transports**: Connect the daemon over direct, Tailscale, Cloudflare, or SSH — chosen with a transport selector, provisioned from the Daemon Access Credentials QR, surfaced as host badges with per-transport guidance, and importable from the desktop connect link on mobile.
+- **Command Code Resume, Fork & Rewind**: Resume transcript sessions, fork a conversation from any point, roll back, and surface usage events, wired through the driver, protocol, daemon, and desktop.
+- **Antigravity Fork & Rewind**: Seeded fork-context plumbing in the protocol plus desktop controls, with the driver helpers split into a dedicated module.
+- **Code Word-Wrap Setting**: A Code settings section with a word-wrap switch; with wrapping off, long code lines pan horizontally instead of wrapping — persisted and honored on desktop and web.
+- **Environment Git Initialization**: Initialize a Git repository from the environment popover on desktop and web, backed by a workspace init operation on the daemon; Git changes now live in the environment popover.
+- **Sidebar Session Hover Detail**: Hovering a session reveals its detail in the sidebar and hides the working-time label, synced across desktop and web.
+- **Grok Dynamic Reasoning Options**: Discover Grok's reasoning options from live ACP model state instead of a fixed list.
+- **Daemon Connection UX**: "Add as Remote Host" shortcuts and a reworked host dialog for configuring and switching daemons.
+
+### Improved
+
+- **Transport Reliability**: Tunnels tear down on stop, a dead tunnel reports as failed instead of ready, cloudflared output is drained, and the local bind retries so relaunching the app no longer fails to start.
+- **Daemon Access Credentials**: Revamped credential section with per-transport guidance and refreshed copy across locales.
+- **Landing Metadata**: Improved SEO metadata.
+
 ### Fixed
 
 - **Antigravity Turn Completion**: A turn whose answer had already streamed to completion no longer stays stuck as running when the provider never sends its final response; the driver settles it from the stream and tells the provider to abandon the turn, while a turn that is still working or waiting on the user is left alone.
+- **Project Script Configs**: Read through the daemon so project scripts load reliably.
+- **What's-New Badge**: Dismisses only on Done.
+- **Mobile Reconnect**: Refresh the saved token on connect-link re-scan.
 
 ## [0.1.8] - 2026-09-19
 
