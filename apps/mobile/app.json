@@ -43,6 +43,13 @@
         }
       ],
       [
+        "expo-camera",
+        {
+          "cameraPermission": "Padu scans the QR code in Padu Desktop’s host dialog to add a daemon.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
         "expo-build-properties",
         {
           "android": {
