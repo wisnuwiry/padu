@@ -1,6 +1,7 @@
 //! Local provider runtime owned by `padu-daemon`.
 
 mod acp;
+mod acp_agy;
 mod activity;
 mod amp;
 mod claude;
@@ -13,8 +14,9 @@ mod pi;
 mod support;
 mod title_refresh;
 
-pub use acp::{agy_account_label, agy_auth_status, authenticate_agy, logout_agy};
-pub(crate) use acp::{catalog_agent, discover_agy_models};
+pub(crate) use acp::catalog_agent;
+pub(crate) use acp_agy::discover_agy_models;
+pub use acp_agy::{agy_account_label, agy_auth_status, authenticate_agy, logout_agy};
 
 use std::path::PathBuf;
 use std::sync::Arc;
