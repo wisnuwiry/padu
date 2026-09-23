@@ -378,8 +378,12 @@ settings.theme: テーマ
 settings.theme_description: システム、ライト、ダークのいずれかのテーマを選択します
 settings.ui_font_size: UI のフォントサイズ
 settings.ui_font_size_description: インターフェース全体とメッセージの文字サイズ
+settings.code: コード
+settings.code_description: ファイルエディタ、差分表示、コードブロック、ツール出力の表示オプション
 settings.code_font_size: コードのフォントサイズ
 settings.code_font_size_description: ファイルエディタ、差分表示、コードブロック、ツール出力の文字サイズ
+settings.code_word_wrap: 折り返し
+settings.code_word_wrap_description: 横スクロールせずに長い行を折り返します
 settings.theme_system: システム
 settings.theme_light: ライト
 settings.theme_dark: ダーク

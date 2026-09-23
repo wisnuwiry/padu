@@ -374,8 +374,12 @@ settings.theme: 主题
 settings.theme_description: 选择跟随系统、浅色或深色主题
 settings.ui_font_size: 界面字号
 settings.ui_font_size_description: 整个界面与消息的文字大小
+settings.code: 代码
+settings.code_description: 文件编辑器、差分视图、代码块与工具输出的显示选项
 settings.code_font_size: 代码字号
 settings.code_font_size_description: 文件编辑器、差分视图、代码块与工具输出的文字大小
+settings.code_word_wrap: 自动换行
+settings.code_word_wrap_description: 折行显示长行，而不是横向滚动
 settings.theme_system: 跟随系统
 settings.theme_light: 浅色
 settings.theme_dark: 深色

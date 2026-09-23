@@ -874,10 +874,18 @@ settings.ui_font_size:
   en: UI font size
 settings.ui_font_size_description:
   en: Text size across the interface and messages
+settings.code:
+  en: Code
+settings.code_description:
+  en: Reading options for code in the editor, diffs, code blocks, and tool output
 settings.code_font_size:
   en: Code font size
 settings.code_font_size_description:
   en: Text size in the file editor, diffs, code blocks, and tool output
+settings.code_word_wrap:
+  en: Word wrap
+settings.code_word_wrap_description:
+  en: Wrap long lines instead of scrolling horizontally
 settings.theme_system:
   en: System
 settings.theme_light:
