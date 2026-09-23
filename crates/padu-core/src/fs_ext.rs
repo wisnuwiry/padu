@@ -68,3 +68,39 @@ pub(crate) fn symlink(original: &Path, link: &Path) -> io::Result<()> {
         ))
     }
 }
+
+/// Fold a Windows verbatim path back to plain form (`\\?\C:\…` → `C:\…`,
+/// `\\?\UNC\server\share` → `server\share`). `canonicalize` returns the
+/// verbatim form, which no slug scheme, transcript header, or display string
+/// includes; a no-op everywhere else.
+pub(crate) fn strip_verbatim_prefix(path: &str) -> &str {
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        rest
+    } else if let Some(rest) = path.strip_prefix(r"\\?\") {
+        rest
+    } else {
+        path
+    }
+}
+
+/// Canonicalized `path` as a portable display string: verbatim prefixes
+/// folded away, falling back to the path as given when it does not exist.
+pub(crate) fn canonical_display_string(path: &Path) -> String {
+    let resolved = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    strip_verbatim_prefix(&resolved.to_string_lossy()).to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verbatim_prefixes_fold_back_to_plain_paths() {
+        assert_eq!(strip_verbatim_prefix(r"\\?\C:\Users\dev"), r"C:\Users\dev");
+        assert_eq!(
+            strip_verbatim_prefix(r"\\?\UNC\server\share"),
+            r"server\share"
+        );
+        assert_eq!(strip_verbatim_prefix("/private/tmp"), "/private/tmp");
+    }
+}

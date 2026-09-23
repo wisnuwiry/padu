@@ -25,6 +25,7 @@ use chrono::SecondsFormat;
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::fs_ext::canonical_display_string;
 use crate::model::{
     AgentTurn, Message, MessageRole, ProviderResumeCursor, ProviderSessionHistory,
     ProviderSessionSummary, TurnStatus,
@@ -43,27 +44,7 @@ fn projects_root() -> Option<PathBuf> {
 /// characters folded to one dash (`/private/tmp/probe-a` →
 /// `private-tmp-probe-a`).
 pub fn slug_for_cwd(cwd: &Path) -> String {
-    slugify(&display_cwd(cwd))
-}
-
-/// Canonicalized working directory in portable form, for transcript headers
-/// and slug filing alike.
-fn display_cwd(cwd: &Path) -> String {
-    let resolved = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
-    strip_verbatim_prefix(&resolved.to_string_lossy()).to_owned()
-}
-
-/// `canonicalize` returns verbatim paths on Windows (`\\?\C:\…`,
-/// `\\?\UNC\server\share`), which no slug scheme includes. Fold back to the
-/// plain form before slugifying; a no-op everywhere else.
-fn strip_verbatim_prefix(path: &str) -> &str {
-    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
-        rest
-    } else if let Some(rest) = path.strip_prefix(r"\\?\") {
-        rest
-    } else {
-        path
-    }
+    slugify(&canonical_display_string(cwd))
 }
 
 fn slugify(raw: &str) -> String {
@@ -279,7 +260,7 @@ fn create_empty_session_in(root: &Path, cwd: &Path) -> anyhow::Result<ProviderRe
         "version": 3,
         "id": fork_id,
         "timestamp": chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
-        "cwd": display_cwd(cwd),
+        "cwd": canonical_display_string(cwd),
     }))?;
     write_fork_files(root, cwd, &fork_id, &[header])?;
     Ok(ProviderResumeCursor::CommandCode {
@@ -341,7 +322,7 @@ fn fork_session_at_turn_in(
                 "timestamp".into(),
                 Value::String(chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)),
             );
-            let resolved = display_cwd(cwd);
+            let resolved = canonical_display_string(cwd);
             object.insert("cwd".into(), Value::String(resolved));
             *header = serde_json::to_string(&value)?;
         }
@@ -620,12 +601,8 @@ mod tests {
 
     #[test]
     fn verbatim_prefixes_fold_out_of_slugs() {
-        assert_eq!(strip_verbatim_prefix(r"\\?\C:\Users\dev"), r"C:\Users\dev");
-        assert_eq!(
-            strip_verbatim_prefix(r"\\?\UNC\server\share"),
-            r"server\share"
-        );
-        assert_eq!(strip_verbatim_prefix("/private/tmp"), "/private/tmp");
+        use crate::fs_ext::strip_verbatim_prefix;
+
         assert_eq!(
             slugify(strip_verbatim_prefix(r"\\?\C:\Users\dev")),
             "c-users-dev"
