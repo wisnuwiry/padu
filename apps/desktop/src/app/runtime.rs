@@ -537,7 +537,11 @@ fn perform_provider_rewind(
                 .cursor;
             Ok((Some(cursor), None, None))
         }
-        ProviderKind::Codex | ProviderKind::DeepSeek | ProviderKind::OhMyPi | ProviderKind::Pi => {
+        ProviderKind::Codex
+        | ProviderKind::CommandCode
+        | ProviderKind::DeepSeek
+        | ProviderKind::OhMyPi
+        | ProviderKind::Pi => {
             let mut prepared_driver = None;
             let driver = if let Some(driver) = request.driver.as_ref() {
                 driver.clone()
@@ -558,14 +562,12 @@ fn perform_provider_rewind(
         }
         // Unreachable through the UI, which hides rewinding for providers that
         // answer `supports_conversation_rollback` with false.
-        ProviderKind::Agy
-        | ProviderKind::CommandCode
-        | ProviderKind::Fx
-        | ProviderKind::Kimi
-        | ProviderKind::Qoder => Err(anyhow::anyhow!(tr!(
-            "errors.provider_turn_branching_unsupported",
-            provider = provider.display_name()
-        ))),
+        ProviderKind::Agy | ProviderKind::Fx | ProviderKind::Kimi | ProviderKind::Qoder => {
+            Err(anyhow::anyhow!(tr!(
+                "errors.provider_turn_branching_unsupported",
+                provider = provider.display_name()
+            )))
+        }
     }
 }
 
@@ -714,6 +716,19 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
                 let (cursor, prepared_driver) = fork_response_with_driver(&mut request)?;
                 Ok((cursor, None, prepared_driver))
             }
+            ProviderKind::CommandCode => {
+                if !matches!(
+                    request.source.provider_cursor.as_ref(),
+                    Some(ProviderResumeCursor::CommandCode { .. })
+                ) {
+                    anyhow::bail!(tr!(
+                        "errors.provider_native_session_unavailable",
+                        provider = "Command Code"
+                    ));
+                }
+                let (cursor, prepared_driver) = fork_response_with_driver(&mut request)?;
+                Ok((cursor, None, prepared_driver))
+            }
             ProviderKind::Cursor => Ok((
                 request
                     .workspace_client
@@ -853,14 +868,12 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
             }
             // Unreachable through the UI, which hides branching for providers
             // that answer `supports_conversation_fork` with false.
-            ProviderKind::Agy
-            | ProviderKind::CommandCode
-            | ProviderKind::Fx
-            | ProviderKind::Kimi
-            | ProviderKind::Qoder => anyhow::bail!(tr!(
-                "errors.provider_turn_branching_unsupported",
-                provider = provider.display_name()
-            )),
+            ProviderKind::Agy | ProviderKind::Fx | ProviderKind::Kimi | ProviderKind::Qoder => {
+                anyhow::bail!(tr!(
+                    "errors.provider_turn_branching_unsupported",
+                    provider = provider.display_name()
+                ))
+            }
         }
     })();
 
