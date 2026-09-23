@@ -32,6 +32,9 @@ pub fn init(cx: &mut App) {
 
 pub(crate) struct HostDialogRequest {
     pub editing_profile_id: Option<String>,
+    /// When opened from a credential card ("Add as Remote Host"), the address
+    /// and token are pre-filled so the user only needs to confirm the name.
+    pub prefill: Option<(String, String)>,
 }
 
 pub(crate) struct HostDialogState {
@@ -346,7 +349,25 @@ impl Padu {
         editing_profile_id: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        self.host_dialog_request = Some(HostDialogRequest { editing_profile_id });
+        self.host_dialog_request = Some(HostDialogRequest {
+            editing_profile_id,
+            prefill: None,
+        });
+        cx.notify();
+    }
+
+    /// Open the host dialog with `address` and `token` already filled in —
+    /// used by the "Add as Remote Host" shortcut in the daemon credential card.
+    pub(crate) fn request_host_dialog_prefilled(
+        &mut self,
+        address: String,
+        token: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.host_dialog_request = Some(HostDialogRequest {
+            editing_profile_id: None,
+            prefill: Some((address, token)),
+        });
         cx.notify();
     }
 
@@ -362,18 +383,27 @@ impl Padu {
             .and_then(|id| self.state.hosts.iter().find(|h| &h.id == id))
             .cloned();
 
-        let initial_name = existing
-            .as_ref()
-            .map(|h| h.name.clone())
-            .unwrap_or_default();
-        let initial_address = existing
-            .as_ref()
-            .map(|h| h.address.clone())
-            .unwrap_or_default();
-        let initial_token = existing
-            .as_ref()
-            .and_then(|h| h.token.clone())
-            .unwrap_or_default();
+        // Prefill wins over existing when opening a fresh dialog from the
+        // credential card — address and token come from the live daemon, not
+        // from a saved profile.
+        let (initial_name, initial_address, initial_token) = if let Some((addr, tok)) =
+            &request.prefill
+        {
+            (String::new(), addr.clone(), tok.clone())
+        } else {
+            (
+                existing.as_ref().map(|h| h.name.clone()).unwrap_or_default(),
+                existing
+                    .as_ref()
+                    .map(|h| h.address.clone())
+                    .unwrap_or_default(),
+                existing
+                    .as_ref()
+                    .and_then(|h| h.token.clone())
+                    .unwrap_or_default(),
+            )
+        };
+
         let initial_tab = existing
             .as_ref()
             .map(|h| HostTab::of_profile_kind(h.kind))
@@ -455,7 +485,11 @@ impl Padu {
 
         let address_focus = address_input.read(cx).focus();
         let name_focus = name_input.read(cx).focus();
-        let first_focus = if request.editing_profile_id.is_some() {
+        // When prefilled from the credential card, address and token are already
+        // populated — focus the name field so the user can type a friendly label
+        // and hit Enter to save. Otherwise focus the address field for normal
+        // new-host flow, or the name field when editing.
+        let first_focus = if request.prefill.is_some() || request.editing_profile_id.is_some() {
             name_focus
         } else {
             address_focus

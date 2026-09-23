@@ -710,6 +710,8 @@ daemon.qr_unavailable:
   en: This daemon address cannot be encoded as a QR code.
 daemon.qr_hint:
   en: Scan this with the Padu mobile app to connect this device — it carries the address and token, so nothing needs typing.
+daemon.add_as_remote_host:
+  en: Add as Remote Host
 host.hosts:
   en: Hosts
 host.local:

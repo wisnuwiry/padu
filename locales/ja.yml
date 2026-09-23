@@ -1581,6 +1581,8 @@ host.connection_section: 接続
 daemon.show_qr: QR コードを表示
 daemon.hide_qr: QR コードを非表示
 daemon.qr_hint: Padu モバイルアプリでこれをスキャンするとこの端末を接続できます。アドレスとトークンが含まれるため、入力は不要です。
+daemon.add_as_remote_host: リモートホストとして追加
+
 daemon.qr_unavailable: このデーモンのアドレスは QR コードにできません。
 daemon.qr_tailscale_name: テールネット名
 daemon.qr_direct_address: LAN アドレス

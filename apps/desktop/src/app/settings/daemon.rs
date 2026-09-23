@@ -1080,6 +1080,11 @@ impl Padu {
             .unwrap_or_default();
         drop(cache);
 
+        let address_click = address.clone();
+        let token_click = token.to_owned();
+        let address_key = address.clone();
+        let token_key = token.to_owned();
+
         left = left
             .child(
                 div()
@@ -1088,6 +1093,49 @@ impl Padu {
                     .text_color(theme.text_secondary)
                     .truncate()
                     .child(SharedString::from(address)),
+            )
+            // "Add as Remote Host" shortcut: opens the host dialog pre-filled
+            // with the credential so the user only types a friendly name.
+            .child(
+                div()
+                    .id("daemon-add-as-host-btn")
+                    .tab_index(0)
+                    .h(px(26.0))
+                    .px(px(10.0))
+                    .rounded(px(6.0))
+                    .border_1()
+                    .border_color(theme.border_strong)
+                    .flex()
+                    .items_center()
+                    .gap(px(5.0))
+                    .cursor_pointer()
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_secondary)
+                    .hover(|e| e.bg(theme.overlay).text_color(theme.text))
+                    .focus_visible(|style| style.border_color(theme.accent))
+                    .child(icon("icons/plus.svg", 10.0, theme.text_tertiary))
+                    .child(tr!("daemon.add_as_remote_host"))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.request_host_dialog_prefilled(
+                            address_click.clone(),
+                            token_click.clone(),
+                            cx,
+                        );
+                    }))
+                    .on_key_down(cx.listener({
+                        move |this, event: &KeyDownEvent, _, cx| {
+                            if !event.keystroke.modifiers.modified()
+                                && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                            {
+                                this.request_host_dialog_prefilled(
+                                    address_key.clone(),
+                                    token_key.clone(),
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }
+                        }
+                    })),
             )
             .child(render_qr_centered(&svg, theme));
         if self.daemon_qr_transport == HostKind::SshRelay {

@@ -1523,6 +1523,8 @@ host.connection_section: Koneksi
 daemon.show_qr: Tampilkan Kode QR
 daemon.hide_qr: Sembunyikan Kode QR
 daemon.qr_hint: Pindai ini dengan aplikasi Padu Mobile untuk menghubungkan perangkat ini — kode ini membawa alamat dan token, jadi tidak perlu mengetik apa pun.
+daemon.add_as_remote_host: Tambahkan sebagai Host Jarak Jauh
+
 daemon.qr_unavailable: Alamat daemon ini tidak dapat dijadikan kode QR.
 daemon.qr_tailscale_name: Nama tailnet
 daemon.qr_direct_address: Alamat LAN

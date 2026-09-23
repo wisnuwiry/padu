@@ -1528,6 +1528,8 @@ host.connection_section: 连接
 daemon.show_qr: 显示二维码
 daemon.hide_qr: 隐藏二维码
 daemon.qr_hint: 用 Padu 移动应用扫描此二维码即可连接本设备 — 其中包含地址和令牌，无需手动输入。
+daemon.add_as_remote_host: 添加为远程主机
+
 daemon.qr_unavailable: 无法将该守护进程地址编码为二维码。
 daemon.qr_tailscale_name: Tailnet 名称
 daemon.qr_direct_address: 局域网地址
