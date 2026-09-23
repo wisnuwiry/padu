@@ -142,11 +142,92 @@ export function displayHost(address: string): string {
   }
 }
 
+/**
+ * Short badge text for a transport. Empty for `direct`, which is the default
+ * and needs no badge — callers render the badge only for a non-empty label.
+ */
+export function transportLabel(kind: DaemonTransport): string {
+  switch (kind) {
+    case "cloudflare":
+      return "Cloudflare";
+    case "tailscale":
+      return "Tailscale";
+    case "ssh_relay":
+      return "SSH";
+    default:
+      return "";
+  }
+}
+
+export type ConnectionTone = "secure" | "warning" | "danger";
+
+export interface ConnectionDescription {
+  tone: ConnectionTone;
+  /** One sentence naming the transport and what it means for secrecy. */
+  text: string;
+}
+
+/**
+ * How to describe a classified connection to the user.
+ *
+ * One source for both the daemon editor and the connect-link preview, so the
+ * same host reads the same way wherever it is shown. The plaintext-to-a-public
+ * host case says it is blocked rather than only warning, because `saveProfile`
+ * rejects it.
+ */
+export function describeConnection(
+  connectionClass: ConnectionClass,
+): ConnectionDescription {
+  switch (connectionClass) {
+    case "cloudflare":
+      return { tone: "secure", text: "Encrypted through Cloudflare." };
+    case "tailscale":
+      return { tone: "secure", text: "Encrypted over your tailnet." };
+    case "ssh_relay":
+      return { tone: "secure", text: "Encrypted through your SSH tunnel." };
+    case "public_wss":
+      return { tone: "secure", text: "Encrypted connection." };
+    case "private_ws":
+      return {
+        tone: "warning",
+        text: "Unencrypted connection. Use it only on a LAN or tailnet you trust.",
+      };
+    case "insecure_public_ws":
+      return {
+        tone: "danger",
+        text: "Public plaintext connections are blocked. Use wss:// for this host.",
+      };
+    default:
+      return {
+        tone: "danger",
+        text: "Enter a valid ws:// or wss:// WebSocket address.",
+      };
+  }
+}
+
 export function profileInitials(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);
   if (!words.length) return 'W';
   if (words.length === 1) return [...words[0]!].slice(0, 2).join('').toUpperCase();
   return `${[...words[0]!][0] ?? ''}${[...words.at(-1)!][0] ?? ''}`.toUpperCase();
+}
+
+/**
+ * Compact "how long ago" label for a host's last successful connection.
+ *
+ * Deliberately coarse — the list only needs to separate "just now" from "a
+ * while ago", so it never has to re-render on a clock tick.
+ */
+export function formatLastUsed(timestamp: number, now = Date.now()): string {
+  const seconds = Math.max(0, Math.round((now - timestamp) / 1000));
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return `${Math.floor(days / 7)}w ago`;
 }
 
 export function isPrivateDaemonAddress(address: string): boolean {
