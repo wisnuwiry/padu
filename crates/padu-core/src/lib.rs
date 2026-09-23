@@ -26,6 +26,7 @@ pub mod checkpoint;
 mod claude_metadata;
 pub mod claude_session;
 pub mod codex_session;
+pub mod command_code_session;
 pub mod command_env;
 pub mod composer_complete;
 pub mod computer_use;

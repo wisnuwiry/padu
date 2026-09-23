@@ -31,6 +31,25 @@ pub(super) fn claude_context_tokens(usage: &Value) -> Option<u64> {
     (total > 0).then_some(total)
 }
 
+/// The context-window occupancy of one Command Code `usage` object
+/// (`model_request_end`, `turn_end`, `run_end`, and the final `result` all
+/// carry one): the call's full input context plus what it generated. Later
+/// frames supersede earlier ones — usage grows as the run's context does —
+/// so callers emit every frame and let the app keep the latest. The CLI
+/// reports no window size, so these pair with `context_window: None` the way
+/// Claude's mid-turn updates do.
+pub(super) fn command_code_context_tokens(usage: &Value) -> Option<u64> {
+    let total = usage
+        .get("inputTokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+        + usage
+            .get("outputTokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+    (total > 0).then_some(total)
+}
+
 #[derive(Clone)]
 pub(super) enum HeadlessComputerUseConfig {
     OpenCode {
