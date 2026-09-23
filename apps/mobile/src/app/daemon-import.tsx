@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { Stack } from 'expo-router';
+import { router, Stack } from 'expo-router';
 import { navigateBack } from '@/components/screen-header';
 import { useState } from 'react';
 import {
@@ -66,11 +66,30 @@ export default function DaemonImportScreen() {
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled">
-        <Text style={[styles.intro, { color: theme.textSecondary }]}>
-          Point your camera at the QR code in Padu Desktop’s host dialog, or
-          paste the link it shows. The link carries the address and token, so
-          you never type them on the phone.
-        </Text>
+        <Pressable
+          accessibilityHint="Opens the camera to scan the desktop’s QR code"
+          accessibilityLabel="Scan QR code"
+          accessibilityRole="button"
+          onPress={() => router.push('/scan')}
+          style={({ pressed }) => [
+            styles.scan,
+            { backgroundColor: theme.inverse, opacity: pressed ? 0.8 : 1 },
+          ]}>
+          <AppSymbol
+            name={{ ios: 'qrcode.viewfinder', android: 'qr_code_scanner', web: 'qr_code_scanner' }}
+            size={17}
+            tintColor={theme.onInverse}
+          />
+          <Text style={[styles.scanLabel, { color: theme.onInverse }]}>Scan QR Code</Text>
+        </Pressable>
+
+        <View style={styles.divider}>
+          <View style={[styles.dividerLine, { backgroundColor: theme.separator }]} />
+          <Text style={[styles.dividerLabel, { color: theme.textTertiary }]}>
+            or paste the link
+          </Text>
+          <View style={[styles.dividerLine, { backgroundColor: theme.separator }]} />
+        </View>
 
         <Text style={[styles.label, { color: theme.textSecondary }]}>Link</Text>
         <View
@@ -137,7 +156,23 @@ export default function DaemonImportScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   content: { padding: Spacing.three, paddingBottom: 40 },
-  intro: { fontSize: 13.5, lineHeight: 19, marginBottom: 20 },
+  scan: {
+    alignItems: 'center',
+    borderRadius: Radius.large,
+    flexDirection: 'row',
+    gap: Spacing.two,
+    justifyContent: 'center',
+    minHeight: 50,
+  },
+  scanLabel: { fontSize: 15, fontWeight: '700' },
+  divider: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: Spacing.two,
+    marginVertical: Spacing.four,
+  },
+  dividerLine: { flex: 1, height: StyleSheet.hairlineWidth },
+  dividerLabel: { fontSize: 12.5, fontWeight: '600' },
   label: { fontSize: 12.5, fontWeight: '600', marginBottom: 6 },
   inputShell: {
     borderRadius: Radius.large,
