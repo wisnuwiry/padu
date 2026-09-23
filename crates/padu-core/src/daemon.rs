@@ -651,7 +651,9 @@ impl Backend for PaduBackend {
                     }
                     ProviderKind::Grok => crate::grok_session::list_provider_sessions(limit)?,
                     ProviderKind::Kimi => crate::kimi_session::list_provider_sessions(limit)?,
-                    ProviderKind::CommandCode => Vec::new(),
+                    ProviderKind::CommandCode => {
+                        crate::command_code_session::list_provider_sessions(limit)?
+                    }
                     ProviderKind::OhMyPi | ProviderKind::Pi => {
                         crate::pi_session::list_provider_sessions(provider, limit)?
                     }
@@ -705,8 +707,13 @@ impl Backend for PaduBackend {
                             VISIBLE_TURN_LIMIT,
                         )?
                     }
-                    ProviderResumeCursor::CommandCode { .. }
-                    | ProviderResumeCursor::Qoder { .. } => ProviderSessionHistory {
+                    ProviderResumeCursor::CommandCode { session_id } => {
+                        crate::command_code_session::provider_session_history(
+                            session_id,
+                            VISIBLE_TURN_LIMIT,
+                        )?
+                    }
+                    ProviderResumeCursor::Qoder { .. } => ProviderSessionHistory {
                         messages: Vec::new(),
                         turns: Vec::new(),
                     },
@@ -1343,6 +1350,7 @@ impl PaduBackend {
                 Ok((fork.cursor, fork.message_ids))
             }
             ProviderKind::Codex
+            | ProviderKind::CommandCode
             | ProviderKind::DeepSeek
             | ProviderKind::OhMyPi
             | ProviderKind::Pi => Ok((
@@ -1403,11 +1411,7 @@ impl PaduBackend {
             }
             // Unreachable through the UI, which hides branching for providers
             // that answer `supports_conversation_fork` with false.
-            ProviderKind::Agy
-            | ProviderKind::CommandCode
-            | ProviderKind::Fx
-            | ProviderKind::Kimi
-            | ProviderKind::Qoder => {
+            ProviderKind::Agy | ProviderKind::Fx | ProviderKind::Kimi | ProviderKind::Qoder => {
                 bail!(
                     "{} cannot branch a conversation at a turn",
                     source.provider.display_name()
@@ -1447,6 +1451,14 @@ impl PaduBackend {
                 ) =>
             {
                 bail!("DeepSeek Harness's native session is unavailable");
+            }
+            ProviderKind::CommandCode
+                if !matches!(
+                    source.provider_cursor.as_ref(),
+                    Some(ProviderResumeCursor::CommandCode { .. })
+                ) =>
+            {
+                bail!("Command Code's native session is unavailable");
             }
             ProviderKind::Pi
                 if !matches!(
@@ -1601,6 +1613,7 @@ impl PaduBackend {
                 Ok((Some(cursor), HashMap::new(), false))
             }
             ProviderKind::Codex
+            | ProviderKind::CommandCode
             | ProviderKind::DeepSeek
             | ProviderKind::OhMyPi
             | ProviderKind::Pi => Ok((
@@ -1610,11 +1623,7 @@ impl PaduBackend {
             )),
             // Unreachable through the UI, which hides rewinding for providers
             // that answer `supports_conversation_rollback` with false.
-            ProviderKind::Agy
-            | ProviderKind::CommandCode
-            | ProviderKind::Fx
-            | ProviderKind::Kimi
-            | ProviderKind::Qoder => {
+            ProviderKind::Agy | ProviderKind::Fx | ProviderKind::Kimi | ProviderKind::Qoder => {
                 bail!(
                     "{} cannot rewind a conversation to a turn",
                     source.provider.display_name()
