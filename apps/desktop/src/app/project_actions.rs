@@ -31,21 +31,39 @@ pub struct ProjectConfigFile {
     pub scripts: Vec<FileScript>,
 }
 
-pub fn read_project_file_scripts(project_path: &Path) -> (Vec<FileScript>, &'static str) {
-    let padu_json = project_path.join("padu.json");
-    if padu_json.is_file() {
-        if let Ok(content) = std::fs::read_to_string(&padu_json) {
-            if let Ok(config) = serde_json::from_str::<ProjectConfigFile>(&content) {
-                return (config.scripts, "padu.json");
-            }
-        }
-    }
-    let t3_json = project_path.join("t3.json");
-    if t3_json.is_file() {
-        if let Ok(content) = std::fs::read_to_string(&t3_json) {
-            if let Ok(config) = serde_json::from_str::<ProjectConfigFile>(&content) {
-                return (config.scripts, "t3.json");
-            }
+/// Reads one candidate configuration file and parses its scripts.
+///
+/// The read goes through the daemon, which owns the project's filesystem. A
+/// local read of a project under `~/Documents` asks macOS for the folder in
+/// Padu's own name, and a remote host does not have the path on this machine at
+/// all. A missing or unparseable file is simply not a config.
+fn read_project_config_scripts(
+    workspace: &padu_client::WorkspaceClient,
+    project_path: &Path,
+    file_name: &str,
+) -> Option<Vec<FileScript>> {
+    let Ok(padu_client::WorkspaceResult::TextFile { content }) =
+        workspace.request(padu_client::WorkspaceOperation::ReadTextFile {
+            root: project_path.to_path_buf(),
+            relative_path: PathBuf::from(file_name),
+        })
+    else {
+        return None;
+    };
+    serde_json::from_str::<ProjectConfigFile>(&content)
+        .ok()
+        .map(|config| config.scripts)
+}
+
+/// The scripts a project declares in `padu.json`, else in `t3.json`, with the
+/// file they came from — empty when it declares none.
+pub fn read_project_file_scripts(
+    workspace: &padu_client::WorkspaceClient,
+    project_path: &Path,
+) -> (Vec<FileScript>, &'static str) {
+    for file_name in ["padu.json", "t3.json"] {
+        if let Some(scripts) = read_project_config_scripts(workspace, project_path, file_name) {
+            return (scripts, file_name);
         }
     }
     (Vec::new(), "")
@@ -72,13 +90,18 @@ fn slug_id(name: &str) -> String {
 
 impl Padu {
     pub(super) fn detect_file_scripts(&self, path: PathBuf, cx: &mut Context<Self>) {
+        if !self.pending_file_scripts.borrow_mut().insert(path.clone()) {
+            return;
+        }
         let scan_path = path.clone();
+        let workspace = padu_client::WorkspaceClient::new(self.daemon.client());
         cx.spawn(async move |this, cx| {
             let res = cx
                 .background_executor()
-                .spawn(async move { read_project_file_scripts(&scan_path) })
+                .spawn(async move { read_project_file_scripts(&workspace, &scan_path) })
                 .await;
             let _ = this.update(cx, |this, cx| {
+                this.pending_file_scripts.borrow_mut().remove(&path);
                 this.cached_file_scripts.insert(path, res);
                 cx.notify();
             });
@@ -775,5 +798,33 @@ impl Padu {
                 .child(menu)
                 .into_any_element(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// The header draws this probe for the selected project, so it must not
+    /// touch the project path itself. A local read of a project under
+    /// `~/Documents` makes macOS ask for the folder in Padu's own name, and a
+    /// remote host does not have the path on this machine at all, so the
+    /// daemon — which owns the filesystem — has to answer instead.
+    #[test]
+    fn the_script_probe_reads_through_the_daemon() {
+        let source = include_str!("project_actions.rs");
+        // Anchored past the test module so the literals below do not match
+        // themselves.
+        let source = source
+            .split_once("\n#[cfg(test)]")
+            .expect("the test module")
+            .0;
+
+        for forbidden in ["std::fs::", "is_file()", "read_to_string"] {
+            assert!(
+                !source.contains(forbidden),
+                "project script detection must not call `{forbidden}`; \
+                 read the config with WorkspaceOperation::ReadTextFile instead"
+            );
+        }
+        assert!(source.contains("WorkspaceOperation::ReadTextFile"));
     }
 }

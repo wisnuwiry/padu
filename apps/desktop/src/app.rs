@@ -1319,10 +1319,16 @@ pub struct Padu {
     /// executor. Render only reads this; empty means not resolved yet (or
     /// nothing to offer) and hides the control.
     open_in_apps: Rc<Vec<crate::platform::ExternalApp>>,
+    /// Project-script configs (`padu.json` / `t3.json`) per project path, read
+    /// through the daemon. Render only reads this map; a miss starts one fetch
+    /// on the background executor.
     cached_file_scripts: std::collections::HashMap<
         std::path::PathBuf,
         (Vec<crate::app::project_actions::FileScript>, &'static str),
     >,
+    /// Project paths whose script config is mid-fetch, so a header that draws
+    /// again before the answer cannot queue another daemon read every frame.
+    pending_file_scripts: RefCell<HashSet<PathBuf>>,
     model_picker_tab: ModelPickerTab,
     /// Keyboard cursor over the model picker's filtered rows. `None` means the
     /// keyboard has not moved yet, so `enter` takes the first row.
@@ -3480,6 +3486,7 @@ impl Padu {
                 computer_use_app_icon_loads: RefCell::new(HashSet::new()),
                 open_in_apps: Rc::new(Vec::new()),
                 cached_file_scripts: std::collections::HashMap::new(),
+                pending_file_scripts: RefCell::new(HashSet::new()),
                 model_picker_tab,
                 model_picker_highlight: None,
                 model_picker_scroll: ScrollHandle::new(),
