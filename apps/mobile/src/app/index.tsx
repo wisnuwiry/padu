@@ -27,6 +27,8 @@ import { ProviderIcon, providerBrandColor } from '@/components/provider-icon';
 import { ConnectionStatus } from '@/components/connection-status';
 import { RenameDialog } from '@/components/rename-dialog';
 import { Sheet, SheetRow } from '@/components/sheet';
+import { ThemeChoiceControl } from '@/components/theme-choice-control';
+import { ThemeToggleButton } from '@/components/theme-toggle-button';
 import { MaxContentWidth, NativeTint, Radius, Spacing } from '@/constants/theme';
 import { useTaskState } from '@/hooks/use-daemon-data';
 import { useTheme } from '@/hooks/use-theme';
@@ -136,6 +138,14 @@ export default function TasksScreen() {
               />
             </Pressable>
           </GlassSurface>
+        </View>
+      )}
+
+      {!showOnboarding && (
+        <View
+          pointerEvents="box-none"
+          style={[styles.floatingTheme, { top: insets.top + DaemonPickerTop }]}>
+          <ThemeToggleButton />
         </View>
       )}
 
@@ -332,6 +342,10 @@ function Onboarding() {
             icon={{ ios: 'lock.shield', android: 'shield_lock', web: 'lock' }}
             title="Private by default"
           />
+        </View>
+
+        <View style={styles.onboardingTheme}>
+          <ThemeChoiceControl />
         </View>
 
         <View style={styles.onboardingActions}>
@@ -552,6 +566,11 @@ const styles = StyleSheet.create({
     position: 'absolute',
     zIndex: 20,
   },
+  floatingTheme: {
+    position: 'absolute',
+    right: Spacing.three,
+    zIndex: 20,
+  },
   roundInner: { alignItems: 'center', flex: 1, justifyContent: 'center' },
   searchDock: {
     alignItems: 'center',
@@ -623,6 +642,7 @@ const styles = StyleSheet.create({
   highlightCopy: { flex: 1, gap: Spacing.half, minWidth: 0 },
   highlightTitle: { fontSize: 15, fontWeight: '600' },
   highlightBody: { fontSize: 12.5, lineHeight: 17 },
+  onboardingTheme: { marginTop: Spacing.four, maxWidth: 420, width: '100%' },
   onboardingActions: { gap: Spacing.two, marginTop: Spacing.five, maxWidth: 420, width: '100%' },
   primaryButton: {
     alignItems: 'center',

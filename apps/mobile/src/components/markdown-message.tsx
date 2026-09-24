@@ -1,8 +1,9 @@
 import { Fragment, memo, useMemo } from 'react';
-import { StyleSheet, View, useColorScheme } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useMarkdown, type MarkedStyles } from 'react-native-marked';
 
 import { MonoFont, Radius } from '@/constants/theme';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
 
 /**
@@ -70,7 +71,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
     spacing: { xs: 2, s: 4, m: 6, l: 12 },
   }), [bodyColor, theme]);
   const elements = useMarkdown(value, {
-    colorScheme: colorScheme === 'dark' ? 'dark' : 'light',
+    colorScheme,
     styles,
     theme: markdownTheme,
   });
