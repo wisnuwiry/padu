@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { router, Stack } from 'expo-router';
-import { useState } from 'react';
+import { memo, useCallback, useState, type ComponentProps } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -29,12 +29,17 @@ import {
   type DaemonProfile,
 } from '@/lib/daemon-profile';
 
+/** Stable identity so the list doesn't see a new key fn every render. */
+function daemonKeyExtractor(item: DaemonProfile): string {
+  return item.id;
+}
+
 export default function DaemonsScreen() {
   const theme = useTheme();
   const daemon = useDaemon();
   const [selectingId, setSelectingId] = useState<string | null>(null);
 
-  async function select(profile: DaemonProfile) {
+  const select = useCallback(async (profile: DaemonProfile) => {
     if (selectingId) return;
     if (profile.id === daemon.activeProfile?.id) {
       navigateBack();
@@ -49,7 +54,24 @@ export default function DaemonsScreen() {
     } finally {
       setSelectingId(null);
     }
-  }
+  }, [daemon, selectingId]);
+
+  const edit = useCallback((id: string) => {
+    router.push({ pathname: '/daemon-editor', params: { id } });
+  }, []);
+
+  const renderDaemon = useCallback(({ item }: { item: DaemonProfile }) => (
+    <DaemonRow
+      active={item.id === daemon.activeProfile?.id}
+      onEdit={edit}
+      onSelect={select}
+      phase={daemon.phase}
+      profile={item}
+      selecting={item.id === selectingId}
+    />
+  ), [daemon.activeProfile?.id, daemon.phase, edit, select, selectingId]);
+
+  const empty = daemon.profiles.length === 0;
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.background }]}>
@@ -78,9 +100,9 @@ export default function DaemonsScreen() {
       />
       <FlatList
         data={daemon.profiles}
-        keyExtractor={(item) => item.id}
-        contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={styles.listContent}
+        keyExtractor={daemonKeyExtractor}
+        contentInsetAdjustmentBehavior="never"
+        contentContainerStyle={[styles.listContent, empty && styles.listContentEmpty]}
         style={styles.list}
         ListHeaderComponent={(
           <>
@@ -93,11 +115,13 @@ export default function DaemonsScreen() {
         )}
         ListEmptyComponent={(
           <View style={styles.empty}>
-            <PaduIcon
-              name="server"
-              size={26}
-              tintColor={theme.textTertiary}
-            />
+            <View style={[styles.emptyIcon, { backgroundColor: theme.overlayStrong }]}>
+              <PaduIcon
+                name="server"
+                size={26}
+                tintColor={theme.textTertiary}
+              />
+            </View>
             <Text style={[styles.emptyTitle, { color: theme.text }]}>
               No saved daemons
             </Text>
@@ -135,109 +159,130 @@ export default function DaemonsScreen() {
             </Text>
           </View>
         ) : undefined}
-        renderItem={({ item }) => {
-          const active = item.id === daemon.activeProfile?.id;
-          // Only a host that needs attention spells it out; repeating
-          // "Encrypted connection." on every row would be noise.
-          const description = describeConnection(
-            classifyConnection(item.address, item.kind),
-          );
-          const lastUsed =
-            item.lastConnectedAt === null
-              ? null
-              : formatLastUsed(item.lastConnectedAt);
-          const warn = description.tone !== 'secure';
-          return (
-            <Pressable
-              accessibilityLabel={[
-                item.name,
-                active ? 'selected' : 'saved daemon',
-                lastUsed ? `last used ${lastUsed}` : null,
-                warn ? description.text : null,
-              ]
-                .filter(Boolean)
-                .join(', ')}
-              accessibilityRole="button"
-              onPress={() => void select(item)}
-              style={({ pressed }) => [
-                styles.row,
-                {
-                  backgroundColor: pressed
-                    ? theme.backgroundSelected
-                    : theme.surface,
-                  borderColor: active ? theme.accent : 'transparent',
-                },
-              ]}>
-              <DaemonAvatar name={item.name} />
-              <View style={styles.copy}>
-                <View style={styles.nameLine}>
-                  <Text
-                    numberOfLines={1}
-                    style={[styles.name, { color: theme.text }]}>
-                    {item.name}
-                  </Text>
-                  <TransportBadge kind={item.kind} />
-                  {active && <ConnectionStatus phase={daemon.phase} />}
-                </View>
-                <View style={styles.metaLine}>
-                  <Text
-                    numberOfLines={1}
-                    style={[styles.host, { color: theme.textSecondary }]}>
-                    {displayHost(item.address)}
-                  </Text>
-                  {lastUsed ? (
-                    <View style={styles.lastUsed}>
-                      <PaduIcon
-                        name="clock"
-                        size={11}
-                        tintColor={theme.textTertiary}
-                      />
-                      <Text
-                        style={[styles.lastUsedText, { color: theme.textTertiary }]}>
-                        {lastUsed}
-                      </Text>
-                    </View>
-                  ) : null}
-                </View>
-                {warn ? (
-                  <View style={styles.warningSlot}>
-                    <ConnectionNote
-                      tone={description.tone}
-                      text={description.text}
-                    />
-                  </View>
-                ) : null}
-              </View>
-              {selectingId === item.id ? (
-                <ActivityIndicator color={theme.accent} />
-              ) : active ? (
-                <PaduIcon
-                  name="check"
-                  size={22}
-                  tintColor={theme.accent}
-                />
-              ) : null}
-              <IconButton
-                glyphSize={22}
-                icon="ellipsis"
-                label={`Edit ${item.name}`}
-                onPress={(event) => {
-                  event.stopPropagation();
-                  router.push({
-                    pathname: '/daemon-editor',
-                    params: { id: item.id },
-                  });
-                }}
-                tintColor={theme.textTertiary}
-              />
-            </Pressable>
-          );
-        }}
+        renderItem={renderDaemon}
         showsVerticalScrollIndicator={false}
       />
     </View>
   );
 }
+
+/**
+ * One saved host. Memoized so connecting to one daemon (the `selecting`
+ * spinner) doesn't re-render every other row. Reads the same card treatment
+ * as the task list: hairline border, accent when selected.
+ */
+const DaemonRow = memo(function DaemonRow({
+  active,
+  onEdit,
+  onSelect,
+  phase,
+  profile,
+  selecting,
+}: {
+  active: boolean;
+  onEdit: (id: string) => void;
+  onSelect: (profile: DaemonProfile) => void;
+  phase: ComponentProps<typeof ConnectionStatus>['phase'];
+  profile: DaemonProfile;
+  selecting: boolean;
+}) {
+  const theme = useTheme();
+  // Only a host that needs attention spells it out; repeating
+  // "Encrypted connection." on every row would be noise.
+  const description = describeConnection(
+    classifyConnection(profile.address, profile.kind),
+  );
+  const lastUsed =
+    profile.lastConnectedAt === null
+      ? null
+      : formatLastUsed(profile.lastConnectedAt);
+  const warn = description.tone !== 'secure';
+  return (
+    <Pressable
+      accessibilityLabel={[
+        profile.name,
+        active ? 'selected' : 'saved daemon',
+        lastUsed ? `last used ${lastUsed}` : null,
+        warn ? description.text : null,
+      ]
+        .filter(Boolean)
+        .join(', ')}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      onPress={() => void onSelect(profile)}
+      style={({ pressed }) => [
+        styles.row,
+        {
+          backgroundColor: pressed
+            ? theme.backgroundSelected
+            : theme.surface,
+          borderColor: active ? theme.accent : theme.border,
+        },
+      ]}>
+      <DaemonAvatar name={profile.name} />
+      <View style={styles.copy}>
+        <View style={styles.nameLine}>
+          <Text
+            numberOfLines={1}
+            style={[styles.name, { color: theme.text }]}>
+            {profile.name}
+          </Text>
+          <TransportBadge kind={profile.kind} />
+          {active && <ConnectionStatus phase={phase} />}
+        </View>
+        <View style={styles.metaLine}>
+          <Text
+            numberOfLines={1}
+            style={[styles.host, { color: theme.textSecondary }]}>
+            {displayHost(profile.address)}
+          </Text>
+          {lastUsed ? (
+            <View style={styles.lastUsed}>
+              <PaduIcon
+                name="clock"
+                size={11}
+                tintColor={theme.textTertiary}
+              />
+              <Text
+                style={[styles.lastUsedText, { color: theme.textTertiary }]}>
+                {lastUsed}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+        {warn ? (
+          <View style={styles.warningSlot}>
+            <ConnectionNote
+              tone={description.tone}
+              text={description.text}
+            />
+          </View>
+        ) : null}
+      </View>
+      <View style={styles.trailing}>
+        {selecting ? (
+          <ActivityIndicator color={theme.accent} />
+        ) : active ? (
+          <PaduIcon
+            name="check"
+            size={20}
+            tintColor={theme.accent}
+          />
+        ) : null}
+        <IconButton
+          glyphSize={20}
+          icon="ellipsis"
+          label={`Edit ${profile.name}`}
+          onPress={(event) => {
+            event.stopPropagation();
+            onEdit(profile.id);
+          }}
+          tintColor={theme.textTertiary}
+        />
+      </View>
+    </Pressable>
+  );
+});
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
@@ -249,6 +294,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   listContent: { paddingBottom: Spacing.five },
+  listContentEmpty: { flexGrow: 1 },
   intro: {
     fontSize: 13,
     lineHeight: 18,
@@ -258,8 +304,8 @@ const styles = StyleSheet.create({
   },
   row: {
     alignItems: 'center',
-    borderRadius: Radius.large,
-    borderWidth: 1.5,
+    borderRadius: Radius.medium,
+    borderWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     gap: Spacing.two,
     marginBottom: Spacing.two,
@@ -280,6 +326,7 @@ const styles = StyleSheet.create({
   lastUsed: { alignItems: 'center', flexDirection: 'row', gap: Spacing.one },
   lastUsedText: { fontSize: 12 },
   warningSlot: { marginTop: Spacing.two },
+  trailing: { alignItems: 'center', flexDirection: 'row', gap: Spacing.one },
   footer: {
     alignItems: 'flex-start',
     flexDirection: 'row',
@@ -290,11 +337,20 @@ const styles = StyleSheet.create({
   footerText: { flex: 1, fontSize: 12, lineHeight: 17 },
   empty: {
     alignItems: 'center',
+    flex: 1,
     gap: Spacing.two,
+    justifyContent: 'center',
     paddingHorizontal: Spacing.four,
-    paddingTop: Spacing.six,
   },
-  emptyTitle: { fontSize: 22, fontWeight: '700' },
+  emptyIcon: {
+    alignItems: 'center',
+    borderRadius: 20,
+    height: 64,
+    justifyContent: 'center',
+    marginBottom: Spacing.two,
+    width: 64,
+  },
+  emptyTitle: { fontSize: 17, fontWeight: '700', textAlign: 'center' },
   emptyBody: { fontSize: 14, lineHeight: 20, maxWidth: 320, textAlign: 'center' },
   emptyActions: {
     alignItems: 'stretch',
