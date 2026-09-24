@@ -30,10 +30,16 @@ export function ScreenHeader({
   title,
   subtitle,
   right,
+  back = true,
+  leading,
 }: {
-  title: string;
+  title?: string;
   subtitle?: string | null;
   right?: ReactNode;
+  /** Off for a root screen, which has nothing to go back to. */
+  back?: boolean;
+  /** Replaces the title block — e.g. the daemon switcher on the task list. */
+  leading?: ReactNode;
 }) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -49,24 +55,35 @@ export function ScreenHeader({
       ]}
     >
       <View style={styles.row}>
-        <IconButton
-          glyphSize={17}
-          icon={{ ios: "chevron.left", android: "arrow_back", web: "arrow_back" }}
-          label="Back"
-          onPress={navigateBack}
-        />
+        {back ? (
+          <IconButton
+            glyphSize={17}
+            icon={{ ios: "chevron.left", android: "arrow_back", web: "arrow_back" }}
+            label="Back"
+            onPress={navigateBack}
+          />
+        ) : null}
         <View style={styles.titles}>
-          <Text numberOfLines={1} style={[styles.title, { color: theme.text }]}>
-            {title}
-          </Text>
-          {subtitle ? (
-            <Text
-              numberOfLines={1}
-              style={[styles.subtitle, { color: theme.textTertiary }]}
-            >
-              {subtitle}
-            </Text>
-          ) : null}
+          {leading ?? (
+            <>
+              {title ? (
+                <Text
+                  numberOfLines={1}
+                  style={[styles.title, { color: theme.text }]}
+                >
+                  {title}
+                </Text>
+              ) : null}
+              {subtitle ? (
+                <Text
+                  numberOfLines={1}
+                  style={[styles.subtitle, { color: theme.textTertiary }]}
+                >
+                  {subtitle}
+                </Text>
+              ) : null}
+            </>
+          )}
         </View>
         {right ? <View style={styles.right}>{right}</View> : null}
       </View>
@@ -84,15 +101,14 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: Spacing.one,
     maxWidth: MaxContentWidth,
-    paddingBottom: Spacing.two,
-    paddingHorizontal: Spacing.two,
-    paddingTop: Spacing.two,
+    paddingBottom: Spacing.one,
+    paddingHorizontal: Spacing.three,
+    paddingTop: Spacing.one,
     width: "100%",
   },
   titles: {
     flex: 1,
     justifyContent: "center",
-    marginLeft: Spacing.one,
     minWidth: 0,
   },
   title: { fontSize: 17, fontWeight: "700", letterSpacing: -0.3 },

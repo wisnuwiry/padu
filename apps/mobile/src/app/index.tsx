@@ -3,50 +3,41 @@ import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
-  Image,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   RefreshControl,
-  ScrollView,
   SectionList,
   StyleSheet,
   Text,
-  TextInput,
   View,
-  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppSymbol } from '@/components/app-symbol';
+import { IconButton } from '@/components/button';
 import { ConnectionErrorCard } from '@/components/connection-error-card';
-import { ChromeSurface } from '@/components/chrome-surface';
-import { ProviderIcon, providerBrandColor } from '@/components/provider-icon';
-import { ConnectionStatus } from '@/components/connection-status';
+import { DaemonPicker } from '@/components/daemon-picker';
+import { Onboarding } from '@/components/onboarding';
 import { RenameDialog } from '@/components/rename-dialog';
+import { ScreenHeader } from '@/components/screen-header';
+import { SearchField } from '@/components/search-field';
+import { SessionRow } from '@/components/session-row';
 import { Sheet, SheetRow } from '@/components/sheet';
-import { ThemeChoiceControl } from '@/components/theme-choice-control';
+import { TaskListEmpty } from '@/components/task-list-empty';
 import { ThemeToggleButton } from '@/components/theme-toggle-button';
-import { MaxContentWidth, NativeTint, Radius, Spacing } from '@/constants/theme';
+import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTaskState } from '@/hooks/use-daemon-data';
 import { useTheme } from '@/hooks/use-theme';
 import { useDaemon } from '@/lib/daemon-context';
-import { sessionBusy } from '@/lib/mobile-runtime';
 import { useRuntime } from '@/lib/runtime-context';
 import {
   displaySessionTitle,
   groupSessions,
   providerLabel,
-  relativeSessionTime,
-  type SessionListItem,
 } from '@/lib/session-presentation';
 
-const DaemonPickerTop = 8;
-const DaemonPickerHeight = 38;
-const DaemonPickerGap = 12;
-
+/** The task list: the home screen, and the daemon it is talking to. */
 export default function TasksScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -54,6 +45,7 @@ export default function TasksScreen() {
   const runtime = useRuntime();
   const taskState = useTaskState();
   const [search, setSearch] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
   const [actionTarget, setActionTarget] = useState<AgentSession | null>(null);
   const [renameTarget, setRenameTarget] = useState<AgentSession | null>(null);
   const visibleSessions = useMemo(() => {
@@ -107,151 +99,107 @@ export default function TasksScreen() {
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={[styles.screen, { backgroundColor: theme.background }]}>
-      {!showOnboarding && (
-        <View
-          pointerEvents="box-none"
-          style={[styles.floatingActions, { top: insets.top + DaemonPickerTop }]}>
-          <ChromeSurface style={styles.daemonButton}>
-            <Pressable
-              accessibilityHint="Opens the daemon switcher"
-              accessibilityLabel={daemon.activeProfile
-                ? `Connected daemon: ${daemon.activeProfile.name}`
-                : 'Add a daemon'}
-              accessibilityRole="button"
-              hitSlop={8}
-              onPress={() => router.push('/daemons')}
-              style={({ pressed }) => [styles.daemonButtonInner, { opacity: pressed ? 0.62 : 1 }]}>
-              {daemon.activeProfile ? <ConnectionStatus compact phase={daemon.phase} /> : (
-                <AppSymbol
-                  name={{ ios: 'plus', android: 'add', web: 'add' }}
-                  size={14}
-                  tintColor={theme.text}
-                />
-              )}
-              <Text numberOfLines={1} style={[styles.daemonButtonText, { color: theme.text }]}>
-                {daemon.activeProfile?.name ?? 'Add daemon'}
-              </Text>
-              <AppSymbol
-                name={{ ios: 'chevron.down', android: 'keyboard_arrow_down', web: 'keyboard_arrow_down' }}
-                size={12}
-                tintColor={theme.textTertiary}
-              />
-            </Pressable>
-          </ChromeSurface>
-        </View>
-      )}
-
-      {!showOnboarding && (
-        <View
-          pointerEvents="box-none"
-          style={[styles.floatingTheme, { top: insets.top + DaemonPickerTop }]}>
-          <ThemeToggleButton />
-        </View>
-      )}
-
       {showOnboarding ? (
         <Onboarding />
       ) : (
-        <SectionList
-          sections={sections}
-          keyExtractor={(item) => item.session.id}
-          contentContainerStyle={[
-            styles.listContent,
-            {
-              paddingTop:
-                insets.top + DaemonPickerTop + DaemonPickerHeight + DaemonPickerGap,
-            },
-            sections.length === 0 && styles.listContentEmpty,
-          ]}
-          refreshControl={(
-            <RefreshControl
-              refreshing={taskState.isRefetching}
-              tintColor={theme.textTertiary}
-              onRefresh={() => {
-                if (daemon.phase === 'connected') void taskState.refetch();
-                else void daemon.reconnect();
-              }}
-            />
+        <>
+          <ScreenHeader
+            back={false}
+            leading={<DaemonPicker />}
+            right={(
+              <>
+                <IconButton
+                  accessibilityHint="Searches the task list"
+                  glyphSize={18}
+                  icon={{ ios: 'magnifyingglass', android: 'search', web: 'search' }}
+                  label="Search"
+                  onPress={() => setSearchOpen(true)}
+                />
+                <ThemeToggleButton />
+              </>
+            )}
+          />
+          {searchOpen && (
+            <>
+              <View style={styles.searchBar}>
+                <SearchField
+                  onChange={setSearch}
+                  onClose={() => {
+                    setSearch('');
+                    setSearchOpen(false);
+                  }}
+                  value={search}
+                />
+              </View>
+              <View style={[styles.divider, { backgroundColor: theme.separator }]} />
+            </>
           )}
-          renderSectionHeader={({ section }) => (
-            <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>
-              {section.title.toUpperCase()}
-            </Text>
-          )}
-          renderItem={({ item }) => (
-            <SessionRow
-              item={item}
-              onLongPress={() => {
-                void Haptics.selectionAsync();
-                setActionTarget(item.session);
-              }}
-            />
-          )}
-          ListHeaderComponent={daemon.error ? <ConnectionErrorCard /> : undefined}
-          ListEmptyComponent={(
-            <TaskListEmpty
-              connecting={daemon.phase === 'booting' || daemon.phase === 'connecting'}
-              error={taskState.error}
-              searching={Boolean(search.trim())}
-            />
-          )}
-          showsVerticalScrollIndicator={false}
-          stickySectionHeadersEnabled={false}
-        />
+          <SectionList
+            sections={sections}
+            keyExtractor={(item) => item.session.id}
+            contentContainerStyle={[
+              // Clears the floating New Task button, which sits above the
+              // home indicator.
+              { paddingBottom: insets.bottom + Spacing.six + Spacing.four },
+              sections.length === 0 && styles.listContentEmpty,
+            ]}
+            contentInsetAdjustmentBehavior="never"
+            style={styles.list}
+            refreshControl={(
+              <RefreshControl
+                refreshing={taskState.isRefetching}
+                tintColor={theme.textTertiary}
+                onRefresh={() => {
+                  if (daemon.phase === 'connected') void taskState.refetch();
+                  else void daemon.reconnect();
+                }}
+              />
+            )}
+            renderSectionHeader={({ section }) => (
+              <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>
+                {section.title.toUpperCase()}
+              </Text>
+            )}
+            renderItem={({ item }) => (
+              <SessionRow
+                item={item}
+                onLongPress={() => {
+                  void Haptics.selectionAsync();
+                  setActionTarget(item.session);
+                }}
+              />
+            )}
+            ListHeaderComponent={daemon.error ? (
+              <View style={styles.alertSlot}>
+                <ConnectionErrorCard />
+              </View>
+            ) : undefined}
+            ListEmptyComponent={(
+              <TaskListEmpty
+                connecting={daemon.phase === 'booting' || daemon.phase === 'connecting'}
+                error={taskState.error}
+                searching={Boolean(search.trim())}
+              />
+            )}
+            showsVerticalScrollIndicator={false}
+            stickySectionHeadersEnabled={false}
+          />
+        </>
       )}
 
-      {(daemon.profiles.length > 0 || daemon.phase === 'booting') && (
-        <View pointerEvents="box-none" style={[styles.searchDock, { bottom: insets.bottom + 14 }]}>
-          <ChromeSurface style={styles.searchCapsule}>
-            <View style={styles.searchCapsuleInner}>
-              <AppSymbol
-                name={{ ios: 'magnifyingglass', android: 'search', web: 'search' }}
-                size={17}
-                tintColor={theme.textSecondary}
-              />
-              <TextInput
-                accessibilityLabel="Search tasks"
-                autoCapitalize="none"
-                autoCorrect={false}
-                placeholder="Search"
-                placeholderTextColor={theme.textTertiary}
-                selectionColor={NativeTint}
-                style={[styles.searchInput, { color: theme.text }]}
-                value={search}
-                onChangeText={setSearch}
-              />
-              {search.length > 0 && (
-                <Pressable
-                  accessibilityLabel="Clear search"
-                  accessibilityRole="button"
-                  hitSlop={8}
-                  onPress={() => setSearch('')}
-                  style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
-                  <AppSymbol
-                    name={{ ios: 'xmark.circle.fill', android: 'cancel', web: 'cancel' }}
-                    size={16}
-                    tintColor={theme.textTertiary}
-                  />
-                </Pressable>
-              )}
-            </View>
-          </ChromeSurface>
-          {daemon.phase === 'connected' && (
-            <ChromeSurface style={styles.composeButton}>
-              <Pressable
-                accessibilityLabel="New task"
-                accessibilityRole="button"
-                hitSlop={6}
-                onPress={() => router.push('/new-task')}
-                style={({ pressed }) => [styles.roundInner, { opacity: pressed ? 0.5 : 1 }]}>
-                <AppSymbol
-                  name={{ ios: 'square.and.pencil', android: 'edit_square', web: 'edit' }}
-                  size={20}
-                  tintColor={theme.text}
-                />
-              </Pressable>
-            </ChromeSurface>
-          )}
+      {!showOnboarding && !searchOpen && (
+        <View
+          pointerEvents="box-none"
+          style={[styles.fabDock, { bottom: insets.bottom + Spacing.three }]}>
+          <IconButton
+            accessibilityHint="Starts a new agent task"
+            glyphSize={22}
+            icon={{ ios: 'square.and.pencil', android: 'edit_square', web: 'edit' }}
+            label="New task"
+            onPress={() => router.push('/new-task')}
+            size={52}
+            variant="filled"
+          />
         </View>
       )}
 
@@ -295,313 +243,20 @@ export default function TasksScreen() {
   );
 }
 
-function Onboarding() {
-  const theme = useTheme();
-  const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
-  const wide = width >= 640;
-  return (
-    <ScrollView
-      contentContainerStyle={[
-        styles.onboardingContent,
-        {
-          paddingBottom: insets.bottom + Spacing.five,
-          paddingTop: insets.top + Spacing.four,
-        },
-      ]}
-      showsVerticalScrollIndicator={false}>
-      <View
-        style={[
-          styles.onboardingColumn,
-          { paddingHorizontal: wide ? Spacing.five : Spacing.four },
-        ]}>
-        <Image
-          accessibilityLabel="Padu"
-          source={require('@/assets/images/icon.png')}
-          style={styles.appIcon}
-        />
-        <Text style={[styles.onboardingTitle, { color: theme.text }]}>Your agents, everywhere.</Text>
-        <Text style={[styles.onboardingBody, { color: theme.textSecondary }]}>
-          Connect to Padu running on your Mac, workstation, or private server. Add more than one and
-          switch whenever you need.
-        </Text>
-
-        <View style={styles.onboardingCards}>
-          <OnboardingHighlight
-            description="Padu lives on your computer, workstation, or private server — the phone just drives it."
-            icon={{ ios: 'laptopcomputer', android: 'laptop_mac', web: 'laptop_mac' }}
-            title="Runs on your machine"
-          />
-          <OnboardingHighlight
-            description="Save several hosts and move between them without re-entering credentials."
-            icon={{ ios: 'arrow.left.arrow.right', android: 'swap_horiz', web: 'swap_horiz' }}
-            title="Switch anytime"
-          />
-          <OnboardingHighlight
-            description="Tokens stay in this device’s keychain and go straight to the host you choose."
-            icon={{ ios: 'lock.shield', android: 'shield_lock', web: 'lock' }}
-            title="Private by default"
-          />
-        </View>
-
-        <View style={styles.onboardingTheme}>
-          <ThemeChoiceControl />
-        </View>
-
-        <View style={styles.onboardingActions}>
-          <Pressable
-            accessibilityHint="Opens the daemon editor"
-            accessibilityLabel="Add a daemon"
-            accessibilityRole="button"
-            onPress={() => router.push('/daemon-editor')}
-            style={({ pressed }) => [
-              styles.primaryButton,
-              { backgroundColor: theme.inverse, opacity: pressed ? 0.78 : 1 },
-            ]}>
-            <AppSymbol
-              name={{ ios: 'plus', android: 'add', web: 'add' }}
-              size={17}
-              tintColor={theme.onInverse}
-            />
-            <Text style={[styles.primaryButtonText, { color: theme.onInverse }]}>Add a daemon</Text>
-          </Pressable>
-          <Pressable
-            accessibilityHint="Import a daemon from the desktop’s QR code"
-            accessibilityLabel="Import from link"
-            accessibilityRole="button"
-            onPress={() => router.push('/daemon-import')}
-            style={({ pressed }) => [
-              styles.secondaryButton,
-              {
-                backgroundColor: pressed ? theme.overlayStrong : theme.surface,
-                borderColor: theme.borderStrong,
-              },
-            ]}>
-            <AppSymbol
-              name={{ ios: 'qrcode.viewfinder', android: 'qr_code_scanner', web: 'qr_code_scanner' }}
-              size={16}
-              tintColor={theme.textSecondary}
-            />
-            <Text style={[styles.secondaryButtonText, { color: theme.text }]}>Import from link</Text>
-          </Pressable>
-        </View>
-      </View>
-    </ScrollView>
-  );
-}
-
-function OnboardingHighlight({
-  description,
-  icon,
-  title,
-}: {
-  description: string;
-  icon: Parameters<typeof AppSymbol>[0]['name'];
-  title: string;
-}) {
-  const theme = useTheme();
-  return (
-    <View style={[styles.highlight, { backgroundColor: theme.raised, borderColor: theme.border }]}>
-      <View
-        style={[
-          styles.highlightIcon,
-          { backgroundColor: theme.background, borderColor: theme.borderStrong },
-        ]}>
-        <AppSymbol name={icon} size={15} tintColor={theme.textSecondary} />
-      </View>
-      <View style={styles.highlightCopy}>
-        <Text style={[styles.highlightTitle, { color: theme.text }]}>{title}</Text>
-        <Text style={[styles.highlightBody, { color: theme.textSecondary }]}>{description}</Text>
-      </View>
-    </View>
-  );
-}
-
-function TaskListEmpty({
-  connecting,
-  error,
-  searching,
-}: {
-  connecting: boolean;
-  error: unknown;
-  searching: boolean;
-}) {
-  const theme = useTheme();
-  const { error: daemonError, phase } = useDaemon();
-  if (daemonError) return null;
-  if (connecting) {
-    return (
-      <View style={styles.emptyState}>
-        <ActivityIndicator color={theme.textTertiary} />
-        <Text style={[styles.emptyTitle, { color: theme.textSecondary }]}>Connecting to daemon…</Text>
-      </View>
-    );
-  }
-  if (searching) {
-    return (
-      <View style={styles.emptyState}>
-        <Text style={[styles.emptyTitle, { color: theme.text }]}>No matching tasks</Text>
-        <Text style={[styles.emptyBody, { color: theme.textSecondary }]}>Try another title, project, or agent.</Text>
-      </View>
-    );
-  }
-  if (error) {
-    return (
-      <View style={styles.emptyState}>
-        <Text style={[styles.emptyTitle, { color: theme.text }]}>Couldn’t load tasks</Text>
-        <Text style={[styles.emptyBody, { color: theme.textSecondary }]}>
-          {error instanceof Error ? error.message : String(error)}
-        </Text>
-      </View>
-    );
-  }
-  return (
-    <View style={styles.emptyState}>
-      <View style={[styles.emptyIcon, { backgroundColor: theme.overlayStrong }]}>
-        <AppSymbol
-          name={{ ios: 'text.bubble', android: 'chat_bubble', web: 'chat' }}
-          size={25}
-          tintColor={theme.textTertiary}
-        />
-      </View>
-      <Text style={[styles.emptyTitle, { color: theme.text }]}>No tasks yet</Text>
-      <Text style={[styles.emptyBody, { color: theme.textSecondary }]}>
-        Start an agent on anything — a bug, a feature, a question about the code.
-      </Text>
-      {phase === 'connected' && (
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => router.push('/new-task')}
-          style={({ pressed }) => [
-            styles.emptyAction,
-            { backgroundColor: theme.inverse, opacity: pressed ? 0.7 : 1 },
-          ]}>
-          <Text style={[styles.emptyActionText, { color: theme.onInverse }]}>New task</Text>
-        </Pressable>
-      )}
-    </View>
-  );
-}
-
-function SessionRow({ item, onLongPress }: { item: SessionListItem; onLongPress: () => void }) {
-  const theme = useTheme();
-  const session = item.session;
-  const status = statusPresentation(session, theme);
-  return (
-    <Pressable
-      accessibilityHint="Long press for actions"
-      accessibilityLabel={`${displaySessionTitle(session)}, ${item.projectName}${status ? `, ${status.label}` : ''}`}
-      accessibilityRole="button"
-      delayLongPress={350}
-      onLongPress={onLongPress}
-      onPress={() => router.push({ pathname: '/session/[id]', params: { id: session.id } })}
-      style={({ pressed }) => [
-        styles.sessionRow,
-        {
-          backgroundColor: pressed ? theme.backgroundSelected : theme.surface,
-          borderColor: theme.border,
-        },
-      ]}>
-      <View style={styles.sessionCopy}>
-        <Text numberOfLines={2} style={[styles.sessionTitle, { color: theme.text }]}>
-          {displaySessionTitle(session)}
-        </Text>
-        <View style={styles.sessionMetadata}>
-          <Text numberOfLines={1} style={[styles.sessionMetaText, { color: theme.textSecondary }]}>
-            {item.projectName}
-          </Text>
-          <Text style={[styles.metadataBullet, { color: theme.textGhost }]}>·</Text>
-          <View style={styles.providerBadge}>
-            <ProviderIcon
-              color={providerBrandColor(session.provider) ?? theme.textTertiary}
-              provider={session.provider}
-              size={13}
-            />
-            <Text style={[styles.sessionMetaText, { color: theme.textTertiary }]}>
-              {providerLabel(session.provider)}
-            </Text>
-          </View>
-        </View>
-      </View>
-      <View style={styles.sessionTrailing}>
-        <Text style={[styles.sessionTime, { color: theme.textTertiary }]}>
-          {relativeSessionTime(item.timestamp)}
-        </Text>
-        {status && (
-          <View style={styles.statusLine}>
-            {status.spinner
-              ? <ActivityIndicator color={status.color} size="small" style={styles.statusSpinner} />
-              : <View style={[styles.statusDot, { backgroundColor: status.color }]} />}
-            <Text style={[styles.statusLabel, { color: status.color }]}>{status.label}</Text>
-          </View>
-        )}
-      </View>
-    </Pressable>
-  );
-}
-
-function statusPresentation(
-  session: AgentSession,
-  theme: ReturnType<typeof useTheme>,
-): { label: string; color: string; spinner: boolean } | null {
-  if (session.status === 'waiting') {
-    return { label: 'Needs input', color: theme.warning, spinner: false };
-  }
-  if (sessionBusy(session)) {
-    return { label: 'Working', color: theme.success, spinner: true };
-  }
-  if (session.status === 'failed') {
-    return { label: 'Failed', color: theme.danger, spinner: false };
-  }
-  return null;
-}
-
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  floatingActions: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 8,
-    left: Spacing.three,
-    position: 'absolute',
-    zIndex: 20,
-  },
-  floatingTheme: {
-    position: 'absolute',
-    right: Spacing.three,
-    zIndex: 20,
-  },
-  roundInner: { alignItems: 'center', flex: 1, justifyContent: 'center' },
-  searchDock: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 10,
-    left: 0,
+  searchBar: {
+    alignSelf: 'center',
+    maxWidth: MaxContentWidth,
+    paddingBottom: Spacing.two,
     paddingHorizontal: Spacing.three,
-    position: 'absolute',
-    right: 0,
-    zIndex: 20,
+    paddingTop: Spacing.three,
+    width: '100%',
   },
-  searchCapsule: { borderRadius: Radius.pill, flex: 1 },
-  searchCapsuleInner: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 9,
-    minHeight: 50,
-    paddingHorizontal: 16,
-  },
-  searchInput: { flex: 1, fontSize: 16.5, paddingVertical: 10 },
-  composeButton: { borderRadius: Radius.pill, height: 50, width: 50 },
-  daemonButton: { borderRadius: Radius.pill, maxWidth: 176 },
-  daemonButtonInner: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 6,
-    minHeight: DaemonPickerHeight,
-    paddingHorizontal: 12,
-  },
-  daemonButtonText: { flexShrink: 1, fontSize: 13, fontWeight: '600' },
-  listContent: { paddingBottom: 96 },
+  divider: { height: StyleSheet.hairlineWidth },
+  alertSlot: { marginTop: Spacing.three },
+  fabDock: { position: 'absolute', right: Spacing.three, zIndex: 20 },
+  list: { alignSelf: 'center', flex: 1, maxWidth: MaxContentWidth, width: '100%' },
   listContentEmpty: { flexGrow: 1 },
   sectionTitle: {
     fontSize: 11,
@@ -611,106 +266,6 @@ const styles = StyleSheet.create({
     marginHorizontal: Spacing.three,
     marginTop: 18,
   },
-  onboardingContent: { alignItems: 'center', flexGrow: 1, justifyContent: 'center' },
-  onboardingColumn: { alignItems: 'center', maxWidth: MaxContentWidth, width: '100%' },
-  appIcon: { borderRadius: Radius.large, height: 72, marginBottom: Spacing.four, width: 72 },
-  onboardingTitle: { fontSize: 28, fontWeight: '700', letterSpacing: -0.7, textAlign: 'center' },
-  onboardingBody: {
-    fontSize: 15,
-    lineHeight: 21,
-    marginTop: Spacing.two,
-    maxWidth: 360,
-    textAlign: 'center',
-  },
-  onboardingCards: { gap: Spacing.two, marginTop: Spacing.five, maxWidth: 420, width: '100%' },
-  highlight: {
-    alignItems: 'flex-start',
-    borderRadius: Radius.medium,
-    borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    gap: 12,
-    padding: 12,
-  },
-  highlightIcon: {
-    alignItems: 'center',
-    borderRadius: Radius.small,
-    borderWidth: StyleSheet.hairlineWidth,
-    height: 30,
-    justifyContent: 'center',
-    width: 30,
-  },
-  highlightCopy: { flex: 1, gap: Spacing.half, minWidth: 0 },
-  highlightTitle: { fontSize: 15, fontWeight: '600' },
-  highlightBody: { fontSize: 12.5, lineHeight: 17 },
-  onboardingTheme: { marginTop: Spacing.four, maxWidth: 420, width: '100%' },
-  onboardingActions: { gap: Spacing.two, marginTop: Spacing.five, maxWidth: 420, width: '100%' },
-  primaryButton: {
-    alignItems: 'center',
-    borderRadius: Radius.large,
-    flexDirection: 'row',
-    gap: Spacing.two,
-    justifyContent: 'center',
-    minHeight: 50,
-  },
-  primaryButtonText: { fontSize: 15, fontWeight: '700' },
-  secondaryButton: {
-    alignItems: 'center',
-    borderRadius: Radius.large,
-    borderWidth: 1.5,
-    flexDirection: 'row',
-    gap: Spacing.two,
-    justifyContent: 'center',
-    minHeight: 50,
-  },
-  secondaryButtonText: { fontSize: 15, fontWeight: '600' },
-  emptyState: {
-    alignItems: 'center',
-    flex: 1,
-    justifyContent: 'center',
-    minHeight: 360,
-    paddingHorizontal: 40,
-  },
-  emptyIcon: {
-    alignItems: 'center',
-    borderRadius: 20,
-    height: 64,
-    justifyContent: 'center',
-    marginBottom: 18,
-    width: 64,
-  },
-  emptyTitle: { fontSize: 17, fontWeight: '700', textAlign: 'center' },
-  emptyBody: { fontSize: 14, lineHeight: 20, marginTop: 7, maxWidth: 320, textAlign: 'center' },
-  emptyAction: {
-    borderRadius: Radius.pill,
-    justifyContent: 'center',
-    marginTop: 18,
-    minHeight: 42,
-    paddingHorizontal: 18,
-  },
-  emptyActionText: { fontSize: 14, fontWeight: '700' },
-  sessionRow: {
-    borderRadius: Radius.medium,
-    borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 8,
-    marginHorizontal: Spacing.three,
-    minHeight: 74,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  sessionCopy: { flex: 1, justifyContent: 'center' },
-  sessionTitle: { fontSize: 15.5, fontWeight: '600', letterSpacing: -0.15, lineHeight: 20 },
-  sessionMetadata: { alignItems: 'center', flexDirection: 'row', marginTop: 6, minWidth: 0 },
-  sessionMetaText: { flexShrink: 1, fontSize: 12.5 },
-  metadataBullet: { fontSize: 12, marginHorizontal: 6 },
-  providerBadge: { alignItems: 'center', flexDirection: 'row', gap: 5 },
-  sessionTrailing: { alignItems: 'flex-end', gap: 6, justifyContent: 'center', minWidth: 64 },
-  sessionTime: { fontSize: 11.5 },
-  statusLine: { alignItems: 'center', flexDirection: 'row', gap: 5 },
-  statusDot: { borderRadius: Radius.pill, height: 7, width: 7 },
-  statusSpinner: { height: 12, transform: [{ scale: 0.6 }], width: 12 },
-  statusLabel: { fontSize: 11.5, fontWeight: '600' },
   actionSheetTitle: {
     fontSize: 14,
     fontWeight: '700',

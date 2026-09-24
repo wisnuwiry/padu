@@ -97,9 +97,9 @@ export function Button({
 
 /**
  * Square icon-only control for chrome and row affordances: a 44pt target on
- * both platforms, `plain` for transparent chrome, `filled` for the one
- * prominent action. `tintColor` overrides the glyph when a quieter treatment
- * than the variant's is wanted.
+ * both platforms (the default `size`), `plain` for transparent chrome,
+ * `filled` for the one prominent action. `tintColor` overrides the glyph when
+ * a quieter treatment than the variant's is wanted.
  */
 export function IconButton({
   accessibilityHint,
@@ -108,6 +108,7 @@ export function IconButton({
   icon,
   label,
   onPress,
+  size = 44,
   tintColor,
   variant = 'plain',
 }: {
@@ -117,6 +118,8 @@ export function IconButton({
   icon: Parameters<typeof AppSymbol>[0]['name'];
   label: string;
   onPress: (event: GestureResponderEvent) => void;
+  /** Box edge; 44 is the accessibility floor. */
+  size?: number;
   tintColor?: ColorValue;
   variant?: IconButtonVariant;
 }) {
@@ -138,7 +141,9 @@ export function IconButton({
         styles.iconButton,
         {
           backgroundColor: palette.background,
+          height: size,
           opacity: disabled ? 0.4 : pressed ? 0.55 : 1,
+          width: size,
         },
       ]}>
       <AppSymbol
@@ -164,8 +169,6 @@ const styles = StyleSheet.create({
   iconButton: {
     alignItems: 'center',
     borderRadius: Radius.pill,
-    height: 44,
     justifyContent: 'center',
-    width: 44,
   },
 });

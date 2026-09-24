@@ -1,9 +1,4 @@
-import { Pressable, StyleSheet } from 'react-native';
-
-import { AppSymbol } from '@/components/app-symbol';
-import { ChromeSurface } from '@/components/chrome-surface';
-import { Radius } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { IconButton } from '@/components/button';
 import { useAppearance } from '@/lib/appearance-context';
 import { THEME_LABELS, type ThemeChoice } from '@/lib/appearance';
 
@@ -16,7 +11,7 @@ const NEXT_CHOICE: Record<ThemeChoice, ThemeChoice> = {
 
 const CHOICE_ICONS: Record<
   ThemeChoice,
-  Parameters<typeof AppSymbol>[0]['name']
+  Parameters<typeof IconButton>[0]['icon']
 > = {
   system: {
     ios: 'circle.lefthalf.filled',
@@ -28,38 +23,21 @@ const CHOICE_ICONS: Record<
 };
 
 /**
- * Compact theme switch for the floating header chrome: one tap steps through
- * System, Light, and Dark. The icon names the current choice and the
- * accessibility label says it outright, so the state is never carried by
- * appearance alone.
+ * Compact theme switch for the header chrome: one tap steps through System,
+ * Light, and Dark. The icon names the current choice and the accessibility
+ * label says it outright, so the state is never carried by appearance alone.
+ * It is a plain header control, not a filled chip.
  */
 export function ThemeToggleButton() {
-  const theme = useTheme();
   const { preference, setPreference } = useAppearance();
 
   return (
-    <ChromeSurface style={styles.surface}>
-      <Pressable
-        accessibilityHint="Switches between system, light, and dark"
-        accessibilityLabel={`Theme: ${THEME_LABELS[preference]}`}
-        accessibilityRole="button"
-        hitSlop={8}
-        onPress={() => setPreference(NEXT_CHOICE[preference])}
-        style={({ pressed }) => [
-          styles.inner,
-          { opacity: pressed ? 0.62 : 1 },
-        ]}>
-        <AppSymbol
-          name={CHOICE_ICONS[preference]}
-          size={16}
-          tintColor={theme.text}
-        />
-      </Pressable>
-    </ChromeSurface>
+    <IconButton
+      accessibilityHint="Switches between system, light, and dark"
+      glyphSize={18}
+      icon={CHOICE_ICONS[preference]}
+      label={`Theme: ${THEME_LABELS[preference]}`}
+      onPress={() => setPreference(NEXT_CHOICE[preference])}
+    />
   );
 }
-
-const styles = StyleSheet.create({
-  surface: { borderRadius: Radius.pill, height: 38, width: 38 },
-  inner: { alignItems: 'center', flex: 1, justifyContent: 'center' },
-});
