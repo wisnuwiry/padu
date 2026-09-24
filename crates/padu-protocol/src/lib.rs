@@ -48,6 +48,7 @@ pub mod persistence;
 pub mod projectless;
 pub mod provider_session;
 pub mod settings;
+pub mod sidebar;
 pub mod skills;
 pub mod theme;
 pub mod usage;

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -17,6 +18,7 @@ use crate::notes::{CreateNote, Note, NoteSummary, UpdateNote};
 use crate::persistence::{ComposerDraftChange, ComposerDrafts, SessionMessageMatch};
 use crate::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
 use crate::settings::DaemonSettings;
+use crate::sidebar::{SidebarGroupView, SidebarGrouping, SidebarOrdering};
 use crate::skills::SkillsCatalog;
 use crate::usage::PlanUsage;
 use crate::usage_history::{UsageHistory, UsageWindow};
@@ -184,6 +186,22 @@ pub enum Command {
         projects: Vec<Project>,
         live_session_ids: Vec<Uuid>,
         sessions: Vec<AgentSession>,
+    },
+    /// Daemon-owned sidebar sort & grouping.
+    ///
+    /// The engine lives in `crate::sidebar`; clients send their local
+    /// calendar context (today + UTC offset) so a remote daemon computes the
+    /// same date buckets the client would see locally.
+    GetSidebarGroups {
+        grouping: SidebarGrouping,
+        ordering: SidebarOrdering,
+        today_year: i32,
+        today_month: u32,
+        today_day: u32,
+        now_secs: u64,
+        local_utc_offset_secs: i32,
+        #[serde(default)]
+        revealed_older: HashMap<String, u32>,
     },
     /// Explicitly remove one daemon-owned task. Ordinary state saves are
     /// merge-only so a stale client snapshot cannot delete tasks another
@@ -606,6 +624,9 @@ pub enum ResponsePayload {
     TaskStateSaved {
         sessions: Vec<AgentSession>,
     },
+    SidebarGroups {
+        groups: Vec<SidebarGroupView>,
+    },
     SessionMetadataUpdated {
         session: AgentSession,
     },
@@ -982,6 +1003,32 @@ mod tests {
             project_id.to_string()
         );
         assert_eq!(json["changes"][0]["draft"]["text"], "unfinished");
+    }
+
+    #[test]
+    fn sidebar_groups_command_uses_stable_camel_case_fields() {
+        let json = serde_json::to_value(Command::GetSidebarGroups {
+            grouping: crate::sidebar::SidebarGrouping::Project,
+            ordering: crate::sidebar::SidebarOrdering::Newest,
+            today_year: 2026,
+            today_month: 8,
+            today_day: 12,
+            now_secs: 1_000,
+            local_utc_offset_secs: 0,
+            revealed_older: std::collections::HashMap::new(),
+        })
+        .unwrap();
+
+        assert_eq!(json["type"], "getSidebarGroups");
+        assert_eq!(json["grouping"], "project");
+        assert_eq!(json["ordering"], "newest");
+        assert_eq!(json["todayYear"], 2026);
+        assert_eq!(json["nowSecs"], 1_000);
+        assert_eq!(json["localUtcOffsetSecs"], 0);
+
+        let response =
+            serde_json::to_value(ResponsePayload::SidebarGroups { groups: vec![] }).unwrap();
+        assert_eq!(response["type"], "sidebarGroups");
     }
 
     #[test]
