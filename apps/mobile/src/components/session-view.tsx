@@ -5,7 +5,6 @@ import {
 } from '@padu/client/transcript-presentation';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
-import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -21,11 +20,13 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
+import { Defs, LinearGradient, Rect, Stop, Svg } from 'react-native-svg';
 
 import { ActivityGroup } from '@/components/activity-group';
 import { PaduIcon } from '@/components/padu-icon';
 import { IconButton } from '@/components/button';
 import { ChromeSurface } from '@/components/chrome-surface';
+import { ConversationBackgroundLayer } from '@/components/conversation-background-layer';
 import { MarkdownMessage } from '@/components/markdown-message';
 import { MobileComposer } from '@/components/mobile-composer';
 import { RenameDialog } from '@/components/rename-dialog';
@@ -42,6 +43,12 @@ import {
   displaySessionTitle,
   type TranscriptRow,
 } from '@/lib/session-presentation';
+
+/**
+ * Transparent lead above the composer card inside the floating overlay.
+ * Kept in a constant because the transcript clearance math depends on it.
+ */
+const COMPOSER_FADE_LEAD = 44;
 
 export function SessionView({
   sessionId,
@@ -60,6 +67,12 @@ export function SessionView({
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [pinnedToBottom, setPinnedToBottom] = useState(true);
+  // Measured overlay height so the transcript ends halfway up the
+  // composer instead of running full height behind it.
+  const [composerHeight, setComposerHeight] = useState(0);
+  // Bottom edge of the transcript: half the composer height above the
+  // screen bottom, so only the fade lead overlaps the tail.
+  const listBottomInset = composerHeight / 2;
   const transcriptRows = useMemo(
     () => session ? buildTranscriptRows(session, expandedFolds) : [],
     [expandedFolds, session],
@@ -171,27 +184,19 @@ export function SessionView({
       <ScreenHeader
         back={showBack}
         right={session ? (
-          <>
-            <IconButton
-              accessibilityHint="Starts a new task"
-              glyphSize={18}
-              icon="compose"
-              label="New task"
-              onPress={() => router.push('/new-task')}
-            />
-            <IconButton
-              accessibilityHint="Opens the task menu"
-              glyphSize={18}
-              icon="ellipsis"
-              label="Task options"
-              onPress={() => setMenuOpen(true)}
-            />
-          </>
+          <IconButton
+            accessibilityHint="Opens the task menu"
+            glyphSize={18}
+            icon="ellipsis"
+            label="Task options"
+            onPress={() => setMenuOpen(true)}
+          />
         ) : undefined}
         subtitle={subtitleParts.length ? subtitleParts.join(' · ') : null}
         title={session ? displaySessionTitle(session) : 'Task'}
       />
-      <View style={styles.listFrame}>
+      <View style={[styles.listFrame, { marginBottom: listBottomInset }]}>
+        <ConversationBackgroundLayer />
         <FlatList
           ref={listRef}
           key={sessionId ?? 'missing'}
@@ -200,6 +205,13 @@ export function SessionView({
           contentContainerStyle={[
             styles.content,
             !transcriptRows.length && styles.emptyContent,
+            // The frame already ends halfway up the composer; keep just
+            // enough clearance for the tail to sit below the opaque card.
+            {
+              paddingBottom: composerHeight > 0
+                ? Math.max(12, listBottomInset - COMPOSER_FADE_LEAD + 12)
+                : 40,
+            },
           ]}
           refreshControl={(
             <RefreshControl
@@ -208,7 +220,11 @@ export function SessionView({
               onRefresh={() => void query.refetch()}
             />
           )}
-          ListHeaderComponent={daemon.phase === 'error' ? <OfflineBanner /> : undefined}
+          ListHeaderComponent={(
+            <>
+              {daemon.phase === 'error' ? <OfflineBanner /> : undefined}
+            </>
+          )}
           ListEmptyComponent={(
             <SessionEmpty loading={query.isPending} error={query.error} missing={query.data === null} />
           )}
@@ -236,7 +252,26 @@ export function SessionView({
           </ChromeSurface>
         )}
       </View>
-      {session && <MobileComposer session={session} />}
+      {session && (
+        <View
+          onLayout={(event) => setComposerHeight(event.nativeEvent.layout.height)}
+          style={styles.composerOverlay}>
+          <View pointerEvents="none" style={styles.composerFade}>
+            <Svg height="100%" width="100%">
+              <Defs>
+                <LinearGradient id="composer-fade" x1="0" x2="0" y1="0" y2="1">
+                  <Stop offset="0" stopColor={theme.background} stopOpacity="0" />
+                  <Stop offset="0.5" stopColor={theme.background} stopOpacity="0.5" />
+                  <Stop offset="1" stopColor={theme.background} stopOpacity="1" />
+                </LinearGradient>
+              </Defs>
+              <Rect fill="url(#composer-fade)" height="100%" width="100%" x="0" y="0" />
+            </Svg>
+          </View>
+          <View style={styles.composerFadeSpacer} />
+          <MobileComposer session={session} />
+        </View>
+      )}
 
       <Sheet onDismiss={() => setMenuOpen(false)} visible={menuOpen}>
         <SheetRow
@@ -519,6 +554,11 @@ function SessionEmpty({
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   listFrame: { flex: 1 },
+  debugBackground: {
+    fontFamily: MonoFont,
+    fontSize: 10.5,
+    marginBottom: 8,
+  },
   content: { paddingBottom: 40, paddingHorizontal: Spacing.three, paddingTop: Spacing.two },
   emptyContent: { flexGrow: 1, justifyContent: 'center' },
   offlineBanner: {
@@ -598,13 +638,27 @@ const styles = StyleSheet.create({
   changedFilePath: { flex: 1, fontFamily: MonoFont, fontSize: 11 },
   jumpButton: {
     borderRadius: Radius.pill,
-    bottom: 12,
+    bottom: 80,
     height: 40,
     position: 'absolute',
     right: 14,
     width: 40,
   },
   jumpButtonInner: { alignItems: 'center', flex: 1, justifyContent: 'center' },
+  composerOverlay: {
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+  },
+  composerFade: {
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+  },
+  composerFadeSpacer: { height: COMPOSER_FADE_LEAD },
   workingFooter: { alignItems: 'center', flexDirection: 'row', gap: 8, paddingBottom: 8, paddingLeft: 2, paddingVertical: 10 },
   workingText: { fontSize: 12.5, fontVariant: ['tabular-nums'], fontWeight: '500' },
   empty: { alignItems: 'center', paddingHorizontal: 32 },
