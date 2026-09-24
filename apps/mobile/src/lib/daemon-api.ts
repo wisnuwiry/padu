@@ -303,6 +303,21 @@ export async function setSessionPinned(
   return response.session;
 }
 
+/**
+ * Reads daemon blob bytes on the global path (these commands bail on the
+ * session-scoped path). Returns base64, mirroring web's attachments reader.
+ */
+export async function readDaemonBlob(
+  client: PaduClient,
+  reference: string,
+): Promise<string> {
+  const response = expectResponse(
+    await client.request({ type: 'readBlob', reference }),
+    'blobData',
+  );
+  return response.bytes;
+}
+
 export async function setSessionArchived(
   client: PaduClient,
   sessionId: string,
