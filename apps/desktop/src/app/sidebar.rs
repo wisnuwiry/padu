@@ -1,8 +1,9 @@
-use chrono::{DateTime, Datelike, Days, Local, NaiveDate, Utc};
+use chrono::{Datelike as _, Local, NaiveDate};
 use gpui::{KeyBinding, actions};
 
 use super::*;
 use crate::app::right_panel::EmptyStateCardAction;
+use padu_client::sidebar as daemon_sidebar;
 
 actions!(padu_sidebar, [CancelSessionRename]);
 
@@ -30,14 +31,19 @@ pub(super) enum SessionDateGroup {
 }
 
 impl SessionDateGroup {
-    const ALL: [Self; 6] = [
-        Self::Today,
-        Self::Yesterday,
-        Self::ThisWeek,
-        Self::ThisMonth,
-        Self::ThisYear,
-        Self::More,
-    ];
+    /// Bridge from the daemon-owned engine (`padu_protocol::sidebar`) to the
+    /// local presentation enum. The daemon's `Week`/`Month`/`Year` are this
+    /// view's `ThisWeek`/`ThisMonth`/`ThisYear`.
+    fn from_daemon(group: daemon_sidebar::SidebarDateGroup) -> Self {
+        match group {
+            daemon_sidebar::SidebarDateGroup::Today => Self::Today,
+            daemon_sidebar::SidebarDateGroup::Yesterday => Self::Yesterday,
+            daemon_sidebar::SidebarDateGroup::Week => Self::ThisWeek,
+            daemon_sidebar::SidebarDateGroup::Month => Self::ThisMonth,
+            daemon_sidebar::SidebarDateGroup::Year => Self::ThisYear,
+            daemon_sidebar::SidebarDateGroup::More => Self::More,
+        }
+    }
 
     fn index(self) -> usize {
         match self {
@@ -105,42 +111,6 @@ fn sidebar_ordering_label(ordering: SidebarOrdering) -> String {
         SidebarOrdering::Newest => tr!("sidebar.ordering_newest"),
         SidebarOrdering::Oldest => tr!("sidebar.ordering_oldest"),
     }
-}
-
-fn session_date_group(timestamp: u64, today: NaiveDate) -> SessionDateGroup {
-    let session_date = i64::try_from(timestamp)
-        .ok()
-        .and_then(|timestamp| DateTime::<Utc>::from_timestamp(timestamp, 0))
-        .map(|timestamp| timestamp.with_timezone(&Local).date_naive())
-        .unwrap_or(today);
-    session_date_group_for_dates(session_date, today)
-}
-
-fn session_date_group_for_dates(session_date: NaiveDate, today: NaiveDate) -> SessionDateGroup {
-    if session_date >= today {
-        return SessionDateGroup::Today;
-    }
-
-    if today.pred_opt() == Some(session_date) {
-        return SessionDateGroup::Yesterday;
-    }
-
-    let week_start = today
-        .checked_sub_days(Days::new(today.weekday().num_days_from_monday().into()))
-        .unwrap_or(today);
-    if session_date >= week_start {
-        return SessionDateGroup::ThisWeek;
-    }
-
-    if session_date.year() == today.year() && session_date.month() == today.month() {
-        return SessionDateGroup::ThisMonth;
-    }
-
-    if session_date.year() == today.year() {
-        return SessionDateGroup::ThisYear;
-    }
-
-    SessionDateGroup::More
 }
 
 fn session_group_header(theme: &Theme) -> Div {
@@ -227,8 +197,9 @@ const SIDEBAR_SHOW_MORE_ROW_HEIGHT: f32 = 30.0;
 const SIDEBAR_GROUP_SPACER_HEIGHT: f32 = 10.0;
 const SIDEBAR_PINNED_SEPARATOR_HEIGHT: f32 = 9.0;
 const SIDEBAR_GROUP_CHILD_PADDING: f32 = 25.0;
-const SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS: u64 = 3 * 24 * 60 * 60;
-const SIDEBAR_PROJECT_REVEAL_BATCH: usize = 30;
+/// Recent-window and reveal batch come from the daemon-owned engine so every
+/// client paginates project history identically.
+use daemon_sidebar::{SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS, SIDEBAR_PROJECT_REVEAL_BATCH};
 
 /// The session row's trailing time: how long the live turn has been working,
 /// or how long ago the agent last replied. A session that has never replied
@@ -394,73 +365,95 @@ impl Render for SessionTooltip {
     }
 }
 
-/// Recency for sidebar ordering and date groups. A submitted turn promotes the
-/// task immediately, while metadata edits such as a rename do not; a task with
-/// no turns stays anchored to when it was created.
-fn sidebar_session_timestamp(session: &AgentSession) -> u64 {
-    session.last_reply_at.unwrap_or(session.created_at)
+/// Daemon-owned sort & grouping engine.
+///
+/// Sorting, date-bucket grouping, project grouping, and pagination (recent
+/// window plus an always-visible per-project minimum, extended by "show
+/// more") all live in `padu_protocol::sidebar` — the exact function the
+/// daemon's `GetSidebarGroups` RPC runs over its authoritative task state.
+/// The desktop calls it synchronously over its synced session snapshot (which
+/// mirrors daemon state) so `render` never performs IPC; remote web clients
+/// use the RPC. Row building, collapsed sections, and reveal counts below are
+/// presentation state that travels with the request / renders the response.
+fn daemon_sidebar_view(
+    projects: &[Project],
+    sessions: &[AgentSession],
+    grouping: SidebarGrouping,
+    ordering: SidebarOrdering,
+    today: NaiveDate,
+    now: u64,
+    revealed_older: &HashMap<String, u32>,
+) -> Vec<daemon_sidebar::SidebarGroupView> {
+    let offset = Local::now().offset().local_minus_utc();
+    daemon_sidebar::build_sidebar_groups(
+        projects,
+        sessions,
+        grouping,
+        ordering,
+        today,
+        now,
+        offset,
+        revealed_older,
+    )
 }
 
-fn sort_sidebar_sessions(sessions: &mut Vec<&AgentSession>, ordering: SidebarOrdering) {
-    match ordering {
-        SidebarOrdering::Newest => {
-            sessions.sort_by_key(|session| std::cmp::Reverse(sidebar_session_timestamp(session)))
-        }
-        SidebarOrdering::Oldest => {
-            sessions.sort_by_key(|session| sidebar_session_timestamp(session))
-        }
+/// Convert the daemon's per-section reveal counts (keyed by local
+/// [`SidebarGroup`]) to the wire ids the engine expects.
+fn daemon_revealed_older(counts: &HashMap<SidebarGroup, usize>) -> HashMap<String, u32> {
+    counts
+        .iter()
+        .map(|(group, count)| {
+            let (kind, date_group, project_id) = match *group {
+                SidebarGroup::Pinned => (daemon_sidebar::SidebarGroupKind::Pinned, None, None),
+                SidebarGroup::Updated(group) => (
+                    daemon_sidebar::SidebarGroupKind::Updated,
+                    Some(daemon_date_group(group)),
+                    None,
+                ),
+                SidebarGroup::Project(project_id) => (
+                    daemon_sidebar::SidebarGroupKind::Project,
+                    None,
+                    Some(project_id),
+                ),
+                SidebarGroup::Projectless => {
+                    (daemon_sidebar::SidebarGroupKind::Projectless, None, None)
+                }
+            };
+            (
+                daemon_sidebar::sidebar_group_id(kind, date_group, project_id),
+                u32::try_from(*count).unwrap_or(u32::MAX),
+            )
+        })
+        .collect()
+}
+
+fn daemon_date_group(group: SessionDateGroup) -> daemon_sidebar::SidebarDateGroup {
+    match group {
+        SessionDateGroup::Today => daemon_sidebar::SidebarDateGroup::Today,
+        SessionDateGroup::Yesterday => daemon_sidebar::SidebarDateGroup::Yesterday,
+        SessionDateGroup::ThisWeek => daemon_sidebar::SidebarDateGroup::Week,
+        SessionDateGroup::ThisMonth => daemon_sidebar::SidebarDateGroup::Month,
+        SessionDateGroup::ThisYear => daemon_sidebar::SidebarDateGroup::Year,
+        SessionDateGroup::More => daemon_sidebar::SidebarDateGroup::More,
     }
 }
 
-fn project_sidebar_groups(
-    sessions: &[&AgentSession],
-    projectless_project_ids: &HashSet<Uuid>,
-) -> Vec<(SidebarGroup, Vec<Uuid>)> {
-    let mut groups: Vec<(SidebarGroup, Vec<Uuid>)> = Vec::new();
-    let mut indexes = HashMap::new();
-    let mut projectless_sessions = Vec::new();
-    for session in sessions {
-        if projectless_project_ids.contains(&session.project_id) {
-            projectless_sessions.push(session.id);
-            continue;
-        }
-        let index = *indexes.entry(session.project_id).or_insert_with(|| {
-            let index = groups.len();
-            groups.push((SidebarGroup::Project(session.project_id), Vec::new()));
-            index
-        });
-        groups[index].1.push(session.id);
+/// Map one daemon group to the local collapsible section identity.
+fn sidebar_group_for_view(group: &daemon_sidebar::SidebarGroupView) -> SidebarGroup {
+    match group.kind {
+        daemon_sidebar::SidebarGroupKind::Pinned => SidebarGroup::Pinned,
+        daemon_sidebar::SidebarGroupKind::Updated => SidebarGroup::Updated(
+            group
+                .date_group
+                .map(SessionDateGroup::from_daemon)
+                .unwrap_or(SessionDateGroup::Today),
+        ),
+        daemon_sidebar::SidebarGroupKind::Project => group
+            .project_id
+            .map(SidebarGroup::Project)
+            .unwrap_or(SidebarGroup::Projectless),
+        daemon_sidebar::SidebarGroupKind::Projectless => SidebarGroup::Projectless,
     }
-    if !projectless_sessions.is_empty() {
-        groups.push((SidebarGroup::Projectless, projectless_sessions));
-    }
-    groups
-}
-
-fn visible_project_sessions(
-    sessions: &[Uuid],
-    session_timestamps: &HashMap<Uuid, u64>,
-    recent_cutoff: u64,
-    revealed_older_sessions: usize,
-) -> (Vec<Uuid>, bool) {
-    let mut visible = Vec::with_capacity(sessions.len());
-    let mut older_seen = 0usize;
-    for session_id in sessions {
-        let recent = session_timestamps
-            .get(session_id)
-            .is_some_and(|timestamp| *timestamp >= recent_cutoff);
-        if recent || older_seen < revealed_older_sessions {
-            visible.push(*session_id);
-        }
-        if !recent {
-            older_seen = older_seen.saturating_add(1);
-        }
-    }
-    (visible, older_seen > revealed_older_sessions)
-}
-
-fn sidebar_project_is_projectless(project: &Project, projectless_root: Option<&Path>) -> bool {
-    projectless_root.is_some_and(|root| project.path.starts_with(root))
 }
 
 #[allow(dead_code)]
@@ -1500,13 +1493,12 @@ impl Padu {
             })
             .map(|session| session.project_id)
             .collect::<HashSet<_>>();
-        let projectless_root = crate::projectless::workspace_root();
         let paths = self
             .state
             .projects
             .iter()
             .filter(|project| local_project_ids.contains(&project.id))
-            .filter(|project| !sidebar_project_is_projectless(project, projectless_root.as_deref()))
+            .filter(|project| !project.is_projectless())
             .map(|project| project.path.clone())
             .collect::<HashSet<_>>();
         if paths.is_empty() {
@@ -1707,14 +1699,17 @@ impl Padu {
             }
             fingerprint = mix_uuid(fingerprint, session.id);
             fingerprint = mix_uuid(fingerprint, session.project_id);
-            fingerprint = mix(fingerprint, sidebar_session_timestamp(session));
+            fingerprint = mix(
+                fingerprint,
+                daemon_sidebar::sidebar_session_timestamp(session),
+            );
             fingerprint = mix(fingerprint, u64::from(session.pinned_at.is_some()));
             fingerprint = mix(fingerprint, u64::from(session.archived_at.is_some()));
             if self.state.sidebar_grouping == SidebarGrouping::Project {
                 fingerprint = mix(
                     fingerprint,
                     u64::from(
-                        sidebar_session_timestamp(session)
+                        daemon_sidebar::sidebar_session_timestamp(session)
                             >= now.saturating_sub(SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS),
                     ),
                 );
@@ -1754,17 +1749,12 @@ impl Padu {
         self.sidebar_rows_snapshot.borrow().clone()
     }
 
-    /// Snapshot the session history as a flat list of lightweight rows under
-    /// the current grouping and ordering preferences.
+    /// Snapshot the session history as a flat list of lightweight rows.
+    ///
+    /// Sort, grouping, and recent-window pagination come from the
+    /// daemon-owned engine ([`daemon_sidebar_view`]); this only turns the
+    /// returned groups into rows, applying the local collapsed state.
     fn sidebar_rows(&self, today: NaiveDate, now: u64) -> Vec<SidebarRow> {
-        let mut sorted_sessions = self
-            .state
-            .sessions
-            .iter()
-            .filter(|session| session.has_started() && session.archived_at.is_none())
-            .collect::<Vec<_>>();
-        sort_sidebar_sessions(&mut sorted_sessions, self.state.sidebar_ordering);
-
         let mut rows = vec![
             SidebarRow::Search,
             SidebarRow::Board,
@@ -1772,115 +1762,47 @@ impl Padu {
             SidebarRow::PinnedSeparator,
             SidebarRow::GroupSpacer,
         ];
-        let pinned_sessions = sorted_sessions
-            .iter()
-            .filter(|session| session.pinned_at.is_some())
-            .map(|session| session.id)
-            .collect::<Vec<_>>();
-        append_sidebar_group_rows(
-            &mut rows,
-            SidebarGroup::Pinned,
-            &pinned_sessions,
-            self.sidebar_collapsed_groups
-                .contains(&SidebarGroup::Pinned),
-            false,
-        );
-        match self.state.sidebar_grouping {
-            SidebarGrouping::Updated => {
-                let mut grouped_sessions: [Vec<Uuid>; 6] = std::array::from_fn(|_| Vec::new());
-                for session in sorted_sessions
-                    .iter()
-                    .filter(|session| session.pinned_at.is_none())
-                {
-                    grouped_sessions
-                        [session_date_group(sidebar_session_timestamp(session), today).index()]
-                    .push(session.id);
-                }
-                let mut groups = SessionDateGroup::ALL;
-                if self.state.sidebar_ordering == SidebarOrdering::Oldest {
-                    groups.reverse();
-                }
-                for date_group in groups {
-                    let group = SidebarGroup::Updated(date_group);
-                    append_sidebar_group_rows(
-                        &mut rows,
-                        group,
-                        &grouped_sessions[date_group.index()],
-                        self.sidebar_collapsed_groups.contains(&group),
-                        false,
-                    );
-                }
-            }
-            SidebarGrouping::Project => {
-                let recent_cutoff = now.saturating_sub(SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS);
-                let unpinned_sessions = sorted_sessions
-                    .iter()
-                    .copied()
-                    .filter(|session| session.pinned_at.is_none())
-                    .collect::<Vec<_>>();
-                let session_timestamps = unpinned_sessions
-                    .iter()
-                    .map(|session| (session.id, sidebar_session_timestamp(session)))
-                    .collect::<HashMap<_, _>>();
-                let projectless_root = crate::projectless::workspace_root();
-                let projectless_project_ids = self
-                    .state
-                    .projects
-                    .iter()
-                    .filter(|project| {
-                        sidebar_project_is_projectless(project, projectless_root.as_deref())
-                    })
-                    .map(|project| project.id)
-                    .collect::<HashSet<_>>();
-                for (group, sessions) in
-                    project_sidebar_groups(&unpinned_sessions, &projectless_project_ids)
-                {
-                    let revealed_older_sessions = self
-                        .sidebar_project_reveal_counts
-                        .get(&group)
-                        .copied()
-                        .unwrap_or_default();
-                    let (visible_sessions, show_more) = visible_project_sessions(
-                        &sessions,
-                        &session_timestamps,
-                        recent_cutoff,
-                        revealed_older_sessions,
-                    );
-                    append_sidebar_group_rows(
-                        &mut rows,
-                        group,
-                        &visible_sessions,
-                        self.sidebar_collapsed_groups.contains(&group),
-                        show_more,
-                    );
-                }
-            }
+        let revealed = daemon_revealed_older(&self.sidebar_project_reveal_counts);
+        for view in daemon_sidebar_view(
+            &self.state.projects,
+            &self.state.sessions,
+            self.state.sidebar_grouping,
+            self.state.sidebar_ordering,
+            today,
+            now,
+            &revealed,
+        ) {
+            let group = sidebar_group_for_view(&view);
+            append_sidebar_group_rows(
+                &mut rows,
+                group,
+                &view.session_ids,
+                self.sidebar_collapsed_groups.contains(&group),
+                view.has_more,
+            );
         }
         if rows.len() == 4 {
             // Keep the header actions visible while there is no history.
             let group = match self.state.sidebar_grouping {
                 SidebarGrouping::Updated => SidebarGroup::Updated(SessionDateGroup::Today),
-                SidebarGrouping::Project => {
-                    let projectless_root = crate::projectless::workspace_root();
-                    self.state
-                        .selected_project
-                        .and_then(|project_id| {
-                            self.state
-                                .projects
-                                .iter()
-                                .find(|project| project.id == project_id)
-                        })
-                        .or_else(|| self.state.projects.first())
-                        .map(|project| {
-                            if sidebar_project_is_projectless(project, projectless_root.as_deref())
-                            {
-                                SidebarGroup::Projectless
-                            } else {
-                                SidebarGroup::Project(project.id)
-                            }
-                        })
-                        .unwrap_or(SidebarGroup::Projectless)
-                }
+                SidebarGrouping::Project => self
+                    .state
+                    .selected_project
+                    .and_then(|project_id| {
+                        self.state
+                            .projects
+                            .iter()
+                            .find(|project| project.id == project_id)
+                    })
+                    .or_else(|| self.state.projects.first())
+                    .map(|project| {
+                        if project.is_projectless() {
+                            SidebarGroup::Projectless
+                        } else {
+                            SidebarGroup::Project(project.id)
+                        }
+                    })
+                    .unwrap_or(SidebarGroup::Projectless),
             };
             rows.push(SidebarRow::Header(group));
         }
@@ -2115,7 +2037,7 @@ impl Padu {
 
     fn show_more_project_sessions(&mut self, group: SidebarGroup, cx: &mut Context<Self>) {
         let revealed = self.sidebar_project_reveal_counts.entry(group).or_default();
-        *revealed = revealed.saturating_add(SIDEBAR_PROJECT_REVEAL_BATCH);
+        *revealed = revealed.saturating_add(SIDEBAR_PROJECT_REVEAL_BATCH as usize);
         self.sidebar_rows_fingerprint.set(None);
         cx.notify();
     }
@@ -2169,7 +2091,10 @@ impl Padu {
                 .iter()
                 .filter(|session| session.has_started() && session.archived_at.is_none())
                 .collect::<Vec<_>>();
-            sort_sidebar_sessions(&mut sorted_sessions, self.state.sidebar_ordering);
+            daemon_sidebar::sort_sidebar_sessions(
+                &mut sorted_sessions,
+                self.state.sidebar_ordering,
+            );
             sessions = sorted_sessions.iter().map(|s| s.id).collect();
         }
         if sessions.is_empty() {
@@ -2198,20 +2123,23 @@ impl Padu {
                 SidebarGroup::Pinned
             } else {
                 match self.state.sidebar_grouping {
-                    SidebarGrouping::Updated => SidebarGroup::Updated(session_date_group(
-                        sidebar_session_timestamp(target_session),
-                        Local::now().date_naive(),
-                    )),
+                    SidebarGrouping::Updated => {
+                        let today = Local::now().date_naive();
+                        let offset = Local::now().offset().local_minus_utc();
+                        let timestamp = daemon_sidebar::sidebar_session_timestamp(target_session);
+                        let date =
+                            daemon_sidebar::session_local_date(timestamp, offset).unwrap_or(today);
+                        SidebarGroup::Updated(SessionDateGroup::from_daemon(
+                            daemon_sidebar::date_group_for_dates(date, today),
+                        ))
+                    }
                     SidebarGrouping::Project => {
-                        let projectless_root = crate::projectless::workspace_root();
                         let is_projectless = self
                             .state
                             .projects
                             .iter()
                             .find(|p| p.id == target_session.project_id)
-                            .is_some_and(|p| {
-                                sidebar_project_is_projectless(p, projectless_root.as_deref())
-                            });
+                            .is_some_and(|p| p.is_projectless());
                         if is_projectless {
                             SidebarGroup::Projectless
                         } else {
@@ -3227,23 +3155,11 @@ fn sidebar_session_selected(
 mod tests {
     use super::*;
 
-    #[test]
-    fn groups_sessions_by_calendar_period() {
-        let today = NaiveDate::from_ymd_opt(2026, 8, 12).unwrap();
-        let cases = [
-            ((2026, 8, 12), SessionDateGroup::Today),
-            ((2026, 8, 11), SessionDateGroup::Yesterday),
-            ((2026, 8, 10), SessionDateGroup::ThisWeek),
-            ((2026, 8, 1), SessionDateGroup::ThisMonth),
-            ((2026, 1, 1), SessionDateGroup::ThisYear),
-            ((2025, 12, 31), SessionDateGroup::More),
-        ];
-
-        for ((year, month, day), expected) in cases {
-            let session_date = NaiveDate::from_ymd_opt(year, month, day).unwrap();
-            assert_eq!(session_date_group_for_dates(session_date, today), expected);
-        }
-    }
+    // Sort, date-bucket grouping, project grouping, and recent-window
+    // pagination are owned by the daemon engine (`padu_protocol::sidebar`,
+    // served through `Command::GetSidebarGroups`) and tested there. The
+    // tests below cover what stays client-side: row building, geometry,
+    // selection, and the daemon/local group-identity bridge.
 
     #[test]
     fn format_time_ago_handles_time_boundaries() {
@@ -3253,16 +3169,6 @@ mod tests {
         assert_eq!(format_time_ago(7_200), "2h");
         assert_eq!(format_time_ago(86_400), "1d");
         assert_eq!(format_time_ago(172_800), "2d");
-    }
-
-    #[test]
-    fn future_sessions_stay_in_today() {
-        let today = NaiveDate::from_ymd_opt(2026, 8, 12).unwrap();
-        let tomorrow = NaiveDate::from_ymd_opt(2026, 8, 13).unwrap();
-        assert_eq!(
-            session_date_group_for_dates(tomorrow, today),
-            SessionDateGroup::Today
-        );
     }
 
     #[test]
@@ -3343,143 +3249,51 @@ mod tests {
     }
 
     #[test]
-    fn project_sessions_reveal_older_history_in_thirty_item_batches() {
-        let sessions = (1..=36).map(Uuid::from_u128).collect::<Vec<_>>();
-        let recent_cutoff = 100;
-        let timestamps = sessions
-            .iter()
-            .enumerate()
-            .map(|(index, session_id)| {
-                (
-                    *session_id,
-                    if index == 0 {
-                        recent_cutoff
-                    } else {
-                        recent_cutoff - 1
-                    },
-                )
-            })
-            .collect::<HashMap<_, _>>();
-
-        let (initial, show_more) =
-            visible_project_sessions(&sessions, &timestamps, recent_cutoff, 0);
-        assert_eq!(initial, vec![sessions[0]]);
-        assert!(show_more);
-
-        let (first_batch, show_more) = visible_project_sessions(
-            &sessions,
-            &timestamps,
-            recent_cutoff,
-            SIDEBAR_PROJECT_REVEAL_BATCH,
-        );
-        assert_eq!(first_batch, sessions[..31]);
-        assert!(show_more);
-
-        let (all_sessions, show_more) = visible_project_sessions(
-            &sessions,
-            &timestamps,
-            recent_cutoff,
-            SIDEBAR_PROJECT_REVEAL_BATCH * 2,
-        );
-        assert_eq!(all_sessions, sessions);
-        assert!(!show_more);
-    }
-
-    #[test]
-    fn sidebar_recency_uses_last_reply_with_creation_fallback() {
-        let project_id = Uuid::new_v4();
-        let mut renamed_old_session = AgentSession::new(project_id, ProviderKind::Codex);
-        renamed_old_session.created_at = 10;
-        renamed_old_session.last_reply_at = Some(20);
-        renamed_old_session.updated_at = 1_000;
-
-        let mut newer_unanswered_session = AgentSession::new(project_id, ProviderKind::Codex);
-        newer_unanswered_session.created_at = 30;
-        newer_unanswered_session.last_reply_at = None;
-        newer_unanswered_session.updated_at = 30;
-
-        assert_eq!(sidebar_session_timestamp(&renamed_old_session), 20);
-        assert_eq!(sidebar_session_timestamp(&newer_unanswered_session), 30);
-
-        let mut sessions = vec![&renamed_old_session, &newer_unanswered_session];
-        sort_sidebar_sessions(&mut sessions, SidebarOrdering::Newest);
-        assert_eq!(sessions[0].id, newer_unanswered_session.id);
-
-        sort_sidebar_sessions(&mut sessions, SidebarOrdering::Oldest);
-        assert_eq!(sessions[0].id, renamed_old_session.id);
-    }
-
-    #[test]
-    fn project_grouping_preserves_global_group_and_session_order() {
-        let first_project = Uuid::from_u128(1);
-        let second_project = Uuid::from_u128(2);
-        let first = AgentSession::new(first_project, ProviderKind::Codex);
-        let second = AgentSession::new(second_project, ProviderKind::Codex);
-        let third = AgentSession::new(first_project, ProviderKind::Codex);
-
-        let groups = project_sidebar_groups(&[&second, &first, &third], &HashSet::new());
-
-        assert_eq!(
-            groups,
-            vec![
-                (SidebarGroup::Project(second_project), vec![second.id]),
-                (
-                    SidebarGroup::Project(first_project),
-                    vec![first.id, third.id]
-                ),
-            ]
-        );
-    }
-
-    #[test]
-    fn projectless_sessions_share_one_trailing_group() {
-        let ordinary_project = Uuid::from_u128(1);
-        let first_projectless_project = Uuid::from_u128(2);
-        let second_projectless_project = Uuid::from_u128(3);
-        let first_projectless = AgentSession::new(first_projectless_project, ProviderKind::Codex);
-        let ordinary = AgentSession::new(ordinary_project, ProviderKind::Codex);
-        let second_projectless = AgentSession::new(second_projectless_project, ProviderKind::Codex);
-
-        let groups = project_sidebar_groups(
-            &[&first_projectless, &ordinary, &second_projectless],
-            &HashSet::from([first_projectless_project, second_projectless_project]),
-        );
-
-        assert_eq!(
-            groups,
-            vec![
-                (SidebarGroup::Project(ordinary_project), vec![ordinary.id]),
-                (
-                    SidebarGroup::Projectless,
-                    vec![first_projectless.id, second_projectless.id]
-                ),
-            ]
-        );
-    }
-
-    #[test]
-    fn projectless_sidebar_projects_are_paths_under_the_workspace_root() {
-        let root = Path::new("/tmp/.padu/projects");
-        let projectless = Project {
-            id: Uuid::from_u128(1),
-            name: "Task".to_owned(),
-            path: root.join("2026-08-23/task"),
-            created_at: 0,
-            scripts: Vec::new(),
-            linked_repo: None,
+    fn daemon_group_views_map_to_local_collapsible_sections() {
+        let project_id = Uuid::from_u128(7);
+        let week = daemon_sidebar::SidebarGroupView {
+            id: daemon_sidebar::sidebar_group_id(
+                daemon_sidebar::SidebarGroupKind::Updated,
+                Some(daemon_sidebar::SidebarDateGroup::Week),
+                None,
+            ),
+            kind: daemon_sidebar::SidebarGroupKind::Updated,
+            date_group: Some(daemon_sidebar::SidebarDateGroup::Week),
+            project_id: None,
+            session_ids: vec![],
+            has_more: false,
         };
-        let ordinary = Project {
-            id: Uuid::from_u128(2),
-            name: "Ordinary".to_owned(),
-            path: PathBuf::from("/tmp/dev/ordinary"),
-            created_at: 0,
-            scripts: Vec::new(),
-            linked_repo: None,
-        };
+        assert_eq!(
+            sidebar_group_for_view(&week),
+            SidebarGroup::Updated(SessionDateGroup::ThisWeek)
+        );
 
-        assert!(sidebar_project_is_projectless(&projectless, Some(root)));
-        assert!(!sidebar_project_is_projectless(&ordinary, Some(root)));
-        assert!(!sidebar_project_is_projectless(&projectless, None));
+        let project = daemon_sidebar::SidebarGroupView {
+            id: daemon_sidebar::sidebar_group_id(
+                daemon_sidebar::SidebarGroupKind::Project,
+                None,
+                Some(project_id),
+            ),
+            kind: daemon_sidebar::SidebarGroupKind::Project,
+            date_group: None,
+            project_id: Some(project_id),
+            session_ids: vec![],
+            has_more: true,
+        };
+        assert_eq!(
+            sidebar_group_for_view(&project),
+            SidebarGroup::Project(project_id)
+        );
+
+        let revealed = daemon_revealed_older(&HashMap::from([(
+            SidebarGroup::Project(project_id),
+            30usize,
+        )]));
+        assert_eq!(
+            revealed.get(&project.id).copied(),
+            Some(30u32),
+            "reveal counts must travel under the daemon's wire ids"
+        );
     }
 
     #[test]
