@@ -20,6 +20,7 @@
 //! [`crate::daemon::DaemonSupervisor`] re-uses the resolved `address` for
 //! its 500 ms re-poll loop.
 
+pub mod binary;
 pub mod cloudflare;
 pub mod qr;
 pub mod ssh;

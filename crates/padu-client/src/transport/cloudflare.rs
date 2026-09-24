@@ -22,12 +22,50 @@ use async_trait::async_trait;
 use padu_protocol::persistence::HostKind;
 use parking_lot::Mutex;
 
+use crate::transport::binary::find_binary;
 use crate::transport::{
     QrPayload, Transport, TransportContext, TransportError, TransportHandle, TransportStatus,
     terminate_process, watch_child,
 };
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Cloudflare's download page for every platform. Embedded in the "binary
+/// missing" error and rendered as a copyable link in the desktop's tunnel
+/// instructions, so it has a single definition.
+pub const CLOUDFLARED_INSTALL_GUIDE: &str = "https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/";
+
+/// One-line install command for the platform Padu is running on, if a single
+/// command is enough. Commands are literal text copied into a terminal, so
+/// they are not translated. Linux has no distro-independent one-liner and
+/// returns `None`, leaving the install guide as the instruction.
+pub fn install_command() -> Option<&'static str> {
+    #[cfg(target_os = "macos")]
+    {
+        Some("brew install cloudflared")
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Some("winget install --id Cloudflare.cloudflared")
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        None
+    }
+}
+
+/// The reason attached to [`TransportError::BinaryMissing`] when
+/// `cloudflared` cannot be found. Names the platform's install command when
+/// there is one and always points at the official guide, because a user who
+/// already installed it needs the path that tells them *where* Padu looked.
+fn missing_binary_reason() -> String {
+    match install_command() {
+        Some(command) => {
+            format!(" — run `{command}`, then restart Padu. Guide: {CLOUDFLARED_INSTALL_GUIDE}")
+        }
+        None => format!(" — see the install guide: {CLOUDFLARED_INSTALL_GUIDE}"),
+    }
+}
 
 /// Output line scanner for `cloudflared`. Hand-rolled to avoid pulling in
 /// `regex` as a top-level dep. Lines look like:
@@ -136,9 +174,12 @@ impl Transport for CloudflareTransport {
                 pid: None,
             });
         }
-        let binary = which::which("cloudflared").map_err(|_| TransportError::BinaryMissing {
+        // `find_binary`, not `which`: a GUI app's `PATH` omits the directories
+        // Homebrew and winget install into, which made an installed
+        // `cloudflared` look missing.
+        let binary = find_binary("cloudflared").ok_or_else(|| TransportError::BinaryMissing {
             binary: "cloudflared".into(),
-            why: " — install with `brew install cloudflared` or `apt install cloudflared`".into(),
+            why: missing_binary_reason(),
         })?;
         *self.status.lock() = TransportStatus::Starting;
         *self.pid.lock() = None;
@@ -400,6 +441,26 @@ mod tests {
     fn clean_stdout_yields_no_account_error() {
         let blob = "INF Starting tunnel\nINF https://abc.trycloudflare.com";
         assert_eq!(detect_account_required(blob), None);
+    }
+
+    #[test]
+    fn install_guide_points_at_cloudflares_download_page() {
+        assert_eq!(
+            CLOUDFLARED_INSTALL_GUIDE,
+            "https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/"
+        );
+    }
+
+    #[test]
+    fn missing_binary_reason_always_names_the_install_guide() {
+        let reason = missing_binary_reason();
+        assert!(reason.contains(CLOUDFLARED_INSTALL_GUIDE));
+        #[cfg(target_os = "macos")]
+        assert!(reason.contains("brew install cloudflared"));
+        #[cfg(target_os = "windows")]
+        assert!(reason.contains("winget install"));
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        assert!(install_command().is_none());
     }
 
     #[test]
