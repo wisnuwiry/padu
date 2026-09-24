@@ -16,6 +16,11 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+### Fixed
+
+- **Cloudflare Tunnel Detection**: `cloudflared` is now resolved from the platform's install locations in addition to `PATH`, so an app launched from Finder/Dock finds a Homebrew, winget, or manual install instead of reporting it missing; the tunnel instructions now show the platform install command and a copyable link to Cloudflare's install guide.
+- **Cloudflare Tunnel Target**: The tunnel now forwards to the port the daemon actually bound instead of the exposed port it asked for, so a phone no longer gets "authentication failed" when another Padu instance owns that port; the connection card explains the conflict, since the Direct and Tailscale codes cannot reach the daemon in that state.
+
 ## [0.1.9] - 2026-09-23
 
 ### Added
