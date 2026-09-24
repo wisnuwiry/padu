@@ -22,7 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { ConnectionErrorCard } from '@/components/connection-error-card';
-import { GlassSurface } from '@/components/glass-surface';
+import { ChromeSurface } from '@/components/chrome-surface';
 import { ProviderIcon, providerBrandColor } from '@/components/provider-icon';
 import { ConnectionStatus } from '@/components/connection-status';
 import { RenameDialog } from '@/components/rename-dialog';
@@ -111,7 +111,7 @@ export default function TasksScreen() {
         <View
           pointerEvents="box-none"
           style={[styles.floatingActions, { top: insets.top + DaemonPickerTop }]}>
-          <GlassSurface interactive style={styles.daemonButton}>
+          <ChromeSurface style={styles.daemonButton}>
             <Pressable
               accessibilityHint="Opens the daemon switcher"
               accessibilityLabel={daemon.activeProfile
@@ -137,7 +137,7 @@ export default function TasksScreen() {
                 tintColor={theme.textTertiary}
               />
             </Pressable>
-          </GlassSurface>
+          </ChromeSurface>
         </View>
       )}
 
@@ -202,7 +202,7 @@ export default function TasksScreen() {
 
       {(daemon.profiles.length > 0 || daemon.phase === 'booting') && (
         <View pointerEvents="box-none" style={[styles.searchDock, { bottom: insets.bottom + 14 }]}>
-          <GlassSurface interactive style={styles.searchCapsule}>
+          <ChromeSurface style={styles.searchCapsule}>
             <View style={styles.searchCapsuleInner}>
               <AppSymbol
                 name={{ ios: 'magnifyingglass', android: 'search', web: 'search' }}
@@ -235,9 +235,9 @@ export default function TasksScreen() {
                 </Pressable>
               )}
             </View>
-          </GlassSurface>
+          </ChromeSurface>
           {daemon.phase === 'connected' && (
-            <GlassSurface interactive style={styles.composeButton}>
+            <ChromeSurface style={styles.composeButton}>
               <Pressable
                 accessibilityLabel="New task"
                 accessibilityRole="button"
@@ -250,7 +250,7 @@ export default function TasksScreen() {
                   tintColor={theme.text}
                 />
               </Pressable>
-            </GlassSurface>
+            </ChromeSurface>
           )}
         </View>
       )}

@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet } from 'react-native';
 
 import { AppSymbol } from '@/components/app-symbol';
-import { GlassSurface } from '@/components/glass-surface';
+import { ChromeSurface } from '@/components/chrome-surface';
 import { Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAppearance } from '@/lib/appearance-context';
@@ -38,7 +38,7 @@ export function ThemeToggleButton() {
   const { preference, setPreference } = useAppearance();
 
   return (
-    <GlassSurface interactive style={styles.surface}>
+    <ChromeSurface style={styles.surface}>
       <Pressable
         accessibilityHint="Switches between system, light, and dark"
         accessibilityLabel={`Theme: ${THEME_LABELS[preference]}`}
@@ -55,7 +55,7 @@ export function ThemeToggleButton() {
           tintColor={theme.text}
         />
       </Pressable>
-    </GlassSurface>
+    </ChromeSurface>
   );
 }
 

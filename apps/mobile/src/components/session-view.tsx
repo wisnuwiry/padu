@@ -24,11 +24,12 @@ import {
 
 import { ActivityGroup } from '@/components/activity-group';
 import { AppSymbol } from '@/components/app-symbol';
+import { IconButton } from '@/components/button';
+import { ChromeSurface } from '@/components/chrome-surface';
 import { MarkdownMessage } from '@/components/markdown-message';
 import { MobileComposer } from '@/components/mobile-composer';
 import { RenameDialog } from '@/components/rename-dialog';
-import { GlassSurface } from '@/components/glass-surface';
-import { HeaderAction, HeaderActionGroup, navigateBack, ScreenHeader, useScreenHeaderInset } from '@/components/screen-header';
+import { navigateBack, ScreenHeader } from '@/components/screen-header';
 import { Sheet, SheetRow } from '@/components/sheet';
 import { MonoFont, Radius, Spacing } from '@/constants/theme';
 import { useSession, useTaskState } from '@/hooks/use-daemon-data';
@@ -52,7 +53,6 @@ export function SessionView({ sessionId }: { sessionId: string | undefined }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [pinnedToBottom, setPinnedToBottom] = useState(true);
-  const [scrolledUnderHeader, setScrolledUnderHeader] = useState(false);
   const transcriptRows = useMemo(
     () => session ? buildTranscriptRows(session, expandedFolds) : [],
     [expandedFolds, session],
@@ -61,7 +61,6 @@ export function SessionView({ sessionId }: { sessionId: string | undefined }) {
   const listRef = useRef<FlatList<TranscriptRow>>(null);
   const nearBottom = useRef(true);
   const laidOut = useRef(false);
-  const viewportHeight = useRef(0);
 
   useEffect(() => {
     if (!session || daemon.phase !== 'connected') return;
@@ -75,8 +74,6 @@ export function SessionView({ sessionId }: { sessionId: string | undefined }) {
     const pinned = contentSize.height - layoutMeasurement.height - contentOffset.y < 120;
     nearBottom.current = pinned;
     setPinnedToBottom((current) => current === pinned ? current : pinned);
-    const under = contentOffset.y > 4;
-    setScrolledUnderHeader((current) => current === under ? current : under);
   }
 
   function toggleFold(turnId: string) {
@@ -122,7 +119,6 @@ export function SessionView({ sessionId }: { sessionId: string | undefined }) {
     );
   }
 
-  const headerInset = useScreenHeaderInset();
   const projectName = useTaskState().data?.projects
     .find((project) => project.id === session?.project_id)?.name;
   const subtitleParts = [projectName, daemon.activeProfile?.name].filter(Boolean);
@@ -132,20 +128,23 @@ export function SessionView({ sessionId }: { sessionId: string | undefined }) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={[styles.screen, { backgroundColor: theme.background }]}>
       <ScreenHeader
-        scrolled={scrolledUnderHeader}
         right={session ? (
-          <HeaderActionGroup>
-            <HeaderAction
+          <>
+            <IconButton
+              accessibilityHint="Starts a new task"
+              glyphSize={18}
               icon={{ ios: 'square.and.pencil', android: 'edit_square', web: 'edit' }}
               label="New task"
               onPress={() => router.push('/new-task')}
             />
-            <HeaderAction
+            <IconButton
+              accessibilityHint="Opens the task menu"
+              glyphSize={18}
               icon={{ ios: 'ellipsis', android: 'more_horiz', web: 'more_horiz' }}
               label="Task options"
               onPress={() => setMenuOpen(true)}
             />
-          </HeaderActionGroup>
+          </>
         ) : undefined}
         subtitle={subtitleParts.length ? subtitleParts.join(' · ') : null}
         title={session ? displaySessionTitle(session) : 'Task'}
@@ -157,7 +156,6 @@ export function SessionView({ sessionId }: { sessionId: string | undefined }) {
           keyExtractor={(item) => item.key}
           contentContainerStyle={[
             styles.content,
-            { paddingTop: headerInset + 2 },
             !transcriptRows.length && styles.emptyContent,
           ]}
           refreshControl={(
@@ -173,25 +171,18 @@ export function SessionView({ sessionId }: { sessionId: string | undefined }) {
           )}
           ListFooterComponent={running && session ? <WorkingFooter session={session} /> : undefined}
           renderItem={({ item }) => <TranscriptRowView row={item} onToggleFold={toggleFold} />}
-          onContentSizeChange={(_, height) => {
+          onContentSizeChange={() => {
             if (!laidOut.current || nearBottom.current) {
               listRef.current?.scrollToEnd({ animated: false });
               laidOut.current = true;
-              // scrollToEnd fires no scroll event; content taller than the
-              // viewport means the top now sits under the header.
-              const under = height > viewportHeight.current + 8;
-              setScrolledUnderHeader((current) => current === under ? current : under);
             }
-          }}
-          onLayout={(event) => {
-            viewportHeight.current = event.nativeEvent.layout.height;
           }}
           onScroll={trackScroll}
           scrollEventThrottle={100}
           showsVerticalScrollIndicator={false}
         />
         {!pinnedToBottom && transcriptRows.length > 0 && (
-          <GlassSurface fallbackColor={theme.surface} interactive style={styles.jumpButton}>
+          <ChromeSurface style={styles.jumpButton}>
             <Pressable
               accessibilityLabel="Scroll to latest"
               accessibilityRole="button"
@@ -203,7 +194,7 @@ export function SessionView({ sessionId }: { sessionId: string | undefined }) {
                 tintColor={theme.textSecondary}
               />
             </Pressable>
-          </GlassSurface>
+          </ChromeSurface>
         )}
       </View>
       {session && <MobileComposer session={session} />}
@@ -497,7 +488,7 @@ function SessionEmpty({
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   listFrame: { flex: 1 },
-  content: { paddingBottom: 40, paddingHorizontal: Spacing.three },
+  content: { paddingBottom: 40, paddingHorizontal: Spacing.three, paddingTop: Spacing.two },
   emptyContent: { flexGrow: 1, justifyContent: 'center' },
   offlineBanner: {
     alignItems: 'center',

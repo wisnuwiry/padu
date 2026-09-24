@@ -22,7 +22,7 @@ import {
   SendButton,
 } from '@/components/mobile-composer';
 import { RemoteProjectPicker } from '@/components/remote-project-picker';
-import { ScreenHeader, useScreenHeaderInset } from '@/components/screen-header';
+import { ScreenHeader } from '@/components/screen-header';
 import { AccessSheet, ModelPickerSheet } from '@/components/session-option-sheets';
 import { SessionView } from '@/components/session-view';
 import { Sheet, SheetRow } from '@/components/sheet';
@@ -50,7 +50,6 @@ type SheetKind = 'daemon' | 'project' | 'model' | 'workspace' | 'branch' | 'acce
 export default function NewTaskScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const headerInset = useScreenHeaderInset();
   const daemon = useDaemon();
   const runtime = useRuntime();
   const taskState = useTaskState();
@@ -260,7 +259,6 @@ export default function NewTaskScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={[styles.screen, { backgroundColor: theme.background }]}>
       <ScreenHeader title="New Task" />
-      <View style={{ height: headerInset }} />
       <View style={styles.spacer} />
 
       <View style={styles.rows}>

@@ -1,12 +1,5 @@
 import * as Haptics from 'expo-haptics';
 import { router, Stack } from 'expo-router';
-import {
-  HeaderAction,
-  HeaderActionGroup,
-  navigateBack,
-  ScreenHeader,
-  useScreenHeaderInset,
-} from '@/components/screen-header';
 import { useState } from 'react';
 import {
   ActivityIndicator,
@@ -15,14 +8,15 @@ import {
   StyleSheet,
   Text,
   View,
-  type GestureResponderEvent,
 } from 'react-native';
 
 import { AppSymbol } from '@/components/app-symbol';
+import { Button, IconButton } from '@/components/button';
 import { ConnectionErrorCard } from '@/components/connection-error-card';
 import { ConnectionNote } from '@/components/connection-note';
 import { ConnectionStatus } from '@/components/connection-status';
 import { DaemonAvatar } from '@/components/daemon-avatar';
+import { navigateBack, ScreenHeader } from '@/components/screen-header';
 import { TransportBadge } from '@/components/transport-badge';
 import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -38,7 +32,6 @@ import {
 export default function DaemonsScreen() {
   const theme = useTheme();
   const daemon = useDaemon();
-  const headerInset = useScreenHeaderInset();
   const [selectingId, setSelectingId] = useState<string | null>(null);
 
   async function select(profile: DaemonProfile) {
@@ -62,10 +55,11 @@ export default function DaemonsScreen() {
     <View style={[styles.screen, { backgroundColor: theme.background }]}>
       <Stack.Screen options={{ headerShown: false }} />
       <ScreenHeader
-        title="Daemons"
-        right={
-          <HeaderActionGroup>
-            <HeaderAction
+        right={(
+          <>
+            <IconButton
+              accessibilityHint="Opens the camera to scan the desktop’s QR code"
+              glyphSize={18}
               icon={{
                 ios: 'qrcode.viewfinder',
                 android: 'qr_code_scanner',
@@ -74,19 +68,23 @@ export default function DaemonsScreen() {
               label="Import from link"
               onPress={() => router.push('/daemon-import')}
             />
-            <HeaderAction
+            <IconButton
+              accessibilityHint="Opens the daemon editor"
+              glyphSize={18}
               icon={{ ios: 'plus', android: 'add', web: 'add' }}
               label="Add daemon"
               onPress={() => router.push('/daemon-editor')}
+              variant="filled"
             />
-          </HeaderActionGroup>
-        }
+          </>
+        )}
+        title="Daemons"
       />
       <FlatList
         data={daemon.profiles}
         keyExtractor={(item) => item.id}
         contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={[styles.listContent, { paddingTop: headerInset }]}
+        contentContainerStyle={styles.listContent}
         style={styles.list}
         ListHeaderComponent={(
           <>
@@ -112,32 +110,23 @@ export default function DaemonsScreen() {
               add the address and token by hand.
             </Text>
             <View style={styles.emptyActions}>
-              <Pressable
-                accessibilityLabel="Import from link"
-                accessibilityRole="button"
+              <Button
+                accessibilityHint="Opens the import screen"
+                icon={{
+                  ios: 'qrcode.viewfinder',
+                  android: 'qr_code_scanner',
+                  web: 'qr_code_scanner',
+                }}
+                label="Import from Link"
                 onPress={() => router.push('/daemon-import')}
-                style={({ pressed }) => [
-                  styles.emptyPrimary,
-                  { backgroundColor: theme.inverse, opacity: pressed ? 0.8 : 1 },
-                ]}>
-                <Text
-                  style={[styles.emptyPrimaryLabel, { color: theme.onInverse }]}>
-                  Import from Link
-                </Text>
-              </Pressable>
-              <Pressable
-                accessibilityLabel="Add daemon by hand"
-                accessibilityRole="button"
+              />
+              <Button
+                accessibilityHint="Opens the daemon editor"
+                icon={{ ios: 'plus', android: 'add', web: 'add' }}
+                label="Add by Hand"
                 onPress={() => router.push('/daemon-editor')}
-                style={({ pressed }) => [
-                  styles.emptySecondary,
-                  { borderColor: theme.borderStrong, opacity: pressed ? 0.7 : 1 },
-                ]}>
-                <Text
-                  style={[styles.emptySecondaryLabel, { color: theme.text }]}>
-                  Add by Hand
-                </Text>
-              </Pressable>
+                variant="secondary"
+              />
             </View>
           </View>
         )}
@@ -240,31 +229,23 @@ export default function DaemonsScreen() {
                   tintColor={theme.accent}
                 />
               ) : null}
-              <Pressable
-                accessibilityLabel={`Edit ${item.name}`}
-                accessibilityRole="button"
-                hitSlop={10}
-                onPress={(event: GestureResponderEvent) => {
+              <IconButton
+                glyphSize={22}
+                icon={{
+                  ios: 'ellipsis.circle',
+                  android: 'more_horiz',
+                  web: 'more_horiz',
+                }}
+                label={`Edit ${item.name}`}
+                onPress={(event) => {
                   event.stopPropagation();
                   router.push({
                     pathname: '/daemon-editor',
                     params: { id: item.id },
                   });
                 }}
-                style={({ pressed }) => [
-                  styles.editButton,
-                  { opacity: pressed ? 0.45 : 1 },
-                ]}>
-                <AppSymbol
-                  name={{
-                    ios: 'ellipsis.circle',
-                    android: 'more_horiz',
-                    web: 'more_horiz',
-                  }}
-                  size={22}
-                  tintColor={theme.textTertiary}
-                />
-              </Pressable>
+                tintColor={theme.textTertiary}
+              />
             </Pressable>
           );
         }}
@@ -289,7 +270,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginBottom: Spacing.three,
     marginHorizontal: Spacing.three,
-    marginTop: Spacing.two,
+    marginTop: Spacing.three,
   },
   row: {
     alignItems: 'center',
@@ -315,12 +296,6 @@ const styles = StyleSheet.create({
   lastUsed: { alignItems: 'center', flexDirection: 'row', gap: Spacing.one },
   lastUsedText: { fontSize: 12 },
   warningSlot: { marginTop: Spacing.two },
-  editButton: {
-    alignItems: 'center',
-    height: 44,
-    justifyContent: 'center',
-    width: 40,
-  },
   footer: {
     alignItems: 'flex-start',
     flexDirection: 'row',
@@ -332,27 +307,16 @@ const styles = StyleSheet.create({
   empty: {
     alignItems: 'center',
     gap: Spacing.two,
-    paddingHorizontal: Spacing.five,
+    paddingHorizontal: Spacing.four,
     paddingTop: Spacing.six,
   },
   emptyTitle: { fontSize: 22, fontWeight: '700' },
   emptyBody: { fontSize: 14, lineHeight: 20, maxWidth: 320, textAlign: 'center' },
-  emptyActions: { alignItems: 'center', gap: Spacing.two, marginTop: Spacing.three },
-  emptyPrimary: {
-    alignItems: 'center',
-    borderRadius: Radius.large,
-    justifyContent: 'center',
-    minHeight: 50,
-    paddingHorizontal: Spacing.five,
+  emptyActions: {
+    alignItems: 'stretch',
+    gap: Spacing.two,
+    marginTop: Spacing.three,
+    maxWidth: 320,
+    width: '100%',
   },
-  emptyPrimaryLabel: { fontSize: 15, fontWeight: '700' },
-  emptySecondary: {
-    alignItems: 'center',
-    borderRadius: Radius.large,
-    borderWidth: 1.5,
-    justifyContent: 'center',
-    minHeight: 50,
-    paddingHorizontal: Spacing.five,
-  },
-  emptySecondaryLabel: { fontSize: 15, fontWeight: '600' },
 });

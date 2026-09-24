@@ -14,11 +14,7 @@ import {
 
 import { AppSymbol } from '@/components/app-symbol';
 import { ConnectionNote } from '@/components/connection-note';
-import {
-  navigateBack,
-  ScreenHeader,
-  useScreenHeaderInset,
-} from '@/components/screen-header';
+import { navigateBack, ScreenHeader } from '@/components/screen-header';
 import { TransportBadge } from '@/components/transport-badge';
 import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -45,7 +41,6 @@ import {
 export default function DaemonImportScreen() {
   const theme = useTheme();
   const daemon = useDaemon();
-  const headerInset = useScreenHeaderInset();
   const [link, setLink] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -102,7 +97,7 @@ export default function DaemonImportScreen() {
       <ScreenHeader title="Import Link" />
       <ScrollView
         automaticallyAdjustKeyboardInsets
-        contentContainerStyle={[styles.content, { paddingTop: headerInset }]}
+        contentContainerStyle={styles.content}
         contentInsetAdjustmentBehavior="automatic"
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
@@ -313,7 +308,11 @@ export default function DaemonImportScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  content: { paddingBottom: Spacing.six, paddingHorizontal: Spacing.three },
+  content: {
+    paddingBottom: Spacing.six,
+    paddingHorizontal: Spacing.three,
+    paddingTop: Spacing.three,
+  },
   column: {
     alignSelf: 'center',
     gap: Spacing.three,
