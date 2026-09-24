@@ -8,6 +8,9 @@ import type {
   ProviderProbe,
   ResponsePayload,
   PaduClient,
+  SidebarGroupView,
+  SidebarGrouping,
+  SidebarOrdering,
   WorkspaceResult,
 } from '@padu/client';
 
@@ -41,10 +44,63 @@ export const daemonKeys = {
     'branches',
     cwd,
   ] as const,
+  sidebarGroups: (
+    profileId: string,
+    grouping: SidebarGrouping,
+    ordering: SidebarOrdering,
+    dayKey: string,
+    revealedOlder: Record<string, number>,
+  ) => [
+    'daemon',
+    profileId,
+    'sidebar-groups',
+    grouping,
+    ordering,
+    dayKey,
+    JSON.stringify(revealedOlder),
+  ] as const,
 };
 
 export async function loadTaskState(client: PaduClient): Promise<TaskState> {
   return expectResponse(await client.request({ type: 'loadTaskState' }), 'taskState');
+}
+
+export interface SidebarGroupsParams {
+  grouping: SidebarGrouping;
+  ordering: SidebarOrdering;
+  /** Client-local calendar day the daemon buckets `updated` groups against. */
+  today: Date;
+  nowSecs: number;
+  /** Client-local UTC offset in seconds; the daemon may run in another zone. */
+  localUtcOffsetSecs: number;
+  /** Per-group count of older sessions the user revealed through "show more". */
+  revealedOlder?: Record<string, number>;
+}
+
+/**
+ * Daemon-owned sidebar sort & grouping. Ordering and date-bucket grouping
+ * run on the daemon over its authoritative task state; callers only render
+ * the returned groups.
+ */
+export async function fetchSidebarGroups(
+  client: PaduClient,
+  params: SidebarGroupsParams,
+): Promise<SidebarGroupView[]> {
+  const response = expectResponse(
+    await client.request({
+      type: 'getSidebarGroups',
+      grouping: params.grouping,
+      ordering: params.ordering,
+      todayYear: params.today.getFullYear(),
+      todayMonth: params.today.getMonth() + 1,
+      todayDay: params.today.getDate(),
+      nowSecs: params.nowSecs,
+      localUtcOffsetSecs: params.localUtcOffsetSecs,
+      revealedOlder: params.revealedOlder ?? {},
+    }),
+    'sidebarGroups',
+  );
+  return response.groups;
 }
 
 export async function hydrateSession(

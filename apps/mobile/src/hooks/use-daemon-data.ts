@@ -1,5 +1,5 @@
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ProviderKind } from '@padu/client';
+import type { ProviderKind, SidebarGrouping, SidebarOrdering } from '@padu/client';
 import {
   PROVIDER_PROBE_CACHE_STALE_TIME,
   readProviderProbeCache,
@@ -8,6 +8,7 @@ import {
 
 import {
   daemonKeys,
+  fetchSidebarGroups,
   hydrateSession,
   loadDaemonSettings,
   loadTaskState,
@@ -38,6 +39,43 @@ export function useTaskState() {
   return useQuery({
     queryKey: daemonKeys.taskState(activeProfile?.id ?? 'disconnected'),
     queryFn: () => loadTaskState(requireClient(client)),
+    enabled: phase === 'connected' && Boolean(activeProfile && client),
+    staleTime: 1_000,
+  });
+}
+
+/**
+ * Daemon-owned session sort and grouping for the task list. Ordering,
+ * grouping, and pagination run on the daemon through `getSidebarGroups`;
+ * the list only maps the result to sections. Refetches when the view inputs
+ * move — grouping, ordering, reveal counts, or the local calendar day.
+ */
+export function useSidebarGroups(
+  grouping: SidebarGrouping,
+  ordering: SidebarOrdering,
+  dayKey: string,
+  revealedOlder: Record<string, number>,
+) {
+  const { activeProfile, client, phase } = useDaemon();
+  return useQuery({
+    queryKey: daemonKeys.sidebarGroups(
+      activeProfile?.id ?? 'disconnected',
+      grouping,
+      ordering,
+      dayKey,
+      revealedOlder,
+    ),
+    queryFn: () => {
+      const now = new Date();
+      return fetchSidebarGroups(requireClient(client), {
+        grouping,
+        ordering,
+        today: now,
+        nowSecs: Math.floor(now.getTime() / 1_000),
+        localUtcOffsetSecs: -now.getTimezoneOffset() * 60,
+        revealedOlder,
+      });
+    },
     enabled: phase === 'connected' && Boolean(activeProfile && client),
     staleTime: 1_000,
   });

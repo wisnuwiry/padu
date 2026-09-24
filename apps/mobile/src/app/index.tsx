@@ -1,4 +1,5 @@
-import type { AgentSession } from '@padu/client';
+import type { AgentSession, SidebarGrouping, SidebarOrdering } from '@padu/client';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -6,6 +7,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   RefreshControl,
   SectionList,
   StyleSheet,
@@ -29,17 +31,22 @@ import { TaskListEmpty } from '@/components/task-list-empty';
 import { ThemeToggleButton } from '@/components/theme-toggle-button';
 import { PaneMinima } from '@/constants/layout';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
-import { useTaskState } from '@/hooks/use-daemon-data';
+import { useSidebarGroups, useTaskState } from '@/hooks/use-daemon-data';
 import { useResponsive } from '@/hooks/use-responsive';
 import { useTheme } from '@/hooks/use-theme';
 import { useDaemon } from '@/lib/daemon-context';
 import { useRuntime } from '@/lib/runtime-context';
 import {
+  daemonGroupsToProjectSections,
+  daemonGroupsToSessionSections,
   displaySessionTitle,
-  groupSessions,
   providerLabel,
+  type SessionGroup,
   type SessionListItem,
 } from '@/lib/session-presentation';
+
+/** Matches the daemon's `SIDEBAR_PROJECT_REVEAL_BATCH`: one tap reveals more. */
+const SHOW_MORE_BATCH = 30;
 
 /** Stable identity so the list doesn't see a new key fn every render. */
 function sessionKeyExtractor(item: SessionListItem): string {
@@ -53,6 +60,38 @@ export default function TasksScreen() {
   const daemon = useDaemon();
   const runtime = useRuntime();
   const taskState = useTaskState();
+  // Sidebar view, mirroring the desktop sidebar: grouping (project/updated)
+  // and ordering (newest/oldest) drive the daemon-owned sort & grouping
+  // engine; collapsed sections and per-group "show more" counts are local
+  // presentation state that travels back with the request.
+  const [grouping, setGrouping] = useState<SidebarGrouping>('project');
+  const [ordering, setOrdering] = useState<SidebarOrdering>('newest');
+  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
+  const [revealedOlderCounts, setRevealedOlderCounts] = useState<Record<string, number>>({});
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  useEffect(() => {
+    void AsyncStorage.multiGet(['padu:sidebar_grouping', 'padu:sidebar_ordering'])
+      .then((entries) => {
+        for (const [key, value] of entries) {
+          if (key === 'padu:sidebar_grouping' && (value === 'project' || value === 'updated')) {
+            setGrouping(value);
+          }
+          if (key === 'padu:sidebar_ordering' && (value === 'newest' || value === 'oldest')) {
+            setOrdering(value);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+  useEffect(() => {
+    void AsyncStorage.setItem('padu:sidebar_grouping', grouping).catch(() => {});
+  }, [grouping]);
+  useEffect(() => {
+    void AsyncStorage.setItem('padu:sidebar_ordering', ordering).catch(() => {});
+  }, [ordering]);
+  // Daemon-owned ordering and grouping; the day key refetches when the
+  // local calendar day rolls over.
+  const sidebarGroups = useSidebarGroups(grouping, ordering, new Date().toDateString(), revealedOlderCounts);
   const { isWide } = useResponsive();
   const [search, setSearch] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -75,10 +114,26 @@ export default function TasksScreen() {
       ].some((value) => value?.toLocaleLowerCase().includes(query));
     });
   }, [search, taskState.data]);
-  const sections = useMemo(
-    () => taskState.data ? groupSessions(taskState.data.projects, visibleSessions) : [],
-    [taskState.data, visibleSessions],
-  );
+  const sections = useMemo(() => {
+    if (!taskState.data) return [];
+    const sessionsById = new Map(taskState.data.sessions.map((item) => [item.id, item]));
+    const visibleIds = new Set(visibleSessions.map((item) => item.id));
+    const groups = grouping === 'project'
+      ? daemonGroupsToProjectSections(
+        sidebarGroups.data ?? [],
+        sessionsById,
+        taskState.data.projects,
+        visibleIds,
+      )
+      : daemonGroupsToSessionSections(
+        sidebarGroups.data ?? [],
+        sessionsById,
+        taskState.data.projects,
+        visibleIds,
+      );
+    return groups.map((section) =>
+      collapsedGroups.has(section.id) ? { ...section, data: [] } : section);
+  }, [taskState.data, visibleSessions, sidebarGroups.data, grouping, collapsedGroups]);
   // Membership against every session (not the filtered view), so typing a
   // filter never yanks the open session — only a real disappearance refalls.
   const allSessionIds = useMemo(
@@ -135,11 +190,73 @@ export default function TasksScreen() {
     if (daemonPhase === 'connected') void taskRefetch();
     else void daemonReconnect();
   }, [daemonPhase, daemonReconnect, taskRefetch]);
-  const renderSectionHeader = useCallback(({ section }: { section: { title: string } }) => (
-    <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>
-      {section.title.toUpperCase()}
-    </Text>
-  ), [theme.textTertiary]);
+  const toggleSectionCollapsed = useCallback((sectionId: string) => {
+    setCollapsedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(sectionId)) next.delete(sectionId);
+      else next.add(sectionId);
+      return next;
+    });
+    // Collapsing resets the section's revealed older sessions, like desktop.
+    setRevealedOlderCounts((current) => {
+      if (!current[sectionId]) return current;
+      const next = { ...current };
+      delete next[sectionId];
+      return next;
+    });
+  }, []);
+  const revealMoreSessions = useCallback((sectionId: string) => {
+    setRevealedOlderCounts((current) => ({
+      ...current,
+      [sectionId]: (current[sectionId] ?? 0) + SHOW_MORE_BATCH,
+    }));
+  }, []);
+  const renderSectionHeader = useCallback(({ section }: { section: SessionGroup }) => {
+    const collapsed = collapsedGroups.has(section.id);
+    return (
+      <Pressable
+        accessibilityLabel={`${section.title}, ${collapsed ? 'collapsed' : 'expanded'}`}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: !collapsed }}
+        onPress={() => toggleSectionCollapsed(section.id)}
+        style={styles.sectionHeader}>
+        {section.kind === 'pinned' ? (
+          <PaduIcon name="pin" size={14} tintColor={theme.textTertiary} />
+        ) : section.kind === 'updated' ? null : (
+          <PaduIcon
+            name={collapsed ? 'folder' : 'folderOpen'}
+            size={14}
+            tintColor={theme.textTertiary}
+          />
+        )}
+        <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>
+          {section.title.toUpperCase()}
+        </Text>
+        <View style={styles.sectionChevron}>
+          <PaduIcon
+            name="chevronDown"
+            size={14}
+            tintColor={theme.textTertiary}
+            style={collapsed ? styles.chevronCollapsed : undefined}
+          />
+        </View>
+      </Pressable>
+    );
+  }, [collapsedGroups, theme.textTertiary, toggleSectionCollapsed]);
+  const renderSectionFooter = useCallback(({ section }: { section: SessionGroup }) => {
+    if (!section.hasMore || collapsedGroups.has(section.id)) return null;
+    return (
+      <Pressable
+        accessibilityLabel={`Show more tasks in ${section.title}`}
+        accessibilityRole="button"
+        onPress={() => revealMoreSessions(section.id)}
+        style={styles.showMore}>
+        <Text style={[styles.showMoreLabel, { color: theme.textTertiary }]}>
+          Show more
+        </Text>
+      </Pressable>
+    );
+  }, [collapsedGroups, revealMoreSessions, theme.textTertiary]);
   const renderSessionItem = useCallback(({ item }: { item: SessionListItem }) => (
     <SessionRow
       item={item}
@@ -178,6 +295,13 @@ export default function TasksScreen() {
       leading={<DaemonPicker />}
       right={(
         <>
+          <IconButton
+            accessibilityHint="Changes how tasks are grouped and ordered"
+            glyphSize={18}
+            icon="listFilter"
+            label="List options"
+            onPress={() => setOptionsOpen(true)}
+          />
           <IconButton
             accessibilityHint="Searches the task list"
             glyphSize={18}
@@ -222,6 +346,7 @@ export default function TasksScreen() {
         />
       )}
       renderSectionHeader={renderSectionHeader}
+      renderSectionFooter={renderSectionFooter}
       renderItem={renderSessionItem}
       ListHeaderComponent={listHeaderComponent}
       ListEmptyComponent={listEmptyComponent}
@@ -284,6 +409,42 @@ export default function TasksScreen() {
           visible
         />
       )}
+      <Sheet title="Task list" onDismiss={() => setOptionsOpen(false)} visible={optionsOpen}>
+        <SheetRow
+          label="Group by project"
+          leading={<PaduIcon name="folder" size={16} tintColor={theme.textSecondary} />}
+          onPress={() => {
+            setGrouping('project');
+            setOptionsOpen(false);
+          }}
+          selected={grouping === 'project'}
+        />
+        <SheetRow
+          label="Group by updated"
+          leading={<PaduIcon name="listFilter" size={16} tintColor={theme.textSecondary} />}
+          onPress={() => {
+            setGrouping('updated');
+            setOptionsOpen(false);
+          }}
+          selected={grouping === 'updated'}
+        />
+        <SheetRow
+          label="Newest first"
+          onPress={() => {
+            setOrdering('newest');
+            setOptionsOpen(false);
+          }}
+          selected={ordering === 'newest'}
+        />
+        <SheetRow
+          label="Oldest first"
+          onPress={() => {
+            setOrdering('oldest');
+            setOptionsOpen(false);
+          }}
+          selected={ordering === 'oldest'}
+        />
+      </Sheet>
     </>
   );
 
@@ -388,14 +549,31 @@ const styles = StyleSheet.create({
   fabDock: { position: 'absolute', right: Spacing.three, zIndex: 20 },
   list: { alignSelf: 'center', flex: 1, maxWidth: MaxContentWidth, width: '100%' },
   listContentEmpty: { flexGrow: 1 },
+  sectionHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    marginHorizontal: Spacing.three,
+    marginTop: 18,
+    marginBottom: 8,
+    minHeight: 44,
+  },
   sectionTitle: {
+    flexShrink: 1,
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0.65,
-    marginBottom: 8,
-    marginHorizontal: Spacing.three,
-    marginTop: 18,
   },
+  sectionChevron: { marginLeft: 'auto' },
+  chevronCollapsed: { transform: [{ rotate: '-90deg' }] },
+  showMore: {
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    marginHorizontal: Spacing.three,
+    minHeight: 44,
+    paddingLeft: 20,
+  },
+  showMoreLabel: { fontSize: 13, fontWeight: '600' },
   actionSheetTitle: {
     fontSize: 14,
     fontWeight: '700',

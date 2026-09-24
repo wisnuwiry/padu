@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgentSession, AgentTurn, Project } from '@padu/client';
+import type { AgentSession, AgentTurn, Project, SidebarGroupView } from '@padu/client';
 
 import {
+  daemonGroupsToProjectSections,
+  daemonGroupsToSessionSections,
   displaySessionTitle,
   buildTranscriptRows,
   contextPercent,
-  groupSessions,
   relativeSessionTime,
-  sessionDateGroup,
 } from './session-presentation';
 
 describe('mobile session presentation', () => {
@@ -17,25 +17,94 @@ describe('mobile session presentation', () => {
     );
   });
 
-  test('groups started sessions by local day and newest first', () => {
-    const now = new Date(2026, 7, 31, 12);
+  test('maps daemon groups to sections preserving order and folding older buckets', () => {
     const projects: Project[] = [{ id: 'project', name: 'Padu', path: '/padu', created_at: 1 }];
-    const current = session({ id: 'new', last_reply_at: epoch(2026, 7, 31, 11) });
-    const yesterday = session({ id: 'old', last_reply_at: epoch(2026, 7, 30, 20) });
-    const empty = session({ id: 'empty', last_reply_at: null, messages: [], turns: [] });
-    expect(groupSessions(projects, [yesterday, empty, current], now).map((group) => ({
+    const current = session({ id: 'new', last_reply_at: 300 });
+    const yesterday = session({ id: 'old', last_reply_at: 200 });
+    const pinned = session({ id: 'pinned', last_reply_at: 100, pinned_at: 1 });
+    const stale = session({ id: 'stale', last_reply_at: 50, archived_at: 1 });
+    const byId = new Map([current, yesterday, pinned, stale].map((item) => [item.id, item]));
+    const views: SidebarGroupView[] = [
+      { id: 'pinned', kind: 'pinned', sessionIds: ['pinned'], hasMore: false },
+      { id: 'updated:today', kind: 'updated', dateGroup: 'today', sessionIds: ['new'], hasMore: false },
+      { id: 'updated:yesterday', kind: 'updated', dateGroup: 'yesterday', sessionIds: ['old', 'missing'], hasMore: false },
+      { id: 'updated:more', kind: 'updated', dateGroup: 'more', sessionIds: ['stale'], hasMore: false },
+    ];
+    // Daemon groups arrive pre-sorted and pre-filtered (started, unarchived);
+    // the mapper only resolves display names and folds month/year/more into
+    // "Earlier", skipping ids absent from the snapshot.
+    expect(daemonGroupsToSessionSections(views, byId, projects).map((group) => ({
       id: group.id,
+      kind: group.kind,
       sessions: group.data.map((item) => item.session.id),
     }))).toEqual([
-      { id: 'today', sessions: ['new'] },
-      { id: 'yesterday', sessions: ['old'] },
+      { id: 'pinned', kind: 'pinned', sessions: ['pinned'] },
+      { id: 'updated:today', kind: 'updated', sessions: ['new'] },
+      { id: 'updated:yesterday', kind: 'updated', sessions: ['old'] },
+      { id: 'updated:more', kind: 'updated', sessions: ['stale'] },
     ]);
+  });
+
+  test('maps daemon project groups to sections like the desktop sidebar', () => {
+    const projects: Project[] = [
+      { id: 'p1', name: 'Alpha', path: '/alpha', created_at: 1 },
+      { id: 'p2', name: 'Beta', path: '/beta', created_at: 1 },
+    ];
+    const pinned = session({ id: 'pinned', project_id: 'p1', last_reply_at: 400, pinned_at: 1 });
+    const first = session({ id: 'first', project_id: 'p1', last_reply_at: 300 });
+    const second = session({ id: 'second', project_id: 'p2', last_reply_at: 200 });
+    const homeless = session({ id: 'homeless', project_id: 'px', last_reply_at: 100 });
+    const byId = new Map([pinned, first, second, homeless].map((item) => [item.id, item]));
+    const views: SidebarGroupView[] = [
+      { id: 'pinned', kind: 'pinned', sessionIds: ['pinned'], hasMore: false },
+      { id: 'project:p2', kind: 'project', projectId: 'p2', sessionIds: ['second'], hasMore: true },
+      { id: 'project:p1', kind: 'project', projectId: 'p1', sessionIds: ['first'], hasMore: false },
+      { id: 'projectless', kind: 'projectless', sessionIds: ['homeless', 'missing'], hasMore: false },
+      { id: 'project:gone', kind: 'project', projectId: 'gone', sessionIds: [], hasMore: false },
+    ];
+    // Pinned first, daemon group order kept, projectless trailing, empty
+    // groups without a pager dropped, unknown ids skipped.
+    expect(daemonGroupsToProjectSections(views, byId, projects).map((group) => ({
+      id: group.id,
+      kind: group.kind,
+      title: group.title,
+      sessions: group.data.map((item) => item.session.id),
+      hasMore: group.hasMore,
+    }))).toEqual([
+      { id: 'pinned', kind: 'pinned', title: 'Pinned', sessions: ['pinned'], hasMore: false },
+      { id: 'project:p2', kind: 'project', title: 'Beta', sessions: ['second'], hasMore: true },
+      { id: 'project:p1', kind: 'project', title: 'Alpha', sessions: ['first'], hasMore: false },
+      { id: 'projectless', kind: 'projectless', title: 'No project', sessions: ['homeless'], hasMore: false },
+    ]);
+  });
+
+  test('project sections respect the search-filtered visible set', () => {
+    const projects: Project[] = [{ id: 'p1', name: 'Alpha', path: '/alpha', created_at: 1 }];
+    const first = session({ id: 'first', project_id: 'p1', last_reply_at: 300 });
+    const second = session({ id: 'second', project_id: 'p1', last_reply_at: 200 });
+    const byId = new Map([first, second].map((item) => [item.id, item]));
+    const views: SidebarGroupView[] = [
+      { id: 'project:p1', kind: 'project', projectId: 'p1', sessionIds: ['first', 'second'], hasMore: false },
+    ];
+    const sections = daemonGroupsToProjectSections(views, byId, projects, new Set(['second']));
+    expect(sections.map((group) => group.data.map((item) => item.session.id))).toEqual([['second']]);
+  });
+
+  test('respects the search-filtered visible set', () => {
+    const projects: Project[] = [{ id: 'project', name: 'Padu', path: '/padu', created_at: 1 }];
+    const first = session({ id: 'first', last_reply_at: 300 });
+    const second = session({ id: 'second', last_reply_at: 200 });
+    const byId = new Map([first, second].map((item) => [item.id, item]));
+    const views: SidebarGroupView[] = [
+      { id: 'updated:today', kind: 'updated', dateGroup: 'today', sessionIds: ['first', 'second'], hasMore: false },
+    ];
+    const sections = daemonGroupsToSessionSections(views, byId, projects, new Set(['second']));
+    expect(sections.map((group) => group.data.map((item) => item.session.id))).toEqual([['second']]);
   });
 
   test('formats compact recency labels', () => {
     expect(relativeSessionTime(1_000, 1_030_000)).toBe('Now');
     expect(relativeSessionTime(1_000, 1_300_000)).toBe('5m');
-    expect(sessionDateGroup(epoch(2026, 7, 24, 12), new Date(2026, 7, 31, 12))).toBe('week');
   });
 
   test('reports context usage as a bounded percentage', () => {
@@ -240,8 +309,4 @@ function session(overrides: Partial<AgentSession>): AgentSession {
     turns: [],
     ...overrides,
   };
-}
-
-function epoch(year: number, month: number, day: number, hour: number) {
-  return Math.floor(new Date(year, month, day, hour).getTime() / 1_000);
 }
