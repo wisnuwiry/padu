@@ -15,7 +15,7 @@ import {
   type TextInputInstance,
 } from "react-native";
 
-import { AppSymbol } from "@/components/app-symbol";
+import { PaduIcon } from "@/components/padu-icon";
 import { ConnectionNote } from "@/components/connection-note";
 import { TransportBadge } from "@/components/transport-badge";
 import { MaxContentWidth, Radius, Spacing } from "@/constants/theme";
@@ -273,20 +273,8 @@ export default function DaemonEditorScreen() {
                   styles.revealButton,
                   { opacity: pressed ? 0.45 : 1 },
                 ]}>
-                <AppSymbol
-                  name={
-                    revealed
-                      ? {
-                          ios: "eye.slash",
-                          android: "visibility_off",
-                          web: "visibility_off",
-                        }
-                      : {
-                          ios: "eye",
-                          android: "visibility",
-                          web: "visibility",
-                        }
-                  }
+                <PaduIcon
+                  name={revealed ? "eyeOff" : "eye"}
                   size={18}
                   tintColor={theme.textSecondary}
                 />
@@ -304,12 +292,8 @@ export default function DaemonEditorScreen() {
 
           {localError ? (
             <View accessibilityLiveRegion="polite" style={styles.messageRow}>
-              <AppSymbol
-                name={{
-                  ios: "exclamationmark.circle.fill",
-                  android: "error",
-                  web: "error",
-                }}
+              <PaduIcon
+                name="alert"
                 size={14}
                 tintColor={theme.danger}
               />

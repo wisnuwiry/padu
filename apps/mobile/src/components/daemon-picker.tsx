@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
-import { AppSymbol } from '@/components/app-symbol';
+import { PaduIcon } from '@/components/padu-icon';
 import { ConnectionStatus } from '@/components/connection-status';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -27,8 +27,8 @@ export function DaemonPicker() {
       {daemon.activeProfile ? (
         <ConnectionStatus compact phase={daemon.phase} />
       ) : (
-        <AppSymbol
-          name={{ ios: 'plus', android: 'add', web: 'add' }}
+        <PaduIcon
+          name="plus"
           size={14}
           tintColor={theme.text}
         />
@@ -36,8 +36,8 @@ export function DaemonPicker() {
       <Text numberOfLines={1} style={[styles.name, { color: theme.text }]}>
         {daemon.activeProfile?.name ?? 'Add daemon'}
       </Text>
-      <AppSymbol
-        name={{ ios: 'chevron.down', android: 'keyboard_arrow_down', web: 'keyboard_arrow_down' }}
+      <PaduIcon
+        name="chevronDown"
         size={12}
         tintColor={theme.textTertiary}
       />

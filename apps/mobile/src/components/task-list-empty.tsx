@@ -1,6 +1,6 @@
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
-import { AppSymbol } from '@/components/app-symbol';
+import { PaduIcon } from '@/components/padu-icon';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useDaemon } from '@/lib/daemon-context';
@@ -55,8 +55,8 @@ export function TaskListEmpty({
   return (
     <View style={styles.state}>
       <View style={[styles.icon, { backgroundColor: theme.overlayStrong }]}>
-        <AppSymbol
-          name={{ ios: 'text.bubble', android: 'chat_bubble', web: 'chat' }}
+        <PaduIcon
+          name="bot"
           size={25}
           tintColor={theme.textTertiary}
         />

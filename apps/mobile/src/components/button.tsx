@@ -3,11 +3,10 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  type ColorValue,
   type GestureResponderEvent,
 } from 'react-native';
 
-import { AppSymbol } from '@/components/app-symbol';
+import { PaduIcon, type PaduIconName } from '@/components/padu-icon';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -34,7 +33,7 @@ export function Button({
   accessibilityHint?: string;
   busy?: boolean;
   disabled?: boolean;
-  icon?: Parameters<typeof AppSymbol>[0]['name'];
+  icon?: PaduIconName;
   label: string;
   onPress: (event: GestureResponderEvent) => void;
   variant?: ButtonVariant;
@@ -80,7 +79,7 @@ export function Button({
       ) : (
         <>
           {icon ? (
-            <AppSymbol name={icon} size={17} tintColor={palette.label} />
+            <PaduIcon name={icon} size={17} tintColor={palette.label} />
           ) : null}
           <Text
             style={[
@@ -115,12 +114,12 @@ export function IconButton({
   accessibilityHint?: string;
   disabled?: boolean;
   glyphSize?: number;
-  icon: Parameters<typeof AppSymbol>[0]['name'];
+  icon: PaduIconName;
   label: string;
   onPress: (event: GestureResponderEvent) => void;
   /** Box edge; 44 is the accessibility floor. */
   size?: number;
-  tintColor?: ColorValue;
+  tintColor?: string;
   variant?: IconButtonVariant;
 }) {
   const theme = useTheme();
@@ -146,7 +145,7 @@ export function IconButton({
           width: size,
         },
       ]}>
-      <AppSymbol
+      <PaduIcon
         name={icon}
         size={glyphSize}
         tintColor={tintColor ?? palette.icon}

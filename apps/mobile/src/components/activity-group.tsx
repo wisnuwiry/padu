@@ -10,25 +10,24 @@ import {
   activityPreviewWindow,
   activityRowDetail,
 } from '@padu/client/transcript-presentation';
-import type { SymbolViewProps } from 'expo-symbols';
 import { memo, useEffect, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { AppSymbol } from './app-symbol';
+import { PaduIcon, type PaduIconName } from './padu-icon';
 import { DiffView } from './diff-view';
 import { MonoFont, NativeTint } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
-const ACTIVITY_ICONS: Record<ActivityKind, SymbolViewProps['name']> = {
-  reasoning: { ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' },
-  command: { ios: 'terminal', android: 'terminal', web: 'terminal' },
-  fileChange: { ios: 'pencil.line', android: 'edit', web: 'edit' },
-  fileRead: { ios: 'doc.text', android: 'description', web: 'description' },
-  fileSearch: { ios: 'doc.text.magnifyingglass', android: 'find_in_page', web: 'find_in_page' },
-  fileList: { ios: 'folder', android: 'folder', web: 'folder' },
-  search: { ios: 'globe', android: 'travel_explore', web: 'travel_explore' },
-  plan: { ios: 'checklist', android: 'checklist', web: 'checklist' },
-  tool: { ios: 'wrench.and.screwdriver', android: 'build', web: 'build' },
+const ACTIVITY_ICONS: Record<ActivityKind, PaduIconName> = {
+  reasoning: 'sparkle',
+  command: 'terminal',
+  fileChange: 'pencil',
+  fileRead: 'file',
+  fileSearch: 'search',
+  fileList: 'folder',
+  search: 'globe',
+  plan: 'listChecks',
+  tool: 'wrench',
 };
 
 /**
@@ -65,10 +64,8 @@ export const ActivityGroup = memo(function ActivityGroup({
         <Text numberOfLines={1} style={[styles.groupTitle, { color: theme.textSecondary }]}>
           {activityHeaderTitle(activities, live)}
         </Text>
-        <AppSymbol
-          name={expanded
-            ? { ios: 'chevron.down', android: 'keyboard_arrow_down', web: 'keyboard_arrow_down' }
-            : { ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
+        <PaduIcon
+          name={expanded ? 'chevronDown' : 'chevronRight'}
           size={10}
           tintColor={theme.textGhost}
         />
@@ -87,10 +84,8 @@ export const ActivityGroup = memo(function ActivityGroup({
               <Text numberOfLines={1} style={[styles.showAllLabel, { color: theme.textSecondary }]}>
                 {showAll ? 'Show fewer activities' : `Show ${hiddenCount} more activities`}
               </Text>
-              <AppSymbol
-                name={showAll
-                  ? { ios: 'chevron.up', android: 'keyboard_arrow_up', web: 'keyboard_arrow_up' }
-                  : { ios: 'chevron.down', android: 'keyboard_arrow_down', web: 'keyboard_arrow_down' }}
+              <PaduIcon
+                name={showAll ? 'chevronUp' : 'chevronDown'}
                 size={10}
                 tintColor={theme.textGhost}
               />
@@ -130,7 +125,7 @@ function ActivityRow({ activity }: { activity: ActivityItem }) {
           styles.cardHeader,
           { backgroundColor: pressed && hasDetail ? theme.overlay : 'transparent' },
         ]}>
-        <AppSymbol
+        <PaduIcon
           name={ACTIVITY_ICONS[activity.kind]}
           size={12}
           tintColor={theme.textTertiary}
@@ -209,10 +204,8 @@ function ActivityState({
   const theme = useTheme();
   if (hasDetail) {
     return (
-      <AppSymbol
-        name={expanded
-          ? { ios: 'chevron.down', android: 'keyboard_arrow_down', web: 'keyboard_arrow_down' }
-          : { ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
+      <PaduIcon
+        name={expanded ? 'chevronDown' : 'chevronRight'}
         size={10}
         tintColor={theme.textGhost}
       />
@@ -221,8 +214,8 @@ function ActivityState({
   if (activity.reasoning) return null;
   if (activity.failed) {
     return (
-      <AppSymbol
-        name={{ ios: 'exclamationmark.triangle.fill', android: 'warning', web: 'warning' }}
+      <PaduIcon
+        name="alert"
         size={12}
         tintColor={theme.danger}
       />
@@ -261,10 +254,8 @@ function FileChangeRow({ change }: { change: ActivityFileChange }) {
           </Text>
         )}
         {hasDiff && (
-          <AppSymbol
-            name={open
-              ? { ios: 'chevron.down', android: 'keyboard_arrow_down', web: 'keyboard_arrow_down' }
-              : { ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
+          <PaduIcon
+            name={open ? 'chevronDown' : 'chevronRight'}
             size={10}
             tintColor={theme.textGhost}
           />

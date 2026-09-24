@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 
-import { AppSymbol } from '@/components/app-symbol';
+import { PaduIcon } from '@/components/padu-icon';
 import { Button, IconButton } from '@/components/button';
 import { ConnectionErrorCard } from '@/components/connection-error-card';
 import { ConnectionNote } from '@/components/connection-note';
@@ -60,18 +60,14 @@ export default function DaemonsScreen() {
             <IconButton
               accessibilityHint="Opens the camera to scan the desktop’s QR code"
               glyphSize={18}
-              icon={{
-                ios: 'qrcode.viewfinder',
-                android: 'qr_code_scanner',
-                web: 'qr_code_scanner',
-              }}
+              icon="scan"
               label="Import from link"
               onPress={() => router.push('/daemon-import')}
             />
             <IconButton
               accessibilityHint="Opens the daemon editor"
               glyphSize={18}
-              icon={{ ios: 'plus', android: 'add', web: 'add' }}
+              icon="plus"
               label="Add daemon"
               onPress={() => router.push('/daemon-editor')}
               variant="filled"
@@ -97,8 +93,8 @@ export default function DaemonsScreen() {
         )}
         ListEmptyComponent={(
           <View style={styles.empty}>
-            <AppSymbol
-              name={{ ios: 'server.rack', android: 'dns', web: 'dns' }}
+            <PaduIcon
+              name="server"
               size={26}
               tintColor={theme.textTertiary}
             />
@@ -112,17 +108,13 @@ export default function DaemonsScreen() {
             <View style={styles.emptyActions}>
               <Button
                 accessibilityHint="Opens the import screen"
-                icon={{
-                  ios: 'qrcode.viewfinder',
-                  android: 'qr_code_scanner',
-                  web: 'qr_code_scanner',
-                }}
+                icon="scan"
                 label="Import from Link"
                 onPress={() => router.push('/daemon-import')}
               />
               <Button
                 accessibilityHint="Opens the daemon editor"
-                icon={{ ios: 'plus', android: 'add', web: 'add' }}
+                icon="plus"
                 label="Add by Hand"
                 onPress={() => router.push('/daemon-editor')}
                 variant="secondary"
@@ -132,8 +124,8 @@ export default function DaemonsScreen() {
         )}
         ListFooterComponent={daemon.profiles.length ? (
           <View style={styles.footer}>
-            <AppSymbol
-              name={{ ios: 'key.horizontal', android: 'key', web: 'key' }}
+            <PaduIcon
+              name="lock"
               size={14}
               tintColor={theme.textTertiary}
             />
@@ -195,8 +187,8 @@ export default function DaemonsScreen() {
                   </Text>
                   {lastUsed ? (
                     <View style={styles.lastUsed}>
-                      <AppSymbol
-                        name={{ ios: 'clock', android: 'schedule', web: 'schedule' }}
+                      <PaduIcon
+                        name="clock"
                         size={11}
                         tintColor={theme.textTertiary}
                       />
@@ -219,23 +211,15 @@ export default function DaemonsScreen() {
               {selectingId === item.id ? (
                 <ActivityIndicator color={theme.accent} />
               ) : active ? (
-                <AppSymbol
-                  name={{
-                    ios: 'checkmark.circle.fill',
-                    android: 'check_circle',
-                    web: 'check_circle',
-                  }}
+                <PaduIcon
+                  name="check"
                   size={22}
                   tintColor={theme.accent}
                 />
               ) : null}
               <IconButton
                 glyphSize={22}
-                icon={{
-                  ios: 'ellipsis.circle',
-                  android: 'more_horiz',
-                  web: 'more_horiz',
-                }}
+                icon="ellipsis"
                 label={`Edit ${item.name}`}
                 onPress={(event) => {
                   event.stopPropagation();

@@ -23,7 +23,7 @@ import {
 } from 'react-native';
 
 import { ActivityGroup } from '@/components/activity-group';
-import { AppSymbol } from '@/components/app-symbol';
+import { PaduIcon } from '@/components/padu-icon';
 import { IconButton } from '@/components/button';
 import { ChromeSurface } from '@/components/chrome-surface';
 import { MarkdownMessage } from '@/components/markdown-message';
@@ -141,14 +141,14 @@ export function SessionView({
             <IconButton
               accessibilityHint="Starts a new task"
               glyphSize={18}
-              icon={{ ios: 'square.and.pencil', android: 'edit_square', web: 'edit' }}
+              icon="compose"
               label="New task"
               onPress={() => router.push('/new-task')}
             />
             <IconButton
               accessibilityHint="Opens the task menu"
               glyphSize={18}
-              icon={{ ios: 'ellipsis', android: 'more_horiz', web: 'more_horiz' }}
+              icon="ellipsis"
               label="Task options"
               onPress={() => setMenuOpen(true)}
             />
@@ -196,8 +196,8 @@ export function SessionView({
               accessibilityRole="button"
               onPress={() => listRef.current?.scrollToEnd({ animated: true })}
               style={({ pressed }) => [styles.jumpButtonInner, { opacity: pressed ? 0.6 : 1 }]}>
-              <AppSymbol
-                name={{ ios: 'arrow.down', android: 'arrow_downward', web: 'arrow_downward' }}
+              <PaduIcon
+                name="arrowDown"
                 size={15}
                 tintColor={theme.textSecondary}
               />
@@ -210,7 +210,7 @@ export function SessionView({
       <Sheet onDismiss={() => setMenuOpen(false)} visible={menuOpen}>
         <SheetRow
           label="Rename task"
-          leading={<AppSymbol name={{ ios: 'pencil', android: 'edit', web: 'edit' }} size={16} tintColor={theme.textSecondary} />}
+          leading={<PaduIcon name="pencil" size={16} tintColor={theme.textSecondary} />}
           onPress={() => {
             setMenuOpen(false);
             setRenaming(true);
@@ -218,7 +218,7 @@ export function SessionView({
         />
         <SheetRow
           label="Copy last response"
-          leading={<AppSymbol name={{ ios: 'doc.on.doc', android: 'content_copy', web: 'content_copy' }} size={16} tintColor={theme.textSecondary} />}
+          leading={<PaduIcon name="copy" size={16} tintColor={theme.textSecondary} />}
           onPress={() => {
             setMenuOpen(false);
             void copyLastResponse();
@@ -227,7 +227,7 @@ export function SessionView({
         <SheetRow
           destructive
           label="Delete task"
-          leading={<AppSymbol name={{ ios: 'trash', android: 'delete', web: 'delete' }} size={16} tintColor={theme.danger} />}
+          leading={<PaduIcon name="trash" size={16} tintColor={theme.danger} />}
           onPress={() => {
             setMenuOpen(false);
             confirmDelete();
@@ -250,8 +250,8 @@ function OfflineBanner() {
   const theme = useTheme();
   return (
     <View style={[styles.offlineBanner, { backgroundColor: theme.dangerSoft }]}>
-      <AppSymbol
-        name={{ ios: 'wifi.slash', android: 'wifi_off', web: 'wifi_off' }}
+      <PaduIcon
+        name="wifiOff"
         size={14}
         tintColor={theme.danger}
       />
@@ -310,10 +310,8 @@ function FoldRow({
       <Text numberOfLines={1} style={[styles.foldLabel, { color: theme.textTertiary }]}>
         {label}
       </Text>
-      <AppSymbol
-        name={expanded
-          ? { ios: 'chevron.down', android: 'keyboard_arrow_down', web: 'keyboard_arrow_down' }
-          : { ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
+      <PaduIcon
+        name={expanded ? 'chevronDown' : 'chevronRight'}
         size={10}
         tintColor={theme.textGhost}
       />
@@ -361,12 +359,8 @@ function MessageRow({
                 <View
                   key={`${attachment.path}:${attachment.name}`}
                   style={[styles.attachment, { backgroundColor: theme.overlayStrong }]}>
-                  <AppSymbol
-                    name={{
-                      ios: attachment.is_image ? 'photo' : 'doc',
-                      android: attachment.is_image ? 'image' : 'description',
-                      web: 'description',
-                    }}
+                  <PaduIcon
+                    name="file"
                     size={12}
                     tintColor={theme.textSecondary}
                   />
@@ -404,11 +398,11 @@ function ChangedFilesCard({ checkpoint }: { checkpoint: Checkpoint }) {
         accessibilityRole="button"
         onPress={() => setOpen((value) => !value)}
         style={({ pressed }) => [styles.changedHeader, { opacity: pressed ? 0.6 : 1 }]}>
-        <AppSymbol
-          name={{ ios: 'plusminus', android: 'difference', web: 'difference' }}
-          size={13}
-          tintColor={theme.textSecondary}
-        />
+          <PaduIcon
+            name="fileDiff"
+            size={13}
+            tintColor={theme.textSecondary}
+          />
         <Text style={[styles.changedTitle, { color: theme.textSecondary }]}>
           {checkpoint.files.length} file{checkpoint.files.length === 1 ? '' : 's'} changed
         </Text>
@@ -417,10 +411,8 @@ function ChangedFilesCard({ checkpoint }: { checkpoint: Checkpoint }) {
           <Text style={{ color: theme.textGhost }}> </Text>
           <Text style={{ color: theme.danger }}>−{checkpoint.deletions}</Text>
         </Text>
-        <AppSymbol
-          name={open
-            ? { ios: 'chevron.up', android: 'keyboard_arrow_up', web: 'keyboard_arrow_up' }
-            : { ios: 'chevron.down', android: 'keyboard_arrow_down', web: 'keyboard_arrow_down' }}
+        <PaduIcon
+          name={open ? 'chevronUp' : 'chevronDown'}
           size={11}
           tintColor={theme.textGhost}
         />

@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AppSymbol } from '@/components/app-symbol';
+import { PaduIcon } from '@/components/padu-icon';
 import { IconButton } from '@/components/button';
 import { ConnectionErrorCard } from '@/components/connection-error-card';
 import { DaemonPicker } from '@/components/daemon-picker';
@@ -181,7 +181,7 @@ export default function TasksScreen() {
           <IconButton
             accessibilityHint="Searches the task list"
             glyphSize={18}
-            icon={{ ios: 'magnifyingglass', android: 'search', web: 'search' }}
+            icon="search"
             label="Search"
             onPress={() => setSearchOpen(true)}
           />
@@ -237,7 +237,7 @@ export default function TasksScreen() {
       <IconButton
         accessibilityHint="Starts a new agent task"
         glyphSize={22}
-        icon={{ ios: 'square.and.pencil', android: 'edit_square', web: 'edit' }}
+        icon="compose"
         label="New task"
         onPress={() => router.push('/new-task')}
         size={52}
@@ -256,7 +256,7 @@ export default function TasksScreen() {
             </Text>
             <SheetRow
               label="Rename task"
-              leading={<AppSymbol name={{ ios: 'pencil', android: 'edit', web: 'edit' }} size={16} tintColor={theme.textSecondary} />}
+              leading={<PaduIcon name="pencil" size={16} tintColor={theme.textSecondary} />}
               onPress={() => {
                 const target = actionTarget;
                 setActionTarget(null);
@@ -266,7 +266,7 @@ export default function TasksScreen() {
             <SheetRow
               destructive
               label="Delete task"
-              leading={<AppSymbol name={{ ios: 'trash', android: 'delete', web: 'delete' }} size={16} tintColor={theme.danger} />}
+              leading={<PaduIcon name="trash" size={16} tintColor={theme.danger} />}
               onPress={() => {
                 const target = actionTarget;
                 setActionTarget(null);
@@ -313,8 +313,8 @@ export default function TasksScreen() {
                 />
               ) : (
                 <View style={styles.detailEmpty}>
-                  <AppSymbol
-                    name={{ ios: 'bubble.left.and.bubble.right', android: 'forum', web: 'forum' }}
+                  <PaduIcon
+                    name="list"
                     size={28}
                     tintColor={theme.textGhost}
                   />

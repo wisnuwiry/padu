@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
-import { AppSymbol } from '@/components/app-symbol';
+import { PaduIcon } from '@/components/padu-icon';
 import { NativeTint, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -21,8 +21,8 @@ export function SearchField({
   const theme = useTheme();
   return (
     <View style={[styles.field, { backgroundColor: theme.inset }]}>
-      <AppSymbol
-        name={{ ios: 'magnifyingglass', android: 'search', web: 'search' }}
+      <PaduIcon
+        name="search"
         size={16}
         tintColor={theme.textTertiary}
       />
@@ -45,8 +45,8 @@ export function SearchField({
         hitSlop={8}
         onPress={() => (value ? onChange('') : onClose())}
         style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
-        <AppSymbol
-          name={{ ios: 'xmark.circle.fill', android: 'cancel', web: 'cancel' }}
+        <PaduIcon
+          name="x"
           size={16}
           tintColor={theme.textTertiary}
         />

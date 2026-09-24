@@ -1,4 +1,5 @@
 import { IconButton } from '@/components/button';
+import type { PaduIconName } from '@/components/padu-icon';
 import { useAppearance } from '@/lib/appearance-context';
 import { THEME_LABELS, type ThemeChoice } from '@/lib/appearance';
 
@@ -9,17 +10,10 @@ const NEXT_CHOICE: Record<ThemeChoice, ThemeChoice> = {
   dark: 'system',
 };
 
-const CHOICE_ICONS: Record<
-  ThemeChoice,
-  Parameters<typeof IconButton>[0]['icon']
-> = {
-  system: {
-    ios: 'circle.lefthalf.filled',
-    android: 'brightness_auto',
-    web: 'brightness_auto',
-  },
-  light: { ios: 'sun.max', android: 'light_mode', web: 'light_mode' },
-  dark: { ios: 'moon', android: 'dark_mode', web: 'dark_mode' },
+const CHOICE_ICONS: Record<ThemeChoice, PaduIconName> = {
+  system: 'appearance',
+  light: 'sun',
+  dark: 'moon',
 };
 
 /**

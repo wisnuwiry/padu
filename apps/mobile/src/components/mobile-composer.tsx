@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AppSymbol } from './app-symbol';
+import { PaduIcon, type PaduIconName } from './padu-icon';
 import { AccessSheet, ModelSheet } from './session-option-sheets';
 import { MonoFont, NativeTint, Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -66,7 +66,7 @@ export function ComposerIconButton({
   active = false,
   disabled = false,
 }: {
-  icon: Parameters<typeof AppSymbol>[0]['name'];
+  icon: PaduIconName;
   label: string;
   onPress: () => void;
   active?: boolean;
@@ -88,7 +88,7 @@ export function ComposerIconButton({
           opacity: disabled ? 0.35 : pressed ? 0.55 : 1,
         },
       ]}>
-      <AppSymbol name={icon} size={19} tintColor={active ? NativeTint : theme.textSecondary} />
+      <PaduIcon name={icon} size={19} tintColor={active ? theme.accent : theme.textSecondary} />
     </Pressable>
   );
 }
@@ -128,10 +128,8 @@ export function SendButton({
       {busy ? (
         <ActivityIndicator color={disabled ? theme.textTertiary : theme.onInverse} size="small" />
       ) : (
-        <AppSymbol
-          name={queueing
-            ? { ios: 'text.append', android: 'playlist_add', web: 'playlist_add' }
-            : { ios: 'arrow.up', android: 'arrow_upward', web: 'arrow_upward' }}
+        <PaduIcon
+          name={queueing ? 'queue' : 'arrowUp'}
           size={17}
           tintColor={disabled ? theme.textTertiary : steering ? '#ffffff' : theme.onInverse}
         />
@@ -279,8 +277,8 @@ export function MobileComposer({ session }: { session: AgentSession }) {
               runtime.dismissError(session.id);
             }}
             style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
-            <AppSymbol
-              name={{ ios: 'xmark', android: 'close', web: 'close' }}
+            <PaduIcon
+              name="x"
               size={12}
               tintColor={theme.danger}
             />
@@ -291,8 +289,8 @@ export function MobileComposer({ session }: { session: AgentSession }) {
         <View
           key={message.id}
           style={[styles.queuedRow, { backgroundColor: theme.overlay, borderColor: theme.border }]}>
-          <AppSymbol
-            name={{ ios: 'clock', android: 'schedule', web: 'schedule' }}
+          <PaduIcon
+            name="clock"
             size={12}
             tintColor={theme.textTertiary}
           />
@@ -305,8 +303,8 @@ export function MobileComposer({ session }: { session: AgentSession }) {
             hitSlop={8}
             onPress={() => void runtime.removeQueuedMessage(session.id, message.id).catch(() => {})}
             style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
-            <AppSymbol
-              name={{ ios: 'xmark', android: 'close', web: 'close' }}
+            <PaduIcon
+              name="x"
               size={11}
               tintColor={theme.textTertiary}
             />
@@ -321,7 +319,7 @@ export function MobileComposer({ session }: { session: AgentSession }) {
           <>
             <ComposerIconButton
               active={session.runtime_mode !== 'fullAccess'}
-              icon={{ ios: 'hand.raised', android: 'front_hand', web: 'pan_tool' }}
+              icon="lock"
               label="Agent access"
               onPress={() => setAccessSheetOpen(true)}
             />
@@ -331,7 +329,7 @@ export function MobileComposer({ session }: { session: AgentSession }) {
         right={(
           <>
             <ComposerIconButton
-              icon={{ ios: 'speedometer', android: 'speed', web: 'speed' }}
+              icon="gauge"
               label="Model"
               onPress={() => setModelSheetOpen(true)}
             />
@@ -345,8 +343,8 @@ export function MobileComposer({ session }: { session: AgentSession }) {
                   styles.sendButton,
                   { backgroundColor: theme.dangerSoft, opacity: pressed ? 0.55 : 1 },
                 ]}>
-                <AppSymbol
-                  name={{ ios: 'stop.fill', android: 'stop', web: 'stop' }}
+                <PaduIcon
+                  name="stopFilled"
                   size={14}
                   tintColor={theme.danger}
                 />
@@ -397,8 +395,8 @@ function PermissionPanel({
   return (
     <RequestPanel borderColor={theme.warning}>
       <View style={styles.requestHeading}>
-        <AppSymbol
-          name={{ ios: 'hand.raised.fill', android: 'front_hand', web: 'pan_tool' }}
+        <PaduIcon
+          name="bell"
           size={16}
           tintColor={theme.warning}
         />
@@ -557,10 +555,10 @@ function UserInputPanel({
                 )}
               </View>
               {checked && (
-                <AppSymbol
-                  name={{ ios: 'checkmark', android: 'check', web: 'check' }}
+                <PaduIcon
+                  name="check"
                   size={14}
-                  tintColor={NativeTint}
+                  tintColor={theme.accent}
                 />
               )}
             </Pressable>

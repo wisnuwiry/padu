@@ -57,8 +57,8 @@ export function ScreenHeader({
       <View style={styles.row}>
         {back ? (
           <IconButton
-            glyphSize={17}
-            icon={{ ios: "chevron.left", android: "arrow_back", web: "arrow_back" }}
+            glyphSize={21}
+            icon="chevronLeft"
             label="Back"
             onPress={navigateBack}
           />

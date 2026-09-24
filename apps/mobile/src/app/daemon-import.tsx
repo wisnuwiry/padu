@@ -12,7 +12,7 @@ import {
   View,
 } from 'react-native';
 
-import { AppSymbol } from '@/components/app-symbol';
+import { PaduIcon } from '@/components/padu-icon';
 import { ConnectionNote } from '@/components/connection-note';
 import { navigateBack, ScreenHeader } from '@/components/screen-header';
 import { TransportBadge } from '@/components/transport-badge';
@@ -121,24 +121,16 @@ export default function DaemonImportScreen() {
                 opacity: pressed ? 0.7 : 1,
               },
             ]}>
-            <AppSymbol
-              name={{
-                ios: 'qrcode.viewfinder',
-                android: 'qr_code_scanner',
-                web: 'qr_code_scanner',
-              }}
+            <PaduIcon
+              name="scan"
               size={17}
               tintColor={theme.text}
             />
             <Text style={[styles.scanLabel, { color: theme.text }]}>
               Scan QR Code
             </Text>
-            <AppSymbol
-              name={{
-                ios: 'chevron.forward',
-                android: 'chevron_right',
-                web: 'chevron_right',
-              }}
+            <PaduIcon
+              name="chevronRight"
               size={13}
               tintColor={theme.textTertiary}
             />
@@ -230,12 +222,8 @@ export default function DaemonImportScreen() {
 
           {error ? (
             <View accessibilityLiveRegion="polite" style={styles.noteRow}>
-              <AppSymbol
-                name={{
-                  ios: 'exclamationmark.triangle',
-                  android: 'warning',
-                  web: 'warning',
-                }}
+              <PaduIcon
+                name="alert"
                 size={14}
                 tintColor={theme.danger}
               />

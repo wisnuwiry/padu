@@ -1,6 +1,6 @@
 import { StyleSheet, Text, View } from 'react-native';
 
-import { AppSymbol } from '@/components/app-symbol';
+import { PaduIcon, type PaduIconName } from '@/components/padu-icon';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import type { ConnectionTone } from '@/lib/daemon-profile';
@@ -8,15 +8,11 @@ import type { ConnectionTone } from '@/lib/daemon-profile';
 /** `neutral` is for guidance rather than a connection state. */
 type NoteTone = ConnectionTone | 'neutral';
 
-const TONE_ICONS: Record<NoteTone, Parameters<typeof AppSymbol>[0]['name']> = {
-  secure: { ios: 'lock.fill', android: 'lock', web: 'lock' },
-  warning: { ios: 'wifi', android: 'wifi', web: 'wifi' },
-  danger: {
-    ios: 'exclamationmark.shield.fill',
-    android: 'gpp_bad',
-    web: 'warning',
-  },
-  neutral: { ios: 'info.circle', android: 'info', web: 'info' },
+const TONE_ICONS: Record<NoteTone, PaduIconName> = {
+  secure: 'lock',
+  warning: 'wifi',
+  danger: 'alert',
+  neutral: 'info',
 };
 
 /**
@@ -43,7 +39,7 @@ export function ConnectionNote({
 
   return (
     <View style={styles.row}>
-      <AppSymbol name={TONE_ICONS[tone]} size={14} tintColor={color} />
+      <PaduIcon name={TONE_ICONS[tone]} size={14} tintColor={color} />
       <Text style={[styles.text, { color }]}>{text}</Text>
     </View>
   );

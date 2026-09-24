@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AppSymbol } from '@/components/app-symbol';
+import { PaduIcon, type PaduIconName } from '@/components/padu-icon';
 import { ThemeChoiceControl } from '@/components/theme-choice-control';
 import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -54,17 +54,17 @@ export function Onboarding() {
         <View style={styles.cards}>
           <OnboardingHighlight
             description="Padu lives on your computer, workstation, or private server — the phone just drives it."
-            icon={{ ios: 'laptopcomputer', android: 'laptop_mac', web: 'laptop_mac' }}
+            icon="laptop"
             title="Runs on your machine"
           />
           <OnboardingHighlight
             description="Save several hosts and move between them without re-entering credentials."
-            icon={{ ios: 'arrow.left.arrow.right', android: 'swap_horiz', web: 'swap_horiz' }}
+            icon="server"
             title="Switch anytime"
           />
           <OnboardingHighlight
             description="Tokens stay in this device’s keychain and go straight to the host you choose."
-            icon={{ ios: 'lock.shield', android: 'shield_lock', web: 'lock' }}
+            icon="lock"
             title="Private by default"
           />
         </View>
@@ -83,8 +83,8 @@ export function Onboarding() {
               styles.primaryButton,
               { backgroundColor: theme.inverse, opacity: pressed ? 0.78 : 1 },
             ]}>
-            <AppSymbol
-              name={{ ios: 'plus', android: 'add', web: 'add' }}
+            <PaduIcon
+              name="plus"
               size={17}
               tintColor={theme.onInverse}
             />
@@ -102,8 +102,8 @@ export function Onboarding() {
                 borderColor: theme.borderStrong,
               },
             ]}>
-            <AppSymbol
-              name={{ ios: 'qrcode.viewfinder', android: 'qr_code_scanner', web: 'qr_code_scanner' }}
+            <PaduIcon
+              name="scan"
               size={16}
               tintColor={theme.textSecondary}
             />
@@ -121,7 +121,7 @@ function OnboardingHighlight({
   title,
 }: {
   description: string;
-  icon: Parameters<typeof AppSymbol>[0]['name'];
+  icon: PaduIconName;
   title: string;
 }) {
   const theme = useTheme();
@@ -132,7 +132,7 @@ function OnboardingHighlight({
           styles.highlightIcon,
           { backgroundColor: theme.background, borderColor: theme.borderStrong },
         ]}>
-        <AppSymbol name={icon} size={15} tintColor={theme.textSecondary} />
+        <PaduIcon name={icon} size={15} tintColor={theme.textSecondary} />
       </View>
       <View style={styles.highlightCopy}>
         <Text style={[styles.highlightTitle, { color: theme.text }]}>{title}</Text>

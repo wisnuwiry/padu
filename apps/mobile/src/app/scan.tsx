@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AppSymbol } from '@/components/app-symbol';
+import { PaduIcon } from '@/components/padu-icon';
 import { navigateBack } from '@/components/screen-header';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -115,8 +115,8 @@ export default function ScanScreen() {
         ]}>
         <View
           style={[styles.chrome, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-          <AppSymbol
-            name={{ ios: 'qrcode.viewfinder', android: 'qr_code_scanner', web: 'qr_code_scanner' }}
+          <PaduIcon
+            name="scan"
             size={17}
             tintColor={theme.textSecondary}
           />
@@ -129,8 +129,8 @@ export default function ScanScreen() {
             hitSlop={6}
             onPress={navigateBack}
             style={({ pressed }) => [styles.closeButton, { opacity: pressed ? 0.5 : 1 }]}>
-            <AppSymbol
-              name={{ ios: 'xmark', android: 'close', web: 'close' }}
+            <PaduIcon
+              name="x"
               size={15}
               tintColor={theme.textSecondary}
             />
@@ -157,8 +157,8 @@ export default function ScanScreen() {
           ) : (
             <View
               style={[styles.prompt, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-              <AppSymbol
-                name={{ ios: 'camera.badge.ellipsis', android: 'no_photography', web: 'no_photography' }}
+              <PaduIcon
+                name="eyeOff"
                 size={22}
                 tintColor={theme.textTertiary}
               />
@@ -210,8 +210,8 @@ export default function ScanScreen() {
             styles.manualButton,
             { backgroundColor: theme.surface, borderColor: theme.borderStrong, opacity: pressed ? 0.7 : 1 },
           ]}>
-          <AppSymbol
-            name={{ ios: 'keyboard', android: 'keyboard', web: 'keyboard' }}
+          <PaduIcon
+            name="cornerDownLeft"
             size={16}
             tintColor={theme.textSecondary}
           />

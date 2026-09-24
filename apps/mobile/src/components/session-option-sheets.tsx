@@ -19,7 +19,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import { AppSymbol } from './app-symbol';
+import { PaduIcon } from './padu-icon';
 import { ProviderIcon } from './provider-icon';
 import { Sheet, SheetRow } from './sheet';
 import { NativeTint, Radius } from '@/constants/theme';
@@ -244,18 +244,18 @@ export function ModelPickerSheet({
               accessibilityRole="button"
               onPress={() => slideTo(0)}
               style={({ pressed }) => [styles.backRow, { opacity: pressed ? 0.55 : 1 }]}>
-              <AppSymbol
-                name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }}
+              <PaduIcon
+                name="chevronLeft"
                 size={14}
-                tintColor={NativeTint}
+                tintColor={theme.accent}
               />
-              <Text style={[styles.backLabel, { color: NativeTint }]}>
+              <Text style={[styles.backLabel, { color: theme.accent }]}>
                 {browsing ? providerLabel(browsing) : 'Provider'}
               </Text>
             </Pressable>
             <View style={[styles.searchField, { backgroundColor: theme.overlayStrong }]}>
-              <AppSymbol
-                name={{ ios: 'magnifyingglass', android: 'search', web: 'search' }}
+              <PaduIcon
+                name="search"
                 size={14}
                 tintColor={theme.textTertiary}
               />
@@ -277,8 +277,8 @@ export function ModelPickerSheet({
                   hitSlop={8}
                   onPress={() => setSearch('')}
                   style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
-                  <AppSymbol
-                    name={{ ios: 'xmark.circle.fill', android: 'cancel', web: 'cancel' }}
+                  <PaduIcon
+                    name="x"
                     size={15}
                     tintColor={theme.textTertiary}
                   />

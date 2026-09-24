@@ -41,6 +41,8 @@
     "mobile:web": "bun run --filter @padu/mobile web",
     "mobile:typecheck": "bun run --filter @padu/mobile typecheck",
     "mobile:test": "bun run --filter @padu/mobile test",
+    "mobile:icons:generate": "bun ./scripts/generate-mobile-icons.ts",
+    "mobile:icons:check": "bun ./scripts/generate-mobile-icons.ts --check",
     "mobile:clean": "bun ./scripts/clean.ts --mobile"
   },
   "private": true,

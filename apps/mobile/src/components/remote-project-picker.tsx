@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AppSymbol } from './app-symbol';
+import { PaduIcon, type PaduIconName } from './padu-icon';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import {
@@ -151,8 +151,8 @@ export function RemoteProjectPicker({
 
           <View style={styles.pathArea}>
             <View style={[styles.pathField, { backgroundColor: theme.surface }]}>
-              <AppSymbol
-                name={{ ios: 'folder', android: 'folder', web: 'folder' }}
+              <PaduIcon
+                name="folder"
                 size={16}
                 tintColor={theme.textTertiary}
               />
@@ -177,8 +177,8 @@ export function RemoteProjectPicker({
                 hitSlop={8}
                 onPress={() => visit(pathDraft.trim() || null)}
                 style={({ pressed }) => [styles.goButton, { opacity: pressed ? 0.45 : 1 }]}>
-                <AppSymbol
-                  name={{ ios: 'arrow.right.circle.fill', android: 'arrow_circle_right', web: 'arrow_circle_right' }}
+                <PaduIcon
+                  name="arrowRight"
                   size={22}
                   tintColor={pathDraft.trim() ? theme.accent : theme.textTertiary}
                 />
@@ -191,13 +191,13 @@ export function RemoteProjectPicker({
               />
               <LocationButton
                 disabled={!directory.data?.parent}
-                icon={{ ios: 'arrow.up', android: 'arrow_upward', web: 'arrow_upward' }}
+                icon="arrowUp"
                 label="Parent"
                 onPress={() => visit(directory.data?.parent ?? null)}
               />
               <LocationButton
                 disabled={!directory.data?.filesystem_root}
-                icon={{ ios: 'internaldrive', android: 'hard_drive', web: 'hard_drive' }}
+                icon="server"
                 label="File system"
                 onPress={() => visit(directory.data?.filesystem_root ?? null)}
               />
@@ -247,12 +247,12 @@ export function RemoteProjectPicker({
 
 function LocationButton({
   label,
-  icon = { ios: 'house', android: 'home', web: 'home' },
+  icon = 'house',
   disabled = false,
   onPress,
 }: {
   label: string;
-  icon?: Parameters<typeof AppSymbol>[0]['name'];
+  icon?: PaduIconName;
   disabled?: boolean;
   onPress: () => void;
 }) {
@@ -266,7 +266,7 @@ function LocationButton({
         styles.locationButton,
         { backgroundColor: theme.surfaceMuted, opacity: disabled ? 0.35 : pressed ? 0.55 : 1 },
       ]}>
-      <AppSymbol name={icon} size={13} tintColor={theme.textSecondary} />
+      <PaduIcon name={icon} size={13} tintColor={theme.textSecondary} />
       <Text style={[styles.locationText, { color: theme.textSecondary }]}>{label}</Text>
     </Pressable>
   );
@@ -284,15 +284,15 @@ function FolderRow({ entry, onOpen }: { entry: WorkingTreeEntry; onOpen: () => v
         { backgroundColor: pressed ? theme.backgroundSelected : theme.surface },
       ]}>
       <View style={[styles.folderIcon, { backgroundColor: theme.surfaceMuted }]}>
-        <AppSymbol
-          name={{ ios: 'folder.fill', android: 'folder', web: 'folder' }}
+        <PaduIcon
+          name="folder"
           size={18}
           tintColor={theme.textSecondary}
         />
       </View>
       <Text numberOfLines={1} style={[styles.folderName, { color: theme.text }]}>{entry.name}</Text>
-      <AppSymbol
-        name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
+      <PaduIcon
+        name="chevronRight"
         size={14}
         tintColor={theme.textTertiary}
       />
@@ -306,8 +306,8 @@ function DirectoryEmpty({ loading }: { loading: boolean }) {
     <View style={styles.empty}>
       {loading ? <ActivityIndicator color={theme.textTertiary} /> : (
         <View style={[styles.emptyIcon, { backgroundColor: theme.surfaceMuted }]}>
-          <AppSymbol
-            name={{ ios: 'folder', android: 'folder_open', web: 'folder_open' }}
+          <PaduIcon
+            name="folderOpen"
             size={24}
             tintColor={theme.textTertiary}
           />
