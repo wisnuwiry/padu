@@ -936,6 +936,31 @@ impl Backend for PaduBackend {
                 let matches = self.task_store.session_message_search(query, limit)()?;
                 Ok(ResponsePayload::SessionMessageMatches { matches })
             }
+            Command::GetSidebarGroups {
+                grouping,
+                ordering,
+                today_year,
+                today_month,
+                today_day,
+                now_secs,
+                local_utc_offset_secs,
+                revealed_older,
+            } => {
+                let today = chrono::NaiveDate::from_ymd_opt(today_year, today_month, today_day)
+                    .ok_or_else(|| anyhow!("invalid sidebar today date"))?;
+                let state = self.task_state.lock();
+                let groups = padu_protocol::sidebar::build_sidebar_groups(
+                    &state.projects,
+                    &state.sessions,
+                    grouping,
+                    ordering,
+                    today,
+                    now_secs,
+                    local_utc_offset_secs,
+                    &revealed_older,
+                );
+                Ok(ResponsePayload::SidebarGroups { groups })
+            }
             Command::ListProviderSessions { provider, limit } => {
                 const MAX_PROVIDER_SESSIONS: usize = 500;
                 let limit = limit.min(MAX_PROVIDER_SESSIONS);
@@ -2414,6 +2439,7 @@ fn handle_driver_command(
         | Command::SetSessionPinned { .. }
         | Command::SetSessionArchived { .. }
         | Command::HydrateSession { .. }
+        | Command::GetSidebarGroups { .. }
         | Command::SearchSessionMessages { .. }
         | Command::ListProviderSessions { .. }
         | Command::LoadProviderSession { .. }
