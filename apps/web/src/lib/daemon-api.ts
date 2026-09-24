@@ -27,6 +27,9 @@ import type {
   ResponsePayload,
   RuntimeMode,
   SessionMessageMatch,
+  SidebarGroupView,
+  SidebarGrouping,
+  SidebarOrdering,
   SlashCommand,
   SkillsCatalog,
   CreateTask,
@@ -90,6 +93,14 @@ export const daemonKeys = {
     ['daemon', address, 'workspace-file', cwd, path] as const,
   workspaceDiff: (address: string, cwd: string, source: ReviewDiffSource = 'uncommitted') =>
     ['daemon', address, 'workspace-diff', cwd, JSON.stringify(source)] as const,
+  sidebarGroups: (
+    address: string,
+    grouping: SidebarGrouping,
+    ordering: SidebarOrdering,
+    dayKey: string,
+    revealedOlder: Record<string, number>,
+  ) =>
+    ['daemon', address, 'sidebar-groups', grouping, ordering, dayKey, JSON.stringify(revealedOlder)] as const,
 }
 
 export async function loadTaskState(client: PaduClient): Promise<TaskState> {
@@ -229,6 +240,45 @@ export async function searchSessionMessages(
     'sessionMessageMatches',
   )
   return response.matches
+}
+
+export interface SidebarGroupsParams {
+  grouping: SidebarGrouping
+  ordering: SidebarOrdering
+  /** Client-local calendar day the daemon buckets `updated` groups against. */
+  today: Date
+  nowSecs: number
+  /** Client-local UTC offset in seconds; the daemon may run in another zone. */
+  localUtcOffsetSecs: number
+  revealedOlder?: Record<string, number>
+}
+
+/**
+ * Daemon-owned sidebar sort & grouping. Ordering, date-bucket grouping,
+ * project grouping, and recent-window pagination all run on the daemon over
+ * its authoritative task state; callers only render the returned groups and
+ * keep presentation state (collapsed sections, reveal counts travel back as
+ * `revealedOlder`).
+ */
+export async function fetchSidebarGroups(
+  client: PaduClient,
+  params: SidebarGroupsParams,
+): Promise<SidebarGroupView[]> {
+  const response = expectResponse(
+    await client.request({
+      type: 'getSidebarGroups',
+      grouping: params.grouping,
+      ordering: params.ordering,
+      todayYear: params.today.getFullYear(),
+      todayMonth: params.today.getMonth() + 1,
+      todayDay: params.today.getDate(),
+      nowSecs: params.nowSecs,
+      localUtcOffsetSecs: params.localUtcOffsetSecs,
+      revealedOlder: params.revealedOlder ?? {},
+    }),
+    'sidebarGroups',
+  )
+  return response.groups
 }
 
 export async function listProviderSessions(

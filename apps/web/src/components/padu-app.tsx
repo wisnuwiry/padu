@@ -99,7 +99,7 @@ import {
   type RememberedNavigation,
 } from '@/lib/navigation-memory'
 import { transcriptLinkRoute } from '@/lib/transcript-links'
-import { readSidebarGrouping, readSidebarOrdering, sidebarVisualSessions } from '@/lib/sidebar-presentation'
+import { fetchSidebarVisualSessions, readSidebarGrouping, readSidebarOrdering } from '@/lib/sidebar-presentation'
 import { shouldShowInitialDestination } from '@/lib/workspace-presentation'
 import { usePrimaryShortcut } from '@/lib/platform'
 import { agentPresetIdLabel } from '@/lib/agent-preset-presentation'
@@ -905,30 +905,32 @@ export function PaduApp() {
   }
 
   function selectAdjacentSession(delta: number) {
-    if (!taskState.data) return
-    const started = sidebarVisualSessions(
-      taskState.data.projects,
-      taskState.data.sessions,
-      readSidebarGrouping(),
-      readSidebarOrdering(),
-      t('sidebar.unknown_project'),
-      t('project.no_project_name'),
-    )
-    if (!started.length) return
-    const currentId = search.session
-    const currentIndex = currentId ? started.findIndex((s) => s.id === currentId) : -1
-    let nextIndex: number
-    if (currentIndex >= 0) {
-      nextIndex = delta > 0
-        ? Math.min(currentIndex + 1, started.length - 1)
-        : Math.max(currentIndex - 1, 0)
-    } else {
-      nextIndex = delta > 0 ? 0 : started.length - 1
-    }
-    const nextSession = started[nextIndex]
-    if (nextSession) {
-      selectSession(nextSession.id)
-    }
+    if (!taskState.data || !client) return
+    // Visual order comes from the daemon-owned sidebar engine so ↑/↓ follow
+    // the rendered sequence. One-shot keypress, so an async fetch is fine.
+    const data = taskState.data
+    void fetchSidebarVisualSessions(client, data.sessions, {
+      grouping: readSidebarGrouping(),
+      ordering: readSidebarOrdering(),
+    })
+      .then((started) => {
+        if (!started.length) return
+        const currentId = search.session
+        const currentIndex = currentId ? started.findIndex((s) => s.id === currentId) : -1
+        let nextIndex: number
+        if (currentIndex >= 0) {
+          nextIndex = delta > 0
+            ? Math.min(currentIndex + 1, started.length - 1)
+            : Math.max(currentIndex - 1, 0)
+        } else {
+          nextIndex = delta > 0 ? 0 : started.length - 1
+        }
+        const nextSession = started[nextIndex]
+        if (nextSession) {
+          selectSession(nextSession.id)
+        }
+      })
+      .catch(() => {})
   }
 
   async function resumeProviderSession(summary: ProviderSessionSummary) {
