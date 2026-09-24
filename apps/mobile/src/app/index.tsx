@@ -5,10 +5,12 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  FlatList,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   RefreshControl,
+  ScrollView,
   SectionList,
   StyleSheet,
   Text,
@@ -30,7 +32,7 @@ import { Sheet, SheetRow } from '@/components/sheet';
 import { TaskListEmpty } from '@/components/task-list-empty';
 import { ThemeToggleButton } from '@/components/theme-toggle-button';
 import { PaneMinima } from '@/constants/layout';
-import { MaxContentWidth, Spacing } from '@/constants/theme';
+import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useSidebarGroups, useTaskState } from '@/hooks/use-daemon-data';
 import { useResponsive } from '@/hooks/use-responsive';
 import { useTheme } from '@/hooks/use-theme';
@@ -41,6 +43,8 @@ import {
   daemonGroupsToSessionSections,
   displaySessionTitle,
   providerLabel,
+  relativeSessionTime,
+  sessionTimestamp,
   type SessionGroup,
   type SessionListItem,
 } from '@/lib/session-presentation';
@@ -63,12 +67,15 @@ export default function TasksScreen() {
   // Sidebar view, mirroring the desktop sidebar: grouping (project/updated)
   // and ordering (newest/oldest) drive the daemon-owned sort & grouping
   // engine; collapsed sections and per-group "show more" counts are local
-  // presentation state that travels back with the request.
+  // presentation state that travels back with the request. Project grouping
+  // renders as horizontally scrollable project tabs; updated grouping keeps
+  // the stacked date sections.
   const [grouping, setGrouping] = useState<SidebarGrouping>('project');
   const [ordering, setOrdering] = useState<SidebarOrdering>('newest');
   const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
   const [revealedOlderCounts, setRevealedOlderCounts] = useState<Record<string, number>>({});
   const [optionsOpen, setOptionsOpen] = useState(false);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
   useEffect(() => {
     void AsyncStorage.multiGet(['padu:sidebar_grouping', 'padu:sidebar_ordering'])
       .then((entries) => {
@@ -98,6 +105,9 @@ export default function TasksScreen() {
   const [actionTarget, setActionTarget] = useState<AgentSession | null>(null);
   const [renameTarget, setRenameTarget] = useState<AgentSession | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const projectNamesById = useMemo(() => (
+    new Map((taskState.data?.projects ?? []).map((project) => [project.id, project.name]))
+  ), [taskState.data]);
   const visibleSessions = useMemo(() => {
     if (!taskState.data) return [];
     const query = search.trim().toLocaleLowerCase();
@@ -134,15 +144,41 @@ export default function TasksScreen() {
     return groups.map((section) =>
       collapsedGroups.has(section.id) ? { ...section, data: [] } : section);
   }, [taskState.data, visibleSessions, sidebarGroups.data, grouping, collapsedGroups]);
+  // Project tabs: pinned tasks get their own leading tab, then one tab per
+  // project / projectless group — horizontally scrollable.
+  const tabs = useMemo(
+    () => sections.filter((section) => (
+      (section.kind === 'pinned' ||
+        section.kind === 'project' ||
+        section.kind === 'projectless') &&
+      section.data.length > 0
+    )),
+    [sections],
+  );
+  const activeTab = useMemo(() => (
+    tabs.find((tab) => tab.id === activeTabId) ?? tabs[0] ?? null
+  ), [activeTabId, tabs]);
+  useEffect(() => {
+    if (grouping !== 'project') return;
+    if (!activeTab && tabs.length > 0) setActiveTabId(tabs[0]!.id);
+    else if (activeTabId && !tabs.some((tab) => tab.id === activeTabId)) {
+      setActiveTabId(tabs[0]?.id ?? null);
+    }
+  }, [activeTab, activeTabId, grouping, tabs]);
   // Membership against every session (not the filtered view), so typing a
   // filter never yanks the open session — only a real disappearance refalls.
   const allSessionIds = useMemo(
     () => new Set((taskState.data?.sessions ?? []).map((session) => session.id)),
     [taskState.data],
   );
-  const fallbackSessionId = sections[0]?.data[0]?.session.id
-    ?? taskState.data?.sessions[0]?.id
-    ?? null;
+  const fallbackSessionId = grouping === 'project'
+    ? (activeTab?.data[0]?.session.id
+      ?? sections[0]?.data[0]?.session.id
+      ?? taskState.data?.sessions[0]?.id
+      ?? null)
+    : (sections[0]?.data[0]?.session.id
+      ?? taskState.data?.sessions[0]?.id
+      ?? null);
 
   // The wide two-pane keeps a selection instead of pushing a route. Default
   // to the most recent task so the detail pane is never empty on launch, and
@@ -175,6 +211,37 @@ export default function TasksScreen() {
         },
       ],
     );
+  }
+
+  function togglePin(session: AgentSession) {
+    const pinned = session.pinned_at != null;
+    void Haptics.selectionAsync();
+    void runtime.setSessionPinned(session.id, !pinned)
+      .then(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success))
+      .catch((cause) => {
+        Alert.alert(
+          pinned ? 'Couldn’t unpin task' : 'Couldn’t pin task',
+          cause instanceof Error ? cause.message : String(cause),
+        );
+      });
+  }
+
+  function toggleArchive(session: AgentSession) {
+    const archived = session.archived_at != null;
+    void Haptics.selectionAsync();
+    void runtime.setSessionArchived(session.id, !archived)
+      .then(() => {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        // Archiving hides the task from the list; fall forward when the open
+        // wide-pane task was just archived, mirroring web.
+        if (!archived && session.id === selectedSessionId) setSelectedSessionId(null);
+      })
+      .catch((cause) => {
+        Alert.alert(
+          archived ? 'Couldn’t unarchive task' : 'Couldn’t archive task',
+          cause instanceof Error ? cause.message : String(cause),
+        );
+      });
   }
 
   const showOnboarding = !daemon.profiles.length && daemon.phase !== 'booting';
@@ -210,6 +277,10 @@ export default function TasksScreen() {
       ...current,
       [sectionId]: (current[sectionId] ?? 0) + SHOW_MORE_BATCH,
     }));
+  }, []);
+  const selectProjectTab = useCallback((sectionId: string) => {
+    void Haptics.selectionAsync();
+    setActiveTabId(sectionId);
   }, []);
   const renderSectionHeader = useCallback(({ section }: { section: SessionGroup }) => {
     const collapsed = collapsedGroups.has(section.id);
@@ -271,9 +342,12 @@ export default function TasksScreen() {
     />
   ), [isWide, selectedSessionId]);
   const listContentStyle = useMemo(() => [
-    // Clears the floating New Task button, which sits above the
-    // home indicator.
-    { paddingBottom: insets.bottom + Spacing.six + Spacing.four },
+    // Breathing room between the tab bar / search and the first row, plus
+    // clearance for the floating New Task button above the home indicator.
+    {
+      paddingTop: Spacing.two,
+      paddingBottom: insets.bottom + Spacing.six + Spacing.four,
+    },
     sections.length === 0 && styles.listContentEmpty,
   ], [insets.bottom, sections.length]);
   const listHeaderComponent = useMemo(() => daemon.error ? (
@@ -288,6 +362,81 @@ export default function TasksScreen() {
       searching={Boolean(search.trim())}
     />
   ), [daemon.phase, search, taskState.error]);
+  const projectTabBar = useMemo(() => {
+    if (grouping !== 'project' || tabs.length === 0) return null;
+    return (
+      <View style={styles.tabBarOuter}>
+        <ScrollView
+          horizontal
+          accessibilityRole="tablist"
+          contentContainerStyle={styles.tabBarContent}
+          showsHorizontalScrollIndicator={false}>
+          {tabs.map((tab) => {
+            const selected = tab.id === activeTab?.id;
+            const count = tab.data.length + (tab.hasMore ? 1 : 0);
+            const isPinnedTab = tab.kind === 'pinned';
+            return (
+              <Pressable
+                key={tab.id}
+                accessibilityLabel={`${tab.title}, ${tab.data.length} tasks`}
+                accessibilityRole="tab"
+                accessibilityState={{ selected }}
+                hitSlop={{ top: 6, bottom: 6, left: 2, right: 2 }}
+                onPress={() => selectProjectTab(tab.id)}
+                style={[
+                  styles.tab,
+                  {
+                    backgroundColor: selected ? theme.accentSoft : theme.surface,
+                    borderColor: selected ? theme.accent : theme.border,
+                  },
+                ]}>
+                <PaduIcon
+                  name={isPinnedTab ? 'pin' : selected ? 'folderOpen' : 'folder'}
+                  size={13}
+                  tintColor={selected ? theme.accent : theme.textTertiary}
+                />
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.tabLabel,
+                    { color: selected ? theme.text : theme.textSecondary },
+                  ]}>
+                  {tab.title}
+                </Text>
+                <View
+                  style={[
+                    styles.tabCount,
+                    { backgroundColor: selected ? theme.accentSoft : theme.overlay },
+                  ]}>
+                  <Text
+                    style={[
+                      styles.tabCountLabel,
+                      { color: selected ? theme.accent : theme.textTertiary },
+                    ]}>
+                    {tab.hasMore ? `${count}+` : `${count}`}
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
+    );
+  }, [activeTab?.id, grouping, tabs, selectProjectTab, theme]);
+  const projectTabFooter = useMemo(() => {
+    if (!activeTab?.hasMore) return null;
+    return (
+      <Pressable
+        accessibilityLabel={`Show more tasks in ${activeTab.title}`}
+        accessibilityRole="button"
+        onPress={() => revealMoreSessions(activeTab.id)}
+        style={styles.showMore}>
+        <Text style={[styles.showMoreLabel, { color: theme.textTertiary }]}>
+          Show more
+        </Text>
+      </Pressable>
+    );
+  }, [activeTab, revealMoreSessions, theme.textTertiary]);
 
   const listHeader = (
     <ScreenHeader
@@ -331,7 +480,33 @@ export default function TasksScreen() {
     </>
   );
 
-  const taskList = (
+  const projectTabList = (
+    <FlatList
+      data={activeTab?.data ?? []}
+      keyExtractor={sessionKeyExtractor}
+      contentContainerStyle={listContentStyle}
+      style={styles.list}
+      refreshControl={(
+        <RefreshControl
+          refreshing={taskState.isRefetching}
+          tintColor={theme.textTertiary}
+          onRefresh={handleRefresh}
+        />
+      )}
+      ListHeaderComponent={listHeaderComponent ?? undefined}
+      ListFooterComponent={projectTabFooter ?? undefined}
+      ListEmptyComponent={listEmptyComponent}
+      renderItem={renderSessionItem}
+      showsVerticalScrollIndicator={false}
+    />
+  );
+
+  const taskList = grouping === 'project' ? (
+    <>
+      {projectTabBar}
+      {projectTabList}
+    </>
+  ) : (
     <SectionList
       sections={sections}
       keyExtractor={sessionKeyExtractor}
@@ -371,14 +546,55 @@ export default function TasksScreen() {
     </View>
   );
 
+  const actionTargetProject = actionTarget
+    ? (projectNamesById.get(actionTarget.project_id) ?? 'No project')
+    : null;
+  const actionTargetPinned = (actionTarget?.pinned_at ?? null) != null;
+  const actionTargetArchived = (actionTarget?.archived_at ?? null) != null;
+  const actionTargetSubtitle = actionTarget
+    ? [
+      actionTargetProject,
+      relativeSessionTime(sessionTimestamp(actionTarget)),
+      actionTargetPinned ? 'Pinned' : null,
+      actionTargetArchived ? 'Archived' : null,
+    ].filter(Boolean).join(' · ')
+    : null;
+
   const sheets = (
     <>
       <Sheet onDismiss={() => setActionTarget(null)} visible={actionTarget !== null}>
         {actionTarget && (
           <>
-            <Text numberOfLines={1} style={[styles.actionSheetTitle, { color: theme.text }]}>
+            <Text numberOfLines={2} style={[styles.actionSheetTitle, { color: theme.text }]}>
               {displaySessionTitle(actionTarget)}
             </Text>
+            {actionTargetSubtitle && (
+              <Text
+                numberOfLines={1}
+                style={[styles.actionSheetSubtitle, { color: theme.textTertiary }]}>
+                {actionTargetSubtitle}
+              </Text>
+            )}
+            <SheetRow
+              label={actionTargetPinned ? 'Unpin task' : 'Pin task'}
+              description={actionTargetPinned ? 'Remove from pinned' : 'Keep at the top of the list'}
+              leading={<PaduIcon name="pin" size={16} tintColor={theme.textSecondary} />}
+              onPress={() => {
+                const target = actionTarget;
+                setActionTarget(null);
+                if (target) togglePin(target);
+              }}
+            />
+            <SheetRow
+              label={actionTargetArchived ? 'Unarchive task' : 'Archive task'}
+              description={actionTargetArchived ? 'Restore to the task list' : 'Hide from the task list'}
+              leading={<PaduIcon name="archive" size={16} tintColor={theme.textSecondary} />}
+              onPress={() => {
+                const target = actionTarget;
+                setActionTarget(null);
+                if (target) toggleArchive(target);
+              }}
+            />
             <SheetRow
               label="Rename task"
               leading={<PaduIcon name="pencil" size={16} tintColor={theme.textSecondary} />}
@@ -549,6 +765,45 @@ const styles = StyleSheet.create({
   fabDock: { position: 'absolute', right: Spacing.three, zIndex: 20 },
   list: { alignSelf: 'center', flex: 1, maxWidth: MaxContentWidth, width: '100%' },
   listContentEmpty: { flexGrow: 1 },
+  tabBarOuter: {
+    alignSelf: 'center',
+    maxWidth: MaxContentWidth,
+    width: '100%',
+  },
+  tabBarContent: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: Spacing.one,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.one,
+  },
+  // Compact trigger: the visual pill is 32pt tall; `hitSlop` on the Pressable
+  // keeps the effective touch target at ≥ 44pt.
+  tab: {
+    alignItems: 'center',
+    borderRadius: Radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: 5,
+    maxWidth: 200,
+    minHeight: 32,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  tabLabel: {
+    flexShrink: 1,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  tabCount: {
+    alignItems: 'center',
+    borderRadius: Radius.pill,
+    justifyContent: 'center',
+    minHeight: 18,
+    minWidth: 22,
+    paddingHorizontal: 6,
+  },
+  tabCountLabel: { fontSize: 11, fontWeight: '700' },
   sectionHeader: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -577,8 +832,13 @@ const styles = StyleSheet.create({
   actionSheetTitle: {
     fontSize: 14,
     fontWeight: '700',
-    marginBottom: 4,
+    marginBottom: 2,
     marginHorizontal: 12,
     marginTop: 6,
+  },
+  actionSheetSubtitle: {
+    fontSize: 12.5,
+    marginBottom: 8,
+    marginHorizontal: 12,
   },
 });

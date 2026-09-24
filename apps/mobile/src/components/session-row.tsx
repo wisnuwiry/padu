@@ -34,7 +34,7 @@ export function SessionRow({
   return (
     <Pressable
       accessibilityHint="Long press for actions"
-      accessibilityLabel={`${displaySessionTitle(session)}, ${item.projectName}${status ? `, ${status.label}` : ''}`}
+      accessibilityLabel={`${displaySessionTitle(session)}, ${item.projectName}${session.pinned_at != null ? ', pinned' : ''}${status ? `, ${status.label}` : ''}`}
       accessibilityRole="button"
       accessibilityState={{ selected }}
       delayLongPress={350}
