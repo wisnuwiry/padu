@@ -291,6 +291,30 @@ export async function removeDaemonSession(
   expectResponse(await client.request({ type: 'removeSession' }, sessionId), 'ack');
 }
 
+export async function setSessionPinned(
+  client: PaduClient,
+  sessionId: string,
+  pinned: boolean,
+): Promise<AgentSession> {
+  const response = expectResponse(
+    await client.request({ type: 'setSessionPinned', pinned }, sessionId),
+    'sessionMetadataUpdated',
+  );
+  return response.session;
+}
+
+export async function setSessionArchived(
+  client: PaduClient,
+  sessionId: string,
+  archived: boolean,
+): Promise<AgentSession> {
+  const response = expectResponse(
+    await client.request({ type: 'setSessionArchived', archived }, sessionId),
+    'sessionMetadataUpdated',
+  );
+  return response.session;
+}
+
 export async function persistSession(
   client: PaduClient,
   session: AgentSession,
