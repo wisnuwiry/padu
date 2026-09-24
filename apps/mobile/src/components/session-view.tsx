@@ -67,7 +67,41 @@ export function SessionView({
   const running = Boolean(session && sessionBusy(session));
   const listRef = useRef<FlatList<TranscriptRow>>(null);
   const nearBottom = useRef(true);
-  const laidOut = useRef(false);
+  const initialScrollPending = useRef(true);
+
+  useEffect(() => {
+    // A new task starts pinned to the tail: web remounts its transcript per
+    // session (`key={session.id}`) with `initialTopMostItemIndex` at the end,
+    // so mobile resets the same way instead of reusing the previous task's
+    // pin state and scroll offset.
+    nearBottom.current = true;
+    initialScrollPending.current = true;
+    setPinnedToBottom(true);
+  }, [sessionId]);
+
+  function scrollToBottom(animated: boolean) {
+    if (!transcriptRows.length) return;
+    listRef.current?.scrollToEnd({ animated });
+  }
+
+  function maybeAutoscroll() {
+    // Initial open always lands on the latest message; streaming follows
+    // only while the reader is still pinned to the bottom.
+    if (!transcriptRows.length) return;
+    if (initialScrollPending.current || nearBottom.current) {
+      scrollToBottom(false);
+      initialScrollPending.current = false;
+    }
+  }
+
+  // Content can arrive after layout (placeholder → hydrate, markdown measure),
+  // so retry the pending initial scroll when rows land, not only on size
+  // changes. `onContentSizeChange`/`onLayout` below cover the rest.
+  useEffect(() => {
+    if (initialScrollPending.current && transcriptRows.length > 0) {
+      listRef.current?.scrollToEnd({ animated: false });
+    }
+  }, [sessionId, transcriptRows.length]);
 
   useEffect(() => {
     if (!session || daemon.phase !== 'connected') return;
@@ -160,6 +194,7 @@ export function SessionView({
       <View style={styles.listFrame}>
         <FlatList
           ref={listRef}
+          key={sessionId ?? 'missing'}
           data={transcriptRows}
           keyExtractor={(item) => item.key}
           contentContainerStyle={[
@@ -179,12 +214,8 @@ export function SessionView({
           )}
           ListFooterComponent={running && session ? <WorkingFooter session={session} /> : undefined}
           renderItem={({ item }) => <TranscriptRowView row={item} onToggleFold={toggleFold} />}
-          onContentSizeChange={() => {
-            if (!laidOut.current || nearBottom.current) {
-              listRef.current?.scrollToEnd({ animated: false });
-              laidOut.current = true;
-            }
-          }}
+          onContentSizeChange={maybeAutoscroll}
+          onLayout={maybeAutoscroll}
           onScroll={trackScroll}
           scrollEventThrottle={100}
           showsVerticalScrollIndicator={false}
