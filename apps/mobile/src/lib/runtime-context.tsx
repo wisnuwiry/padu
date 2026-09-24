@@ -635,6 +635,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             : current,
         );
       }
+      // The list renders daemon-owned sidebar groups, not the task state
+      // directly — without this the tabs never recompute and the mutation
+      // looks like a no-op.
+      void queryClient.invalidateQueries({ queryKey: daemonKeys.taskState(profileId) });
+      void queryClient.invalidateQueries({ queryKey: ['daemon', profileId, 'sidebar-groups'] });
     } catch (cause) {
       if (previousState) queryClient.setQueryData(daemonKeys.taskState(profileId), previousState);
       if (previousSession) {
@@ -713,6 +718,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           return typeof sessionId === 'string' && !entries.current.has(sessionId);
         },
       });
+      // Pin / archive / delete from another client move sessions between
+      // sidebar groups — refetch the list inputs too, not just sessions.
+      void queryClient.invalidateQueries({ queryKey: daemonKeys.taskState(profileId) });
+      void queryClient.invalidateQueries({ queryKey: ['daemon', profileId, 'sidebar-groups'] });
     });
   }, [daemon.activeProfile?.id, daemon.client, queryClient]);
 
