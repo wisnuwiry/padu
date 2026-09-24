@@ -57,6 +57,9 @@ function sessionKeyExtractor(item: SessionListItem): string {
   return item.session.id;
 }
 
+/** Shared empty array so the tab list keeps a stable `data` prop with no tab. */
+const EMPTY_TAB_DATA: SessionListItem[] = [];
+
 /** The task list: the home screen, and the daemon it is talking to. */
 export default function TasksScreen() {
   const theme = useTheme();
@@ -482,7 +485,7 @@ export default function TasksScreen() {
 
   const projectTabList = (
     <FlatList
-      data={activeTab?.data ?? []}
+      data={activeTab?.data ?? EMPTY_TAB_DATA}
       keyExtractor={sessionKeyExtractor}
       contentContainerStyle={listContentStyle}
       style={styles.list}
@@ -551,13 +554,8 @@ export default function TasksScreen() {
     : null;
   const actionTargetPinned = (actionTarget?.pinned_at ?? null) != null;
   const actionTargetArchived = (actionTarget?.archived_at ?? null) != null;
-  const actionTargetSubtitle = actionTarget
-    ? [
-      actionTargetProject,
-      relativeSessionTime(sessionTimestamp(actionTarget)),
-      actionTargetPinned ? 'Pinned' : null,
-      actionTargetArchived ? 'Archived' : null,
-    ].filter(Boolean).join(' · ')
+  const actionTargetTime = actionTarget
+    ? relativeSessionTime(sessionTimestamp(actionTarget))
     : null;
 
   const sheets = (
@@ -565,16 +563,47 @@ export default function TasksScreen() {
       <Sheet onDismiss={() => setActionTarget(null)} visible={actionTarget !== null}>
         {actionTarget && (
           <>
-            <Text numberOfLines={2} style={[styles.actionSheetTitle, { color: theme.text }]}>
-              {displaySessionTitle(actionTarget)}
-            </Text>
-            {actionTargetSubtitle && (
-              <Text
-                numberOfLines={1}
-                style={[styles.actionSheetSubtitle, { color: theme.textTertiary }]}>
-                {actionTargetSubtitle}
+            <View style={styles.actionSheetHeader}>
+              <Text numberOfLines={2} style={[styles.actionSheetTitle, { color: theme.text }]}>
+                {displaySessionTitle(actionTarget)}
               </Text>
-            )}
+              <View style={styles.actionSheetMeta}>
+                <PaduIcon name="folder" size={13} tintColor={theme.textTertiary} />
+                <Text
+                  numberOfLines={1}
+                  style={[styles.actionSheetMetaText, { color: theme.textSecondary }]}>
+                  {actionTargetProject}
+                </Text>
+                <Text style={[styles.actionSheetMetaText, { color: theme.textGhost }]}>·</Text>
+                <PaduIcon name="clock" size={13} tintColor={theme.textTertiary} />
+                <Text style={[styles.actionSheetMetaText, { color: theme.textSecondary }]}>
+                  {actionTargetTime}
+                </Text>
+                {actionTargetPinned && (
+                  <View
+                    accessibilityLabel="Pinned"
+                    accessibilityRole="image"
+                    style={[styles.actionSheetBadge, { backgroundColor: theme.accentSoft }]}>
+                    <PaduIcon name="pin" size={11} tintColor={theme.accent} />
+                    <Text style={[styles.actionSheetBadgeLabel, { color: theme.accent }]}>
+                      Pinned
+                    </Text>
+                  </View>
+                )}
+                {actionTargetArchived && (
+                  <View
+                    accessibilityLabel="Archived"
+                    accessibilityRole="image"
+                    style={[styles.actionSheetBadge, { backgroundColor: theme.overlay }]}>
+                    <PaduIcon name="archive" size={11} tintColor={theme.textSecondary} />
+                    <Text style={[styles.actionSheetBadgeLabel, { color: theme.textSecondary }]}>
+                      Archived
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </View>
+            <View style={[styles.actionSheetDivider, { backgroundColor: theme.separator }]} />
             <SheetRow
               label={actionTargetPinned ? 'Unpin task' : 'Pin task'}
               description={actionTargetPinned ? 'Remove from pinned' : 'Keep at the top of the list'}
@@ -829,16 +858,40 @@ const styles = StyleSheet.create({
     paddingLeft: 20,
   },
   showMoreLabel: { fontSize: 13, fontWeight: '600' },
-  actionSheetTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    marginBottom: 2,
+  actionSheetHeader: {
+    gap: Spacing.one,
     marginHorizontal: 12,
     marginTop: 6,
   },
-  actionSheetSubtitle: {
+  actionSheetTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+    lineHeight: 22,
+  },
+  actionSheetMeta: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  actionSheetMetaText: {
+    flexShrink: 1,
     fontSize: 12.5,
-    marginBottom: 8,
+    fontWeight: '500',
+  },
+  actionSheetBadge: {
+    alignItems: 'center',
+    borderRadius: Radius.pill,
+    flexDirection: 'row',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  actionSheetBadgeLabel: { fontSize: 11.5, fontWeight: '700' },
+  actionSheetDivider: {
+    height: StyleSheet.hairlineWidth,
     marginHorizontal: 12,
+    marginVertical: Spacing.two,
   },
 });
