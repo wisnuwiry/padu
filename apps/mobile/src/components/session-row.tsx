@@ -14,23 +14,41 @@ import {
 } from '@/lib/session-presentation';
 
 /** One task in the list: title, project, agent, and its live status. */
-export function SessionRow({ item, onLongPress }: { item: SessionListItem; onLongPress: () => void }) {
+export function SessionRow({
+  item,
+  onLongPress,
+  onPress,
+  selected = false,
+}: {
+  item: SessionListItem;
+  onLongPress: () => void;
+  /** Overrides the default push navigation — used by the wide two-pane. */
+  onPress?: () => void;
+  /** Highlights the row when its session sits in the side detail pane. */
+  selected?: boolean;
+}) {
   const theme = useTheme();
   const session = item.session;
   const status = statusPresentation(session, theme);
+  const handlePress = onPress ?? (() => router.push({ pathname: '/session/[id]', params: { id: session.id } }));
   return (
     <Pressable
       accessibilityHint="Long press for actions"
       accessibilityLabel={`${displaySessionTitle(session)}, ${item.projectName}${status ? `, ${status.label}` : ''}`}
       accessibilityRole="button"
+      accessibilityState={{ selected }}
       delayLongPress={350}
       onLongPress={onLongPress}
-      onPress={() => router.push({ pathname: '/session/[id]', params: { id: session.id } })}
+      onPress={handlePress}
       style={({ pressed }) => [
         styles.row,
         {
-          backgroundColor: pressed ? theme.backgroundSelected : theme.surface,
-          borderColor: theme.border,
+          backgroundColor: selected
+            ? theme.backgroundSelected
+            : pressed
+              ? theme.backgroundSelected
+              : theme.surface,
+          borderColor: selected ? theme.accent : theme.border,
         },
       ]}>
       <View style={styles.copy}>

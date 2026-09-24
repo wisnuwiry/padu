@@ -43,7 +43,14 @@ import {
   type TranscriptRow,
 } from '@/lib/session-presentation';
 
-export function SessionView({ sessionId }: { sessionId: string | undefined }) {
+export function SessionView({
+  sessionId,
+  showBack = true,
+}: {
+  sessionId: string | undefined;
+  /** False when embedded in the wide two-pane, which has no back stack. */
+  showBack?: boolean;
+}) {
   const theme = useTheme();
   const daemon = useDaemon();
   const runtime = useRuntime();
@@ -128,6 +135,7 @@ export function SessionView({ sessionId }: { sessionId: string | undefined }) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={[styles.screen, { backgroundColor: theme.background }]}>
       <ScreenHeader
+        back={showBack}
         right={session ? (
           <>
             <IconButton
