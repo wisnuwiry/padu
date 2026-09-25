@@ -8,9 +8,11 @@ import { useTheme } from '@/hooks/use-theme';
  * OpenCode, Fx, Pi, Agy, Qoder, Command Code, Kimi) tint with the theme text
  * color, and Oh My Pi's SVG carries its own gradient. */
 const PROVIDER_BRAND_COLORS: Partial<Record<ProviderKind, string>> = {
+  agy: '#4388f0',
   claude: '#d97757',
   deepSeek: '#4d6bfe',
   amp: '#f34e3f',
+  ohMyPi: '#d05cdd',
 };
 
 /** Brand color for a provider mark, when the brand has one. */
