@@ -1623,3 +1623,42 @@ daemon.qr_restart_tunnel: トンネルを再起動
 daemon.qr_tunnel_failed: "トンネルを開始できませんでした: %{error}"
 daemon.qr_field_placeholder: "例: 192.168.1.10 または my-mac.tail-abc.ts.net"
 daemon.qr_port_placeholder: "例: 19999"
+
+board.title: タスク
+board.backlog: バックログ
+board.queued: キュー中
+board.running: エージェント実行中
+board.review: レビュー待ち
+board.done: 完了
+board.new_task: 新規タスク
+board.create_task: タスクを作成
+board.edit_task: タスクを編集
+board.delete_task: タスクを削除
+board.delete_task_confirm: このタスクを削除してもよろしいですか？
+board.task_title: タイトル
+board.task_title_placeholder: タスクのタイトル…
+board.task_description: 説明
+board.task_description_placeholder: 行う作業の内容を入力（Markdown 対応）…
+board.assigned_agent: 担当エージェント
+board.no_agent: 自動（優先順位キュー）
+board.status: ステータス
+board.project: プロジェクト
+board.labels: ラベル
+board.labels_placeholder: ラベルを追加（カンマ区切り）…
+board.filter_all_projects: すべてのプロジェクト
+board.filter_all_agents: すべてのエージェント
+board.filter_search_placeholder: タスクを絞り込み…
+board.empty_backlog: バックログにタスクはありません
+board.empty_queued: キュー中のタスクはありません
+board.empty_running: 実行中のエージェントはありません
+board.empty_review: レビュー待ちのタスクはありません
+board.empty_done: 完了したタスクはありません
+board.filter_empty: フィルターに一致するタスクはありません
+board.clear_filters: フィルターをクリア
+board.needs_attention: 要確認
+board.sync_failed: 同期失敗
+board.open_session: セッションを開く
+board.queue_task: キューに追加
+board.mark_done: 完了にする
+board.reopen_task: 再開
+board.drag_running_rejected: エージェントのワークスペースが開始されると自動的に実行中になります

@@ -1570,3 +1570,42 @@ daemon.qr_restart_tunnel: 重启隧道
 daemon.qr_tunnel_failed: "无法启动隧道：%{error}"
 daemon.qr_field_placeholder: 例如 192.168.1.10 或 my-mac.tail-abc.ts.net
 daemon.qr_port_placeholder: 例如 19999
+
+board.title: 任务
+board.backlog: 待办
+board.queued: 排队中
+board.running: 智能体运行中
+board.review: 待审核
+board.done: 已完成
+board.new_task: 新建任务
+board.create_task: 创建任务
+board.edit_task: 编辑任务
+board.delete_task: 删除任务
+board.delete_task_confirm: 确定要删除该任务吗？
+board.task_title: 标题
+board.task_title_placeholder: 任务标题…
+board.task_description: 描述
+board.task_description_placeholder: 需要完成什么？支持 Markdown…
+board.assigned_agent: 指派智能体
+board.no_agent: 自动（按优先级队列）
+board.status: 状态
+board.project: 项目
+board.labels: 标签
+board.labels_placeholder: 添加标签（逗号分隔）…
+board.filter_all_projects: 所有项目
+board.filter_all_agents: 所有智能体
+board.filter_search_placeholder: 过滤任务…
+board.empty_backlog: 待办中无任务
+board.empty_queued: 无排队任务
+board.empty_running: 无运行中的智能体
+board.empty_review: 无待审核任务
+board.empty_done: 无已完成任务
+board.filter_empty: 没有匹配筛选条件的历史任务
+board.clear_filters: 清除筛选
+board.needs_attention: 需要关注
+board.sync_failed: 同步失败
+board.open_session: 打开会话
+board.queue_task: 加入队列
+board.mark_done: 标记为已完成
+board.reopen_task: 重新打开
+board.drag_running_rejected: 任务会在智能体工作区启动时自动进入运行状态

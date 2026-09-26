@@ -1565,3 +1565,42 @@ daemon.qr_restart_tunnel: Mulai Ulang Tunnel
 daemon.qr_tunnel_failed: "Tidak dapat memulai tunnel: %{error}"
 daemon.qr_field_placeholder: mis. 192.168.1.10 atau my-mac.tail-abc.ts.net
 daemon.qr_port_placeholder: mis. 19999
+
+board.title: Tugas
+board.backlog: Backlog
+board.queued: Antrean
+board.running: Agen Berjalan
+board.review: Menunggu Review
+board.done: Selesai
+board.new_task: Tugas Baru
+board.create_task: Buat Tugas
+board.edit_task: Edit Tugas
+board.delete_task: Hapus Tugas
+board.delete_task_confirm: Apakah Anda yakin ingin menghapus tugas ini?
+board.task_title: Judul
+board.task_title_placeholder: Judul tugas…
+board.task_description: Deskripsi
+board.task_description_placeholder: Apa yang perlu dikerjakan? Markdown didukung…
+board.assigned_agent: Agen Ditugaskan
+board.no_agent: Otomatis (antrean prioritas)
+board.status: Status
+board.project: Proyek
+board.labels: Label
+board.labels_placeholder: Tambah label (pisahkan dengan koma)…
+board.filter_all_projects: Semua Proyek
+board.filter_all_agents: Semua Agen
+board.filter_search_placeholder: Filter tugas…
+board.empty_backlog: Tidak ada tugas di Backlog
+board.empty_queued: Tidak ada tugas dalam antrean
+board.empty_running: Tidak ada agen yang berjalan
+board.empty_review: Tidak ada tugas menunggu review
+board.empty_done: Tidak ada tugas yang selesai
+board.filter_empty: Tidak ada tugas yang cocok dengan filter
+board.clear_filters: Hapus Filter
+board.needs_attention: Perlu Perhatian
+board.sync_failed: Sinkronisasi Gagal
+board.open_session: Buka Sesi
+board.queue_task: Masukkan Antrean
+board.mark_done: Tandai Selesai
+board.reopen_task: Buka Kembali
+board.drag_running_rejected: Tugas masuk ke Berjalan secara otomatis saat workspace agen dimulai
