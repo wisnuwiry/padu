@@ -32,6 +32,7 @@ export type { ContextUsage } from "./ContextUsage";
 export type { CostQuality } from "./CostQuality";
 export type { CostTier } from "./CostTier";
 export type { CreateNote } from "./CreateNote";
+export type { CreateTask } from "./CreateTask";
 export type { CreatedWorktree } from "./CreatedWorktree";
 export type { DaemonReady } from "./DaemonReady";
 export type { DaemonSettings } from "./DaemonSettings";
@@ -102,6 +103,7 @@ export type { StoredTranscriptBlockContent } from "./StoredTranscriptBlockConten
 export type { TailscaleHostConfig } from "./TailscaleHostConfig";
 export type { Task } from "./Task";
 export type { TaskStatus } from "./TaskStatus";
+export type { TaskSummary } from "./TaskSummary";
 export type { TaskWorkspaceKind } from "./TaskWorkspaceKind";
 export type { ThreadGoal } from "./ThreadGoal";
 export type { ThreadGoalStatus } from "./ThreadGoalStatus";

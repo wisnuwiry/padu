@@ -287,6 +287,21 @@ impl Hub {
         Self::broadcast_task_state_changed(&mut state, source_subscriber_id);
     }
 
+    /// Fan one card transition out to every client but the source (P1-05).
+    /// Clients re-fetch the card; the event carries a fresh id for dedup.
+    fn broadcast_card_updated(&self, source_subscriber_id: u64, task_id: Uuid) {
+        let message = ServerMessage::CardUpdated {
+            event_id: Uuid::new_v4(),
+            task_id,
+        };
+        self.state
+            .lock()
+            .subscribers
+            .retain(|subscriber_id, subscriber| {
+                *subscriber_id == source_subscriber_id || subscriber.send(message.clone()).is_ok()
+            });
+    }
+
     fn replace_task_catalog(&self, projects: &[Project], sessions: &[AgentSession]) {
         let mut state = self.state.lock();
         state.catalog_projects = projects
@@ -873,8 +888,14 @@ struct HandledRequest {
 enum TaskCatalogAction {
     None,
     Load,
-    Save { projects: Vec<Project> },
+    Save {
+        projects: Vec<Project>,
+    },
     Changed,
+    /// A Kanban card mutation: broadcast `card_updated` with the affected
+    /// task id on success (P1-05). The id comes from the response, since
+    /// creates assign it.
+    CardUpdated,
 }
 
 fn handle_request(
@@ -934,6 +955,11 @@ fn handle_request(
             (TaskCatalogAction::Changed, ResponseOutcome::Ok { .. }) => {
                 hub.task_state_changed(source_subscriber_id);
             }
+            (TaskCatalogAction::CardUpdated, ResponseOutcome::Ok { payload }) => {
+                if let Some(task_id) = card_updated_task_id(payload) {
+                    hub.broadcast_card_updated(source_subscriber_id, task_id);
+                }
+            }
             _ => {}
         }
     }
@@ -957,7 +983,25 @@ fn task_catalog_action(command: &Command) -> TaskCatalogAction {
         | Command::SetSessionArchived { .. }
         | Command::ForkSessionFromResponse { .. }
         | Command::RewindSessionToMessage { .. } => TaskCatalogAction::Changed,
+        Command::CreateTask { .. }
+        | Command::UpdateTask { .. }
+        | Command::MoveTask { .. }
+        | Command::DeleteTask { .. } => TaskCatalogAction::CardUpdated,
         _ => TaskCatalogAction::None,
+    }
+}
+
+/// The card a task-mutation response carried, if any. Hydration reads are
+/// excluded by the caller: opening a detail panel must not fan other
+/// clients out to re-fetch.
+fn card_updated_task_id(payload: &ResponsePayload) -> Option<Uuid> {
+    match payload {
+        ResponsePayload::TaskCreated { task }
+        | ResponsePayload::TaskUpdated { task }
+        | ResponsePayload::TaskMoved { task }
+        | ResponsePayload::TaskHydrated { task, .. } => Some(task.id),
+        ResponsePayload::TaskDeleted { task_id, .. } => Some(*task_id),
+        _ => None,
     }
 }
 
@@ -1129,6 +1173,112 @@ mod tests {
             observer_rx.recv_timeout(Duration::from_secs(1)),
             Ok(ServerMessage::TaskStateChanged { revision: 1 })
         ));
+    }
+
+    #[test]
+    fn card_updates_notify_other_clients_only() {
+        let hub = Hub::default();
+        let (source_tx, source_rx) = unbounded();
+        let source_id = hub.subscribe(&[], source_tx);
+        let (observer_tx, observer_rx) = unbounded();
+        hub.subscribe(&[], observer_tx);
+
+        let task_id = Uuid::new_v4();
+        hub.broadcast_card_updated(source_id, task_id);
+
+        assert!(source_rx.try_recv().is_err());
+        assert!(matches!(
+            observer_rx.recv_timeout(Duration::from_secs(1)),
+            Ok(ServerMessage::CardUpdated {
+                task_id: received,
+                ..
+            }) if received == task_id
+        ));
+    }
+
+    #[test]
+    fn task_mutations_map_to_card_updates_but_reads_do_not() {
+        use padu_protocol::kanban::{CreateTask, Task, TaskStatus};
+
+        let project_id = Uuid::new_v4();
+        let task_id = Uuid::new_v4();
+        assert!(matches!(
+            task_catalog_action(&Command::CreateTask {
+                task: CreateTask {
+                    project_id,
+                    title: "New".into(),
+                    ..Default::default()
+                },
+            }),
+            TaskCatalogAction::CardUpdated
+        ));
+        assert!(matches!(
+            task_catalog_action(&Command::UpdateTask {
+                task: Task::default(),
+                expected_version: 1,
+            }),
+            TaskCatalogAction::CardUpdated
+        ));
+        assert!(matches!(
+            task_catalog_action(&Command::MoveTask {
+                task_id,
+                status: TaskStatus::Queued,
+                expected_version: 1,
+            }),
+            TaskCatalogAction::CardUpdated
+        ));
+        assert!(matches!(
+            task_catalog_action(&Command::DeleteTask {
+                task_id,
+                expected_version: 1,
+            }),
+            TaskCatalogAction::CardUpdated
+        ));
+        assert!(matches!(
+            task_catalog_action(&Command::ListTasks),
+            TaskCatalogAction::None
+        ));
+        assert!(matches!(
+            task_catalog_action(&Command::HydrateTask { task_id }),
+            TaskCatalogAction::None
+        ));
+    }
+
+    #[test]
+    fn card_updated_task_id_covers_mutation_responses() {
+        use padu_protocol::kanban::Task;
+
+        let task = Task {
+            id: Uuid::new_v4(),
+            ..Default::default()
+        };
+        assert_eq!(
+            card_updated_task_id(&ResponsePayload::TaskCreated { task: task.clone() }),
+            Some(task.id)
+        );
+        assert_eq!(
+            card_updated_task_id(&ResponsePayload::TaskUpdated { task: task.clone() }),
+            Some(task.id)
+        );
+        assert_eq!(
+            card_updated_task_id(&ResponsePayload::TaskMoved { task: task.clone() }),
+            Some(task.id)
+        );
+        assert_eq!(
+            card_updated_task_id(&ResponsePayload::TaskHydrated {
+                task: task.clone(),
+                session: None,
+            }),
+            Some(task.id)
+        );
+        assert_eq!(
+            card_updated_task_id(&ResponsePayload::TaskDeleted {
+                task_id: task.id,
+                version: 2,
+            }),
+            Some(task.id)
+        );
+        assert_eq!(card_updated_task_id(&ResponsePayload::Ack), None);
     }
 
     #[test]

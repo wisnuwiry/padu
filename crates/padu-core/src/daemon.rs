@@ -24,6 +24,7 @@ use crate::model::{
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
+use padu_protocol::kanban::TaskSummary;
 use padu_protocol::model::ProviderSessionHistory;
 use padu_protocol::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
 
@@ -835,6 +836,65 @@ impl Backend for PaduBackend {
                     .task_store
                     .delete_note(project_id, note_id, expected_revision)?,
             }),
+            Command::ListTasks => Ok(ResponsePayload::Tasks {
+                tasks: self
+                    .task_store
+                    .list_tasks()?
+                    .iter()
+                    .map(TaskSummary::from_task)
+                    .collect(),
+            }),
+            Command::CreateTask { task } => Ok(ResponsePayload::TaskCreated {
+                task: self.task_store.create_task(task)?,
+            }),
+            Command::UpdateTask {
+                task,
+                expected_version,
+            } => Ok(ResponsePayload::TaskUpdated {
+                task: self.task_store.update_task(task, expected_version)?,
+            }),
+            Command::MoveTask {
+                task_id,
+                status,
+                expected_version,
+            } => Ok(ResponsePayload::TaskMoved {
+                task: self
+                    .task_store
+                    .move_task(task_id, status, expected_version)?,
+            }),
+            Command::DeleteTask {
+                task_id,
+                expected_version,
+            } => Ok(ResponsePayload::TaskDeleted {
+                task_id,
+                version: self.task_store.delete_task(task_id, expected_version)?,
+            }),
+            Command::HydrateTask { task_id } => {
+                let task = self
+                    .task_store
+                    .get_task(task_id)?
+                    .ok_or_else(|| anyhow!("task not found"))?;
+                // On-demand session detail, mirroring HydrateSession: the
+                // board works from summaries and only the open card pays for
+                // transcript, checkpoint, and log hydration.
+                let session = match task.session_id {
+                    Some(session_id) => {
+                        let mut state = self.task_state.lock();
+                        let session = state
+                            .sessions
+                            .iter_mut()
+                            .find(|session| session.id == session_id);
+                        if let Some(session) = session {
+                            self.task_store.hydrate(session)?;
+                            Some(session.clone())
+                        } else {
+                            None
+                        }
+                    }
+                    None => None,
+                };
+                Ok(ResponsePayload::TaskHydrated { task, session })
+            }
             Command::StoreBlob { mime_type, bytes } => {
                 let reference = self
                     .task_store
@@ -2008,6 +2068,12 @@ fn handle_driver_command(
         | Command::CreateNote { .. }
         | Command::UpdateNote { .. }
         | Command::DeleteNote { .. }
+        | Command::ListTasks
+        | Command::CreateTask { .. }
+        | Command::UpdateTask { .. }
+        | Command::MoveTask { .. }
+        | Command::DeleteTask { .. }
+        | Command::HydrateTask { .. }
         | Command::ListAgentProfiles
         | Command::UpdateAgentProfile { .. }
         | Command::StoreBlob { .. }

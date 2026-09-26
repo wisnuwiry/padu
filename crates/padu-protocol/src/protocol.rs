@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::agent_profile::{AgentProfile, UpdateAgentProfile};
 use crate::attachments::{AttachmentUpload, StoredAttachment};
 use crate::computer_use::ComputerPermissions;
+use crate::kanban::{CreateTask, Task, TaskStatus, TaskSummary};
 use crate::model::{
     AgentSession, GoalOperation, Project, ProviderKind, ProviderProbe, ProviderResumeCursor,
     ProviderSessionHistory, ProviderSessionSummary, UserInputAnswer,
@@ -237,6 +238,40 @@ pub enum Command {
     /// On conflict the daemon rejects and the client re-fetches.
     UpdateAgentProfile {
         update: UpdateAgentProfile,
+    },
+    /// List board cards as summary projections (P1-05): no descriptions,
+    /// linked handles, checkpoint bodies, or logs. Global board; filtering
+    /// is client presentation state.
+    ListTasks,
+    /// Create one backlog card (P1-05). The daemon assigns id, status,
+    /// version, and timestamps.
+    CreateTask {
+        task: CreateTask,
+    },
+    /// Full-replace one card with an `expected_version` guard (P1-05).
+    /// On conflict the daemon rejects and the client re-fetches.
+    UpdateTask {
+        task: Task,
+        expected_version: u64,
+    },
+    /// Status-only transition write with an `expected_version` guard (P1-05).
+    /// Transition validation and lifecycle side effects land in P1-06; this
+    /// persists the column move.
+    MoveTask {
+        task_id: Uuid,
+        status: TaskStatus,
+        expected_version: u64,
+    },
+    /// Explicit card deletion with an `expected_version` guard (P1-05).
+    /// Merge-only saves never delete; only this command removes rows.
+    DeleteTask {
+        task_id: Uuid,
+        expected_version: u64,
+    },
+    /// On-demand full card plus its linked session, if any (P1-05).
+    /// Checkpoint bodies and logs arrive here, never in `ListTasks`.
+    HydrateTask {
+        task_id: Uuid,
     },
     StoreBlob {
         mime_type: String,
@@ -604,6 +639,27 @@ pub enum ResponsePayload {
     },
     AgentProfileUpdated {
         profile: AgentProfile,
+    },
+    Tasks {
+        tasks: Vec<TaskSummary>,
+    },
+    TaskCreated {
+        task: Task,
+    },
+    TaskUpdated {
+        task: Task,
+    },
+    TaskMoved {
+        task: Task,
+    },
+    TaskDeleted {
+        task_id: Uuid,
+        version: u64,
+    },
+    TaskHydrated {
+        task: Task,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session: Option<AgentSession>,
     },
     BlobStored {
         reference: String,
