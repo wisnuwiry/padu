@@ -36,7 +36,7 @@ use crate::model::{
 use crate::theme::ThemePreference;
 use padu_protocol::agent_profile::{AgentProfile, UpdateAgentProfile};
 use padu_protocol::git_integration::{LinkedIssue, LinkedPr};
-use padu_protocol::kanban::{CreateTask, Task, TaskStatus, TaskSummary, TaskWorkspaceKind};
+use padu_protocol::kanban::{CreateTask, Task, TaskStatus};
 use padu_protocol::notes::EmbeddedNote;
 pub use padu_protocol::notes::{CreateNote, Note, NoteSummary, UpdateNote};
 pub use padu_protocol::persistence::{
@@ -2051,6 +2051,25 @@ impl StateStore {
             .transpose()
     }
 
+    /// Finds a task by its linked session id (P1-06).
+    pub fn find_task_by_session_id(&self, session_id: Uuid) -> io::Result<Option<Task>> {
+        let guard = self.storage_guard()?;
+        let connection = &guard.as_ref().expect("storage opened above").connection;
+        connection
+            .query_row(
+                "SELECT id, project_id, title, description, labels, status, assigned_agent, \
+                        session_id, workspace_kind, linked_issue, linked_pr, needs_attention, \
+                        sync_failed, idempotency_keys, version, created_at, updated_at, archived \
+                 FROM tasks WHERE session_id = ?1",
+                params![session_id.to_string()],
+                task_row_columns,
+            )
+            .optional()
+            .map_err(to_io_error)?
+            .map(task_from_columns)
+            .transpose()
+    }
+
     /// Explicit task deletion (P1-04) with an `expected_version` guard
     /// (P1-05). Returns the deleted version. Merge-only saves never delete;
     /// only this path removes rows.
@@ -2194,18 +2213,34 @@ impl StateStore {
         let mut guard = self.storage_guard()?;
         let connection = &mut guard.as_mut().expect("storage opened above").connection;
         let transaction = connection.transaction().map_err(to_io_error)?;
-        let changed = transaction
-            .execute(
-                "UPDATE tasks SET status = ?1, version = version + 1, updated_at = ?2
-                  WHERE id = ?3 AND version = ?4",
-                params![
-                    tag_of(status),
-                    crate::model::unix_time() as i64,
-                    id.to_string(),
-                    expected_version as i64,
-                ],
-            )
-            .map_err(to_io_error)?;
+        let changed = if status == TaskStatus::Backlog {
+            transaction
+                .execute(
+                    "UPDATE tasks SET status = ?1, needs_attention = 0, sync_failed = NULL, \
+                            version = version + 1, updated_at = ?2 \
+                      WHERE id = ?3 AND version = ?4",
+                    params![
+                        tag_of(status),
+                        crate::model::unix_time() as i64,
+                        id.to_string(),
+                        expected_version as i64,
+                    ],
+                )
+                .map_err(to_io_error)?
+        } else {
+            transaction
+                .execute(
+                    "UPDATE tasks SET status = ?1, version = version + 1, updated_at = ?2 \
+                      WHERE id = ?3 AND version = ?4",
+                    params![
+                        tag_of(status),
+                        crate::model::unix_time() as i64,
+                        id.to_string(),
+                        expected_version as i64,
+                    ],
+                )
+                .map_err(to_io_error)?
+        };
         if changed == 0 {
             return Err(task_version_error(&transaction, id, expected_version));
         }
@@ -2645,6 +2680,7 @@ mod tests {
         ActivityItem, ActivityKind, FavoriteModel, MessageRole, ReasoningBlock, TranscriptBlock,
     };
     use base64::Engine as _;
+    use padu_protocol::kanban::TaskWorkspaceKind;
 
     fn temporary_directory() -> PathBuf {
         std::env::temp_dir().join(format!("padu-state-{}", Uuid::new_v4()))

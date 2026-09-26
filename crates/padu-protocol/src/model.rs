@@ -1247,6 +1247,7 @@ impl AgentSession {
         !self.detail_loaded
             || !self.turns.is_empty()
             || !self.messages.is_empty()
+            || !self.queued_messages.is_empty()
             || self.provider_cursor.is_some()
     }
 

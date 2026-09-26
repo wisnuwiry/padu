@@ -96,9 +96,33 @@ impl EventSink {
     ) {
         self.hub.broadcast_provider_auth_url(provider, url.into());
     }
+
+    pub fn send_task_queued(&self, task_id: Uuid) {
+        self.hub.broadcast_task_queued(task_id);
+    }
+
+    pub fn send_workspace_started(&self, task_id: Uuid, session_id: Uuid) {
+        self.hub.broadcast_workspace_started(task_id, session_id);
+    }
+
+    pub fn send_agent_completed(&self, task_id: Uuid, session_id: Uuid) {
+        self.hub.broadcast_agent_completed(task_id, session_id);
+    }
+
+    pub fn send_checkpoint_failed(&self, task_id: Uuid, session_id: Uuid, streak: u32) {
+        self.hub.broadcast_checkpoint_failed(task_id, session_id, streak);
+    }
+
+    pub fn send_task_state_changed(&self) {
+        let mut state = self.hub.state.lock();
+        Hub::broadcast_task_state_changed(&mut state, 0);
+    }
+
+    pub fn send_card_updated(&self, task_id: Uuid) {
+        self.hub.broadcast_card_updated(0, task_id);
+    }
 }
 
-#[derive(Default)]
 struct HubState {
     next_subscriber_id: u64,
     task_state_revision: u64,
@@ -109,6 +133,22 @@ struct HubState {
     responses: VecDeque<(Uuid, ResponseOutcome)>,
     catalog_projects: HashMap<Uuid, ProjectCatalogEntry>,
     catalog_sessions: HashMap<Uuid, SessionCatalogEntry>,
+}
+
+impl Default for HubState {
+    fn default() -> Self {
+        Self {
+            next_subscriber_id: 1,
+            task_state_revision: 0,
+            subscribers: HashMap::new(),
+            active_runtimes: HashMap::new(),
+            next_sequences: HashMap::new(),
+            journal: HashMap::new(),
+            responses: VecDeque::new(),
+            catalog_projects: HashMap::new(),
+            catalog_sessions: HashMap::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -155,7 +195,7 @@ impl From<&AgentSession> for SessionCatalogEntry {
     }
 }
 
-struct Hub {
+pub(crate) struct Hub {
     epoch: Uuid,
     state: Mutex<HubState>,
 }
@@ -191,7 +231,7 @@ struct RequestDispatcher {
 }
 
 impl Hub {
-    fn event_sink(self: &Arc<Self>, session_id: Uuid, runtime_id: Uuid) -> EventSink {
+    pub(crate) fn event_sink(self: &Arc<Self>, session_id: Uuid, runtime_id: Uuid) -> EventSink {
         EventSink {
             session_id,
             runtime_id,
@@ -256,7 +296,7 @@ impl Hub {
             .retain(|_, subscriber| subscriber.send(message.clone()).is_ok());
     }
 
-    fn subscribe(&self, resume_from: &[ReplayCursor], sender: Sender<ServerMessage>) -> u64 {
+    pub(crate) fn subscribe(&self, resume_from: &[ReplayCursor], sender: Sender<ServerMessage>) -> u64 {
         let mut state = self.state.lock();
         for (&(session_id, runtime_id), events) in &state.journal {
             let sequence = resume_from
@@ -298,8 +338,57 @@ impl Hub {
             .lock()
             .subscribers
             .retain(|subscriber_id, subscriber| {
-                *subscriber_id == source_subscriber_id || subscriber.send(message.clone()).is_ok()
+                (source_subscriber_id != 0 && *subscriber_id == source_subscriber_id)
+                    || subscriber.send(message.clone()).is_ok()
             });
+    }
+
+    fn broadcast_task_queued(&self, task_id: Uuid) {
+        let message = ServerMessage::TaskQueued {
+            event_id: Uuid::new_v4(),
+            task_id,
+        };
+        self.state
+            .lock()
+            .subscribers
+            .retain(|_, subscriber| subscriber.send(message.clone()).is_ok());
+    }
+
+    fn broadcast_workspace_started(&self, task_id: Uuid, session_id: Uuid) {
+        let message = ServerMessage::WorkspaceStarted {
+            event_id: Uuid::new_v4(),
+            task_id,
+            session_id,
+        };
+        self.state
+            .lock()
+            .subscribers
+            .retain(|_, subscriber| subscriber.send(message.clone()).is_ok());
+    }
+
+    fn broadcast_agent_completed(&self, task_id: Uuid, session_id: Uuid) {
+        let message = ServerMessage::AgentCompleted {
+            event_id: Uuid::new_v4(),
+            task_id,
+            session_id,
+        };
+        self.state
+            .lock()
+            .subscribers
+            .retain(|_, subscriber| subscriber.send(message.clone()).is_ok());
+    }
+
+    fn broadcast_checkpoint_failed(&self, task_id: Uuid, session_id: Uuid, streak: u32) {
+        let message = ServerMessage::CheckpointFailed {
+            event_id: Uuid::new_v4(),
+            task_id,
+            session_id,
+            streak,
+        };
+        self.state
+            .lock()
+            .subscribers
+            .retain(|_, subscriber| subscriber.send(message.clone()).is_ok());
     }
 
     fn replace_task_catalog(&self, projects: &[Project], sessions: &[AgentSession]) {
@@ -372,7 +461,8 @@ impl Hub {
             revision: state.task_state_revision,
         };
         state.subscribers.retain(|subscriber_id, subscriber| {
-            *subscriber_id == source_subscriber_id || subscriber.send(message.clone()).is_ok()
+            (source_subscriber_id != 0 && *subscriber_id == source_subscriber_id)
+                || subscriber.send(message.clone()).is_ok()
         });
     }
 

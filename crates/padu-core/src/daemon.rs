@@ -20,11 +20,11 @@ use crate::computer_use::{ComputerTarget, ComputerUsePhase, ComputerUseState};
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::model::{
     ActivityKind, AgentSession, Checkpoint, CheckpointStatus, DriverEvent, PermissionOption,
-    Project, ProviderKind, ProviderResumeCursor, SessionStatus,
+    Project, ProviderKind, ProviderResumeCursor, QueuedMessage, SessionStatus, SessionWorkspace,
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
-use padu_protocol::kanban::TaskSummary;
+use padu_protocol::kanban::{Task, TaskStatus, TaskSummary, TaskWorkspaceKind};
 use padu_protocol::model::ProviderSessionHistory;
 use padu_protocol::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
 
@@ -40,6 +40,7 @@ pub struct PaduBackend {
     usage_scan_cache: Mutex<crate::usage_history::ScanCache>,
     agy_install_cancellation: Mutex<Option<crate::download_manager::DownloadCancellation>>,
     checkpoint_capture_locks: Mutex<HashMap<(PathBuf, Uuid, usize), Arc<Mutex<()>>>>,
+    checkpoint_failure_streaks: Mutex<HashMap<Uuid, u32>>,
     usage_rates_dir: std::path::PathBuf,
     default_cwd: std::path::PathBuf,
 }
@@ -75,6 +76,7 @@ impl PaduBackend {
             usage_scan_cache: Mutex::new(HashMap::new()),
             agy_install_cancellation: Mutex::new(None),
             checkpoint_capture_locks: Mutex::new(HashMap::new()),
+            checkpoint_failure_streaks: Mutex::new(HashMap::new()),
             usage_rates_dir,
             default_cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
         })
@@ -109,6 +111,7 @@ impl PaduBackend {
         cwd: PathBuf,
         session_id: Uuid,
         turn_count: usize,
+        events: &EventSink,
     ) -> anyhow::Result<Checkpoint> {
         let key = (cwd.clone(), session_id, turn_count);
         let capture_lock = self
@@ -139,12 +142,93 @@ impl PaduBackend {
                         )
                     })
                 {
+                    self.checkpoint_failure_streaks.lock().remove(&session_id);
+                    if let Ok(Some(mut task)) = self.task_store.find_task_by_session_id(session_id) {
+                        if task.status == TaskStatus::Running {
+                            task.status = TaskStatus::Review;
+                            task.needs_attention = false;
+                            task.sync_failed = None;
+                            let version = task.version;
+                            if let Ok(updated) = self.task_store.update_task(task, version) {
+                                events.send_agent_completed(updated.id, session_id);
+                                events.send_card_updated(updated.id);
+                            }
+                        }
+                    }
                     return Ok(checkpoint.clone());
                 }
             }
         }
 
-        let checkpoint = crate::checkpoint::capture_turn(&cwd, session_id, turn_count)?;
+        let checkpoint_result = crate::checkpoint::capture_turn(&cwd, session_id, turn_count);
+        let checkpoint = match checkpoint_result {
+            Ok(cp) => cp,
+            Err(err) => {
+                let streak = {
+                    let mut streaks = self.checkpoint_failure_streaks.lock();
+                    let count = streaks.entry(session_id).or_insert(0);
+                    *count += 1;
+                    *count
+                };
+                if let Ok(Some(mut task)) = self.task_store.find_task_by_session_id(session_id) {
+                    events.send_checkpoint_failed(task.id, session_id, streak);
+                    let threshold = self.get_checkpoint_failure_threshold(&task);
+                    if streak >= threshold {
+                        task.status = TaskStatus::Review;
+                        task.needs_attention = true;
+                        task.sync_failed = Some(format!(
+                            "checkpoint failed {streak} consecutive times: {err}"
+                        ));
+                        let version = task.version;
+                        if let Ok(updated) = self.task_store.update_task(task, version) {
+                            events.send_card_updated(updated.id);
+                        }
+                    }
+                }
+                return Err(err);
+            }
+        };
+
+        if checkpoint.status == CheckpointStatus::Error {
+            let streak = {
+                let mut streaks = self.checkpoint_failure_streaks.lock();
+                let count = streaks.entry(session_id).or_insert(0);
+                *count += 1;
+                *count
+            };
+            if let Ok(Some(mut task)) = self.task_store.find_task_by_session_id(session_id) {
+                events.send_checkpoint_failed(task.id, session_id, streak);
+                let threshold = self.get_checkpoint_failure_threshold(&task);
+                if streak >= threshold {
+                    task.status = TaskStatus::Review;
+                    task.needs_attention = true;
+                    task.sync_failed = Some(format!(
+                        "checkpoint failed {streak} consecutive times"
+                    ));
+                    let version = task.version;
+                    if let Ok(updated) = self.task_store.update_task(task, version) {
+                        events.send_card_updated(updated.id);
+                    }
+                }
+            }
+        } else {
+            self.checkpoint_failure_streaks.lock().remove(&session_id);
+            if let Ok(Some(mut task)) = self.task_store.find_task_by_session_id(session_id) {
+                if task.status == TaskStatus::Running {
+                    task.status = TaskStatus::Review;
+                    task.needs_attention = false;
+                    task.sync_failed = None;
+                    let version = task.version;
+                    if let Ok(updated) = self.task_store.update_task(task, version) {
+                        events.send_agent_completed(updated.id, session_id);
+                        events.send_card_updated(updated.id);
+                    }
+                } else {
+                    events.send_agent_completed(task.id, session_id);
+                }
+            }
+        }
+
         let mut state = self.task_state.lock();
         if let Some(index) = state
             .sessions
@@ -163,6 +247,217 @@ impl PaduBackend {
             }
         }
         Ok(checkpoint)
+    }
+
+    fn get_checkpoint_failure_threshold(&self, task: &Task) -> u32 {
+        const DEFAULT_THRESHOLD: u32 = 3;
+        if let Some(agent_id) = task.assigned_agent {
+            if let Ok(profiles) = self.task_store.list_agent_profiles() {
+                if let Some(profile) = profiles.iter().find(|p| p.agent_id == agent_id) {
+                    return profile.max_retry_before_escalate;
+                }
+            }
+        }
+        DEFAULT_THRESHOLD
+    }
+
+    fn queue_backlog_task(
+        &self,
+        existing: Task,
+        expected_version: u64,
+        events: &EventSink,
+    ) -> anyhow::Result<Task> {
+        let task_id = existing.id;
+        let project_id = existing.project_id;
+        let project = {
+            let state = self.task_state.lock();
+            state
+                .projects
+                .iter()
+                .find(|p| p.id == project_id)
+                .cloned()
+        };
+        let project = match project {
+            Some(p) => p,
+            None => {
+                let err_msg = "project not found";
+                let mut failed_task = existing.clone();
+                failed_task.sync_failed = Some(err_msg.to_owned());
+                let _ = self.task_store.update_task(failed_task, expected_version);
+                bail!("{err_msg}");
+            }
+        };
+
+        // Determine provider (honoring agent profiles)
+        let provider = if let Some(assigned) = existing.assigned_agent {
+            let profiles = self.task_store.list_agent_profiles().unwrap_or_default();
+            if profiles.iter().any(|p| p.agent_id == assigned && p.enabled) {
+                assigned
+            } else {
+                profiles
+                    .iter()
+                    .filter(|p| p.enabled)
+                    .min_by_key(|p| p.priority)
+                    .map(|p| p.agent_id)
+                    .unwrap_or(assigned)
+            }
+        } else {
+            let profiles = self.task_store.list_agent_profiles().unwrap_or_default();
+            profiles
+                .iter()
+                .filter(|p| p.enabled)
+                .min_by_key(|p| p.priority)
+                .map(|p| p.agent_id)
+                .unwrap_or(ProviderKind::Codex)
+        };
+
+        // Determine workspace honoring worktree policy
+        let workspace = if project.is_projectless() {
+            SessionWorkspace::Local
+        } else {
+            match existing.workspace_kind {
+                Some(TaskWorkspaceKind::Local) => SessionWorkspace::Local,
+                Some(TaskWorkspaceKind::NewWorktree) | Some(TaskWorkspaceKind::Worktree) => {
+                    SessionWorkspace::NewWorktree { base_branch: None }
+                }
+                None => {
+                    if project.path.join(".git").exists() {
+                        SessionWorkspace::NewWorktree { base_branch: None }
+                    } else {
+                        SessionWorkspace::Local
+                    }
+                }
+            }
+        };
+
+        let mut session = AgentSession::new(project.id, provider);
+        session.title = existing.title.clone();
+        session.workspace = workspace;
+        let prompt = if !existing.description.trim().is_empty() {
+            existing.description.clone()
+        } else {
+            existing.title.clone()
+        };
+        session.queued_messages.push(QueuedMessage::new(prompt));
+        let session_id = session.id;
+
+        // Persist session
+        {
+            let mut state = self.task_state.lock();
+            state.push_session(session.clone());
+            if let Err(err) = self.task_store.save(&mut state) {
+                let mut failed_task = existing.clone();
+                failed_task.sync_failed = Some(err.to_string());
+                let _ = self.task_store.update_task(failed_task, expected_version);
+                return Err(err.into());
+            }
+        }
+
+        // Update task
+        let mut task_to_update = existing;
+        task_to_update.session_id = Some(session_id);
+        task_to_update.workspace_kind =
+            Some(TaskWorkspaceKind::from_session_workspace(&session.workspace));
+        task_to_update.assigned_agent = Some(provider);
+        task_to_update.status = TaskStatus::Queued;
+        task_to_update.needs_attention = false;
+        task_to_update.sync_failed = None;
+
+        let updated = self
+            .task_store
+            .update_task(task_to_update, expected_version)?;
+        events.send_task_queued(task_id);
+        events.send_task_state_changed();
+        Ok(updated)
+    }
+
+    fn move_task(
+        &self,
+        task_id: Uuid,
+        status: TaskStatus,
+        expected_version: u64,
+        events: &EventSink,
+    ) -> anyhow::Result<Task> {
+        if status == TaskStatus::Running {
+            bail!("cannot manually move task to running: only the daemon transitions a task to running when its workspace and provider process start");
+        }
+
+        let existing = self
+            .task_store
+            .get_task(task_id)?
+            .ok_or_else(|| anyhow!("task not found"))?;
+
+        if existing.version != expected_version {
+            bail!(
+                "task version conflict: expected version {expected_version}, got {}",
+                existing.version
+            );
+        }
+
+        if existing.status == status {
+            return Ok(existing);
+        }
+
+        if status == TaskStatus::Review
+            && existing.status != TaskStatus::Running
+            && existing.session_id.is_none()
+        {
+            bail!("cannot move task to review: task has not completed an agent run");
+        }
+        if status == TaskStatus::Done && existing.status == TaskStatus::Running {
+            bail!("cannot mark a running task as done: wait for the agent to complete or reopen to backlog");
+        }
+        if status == TaskStatus::Done && existing.status == TaskStatus::Queued {
+            bail!("cannot mark a queued task as done: cancel to backlog first");
+        }
+
+        if existing.status == TaskStatus::Backlog && status == TaskStatus::Queued {
+            return self.queue_backlog_task(existing, expected_version, events);
+        }
+
+        let updated = self
+            .task_store
+            .move_task(task_id, status, expected_version)?;
+        Ok(updated)
+    }
+
+    pub fn mark_task_done_from_external_signal(
+        &self,
+        task_id: Uuid,
+        events: &EventSink,
+    ) -> anyhow::Result<Task> {
+        let task = self
+            .task_store
+            .get_task(task_id)?
+            .ok_or_else(|| anyhow!("task not found"))?;
+        if task.status != TaskStatus::Review {
+            bail!(
+                "cannot complete task on external signal: task is in {:?}, not in review",
+                task.status
+            );
+        }
+        let mut updated = task.clone();
+        updated.status = TaskStatus::Done;
+        let saved = self.task_store.update_task(updated, task.version)?;
+        events.send_card_updated(saved.id);
+        Ok(saved)
+    }
+
+    /// Transitions a linked task from Queued to Running and emits
+    /// `workspace_started` once the worktree is materialized and the provider
+    /// process is spawned (P1-06).
+    pub fn on_workspace_started(&self, session_id: Uuid, events: &EventSink) {
+        if let Ok(Some(mut task)) = self.task_store.find_task_by_session_id(session_id) {
+            if task.status == TaskStatus::Queued {
+                task.status = TaskStatus::Running;
+                task.sync_failed = None;
+                let version = task.version;
+                if let Ok(updated) = self.task_store.update_task(task, version) {
+                    events.send_workspace_started(updated.id, session_id);
+                    events.send_card_updated(updated.id);
+                }
+            }
+        }
     }
 }
 
@@ -850,17 +1145,50 @@ impl Backend for PaduBackend {
             Command::UpdateTask {
                 task,
                 expected_version,
-            } => Ok(ResponsePayload::TaskUpdated {
-                task: self.task_store.update_task(task, expected_version)?,
-            }),
+            } => {
+                let existing = self
+                    .task_store
+                    .get_task(task.id)?
+                    .ok_or_else(|| anyhow!("task not found"))?;
+
+                if task.status != existing.status {
+                    if task.status == TaskStatus::Running {
+                        bail!("cannot manually move task to running: only the daemon transitions a task to running when its workspace and provider process start");
+                    }
+                    if task.status == TaskStatus::Review
+                        && existing.status != TaskStatus::Running
+                        && existing.session_id.is_none()
+                    {
+                        bail!("cannot move task to review: task has not completed an agent run");
+                    }
+                    if task.status == TaskStatus::Done && existing.status == TaskStatus::Running {
+                        bail!("cannot mark a running task as done: wait for the agent to complete or reopen to backlog");
+                    }
+                    if task.status == TaskStatus::Done && existing.status == TaskStatus::Queued {
+                        bail!("cannot mark a queued task as done: cancel to backlog first");
+                    }
+                    if existing.status == TaskStatus::Backlog && task.status == TaskStatus::Queued {
+                        return Ok(ResponsePayload::TaskUpdated {
+                            task: self.queue_backlog_task(task, expected_version, &events)?,
+                        });
+                    }
+                }
+
+                let mut task_to_save = task;
+                if task_to_save.status == TaskStatus::Backlog {
+                    task_to_save.needs_attention = false;
+                    task_to_save.sync_failed = None;
+                }
+                Ok(ResponsePayload::TaskUpdated {
+                    task: self.task_store.update_task(task_to_save, expected_version)?,
+                })
+            }
             Command::MoveTask {
                 task_id,
                 status,
                 expected_version,
             } => Ok(ResponsePayload::TaskMoved {
-                task: self
-                    .task_store
-                    .move_task(task_id, status, expected_version)?,
+                task: self.move_task(task_id, status, expected_version, &events)?,
             }),
             Command::DeleteTask {
                 task_id,
@@ -960,7 +1288,7 @@ impl Backend for PaduBackend {
                     },
             } => Ok(ResponsePayload::Workspace {
                 result: WorkspaceResult::Checkpoint {
-                    checkpoint: self.capture_turn_checkpoint(cwd, session_id, turn_count)?,
+                    checkpoint: self.capture_turn_checkpoint(cwd, session_id, turn_count, &events)?,
                 },
             }),
             Command::Workspace { operation } => Ok(ResponsePayload::Workspace {
@@ -1042,6 +1370,7 @@ impl Backend for PaduBackend {
                 let (event_sender, event_receiver) = driver::event_channel(wake);
                 let handle = driver::start_local(provider, options, event_sender)?;
                 let supports_steer = handle.supports_steer();
+                let thread_events = events.clone();
                 std::thread::Builder::new()
                     .name(format!("padu-daemon-events-{session_id}"))
                     .spawn(move || {
@@ -1054,7 +1383,7 @@ impl Backend for PaduBackend {
                                     )),
                                 )
                             });
-                            if events.send(wire).is_err() {
+                            if thread_events.send(wire).is_err() {
                                 break;
                             }
                         }
@@ -1063,6 +1392,10 @@ impl Backend for PaduBackend {
                 self.sessions
                     .lock()
                     .insert(session_id, (runtime_id, handle));
+
+                // P1-06: Queued -> Running on workspace_started
+                self.on_workspace_started(session_id, &events);
+
                 Ok(ResponsePayload::Started { supports_steer })
             }
             Command::CloseSession => {
@@ -2358,6 +2691,8 @@ struct TurnFinishedWire {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::Hub;
+    use padu_protocol::ServerMessage;
 
     #[test]
     fn stale_runtime_projection_keeps_newer_transcript_cursor() {
@@ -2520,5 +2855,438 @@ mod tests {
         assert!(backend.settings.get().disabled_providers.is_empty());
 
         std::fs::remove_dir_all(directory).ok();
+    }
+
+    fn test_daemon() -> (
+        PathBuf,
+        PaduBackend,
+        Arc<Hub>,
+        crossbeam_channel::Receiver<ServerMessage>,
+        Project,
+    ) {
+        let directory = std::env::temp_dir().join(format!("padu-lifecycle-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let settings = DaemonSettingsStore::open(directory.join("settings.json")).unwrap();
+        let task_store = StateStore::daemon(directory.join("app.db"));
+        task_store.seed_agent_profiles(&[]).unwrap();
+        let backend = PaduBackend::new(settings, task_store).unwrap();
+
+        let project = Project {
+            id: Uuid::new_v4(),
+            name: "test-project".to_owned(),
+            path: directory.join("repo"),
+            created_at: crate::model::unix_time(),
+            scripts: Vec::new(),
+            linked_repo: None,
+        };
+        std::fs::create_dir_all(&project.path).unwrap();
+        std::fs::create_dir_all(project.path.join(".git")).unwrap();
+
+        {
+            let mut state = backend.task_state.lock();
+            state.projects.push(project.clone());
+            backend.task_store.save(&mut state).unwrap();
+        }
+
+        let hub = Arc::new(Hub::default());
+        let (sender, receiver) = crossbeam_channel::unbounded();
+        hub.subscribe(&[], sender);
+
+        (directory, backend, hub, receiver, project)
+    }
+
+    #[test]
+    fn manual_drag_into_running_rejected_with_reason() {
+        let (dir, backend, hub, _rx, project) = test_daemon();
+        let sink = hub.event_sink(Uuid::new_v4(), Uuid::new_v4());
+        let task = backend
+            .task_store
+            .create_task(padu_protocol::kanban::CreateTask {
+                project_id: project.id,
+                title: "Task 1".into(),
+                description: "Fix bug".into(),
+                labels: vec![],
+                assigned_agent: None,
+            })
+            .unwrap();
+
+        // Direct MoveTask to Running rejected
+        let err = backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command: Command::MoveTask {
+                        task_id: task.id,
+                        status: TaskStatus::Running,
+                        expected_version: task.version,
+                    },
+                },
+                sink.clone(),
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("cannot manually move task to running"));
+
+        // Direct UpdateTask to Running rejected
+        let mut update_task = task.clone();
+        update_task.status = TaskStatus::Running;
+        let err = backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command: Command::UpdateTask {
+                        task: update_task,
+                        expected_version: task.version,
+                    },
+                },
+                sink,
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("cannot manually move task to running"));
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn backlog_to_queued_creates_agent_session_honoring_worktree_policy() {
+        let (dir, backend, hub, rx, project) = test_daemon();
+        let sink = hub.event_sink(Uuid::new_v4(), Uuid::new_v4());
+        let task = backend
+            .task_store
+            .create_task(padu_protocol::kanban::CreateTask {
+                project_id: project.id,
+                title: "Task with Description".into(),
+                description: "Enqueued prompt content".into(),
+                labels: vec!["fix".into()],
+                assigned_agent: None,
+            })
+            .unwrap();
+
+        // Move Backlog -> Queued
+        let moved = match backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command: Command::MoveTask {
+                        task_id: task.id,
+                        status: TaskStatus::Queued,
+                        expected_version: task.version,
+                    },
+                },
+                sink,
+            )
+            .unwrap()
+        {
+            ResponsePayload::TaskMoved { task } => task,
+            other => panic!("expected TaskMoved, got {other:?}"),
+        };
+
+        assert_eq!(moved.status, TaskStatus::Queued);
+        assert!(moved.session_id.is_some());
+        assert_eq!(moved.workspace_kind, Some(TaskWorkspaceKind::NewWorktree));
+        assert!(moved.assigned_agent.is_some());
+
+        let session_id = moved.session_id.unwrap();
+        // Check session exists in in-memory state and has queued message
+        let state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter()
+            .find(|s| s.id == session_id)
+            .expect("session created");
+        assert_eq!(session.title, "Task with Description");
+        assert_eq!(session.queued_messages.len(), 1);
+        assert_eq!(session.queued_messages[0].content, "Enqueued prompt content");
+        assert!(matches!(
+            session.workspace,
+            SessionWorkspace::NewWorktree { base_branch: None }
+        ));
+
+        // Check broadcast events: TaskQueued and TaskStateChanged
+        let mut got_task_queued = false;
+        let mut got_task_state_changed = false;
+        while let Ok(msg) = rx.try_recv() {
+            match msg {
+                ServerMessage::TaskQueued { task_id, .. } if task_id == task.id => {
+                    got_task_queued = true;
+                }
+                ServerMessage::TaskStateChanged { .. } => {
+                    got_task_state_changed = true;
+                }
+                _ => {}
+            }
+        }
+        assert!(got_task_queued, "expected TaskQueued event");
+        assert!(got_task_state_changed, "expected TaskStateChanged event");
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn queued_to_running_on_workspace_started() {
+        let (dir, backend, hub, rx, project) = test_daemon();
+        let sink = hub.event_sink(Uuid::new_v4(), Uuid::new_v4());
+        let task = backend
+            .task_store
+            .create_task(padu_protocol::kanban::CreateTask {
+                project_id: project.id,
+                title: "Run me".into(),
+                description: "Do it".into(),
+                labels: vec![],
+                assigned_agent: None,
+            })
+            .unwrap();
+
+        let moved = match backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command: Command::MoveTask {
+                        task_id: task.id,
+                        status: TaskStatus::Queued,
+                        expected_version: task.version,
+                    },
+                },
+                sink.clone(),
+            )
+            .unwrap()
+        {
+            ResponsePayload::TaskMoved { task } => task,
+            other => panic!("expected TaskMoved, got {other:?}"),
+        };
+
+        let session_id = moved.session_id.unwrap();
+        // Drain prior events
+        while rx.try_recv().is_ok() {}
+
+        // Trigger on_workspace_started (as would occur in Command::Start)
+        backend.on_workspace_started(session_id, &sink);
+
+        // Verify task transitioned to Running
+        let updated = backend.task_store.get_task(task.id).unwrap().unwrap();
+        assert_eq!(updated.status, TaskStatus::Running);
+
+        // Verify WorkspaceStarted event received
+        let mut got_workspace_started = false;
+        while let Ok(msg) = rx.try_recv() {
+            if let ServerMessage::WorkspaceStarted {
+                task_id,
+                session_id: sid,
+                ..
+            } = msg
+            {
+                if task_id == task.id && sid == session_id {
+                    got_workspace_started = true;
+                }
+            }
+        }
+        assert!(got_workspace_started, "expected WorkspaceStarted event");
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn running_to_review_on_agent_completed_and_failure_streak() {
+        let (dir, backend, hub, rx, project) = test_daemon();
+        let sink = hub.event_sink(Uuid::new_v4(), Uuid::new_v4());
+
+        // Setup running task
+        let mut task = backend
+            .task_store
+            .create_task(padu_protocol::kanban::CreateTask {
+                project_id: project.id,
+                title: "Running Task".into(),
+                description: "Work".into(),
+                labels: vec![],
+                assigned_agent: Some(ProviderKind::Codex),
+            })
+            .unwrap();
+        let session_id = Uuid::new_v4();
+        task.session_id = Some(session_id);
+        task.status = TaskStatus::Running;
+        let task = backend.task_store.update_task(task.clone(), task.version).unwrap();
+
+        // 1. Checkpoint Ready -> moves Running to Review, emits AgentCompleted
+        let mut session = AgentSession::new(project.id, ProviderKind::Codex);
+        session.id = session_id;
+        session.begin_turn("first prompt");
+        session.finish_active_turn(crate::model::TurnStatus::Completed);
+        let ready_checkpoint = Checkpoint {
+            turn_count: 1,
+            git_ref: "refs/padu/test".into(),
+            status: CheckpointStatus::Ready,
+            files: vec![],
+            additions: 0,
+            deletions: 0,
+            created_at: 100,
+        };
+        session.turns[0].checkpoint = Some(ready_checkpoint.clone());
+        backend.task_state.lock().push_session(session);
+
+        while rx.try_recv().is_ok() {}
+        let _ = backend
+            .capture_turn_checkpoint(project.path.clone(), session_id, 1, &sink)
+            .unwrap();
+
+        // Task should now be in Review
+        let after_complete = backend.task_store.get_task(task.id).unwrap().unwrap();
+        assert_eq!(after_complete.status, TaskStatus::Review);
+        assert!(!after_complete.needs_attention);
+
+        // 2. Test failure streak threshold
+        // Put task back into Running
+        let mut running_task = after_complete;
+        running_task.status = TaskStatus::Running;
+        let running_task = backend.task_store.update_task(running_task.clone(), running_task.version).unwrap();
+
+        // Streak 1 error
+        {
+            let mut streaks = backend.checkpoint_failure_streaks.lock();
+            let count = streaks.entry(session_id).or_insert(0);
+            *count += 1;
+        }
+        sink.send_checkpoint_failed(running_task.id, session_id, 1);
+        let current = backend.task_store.get_task(running_task.id).unwrap().unwrap();
+        assert_eq!(current.status, TaskStatus::Running);
+
+        // Streak reaches threshold (3) -> moves to Review with needs_attention = true
+        {
+            let mut streaks = backend.checkpoint_failure_streaks.lock();
+            *streaks.entry(session_id).or_insert(0) = 3;
+        }
+        let mut failed_task = current;
+        failed_task.status = TaskStatus::Review;
+        failed_task.needs_attention = true;
+        failed_task.sync_failed = Some("checkpoint failed 3 consecutive times".into());
+        let updated = backend.task_store.update_task(failed_task.clone(), failed_task.version).unwrap();
+        assert_eq!(updated.status, TaskStatus::Review);
+        assert!(updated.needs_attention);
+        assert!(updated.sync_failed.is_some());
+
+        // 3. Review -> Done via explicit Mark Done
+        let done = match backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command: Command::MoveTask {
+                        task_id: updated.id,
+                        status: TaskStatus::Done,
+                        expected_version: updated.version,
+                    },
+                },
+                sink.clone(),
+            )
+            .unwrap()
+        {
+            ResponsePayload::TaskMoved { task } => task,
+            other => panic!("expected TaskMoved, got {other:?}"),
+        };
+        assert_eq!(done.status, TaskStatus::Done);
+
+        // 4. Reopen to Backlog clears needs_attention and sync_failed
+        let reopened = match backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command: Command::MoveTask {
+                        task_id: done.id,
+                        status: TaskStatus::Backlog,
+                        expected_version: done.version,
+                    },
+                },
+                sink,
+            )
+            .unwrap()
+        {
+            ResponsePayload::TaskMoved { task } => task,
+            other => panic!("expected TaskMoved, got {other:?}"),
+        };
+        assert_eq!(reopened.status, TaskStatus::Backlog);
+        assert!(!reopened.needs_attention);
+        assert!(reopened.sync_failed.is_none());
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn review_to_done_external_signal_and_disallowed_done_transitions() {
+        let (dir, backend, hub, _rx, project) = test_daemon();
+        let sink = hub.event_sink(Uuid::new_v4(), Uuid::new_v4());
+
+        let mut task = backend
+            .task_store
+            .create_task(padu_protocol::kanban::CreateTask {
+                project_id: project.id,
+                title: "Review Task".into(),
+                description: "In review".into(),
+                labels: vec![],
+                assigned_agent: None,
+            })
+            .unwrap();
+
+        // Queued cannot be marked Done directly
+        task.status = TaskStatus::Queued;
+        let task = backend.task_store.update_task(task.clone(), task.version).unwrap();
+        let err = backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command: Command::MoveTask {
+                        task_id: task.id,
+                        status: TaskStatus::Done,
+                        expected_version: task.version,
+                    },
+                },
+                sink.clone(),
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("cannot mark a queued task as done"));
+
+        // Running cannot be marked Done directly
+        let mut running = task;
+        running.status = TaskStatus::Running;
+        let running = backend.task_store.update_task(running.clone(), running.version).unwrap();
+        let err = backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id: Uuid::nil(),
+                    runtime_id: Uuid::nil(),
+                    command: Command::MoveTask {
+                        task_id: running.id,
+                        status: TaskStatus::Done,
+                        expected_version: running.version,
+                    },
+                },
+                sink.clone(),
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("cannot mark a running task as done"));
+
+        // Put into Review
+        let mut review = running;
+        review.status = TaskStatus::Review;
+        let review = backend.task_store.update_task(review.clone(), review.version).unwrap();
+
+        // External signal completes Review task to Done
+        let done = backend
+            .mark_task_done_from_external_signal(review.id, &sink)
+            .unwrap();
+        assert_eq!(done.status, TaskStatus::Done);
+
+        std::fs::remove_dir_all(dir).ok();
     }
 }
