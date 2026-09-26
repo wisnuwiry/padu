@@ -36,6 +36,8 @@ export function ProvidersSettings() {
   const [agyInstallPercent, setAgyInstallPercent] = useState(0)
   const [agyAuthenticated, setAgyAuthenticated] = useState(false)
   const [agyAccount, setAgyAccount] = useState<string | null>(null)
+  const [draggedId, setDraggedId] = useState<ProviderKind | null>(null)
+  const [dragOverId, setDragOverId] = useState<ProviderKind | null>(null)
   const agyCancelRequested = useRef(false)
   useEffect(() => {
     if (!client) return
@@ -148,25 +150,63 @@ export function ProvidersSettings() {
     })
   }
 
-  function moveProfile(providerId: ProviderKind, up: boolean) {
-    const index = ordered.findIndex((provider) => provider.id === providerId)
-    const neighbor = up ? ordered[index - 1] : ordered[index + 1]
-    const mover = profileById.get(providerId)
-    const other = neighbor ? profileById.get(neighbor.id) : undefined
-    if (!client || !mover || !other) return
-    const swap = (profile: AgentProfile, priority: number): UpdateAgentProfile => ({
-      agentId: profile.agentId,
-      roleTags: profile.roleTags,
-      costTier: profile.costTier,
-      priority,
-      maxRetryBeforeEscalate: profile.maxRetryBeforeEscalate,
-      enabled: profile.enabled,
-      expectedVersion: profile.version,
-    })
+  function reorderProfile(moverId: ProviderKind, targetId: ProviderKind) {
+    if (moverId === targetId) return
+    const fromIndex = ordered.findIndex((p) => p.id === moverId)
+    const toIndex = ordered.findIndex((p) => p.id === targetId)
+    if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) return
+    if (!client || !config) return
+
+    const newOrdered = [...ordered]
+    const [moved] = newOrdered.splice(fromIndex, 1)
+    if (!moved) return
+    newOrdered.splice(toIndex, 0, moved)
+
+    const currentPriorities = ordered.map(
+      (p) => profileById.get(p.id)?.priority ?? Number.MAX_SAFE_INTEGER,
+    )
+
+    const updates: UpdateAgentProfile[] = []
+    for (let newIdx = 0; newIdx < newOrdered.length; newIdx++) {
+      const provider = newOrdered[newIdx]!
+      const profile = profileById.get(provider.id)
+      if (!profile) continue
+      const targetPriority =
+        newIdx < currentPriorities.length && currentPriorities[newIdx] !== Number.MAX_SAFE_INTEGER
+          ? currentPriorities[newIdx]!
+          : newIdx
+      if (profile.priority !== targetPriority) {
+        updates.push({
+          agentId: profile.agentId,
+          roleTags: profile.roleTags,
+          costTier: profile.costTier,
+          priority: targetPriority,
+          maxRetryBeforeEscalate: profile.maxRetryBeforeEscalate,
+          enabled: profile.enabled,
+          expectedVersion: profile.version,
+        })
+      }
+    }
+
+    if (updates.length === 0) return
+
+    queryClient.setQueryData<AgentProfile[]>(
+      daemonKeys.agentProfiles(config.address),
+      (current) => {
+        if (!current) return current
+        const map = new Map(updates.map((u) => [u.agentId, u]))
+        return current.map((p) => {
+          const u = map.get(p.agentId)
+          return u ? { ...p, priority: u.priority, version: p.version + 1 } : p
+        })
+      },
+    )
+
     void (async () => {
       try {
-        await updateAgentProfile(client, swap(mover, other.priority))
-        await updateAgentProfile(client, swap(other, mover.priority))
+        for (const update of updates) {
+          await updateAgentProfile(client, update)
+        }
         await refreshProfiles()
       } catch (error) {
         if (errorMessage(error).includes('version conflict')) {
@@ -237,9 +277,63 @@ export function ProvidersSettings() {
               : disabled
                 ? 'bg-[var(--warning)]'
                 : 'bg-[var(--success)]'
+          const isDragging = draggedId === provider.id
+          const isDragOver = dragOverId === provider.id && draggedId !== provider.id
           return (
-            <div className="border-b last:border-0" key={provider.id}>
-              <div className="flex items-center gap-3 py-[11px]">
+            <div
+              className={cn(
+                'border-b last:border-0 transition-colors',
+                isDragOver && 'rounded-[7px] bg-accent/60 ring-1 ring-inset ring-ring',
+                isDragging && 'opacity-40',
+              )}
+              key={provider.id}
+              onDragLeave={(e) => {
+                if (e.currentTarget.contains(e.relatedTarget as Node)) return
+                if (dragOverId === provider.id) {
+                  setDragOverId(null)
+                }
+              }}
+              onDragOver={(e) => {
+                if (draggedId && draggedId !== provider.id) {
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'move'
+                  if (dragOverId !== provider.id) {
+                    setDragOverId(provider.id)
+                  }
+                }
+              }}
+              onDrop={(e) => {
+                e.preventDefault()
+                setDragOverId(null)
+                const moverId = (e.dataTransfer.getData('text/plain') as ProviderKind) || draggedId
+                if (moverId && moverId !== provider.id) {
+                  reorderProfile(moverId, provider.id)
+                }
+                setDraggedId(null)
+              }}
+            >
+              <div className="flex items-center gap-2.5 py-[11px]">
+                {profile ? (
+                  <span
+                    aria-label={t('providers.drag_to_reorder', { provider: provider.name })}
+                    className="grid size-6 shrink-0 cursor-grab place-items-center rounded-[7px] text-[var(--text-tertiary)] outline-none hover:bg-accent hover:text-[var(--text-secondary)] active:cursor-grabbing"
+                    draggable
+                    title={t('providers.drag_to_reorder', { provider: provider.name })}
+                    onDragEnd={() => {
+                      setDraggedId(null)
+                      setDragOverId(null)
+                    }}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('text/plain', provider.id)
+                      e.dataTransfer.effectAllowed = 'move'
+                      setDraggedId(provider.id)
+                    }}
+                  >
+                    <PaduIcon className="size-3" name="gripVertical" />
+                  </span>
+                ) : (
+                  <span className="size-6 shrink-0" />
+                )}
                 <span className="relative grid size-[30px] shrink-0 place-items-center rounded-[7px] bg-accent">
                   <ProviderIcon className={cn('size-4', !installed && 'opacity-50')} provider={provider.id} />
                   <span className={cn('absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-[var(--raised)]', dotColor)} />
@@ -253,32 +347,6 @@ export function ProvidersSettings() {
                   </span>
                   <span className="mt-[3px] block truncate text-[10.5px] text-[var(--text-tertiary)]" title={detailText}>{detailText}</span>
                 </span>
-                {profile && (
-                  <span className="flex shrink-0 flex-col">
-                    {index > 0 && (
-                      <button
-                        aria-label={t('providers.move_up', { provider: provider.name })}
-                        className="grid size-6 shrink-0 place-items-center rounded-[7px] text-[var(--text-tertiary)] outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
-                        title={t('providers.move_up', { provider: provider.name })}
-                        type="button"
-                        onClick={() => moveProfile(provider.id, true)}
-                      >
-                        <PaduIcon className="size-2.5" name="chevronUp" />
-                      </button>
-                    )}
-                    {index + 1 < ordered.length && (
-                      <button
-                        aria-label={t('providers.move_down', { provider: provider.name })}
-                        className="grid size-6 shrink-0 place-items-center rounded-[7px] text-[var(--text-tertiary)] outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
-                        title={t('providers.move_down', { provider: provider.name })}
-                        type="button"
-                        onClick={() => moveProfile(provider.id, false)}
-                      >
-                        <PaduIcon className="size-2.5" name="chevronDown" />
-                      </button>
-                    )}
-                  </span>
-                )}
                 <button
                   aria-expanded={open}
                   aria-label={t(open ? 'providers.hide_settings' : 'providers.show_settings', { provider: provider.name })}
