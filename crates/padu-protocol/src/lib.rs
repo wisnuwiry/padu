@@ -27,15 +27,19 @@ macro_rules! tr {
     };
 }
 
+pub mod agent_profile;
 pub mod attachments;
+pub mod automation;
 pub mod blob;
 pub mod checkpoint;
 pub mod composer;
 pub mod computer_use;
 mod driver_wire;
 pub mod git;
+pub mod git_integration;
 pub mod i18n;
 pub mod identity;
+pub mod kanban;
 pub mod model;
 pub mod model_catalog;
 pub mod notes;
