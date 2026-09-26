@@ -30,6 +30,7 @@ export type { ComputerAppGrant } from "./ComputerAppGrant";
 export type { ComputerPermissions } from "./ComputerPermissions";
 export type { ContextUsage } from "./ContextUsage";
 export type { CostQuality } from "./CostQuality";
+export type { CostTier } from "./CostTier";
 export type { CreateNote } from "./CreateNote";
 export type { CreatedWorktree } from "./CreatedWorktree";
 export type { DaemonReady } from "./DaemonReady";

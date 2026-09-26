@@ -671,7 +671,7 @@ fn fingerprint(value: &str) -> u64 {
     hash
 }
 
-fn to_io_error(error: impl std::fmt::Display) -> io::Error {
+pub(crate) fn to_io_error(error: impl std::fmt::Display) -> io::Error {
     io::Error::other(error.to_string())
 }
 
@@ -1025,6 +1025,15 @@ impl StateStore {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Seeds the Agent Profile registry (PRD §6, P1-01): one row per
+    /// `ProviderKind::ALL` with curated defaults, legacy
+    /// `disabled_providers` imported as `enabled = false` exactly once.
+    /// Returns how many rows were inserted (0 on a warm restart).
+    pub fn seed_agent_profiles(&self, disabled_providers: &[ProviderKind]) -> io::Result<usize> {
+        let connection = self.open()?;
+        crate::agent_profile::seed_agent_profiles(&connection, disabled_providers)
     }
 
     fn open(&self) -> io::Result<Connection> {

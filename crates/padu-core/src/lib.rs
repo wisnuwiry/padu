@@ -18,6 +18,7 @@ macro_rules! tr {
 }
 
 pub mod acp_session;
+pub mod agent_profile;
 pub mod agy_install;
 pub mod agy_session;
 pub mod amp_session;
