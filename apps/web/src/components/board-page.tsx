@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { Tooltip } from '@/components/ui/tooltip'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { MarkdownView } from '@/components/markdown-view'
-import { useTasks, useTaskHydrated, useTaskState } from '@/hooks/use-daemon-data'
+import { useTasks, useTaskHydrated, useTaskState, useProviderProbes } from '@/hooks/use-daemon-data'
 import { useDaemon } from '@/lib/daemon-context'
 import { useI18n } from '@/lib/i18n'
 import {
@@ -27,6 +27,18 @@ import {
   setSessionPinned,
 } from '@/lib/daemon-api'
 import { projectDisplayName } from '@/lib/project-presentation'
+
+const DEFAULT_PROVIDER_MODELS: Record<string, string[]> = {
+  claude: ['claude-3-7-sonnet', 'claude-3-5-sonnet', 'claude-3-5-haiku'],
+  codex: ['gpt-4o', 'o3-mini', 'o1', 'gpt-4o-mini'],
+  cursor: ['claude-3.5-sonnet', 'gpt-4o'],
+  agy: ['gemini-2.0-flash', 'gemini-2.0-pro', 'gemini-1.5-pro'],
+  deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+  opencode: ['default'],
+  grok: ['grok-2', 'grok-beta'],
+  kimi: ['moonshot-v1-auto', 'moonshot-v1-128k'],
+  pi: ['default'],
+}
 
 const COLUMNS: { id: TaskStatus; labelKey: string; color: string }[] = [
   { id: 'backlog', labelKey: 'board.backlog', color: 'bg-zinc-400' },
@@ -63,6 +75,19 @@ export function BoardPage() {
   const [newTaskInitialStatus, setNewTaskInitialStatus] = useState<TaskStatus>('backlog')
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null)
   const [dragOverColumn, setDragOverColumn] = useState<TaskStatus | null>(null)
+  const [collapsedColumns, setCollapsedColumns] = useState<Set<TaskStatus>>(() => new Set())
+
+  const toggleColumnCollapse = useCallback((status: TaskStatus) => {
+    setCollapsedColumns((prev) => {
+      const next = new Set(prev)
+      if (next.has(status)) {
+        next.delete(status)
+      } else {
+        next.add(status)
+      }
+      return next
+    })
+  }, [])
 
   // Queries
   const tasksQuery = useTasks()
@@ -195,8 +220,8 @@ export function BoardPage() {
       {/* Main Board View */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Top Header */}
-        <header className="flex h-14 flex-none items-center justify-between border-b border-border px-4 gap-3 bg-sidebar-background">
-          <div className="flex items-center gap-2">
+        <header className="flex h-14 flex-none items-center justify-between border-b border-border px-4 gap-3 bg-card/40 backdrop-blur-xs">
+          <div className="flex items-center gap-2.5">
             {!sidebarVisible && (
               <Button
                 variant="ghost"
@@ -211,68 +236,90 @@ export function BoardPage() {
             <h1 className="text-base font-semibold text-foreground">
               {t('board.title')}
             </h1>
-            <Badge variant="outline" className="ml-1 text-xs">
+            <Badge variant="outline" className="ml-0.5 px-1.5 py-0 text-[11px] font-mono">
               {filteredTasks.length}
             </Badge>
           </div>
 
           {/* Filter Toolbar */}
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
             {/* Search */}
-            <div className="relative w-48">
+            <div className="relative w-44">
               <PaduIcon
                 name="search"
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground"
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none"
               />
               <Input
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder={t('board.filter_search_placeholder')}
-                className="h-8 pl-8 text-xs"
+                className="h-8 pl-8 pr-7 text-xs bg-background/80"
               />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                >
+                  <PaduIcon name="x" className="size-3" />
+                </button>
+              )}
             </div>
 
             {/* Project Filter */}
-            <select
-              value={selectedProjectId}
-              onChange={(e) => setSelectedProjectId(e.target.value)}
-              className="h-8 rounded-md border border-input bg-background px-2.5 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            >
-              <option value="all">{t('board.filter_all_projects')}</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {projectDisplayName(p, t('project.no_project_name'))}
-                </option>
-              ))}
-            </select>
+            <div className="relative flex items-center">
+              <select
+                value={selectedProjectId}
+                onChange={(e) => setSelectedProjectId(e.target.value)}
+                className="h-8 rounded-md border border-input bg-background/80 pl-2.5 pr-6 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary appearance-none cursor-pointer"
+              >
+                <option value="all">{t('board.all_projects')}</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {projectDisplayName(p, t('project.no_project_name'))}
+                  </option>
+                ))}
+              </select>
+              <PaduIcon
+                name="chevronDown"
+                className="pointer-events-none absolute right-2 size-3 text-muted-foreground"
+              />
+            </div>
 
             {/* Agent Filter */}
-            <select
-              value={selectedAgent}
-              onChange={(e) => setSelectedAgent(e.target.value)}
-              className="h-8 rounded-md border border-input bg-background px-2.5 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            >
-              <option value="all">{t('board.filter_all_agents')}</option>
-              {PROVIDERS.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+            <div className="relative flex items-center">
+              <select
+                value={selectedAgent}
+                onChange={(e) => setSelectedAgent(e.target.value)}
+                className="h-8 rounded-md border border-input bg-background/80 pl-2.5 pr-6 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary appearance-none cursor-pointer"
+              >
+                <option value="all">{t('board.all_agents')}</option>
+                {PROVIDERS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+              <PaduIcon
+                name="chevronDown"
+                className="pointer-events-none absolute right-2 size-3 text-muted-foreground"
+              />
+            </div>
 
             {/* Flags Filter */}
-            <div className="flex items-center rounded-md border border-input bg-background p-0.5">
+            <div className="flex items-center rounded-md border border-input bg-background/80 p-0.5 gap-0.5">
               <button
                 type="button"
                 onClick={() =>
                   setFlagFilter((current) => (current === 'needs_attention' ? 'all' : 'needs_attention'))
                 }
-                className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
+                className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium transition-colors cursor-pointer ${
                   flagFilter === 'needs_attention'
                     ? 'bg-amber-500/20 text-amber-500'
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
+                <span className="size-1.5 rounded-full bg-amber-500" />
                 {t('board.needs_attention')}
               </button>
               <button
@@ -280,12 +327,13 @@ export function BoardPage() {
                 onClick={() =>
                   setFlagFilter((current) => (current === 'sync_failed' ? 'all' : 'sync_failed'))
                 }
-                className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
+                className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium transition-colors cursor-pointer ${
                   flagFilter === 'sync_failed'
                     ? 'bg-rose-500/20 text-rose-500'
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
+                <span className="size-1.5 rounded-full bg-rose-500" />
                 {t('board.sync_failed')}
               </button>
             </div>
@@ -301,7 +349,7 @@ export function BoardPage() {
                   setSelectedAgent('all')
                   setFlagFilter('all')
                 }}
-                className="h-8 text-xs text-muted-foreground"
+                className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
               >
                 {t('board.clear_filters')}
               </Button>
@@ -310,7 +358,7 @@ export function BoardPage() {
             {/* New Task Button */}
             <Button
               size="sm"
-              className="h-8 gap-1.5 text-xs"
+              className="h-8 gap-1.5 text-xs font-medium shadow-xs"
               onClick={() => {
                 setNewTaskInitialStatus('backlog')
                 setIsNewTaskOpen(true)
@@ -323,10 +371,46 @@ export function BoardPage() {
         </header>
 
         {/* Kanban Board Columns Container */}
-        <div className="flex flex-1 overflow-x-auto p-4 gap-4 bg-muted/20">
+        <div className="flex flex-1 overflow-x-auto p-4 gap-3 bg-muted/20">
           {COLUMNS.map((column) => {
             const columnTasks = filteredTasks.filter((t) => t.status === column.id)
             const isDragOver = dragOverColumn === column.id
+            const isCollapsed = collapsedColumns.has(column.id)
+
+            if (isCollapsed) {
+              return (
+                <div
+                  key={column.id}
+                  onClick={() => toggleColumnCollapse(column.id)}
+                  className="flex flex-col items-center flex-none w-11 py-3 px-1 rounded-xl border border-border bg-card/60 hover:bg-card hover:border-primary/40 cursor-pointer transition-all select-none gap-3 shadow-xs"
+                  title={t('board.expand_column')}
+                >
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="size-6 p-0 text-muted-foreground hover:text-foreground"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggleColumnCollapse(column.id)
+                    }}
+                  >
+                    <PaduIcon name="chevronRight" className="size-3.5" />
+                  </Button>
+                  <span className={`size-2.5 rounded-full ${column.color}`} />
+                  <Badge variant="secondary" className="h-5 px-1 text-[10px] font-mono">
+                    {columnTasks.length}
+                  </Badge>
+                  <div className="flex-1 flex items-center justify-center my-2">
+                    <span
+                      className="text-[11px] font-medium text-muted-foreground tracking-wider uppercase whitespace-nowrap"
+                      style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+                    >
+                      {t(column.labelKey)}
+                    </span>
+                  </div>
+                </div>
+              )
+            }
 
             return (
               <div
@@ -334,40 +418,51 @@ export function BoardPage() {
                 onDragOver={(e) => handleDragOver(e, column.id)}
                 onDragLeave={handleDragLeave}
                 onDrop={(e) => handleDrop(e, column.id)}
-                className={`flex flex-col flex-none w-80 rounded-xl border border-border bg-card/60 transition-colors ${
+                className={`flex flex-col flex-none w-76 rounded-xl border border-border bg-card/60 transition-colors ${
                   isDragOver ? 'border-primary ring-2 ring-primary/20 bg-primary/5' : ''
                 }`}
               >
                 {/* Column Header */}
-                <div className="flex items-center justify-between px-3.5 py-3 border-b border-border/60">
+                <div className="flex items-center justify-between px-3 py-2.5 border-b border-border/60">
                   <div className="flex items-center gap-2">
                     <span className={`size-2.5 rounded-full ${column.color}`} />
                     <span className="text-xs font-semibold text-foreground">
                       {t(column.labelKey)}
                     </span>
-                    <Badge variant="secondary" className="h-5 px-1.5 text-[11px]">
+                    <Badge variant="secondary" className="h-5 px-1.5 text-[11px] font-mono">
                       {columnTasks.length}
                     </Badge>
                   </div>
-                  {column.id === 'backlog' && (
+                  <div className="flex items-center gap-1">
+                    {column.id === 'backlog' && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="size-6 p-0 text-muted-foreground hover:text-foreground"
+                        onClick={() => {
+                          setNewTaskInitialStatus('backlog')
+                          setIsNewTaskOpen(true)
+                        }}
+                      >
+                        <PaduIcon name="plus" className="size-3.5" />
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="size-7 p-0 text-muted-foreground hover:text-foreground"
-                      onClick={() => {
-                        setNewTaskInitialStatus('backlog')
-                        setIsNewTaskOpen(true)
-                      }}
+                      className="size-6 p-0 text-muted-foreground hover:text-foreground"
+                      onClick={() => toggleColumnCollapse(column.id)}
+                      title={t('board.collapse_column')}
                     >
-                      <PaduIcon name="plus" className="size-4" />
+                      <PaduIcon name="chevronLeft" className="size-3.5" />
                     </Button>
-                  )}
+                  </div>
                 </div>
 
                 {/* Cards Container */}
                 <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5 min-h-[150px]">
                   {columnTasks.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-32 rounded-lg border border-dashed border-border/60 text-muted-foreground p-3 text-center">
+                    <div className="flex flex-col items-center justify-center h-28 rounded-lg border border-dashed border-border/60 text-muted-foreground p-3 text-center">
                       <p className="text-xs">{t(`board.empty_${column.id}`)}</p>
                     </div>
                   ) : (
@@ -492,6 +587,11 @@ function TaskCard({
             <span className="flex items-center gap-1 font-mono uppercase text-foreground/80">
               <ProviderIcon provider={task.assignedAgent} className="size-3" />
               {task.assignedAgent}
+            </span>
+          )}
+          {task.model && (
+            <span className="truncate max-w-[85px] font-mono text-[9px] px-1 py-0.5 rounded bg-muted text-muted-foreground border border-border/40" title={task.model}>
+              {task.model}
             </span>
           )}
         </div>
@@ -890,13 +990,23 @@ function NewTaskDialog({
 }) {
   const { t } = useI18n()
   const { client } = useDaemon()
+  const probes = useProviderProbes()
 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [projectId, setProjectId] = useState(defaultProjectId ?? projects[0]?.id ?? '')
   const [assignedAgent, setAssignedAgent] = useState<ProviderKind | 'none'>('none')
+  const [selectedModel, setSelectedModel] = useState<string>('')
   const [labels, setLabels] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Compute available models for the assigned agent
+  const availableModels = useMemo(() => {
+    if (assignedAgent === 'none') return []
+    const probeModels = probes.data?.[assignedAgent]?.models?.map((m) => m.id) ?? []
+    if (probeModels.length > 0) return probeModels
+    return DEFAULT_PROVIDER_MODELS[assignedAgent] ?? []
+  }, [assignedAgent, probes.data])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -915,6 +1025,7 @@ function NewTaskDialog({
         description: description.trim(),
         labels: parsedLabels,
         assignedAgent: assignedAgent === 'none' ? null : assignedAgent,
+        model: assignedAgent !== 'none' && selectedModel ? selectedModel : undefined,
       }
 
       const created = await createTask(client, input)
@@ -985,7 +1096,11 @@ function NewTaskDialog({
             </label>
             <select
               value={assignedAgent}
-              onChange={(e) => setAssignedAgent(e.target.value as ProviderKind | 'none')}
+              onChange={(e) => {
+                const next = e.target.value as ProviderKind | 'none'
+                setAssignedAgent(next)
+                setSelectedModel('')
+              }}
               className="w-full h-8 rounded-md border border-input bg-background px-2.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
             >
               <option value="none">{t('board.no_agent')}</option>
@@ -996,6 +1111,27 @@ function NewTaskDialog({
               ))}
             </select>
           </div>
+
+          {/* Model based on Assigned Agent */}
+          {assignedAgent !== 'none' && (
+            <div className="space-y-1 animate-in fade-in duration-100">
+              <label className="text-xs font-medium text-foreground">
+                {t('board.model')}
+              </label>
+              <select
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                className="w-full h-8 rounded-md border border-input bg-background px-2.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="">{t('board.default_model')}</option>
+                {availableModels.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Description */}
           <div className="space-y-1">

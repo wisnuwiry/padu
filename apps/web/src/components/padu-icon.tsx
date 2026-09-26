@@ -15,6 +15,7 @@ export const PADU_ICONS = {
   chartColumn: 'i-padu-chart-column',
   check: 'i-padu-check',
   chevronDown: 'i-padu-chevron-down',
+  chevronLeft: 'i-padu-chevron-left',
   chevronRight: 'i-padu-chevron-right',
   chevronUp: 'i-padu-chevron-up',
   chevronsDownUp: 'i-padu-chevrons-down-up',
