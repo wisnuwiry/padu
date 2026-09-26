@@ -328,6 +328,9 @@ impl PaduBackend {
 
         let mut session = AgentSession::new(project.id, provider);
         session.title = existing.title.clone();
+        if let Some(ref model) = existing.model {
+            session.model = Some(model.clone());
+        }
         session.workspace = workspace;
         let prompt = if !existing.description.trim().is_empty() {
             existing.description.clone()
@@ -2915,6 +2918,7 @@ mod tests {
                 description: "Fix bug".into(),
                 labels: vec![],
                 assigned_agent: None,
+                model: None,
             })
             .unwrap();
 
@@ -2976,6 +2980,7 @@ mod tests {
                 description: "Enqueued prompt content".into(),
                 labels: vec!["fix".into()],
                 assigned_agent: None,
+                model: None,
             })
             .unwrap();
 
@@ -3056,6 +3061,7 @@ mod tests {
                 description: "Do it".into(),
                 labels: vec![],
                 assigned_agent: None,
+                model: None,
             })
             .unwrap();
 
@@ -3123,6 +3129,7 @@ mod tests {
                 description: "Work".into(),
                 labels: vec![],
                 assigned_agent: Some(ProviderKind::Codex),
+                model: None,
             })
             .unwrap();
         let session_id = Uuid::new_v4();
@@ -3262,6 +3269,7 @@ mod tests {
                 description: "In review".into(),
                 labels: vec![],
                 assigned_agent: None,
+                model: None,
             })
             .unwrap();
 

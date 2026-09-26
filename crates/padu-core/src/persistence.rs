@@ -726,9 +726,9 @@ fn task_version_error(connection: &Connection, id: Uuid, expected_version: u64) 
 }
 
 const UPSERT_TASK: &str = "INSERT INTO tasks(id, project_id, title, description, labels, status, \
-    assigned_agent, session_id, workspace_kind, linked_issue, linked_pr, needs_attention, \
+    assigned_agent, model, session_id, workspace_kind, linked_issue, linked_pr, needs_attention, \
     sync_failed, idempotency_keys, version, created_at, updated_at, archived)
-     VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+     VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
      ON CONFLICT(id) DO UPDATE SET
          project_id     = excluded.project_id,
          title          = excluded.title,
@@ -736,6 +736,7 @@ const UPSERT_TASK: &str = "INSERT INTO tasks(id, project_id, title, description,
          labels         = excluded.labels,
          status         = excluded.status,
          assigned_agent = excluded.assigned_agent,
+         model          = excluded.model,
          session_id     = excluded.session_id,
          workspace_kind = excluded.workspace_kind,
          linked_issue   = excluded.linked_issue,
@@ -755,6 +756,7 @@ type TaskRowColumns = (
     String,
     String,
     String,
+    Option<String>,
     Option<String>,
     Option<String>,
     Option<String>,
@@ -789,6 +791,7 @@ fn task_row_columns(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRowColumns>
         row.get(15)?,
         row.get(16)?,
         row.get(17)?,
+        row.get(18)?,
     ))
 }
 
@@ -818,6 +821,7 @@ fn upsert_task_row(connection: &Connection, task: &Task) -> io::Result<()> {
                 labels,
                 tag_of(task.status),
                 task.assigned_agent.map(tag_of),
+                task.model,
                 task.session_id.map(|id| id.to_string()),
                 task.workspace_kind.map(tag_of),
                 linked_issue,
@@ -844,6 +848,7 @@ fn task_from_columns(
         labels,
         status,
         assigned_agent,
+        model,
         session_id,
         workspace_kind,
         linked_issue,
@@ -867,6 +872,7 @@ fn task_from_columns(
         assigned_agent: assigned_agent
             .map(|value| parse_task_enum("assigned_agent", value))
             .transpose()?,
+        model,
         session_id: session_id
             .map(|value| parse_task_uuid("session_id", &value))
             .transpose()?,
@@ -2020,7 +2026,7 @@ impl StateStore {
         let connection = &guard.as_ref().expect("storage opened above").connection;
         let mut statement = connection
             .prepare(
-                "SELECT id, project_id, title, description, labels, status, assigned_agent, \
+                "SELECT id, project_id, title, description, labels, status, assigned_agent, model, \
                         session_id, workspace_kind, linked_issue, linked_pr, needs_attention, \
                         sync_failed, idempotency_keys, version, created_at, updated_at, archived \
                  FROM tasks ORDER BY updated_at DESC, id ASC",
@@ -2038,7 +2044,7 @@ impl StateStore {
         let connection = &guard.as_ref().expect("storage opened above").connection;
         connection
             .query_row(
-                "SELECT id, project_id, title, description, labels, status, assigned_agent, \
+                "SELECT id, project_id, title, description, labels, status, assigned_agent, model, \
                         session_id, workspace_kind, linked_issue, linked_pr, needs_attention, \
                         sync_failed, idempotency_keys, version, created_at, updated_at, archived \
                  FROM tasks WHERE id = ?1",
@@ -2057,7 +2063,7 @@ impl StateStore {
         let connection = &guard.as_ref().expect("storage opened above").connection;
         connection
             .query_row(
-                "SELECT id, project_id, title, description, labels, status, assigned_agent, \
+                "SELECT id, project_id, title, description, labels, status, assigned_agent, model, \
                         session_id, workspace_kind, linked_issue, linked_pr, needs_attention, \
                         sync_failed, idempotency_keys, version, created_at, updated_at, archived \
                  FROM tasks WHERE session_id = ?1",
@@ -2112,6 +2118,7 @@ impl StateStore {
             labels: input.labels,
             status: TaskStatus::Backlog,
             assigned_agent: input.assigned_agent,
+            model: input.model,
             session_id: None,
             workspace_kind: None,
             linked_issue: None,
@@ -2142,12 +2149,12 @@ impl StateStore {
             .execute(
                 "UPDATE tasks
                     SET project_id = ?1, title = ?2, description = ?3, labels = ?4,
-                        status = ?5, assigned_agent = ?6, session_id = ?7,
-                        workspace_kind = ?8, linked_issue = ?9, linked_pr = ?10,
-                        needs_attention = ?11, sync_failed = ?12, idempotency_keys = ?13,
-                        version = version + 1, created_at = ?14, updated_at = ?15,
-                        archived = ?16
-                  WHERE id = ?17 AND version = ?18",
+                        status = ?5, assigned_agent = ?6, model = ?7, session_id = ?8,
+                        workspace_kind = ?9, linked_issue = ?10, linked_pr = ?11,
+                        needs_attention = ?12, sync_failed = ?13, idempotency_keys = ?14,
+                        version = version + 1, created_at = ?15, updated_at = ?16,
+                        archived = ?17
+                  WHERE id = ?18 AND version = ?19",
                 params![
                     task.project_id.to_string(),
                     task.title,
@@ -2155,6 +2162,7 @@ impl StateStore {
                     serde_json::to_string(&task.labels).map_err(to_io_error)?,
                     tag_of(task.status),
                     task.assigned_agent.map(tag_of),
+                    task.model,
                     task.session_id.map(|id| id.to_string()),
                     task.workspace_kind.map(tag_of),
                     task.linked_issue
@@ -2184,7 +2192,7 @@ impl StateStore {
         let updated = task_from_columns(
             transaction
                 .query_row(
-                    "SELECT id, project_id, title, description, labels, status, assigned_agent, \
+                    "SELECT id, project_id, title, description, labels, status, assigned_agent, model, \
                             session_id, workspace_kind, linked_issue, linked_pr, needs_attention, \
                             sync_failed, idempotency_keys, version, created_at, updated_at, archived \
                      FROM tasks WHERE id = ?1",
@@ -2247,7 +2255,7 @@ impl StateStore {
         let updated = task_from_columns(
             transaction
                 .query_row(
-                    "SELECT id, project_id, title, description, labels, status, assigned_agent, \
+                    "SELECT id, project_id, title, description, labels, status, assigned_agent, model, \
                             session_id, workspace_kind, linked_issue, linked_pr, needs_attention, \
                             sync_failed, idempotency_keys, version, created_at, updated_at, archived \
                      FROM tasks WHERE id = ?1",
@@ -3491,6 +3499,7 @@ mod tests {
             labels: vec!["bug".to_owned()],
             status: TaskStatus::Backlog,
             assigned_agent: None,
+            model: None,
             session_id: None,
             workspace_kind: None,
             linked_issue: None,
@@ -3607,6 +3616,7 @@ mod tests {
             description: String::new(),
             labels: Vec::new(),
             assigned_agent: None,
+            model: None,
         });
         assert_eq!(missing.unwrap_err().kind(), io::ErrorKind::NotFound);
 
@@ -3620,6 +3630,7 @@ mod tests {
                 description: "details".to_owned(),
                 labels: vec!["feature".to_owned()],
                 assigned_agent: Some(ProviderKind::Codex),
+                model: None,
             })
             .unwrap();
         assert_eq!(created.status, TaskStatus::Backlog);
