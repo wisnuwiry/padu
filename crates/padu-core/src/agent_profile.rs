@@ -88,8 +88,8 @@ pub fn seed_agent_profiles(
         let changed = transaction
             .execute(
                 "INSERT INTO agent_profiles(agent_id, role_tags, cost_tier, priority, \
-                 max_retry_before_escalate, enabled) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
+                 max_retry_before_escalate, enabled, version) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1) \
                  ON CONFLICT(agent_id) DO NOTHING",
                 params![
                     provider.id(),
@@ -113,49 +113,89 @@ pub fn seed_agent_profiles(
 pub fn list_agent_profiles(connection: &Connection) -> io::Result<Vec<AgentProfile>> {
     let mut statement = connection
         .prepare(
-            "SELECT agent_id, role_tags, cost_tier, priority, max_retry_before_escalate, enabled \
+            "SELECT agent_id, role_tags, cost_tier, priority, max_retry_before_escalate, enabled, version \
              FROM agent_profiles ORDER BY priority ASC",
         )
         .map_err(crate::persistence::to_io_error)?;
     let rows = statement
         .query_map([], |row| {
-            let agent_id: String = row.get(0)?;
-            let role_tags: String = row.get(1)?;
-            let cost_tier: String = row.get(2)?;
             Ok((
-                agent_id,
-                role_tags,
-                cost_tier,
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
                 row.get::<_, u32>(3)?,
                 row.get::<_, u32>(4)?,
                 row.get::<_, bool>(5)?,
+                row.get::<_, u32>(6)?,
             ))
         })
         .map_err(crate::persistence::to_io_error)?;
     let mut profiles = Vec::new();
     for row in rows {
-        let (agent_id, role_tags, cost_tier, priority, max_retry_before_escalate, enabled) =
-            row.map_err(crate::persistence::to_io_error)?;
-        let provider = ProviderKind::ALL
-            .into_iter()
-            .find(|provider| provider.id() == agent_id)
-            .ok_or_else(|| io::Error::other(format!("unknown agent_id {agent_id:?}")))?;
-        let role_tags: Vec<String> = serde_json::from_str(&role_tags).map_err(|error| {
-            io::Error::other(format!("bad role tags for {agent_id:?}: {error}"))
-        })?;
-        let cost_tier = CostTier::from_str(&cost_tier).map_err(|error| {
-            io::Error::other(format!("bad cost tier for {agent_id:?}: {error}"))
-        })?;
-        profiles.push(AgentProfile {
-            agent_id: provider,
-            role_tags,
-            cost_tier,
-            priority,
-            max_retry_before_escalate,
-            enabled,
-        });
+        profiles.push(parse_profile(
+            row.map_err(crate::persistence::to_io_error)?,
+        )?);
     }
     Ok(profiles)
+}
+
+/// Reads one profile by provider. `None` means never seeded.
+pub fn get_agent_profile(
+    connection: &Connection,
+    provider: ProviderKind,
+) -> io::Result<Option<AgentProfile>> {
+    use rusqlite::OptionalExtension as _;
+    connection
+        .query_row(
+            "SELECT agent_id, role_tags, cost_tier, priority, max_retry_before_escalate, enabled, version \
+             FROM agent_profiles WHERE agent_id = ?1",
+            params![provider.id()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, u32>(3)?,
+                    row.get::<_, u32>(4)?,
+                    row.get::<_, bool>(5)?,
+                    row.get::<_, u32>(6)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(crate::persistence::to_io_error)?
+        .map(parse_profile)
+        .transpose()
+}
+
+/// Candidacy check (P1-02): a missing row (pre-seed database) reads as
+/// enabled, preserving pre-P1-02 behavior until the startup seed runs.
+pub fn agent_profile_enabled(connection: &Connection, provider: ProviderKind) -> io::Result<bool> {
+    Ok(get_agent_profile(connection, provider)?.is_none_or(|profile| profile.enabled))
+}
+
+type ProfileRow = (String, String, String, u32, u32, bool, u32);
+
+fn parse_profile(
+    (agent_id, role_tags, cost_tier, priority, max_retry_before_escalate, enabled, version): ProfileRow,
+) -> io::Result<AgentProfile> {
+    let provider = ProviderKind::ALL
+        .into_iter()
+        .find(|provider| provider.id() == agent_id)
+        .ok_or_else(|| io::Error::other(format!("unknown agent_id {agent_id:?}")))?;
+    let role_tags: Vec<String> = serde_json::from_str(&role_tags)
+        .map_err(|error| io::Error::other(format!("bad role tags for {agent_id:?}: {error}")))?;
+    let cost_tier = CostTier::from_str(&cost_tier)
+        .map_err(|error| io::Error::other(format!("bad cost tier for {agent_id:?}: {error}")))?;
+    Ok(AgentProfile {
+        agent_id: provider,
+        role_tags,
+        cost_tier,
+        priority,
+        max_retry_before_escalate,
+        enabled,
+        version,
+    })
 }
 
 #[cfg(test)]
@@ -191,6 +231,11 @@ mod tests {
             assert!(
                 profile.enabled,
                 "{:?} should seed enabled",
+                profile.agent_id
+            );
+            assert_eq!(
+                profile.version, 1,
+                "{:?} should seed version 1",
                 profile.agent_id
             );
             assert_eq!(

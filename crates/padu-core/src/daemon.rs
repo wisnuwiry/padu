@@ -79,6 +79,26 @@ impl PaduBackend {
         })
     }
 
+    /// Keeps legacy `DaemonSettings.disabled_providers` derived from the
+    /// profile registry (PRD §6.3): disabling adds the provider, enabling
+    /// removes it, so pre-P1-03 surfaces that still read settings stay
+    /// consistent with the registry source of truth.
+    fn sync_profile_enabled_to_settings(
+        &self,
+        provider: ProviderKind,
+        enabled: bool,
+    ) -> anyhow::Result<()> {
+        let mut settings = self.settings.get();
+        if enabled {
+            settings
+                .disabled_providers
+                .retain(|candidate| *candidate != provider);
+        } else if !settings.disabled_providers.contains(&provider) {
+            settings.disabled_providers.push(provider);
+        }
+        Ok(self.settings.replace(settings)?)
+    }
+
     /// Capture and persist one ending checkpoint exactly once per daemon.
     /// Desktop and Web may observe the same turn completion concurrently; a
     /// per-turn lock prevents both clients from running the expensive Git
@@ -613,7 +633,10 @@ impl Backend for PaduBackend {
                 }
                 ensure_shell_environment();
                 let settings = self.settings.get();
-                if settings.disabled_providers.contains(&provider) {
+                // The profile registry is the source of truth for candidacy
+                // (PRD §6.3); legacy `disabled_providers` is derived from it
+                // on every profile update, so it is not consulted here.
+                if !self.task_store.agent_profile_enabled(provider)? {
                     return Ok(ResponsePayload::ProviderSessions {
                         sessions: Vec::new(),
                     });
@@ -792,6 +815,16 @@ impl Backend for PaduBackend {
             Command::UpdateNote { note } => Ok(ResponsePayload::NoteUpdated {
                 note: self.task_store.update_note(note)?,
             }),
+            Command::ListAgentProfiles => Ok(ResponsePayload::AgentProfiles {
+                profiles: self.task_store.list_agent_profiles()?,
+            }),
+            Command::UpdateAgentProfile { update } => {
+                let provider = update.agent_id;
+                let enabled = update.enabled;
+                let profile = self.task_store.update_agent_profile(update)?;
+                self.sync_profile_enabled_to_settings(provider, enabled)?;
+                Ok(ResponsePayload::AgentProfileUpdated { profile })
+            }
             Command::DeleteNote {
                 project_id,
                 note_id,
@@ -1975,6 +2008,8 @@ fn handle_driver_command(
         | Command::CreateNote { .. }
         | Command::UpdateNote { .. }
         | Command::DeleteNote { .. }
+        | Command::ListAgentProfiles
+        | Command::UpdateAgentProfile { .. }
         | Command::StoreBlob { .. }
         | Command::ImportAttachment { .. }
         | Command::ImportPathAttachment { .. }
@@ -2385,5 +2420,39 @@ mod tests {
             event_from_wire(wire).unwrap(),
             DriverEvent::TextDelta(text) if text == "hello"
         ));
+    }
+
+    #[test]
+    fn profile_toggle_syncs_legacy_disabled_providers() {
+        // `DaemonSettings.disabled_providers` stays derived from the registry
+        // (§6.3) so pre-P1-03 surfaces keep working while profiles own truth.
+        let directory = std::env::temp_dir().join(format!("padu-profile-{}", Uuid::new_v4()));
+        let settings = DaemonSettingsStore::open(directory.join("settings.json")).unwrap();
+        let task_store = StateStore::daemon(directory.join("app.db"));
+        task_store.seed_agent_profiles(&[]).unwrap();
+        let backend = PaduBackend::new(settings, task_store).unwrap();
+
+        backend
+            .sync_profile_enabled_to_settings(ProviderKind::Claude, false)
+            .unwrap();
+        assert_eq!(
+            backend.settings.get().disabled_providers,
+            vec![ProviderKind::Claude]
+        );
+        // Disabling twice stays a single entry.
+        backend
+            .sync_profile_enabled_to_settings(ProviderKind::Claude, false)
+            .unwrap();
+        assert_eq!(
+            backend.settings.get().disabled_providers,
+            vec![ProviderKind::Claude]
+        );
+
+        backend
+            .sync_profile_enabled_to_settings(ProviderKind::Claude, true)
+            .unwrap();
+        assert!(backend.settings.get().disabled_providers.is_empty());
+
+        std::fs::remove_dir_all(directory).ok();
     }
 }

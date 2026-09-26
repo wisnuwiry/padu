@@ -63,6 +63,9 @@ pub struct AgentProfile {
     pub priority: u32,
     pub max_retry_before_escalate: u32,
     pub enabled: bool,
+    /// Optimistic-concurrency guard (P1-02). Bumped on every write; updates
+    /// carry `expected_version` and fail when it no longer matches.
+    pub version: u32,
 }
 
 impl AgentProfile {
@@ -71,6 +74,22 @@ impl AgentProfile {
     pub fn display_name(&self) -> &'static str {
         self.agent_id.display_name()
     }
+}
+
+/// Full-replace profile update (P1-02), mirroring [`crate::notes::UpdateNote`].
+/// `expected_version` must equal the stored [`AgentProfile::version`]; on
+/// mismatch the daemon rejects with a version conflict and the client
+/// re-fetches via `ListAgentProfiles`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateAgentProfile {
+    pub agent_id: ProviderKind,
+    pub role_tags: Vec<String>,
+    pub cost_tier: CostTier,
+    pub priority: u32,
+    pub max_retry_before_escalate: u32,
+    pub enabled: bool,
+    pub expected_version: u32,
 }
 
 #[cfg(test)]
@@ -86,6 +105,7 @@ mod tests {
             priority: 5,
             max_retry_before_escalate: 3,
             enabled: true,
+            version: 1,
         };
         let value = serde_json::to_value(&profile).unwrap();
         // `agent_id` follows the ProviderKind wire spelling shared with
@@ -116,6 +136,7 @@ mod tests {
             priority: 2,
             max_retry_before_escalate: 3,
             enabled: true,
+            version: 1,
         };
         assert_eq!(profile.display_name(), ProviderKind::Claude.display_name());
     }

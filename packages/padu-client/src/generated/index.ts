@@ -102,6 +102,7 @@ export type { ThreadGoalStatus } from "./ThreadGoalStatus";
 export type { TokenTotals } from "./TokenTotals";
 export type { TranscriptBlock } from "./TranscriptBlock";
 export type { TurnStatus } from "./TurnStatus";
+export type { UpdateAgentProfile } from "./UpdateAgentProfile";
 export type { UpdateNote } from "./UpdateNote";
 export type { UsageHistory } from "./UsageHistory";
 export type { UsageProvider } from "./UsageProvider";

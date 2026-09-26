@@ -57,6 +57,13 @@
       "when": 1790396772418,
       "tag": "0007_lonely_stone_men",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1790402734981,
+      "tag": "0008_early_major_mapleleaf",
+      "breakpoints": true
     }
   ]
 }

@@ -189,6 +189,12 @@ export const agentProfiles = sqliteTable(
       .notNull()
       .default(3),
     enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    /**
+     * Optimistic-concurrency guard for UpdateAgentProfile (P1-02).
+     * Bumped on every write; clients send `expected_version` and re-fetch
+     * on conflict. Existing rows backfill to 1.
+     */
+    version: integer("version").notNull().default(1),
   },
   (table) => [index("agent_profiles_by_priority").on(table.priority)],
 );

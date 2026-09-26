@@ -19,7 +19,7 @@ Conventions used below: daemon = `crates/padu-core` + `crates/padu-daemon`; wire
 
 **Agent Profile (PRD §6)**
 - [x] **P1-01** Seed all 14 `ProviderKind`s (`agy, amp, claude, codex, cursor, deepseek, fx, opencode, grok, kimi, commandcode, ohmypi, pi, qoder`) with display names from `ProviderKind::display_name()`, default `role_tags`/`cost_tier`/`priority`/`max_retry_before_escalate=3`; migration imports legacy `DaemonSettings.disabled_providers` → `enabled=false` once.
-- [ ] **P1-02** Daemon CRUD: `ListAgentProfiles` / `UpdateAgentProfile` commands + `expected_version` guard; disabled agent excluded from candidacy (in-flight sessions untouched; queued-unstarted tasks re-resolve); `cargo test` for seed + import + exclusion.
+- [x] **P1-02** Daemon CRUD: `ListAgentProfiles` / `UpdateAgentProfile` commands + `expected_version` guard; disabled agent excluded from candidacy (in-flight sessions untouched; queued-unstarted tasks re-resolve); `cargo test` for seed + import + exclusion.
 - [ ] **P1-03** Profile UI (desktop + web): reorder priority (drag + keyboard up/down), enable/disable toggle with tooltip, capability notes (Kimi/Fx no rollback/fork → skipped in rewind-dependent chains); strings via locales.
 
 **Kanban Task model + board (PRD §5)**

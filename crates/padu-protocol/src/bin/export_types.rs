@@ -44,6 +44,7 @@ fn export_to(output: &Path) -> Result<(), Box<dyn std::error::Error>> {
     // so this only adds new .ts files with no behavior change.
     padu_protocol::kanban::Task::export_all(&config)?;
     padu_protocol::agent_profile::AgentProfile::export_all(&config)?;
+    padu_protocol::agent_profile::UpdateAgentProfile::export_all(&config)?;
     padu_protocol::automation::AutomationRule::export_all(&config)?;
     padu_protocol::git_integration::LinkedRepo::export_all(&config)?;
     strip_trailing_whitespace(output)?;

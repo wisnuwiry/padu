@@ -34,6 +34,7 @@ use crate::model::{
     ProjectScript, ProviderKind, RuntimeMode, SessionWorkspace,
 };
 use crate::theme::ThemePreference;
+use padu_protocol::agent_profile::{AgentProfile, UpdateAgentProfile};
 use padu_protocol::notes::EmbeddedNote;
 pub use padu_protocol::notes::{CreateNote, Note, NoteSummary, UpdateNote};
 pub use padu_protocol::persistence::{
@@ -675,6 +676,34 @@ pub(crate) fn to_io_error(error: impl std::fmt::Display) -> io::Error {
     io::Error::other(error.to_string())
 }
 
+fn profile_version_error(
+    connection: &Connection,
+    provider: ProviderKind,
+    expected_version: u32,
+) -> io::Error {
+    let current: Option<i64> = connection
+        .query_row(
+            "SELECT version FROM agent_profiles WHERE agent_id = ?1",
+            params![provider.id()],
+            |row| row.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten();
+    match current {
+        Some(current) => io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "agent profile version conflict: expected {expected_version}, current {current}"
+            ),
+        ),
+        None => io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("agent profile {:?} not found", provider.id()),
+        ),
+    }
+}
+
 const SESSION_SEARCH_SNIPPET_CHARS: usize = 240;
 const SESSION_SEARCH_CONTEXT_BEFORE_CHARS: usize = 72;
 
@@ -1034,6 +1063,69 @@ impl StateStore {
     pub fn seed_agent_profiles(&self, disabled_providers: &[ProviderKind]) -> io::Result<usize> {
         let connection = self.open()?;
         crate::agent_profile::seed_agent_profiles(&connection, disabled_providers)
+    }
+
+    /// Reads the Agent Profile registry ordered by priority (P1-02).
+    pub fn list_agent_profiles(&self) -> io::Result<Vec<AgentProfile>> {
+        let guard = self.storage_guard()?;
+        let connection = &guard.as_ref().expect("storage opened above").connection;
+        crate::agent_profile::list_agent_profiles(connection)
+    }
+
+    /// Full-replace one profile with an `expected_version` guard (P1-02),
+    /// mirroring [`Self::update_note`]. Returns the stored row with the
+    /// bumped version. Disabling here never touches in-flight sessions:
+    /// they hold their own provider and keep running; only new candidacy
+    /// reads the flag.
+    pub fn update_agent_profile(&self, update: UpdateAgentProfile) -> io::Result<AgentProfile> {
+        let mut guard = self.storage_guard()?;
+        let connection = &mut guard.as_mut().expect("storage opened above").connection;
+        // One transaction keeps the UPDATE and its returned row atomic, so
+        // the caller can never observe another writer's values mid-commit.
+        let transaction = connection.transaction().map_err(to_io_error)?;
+        let role_tags = serde_json::to_string(&update.role_tags)
+            .map_err(|error| io::Error::other(format!("could not encode role tags: {error}")))?;
+        let changed = transaction
+            .execute(
+                "UPDATE agent_profiles
+                    SET role_tags = ?1, cost_tier = ?2, priority = ?3,
+                        max_retry_before_escalate = ?4, enabled = ?5, version = version + 1
+                  WHERE agent_id = ?6 AND version = ?7",
+                params![
+                    role_tags,
+                    update.cost_tier.as_str(),
+                    update.priority,
+                    update.max_retry_before_escalate,
+                    update.enabled,
+                    update.agent_id.id(),
+                    update.expected_version,
+                ],
+            )
+            .map_err(to_io_error)?;
+        if changed == 0 {
+            return Err(profile_version_error(
+                &transaction,
+                update.agent_id,
+                update.expected_version,
+            ));
+        }
+        let profile = crate::agent_profile::get_agent_profile(&transaction, update.agent_id)?
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "agent profile not found after update",
+                )
+            })?;
+        transaction.commit().map_err(to_io_error)?;
+        Ok(profile)
+    }
+
+    /// Candidacy check (P1-02): disabled agents are excluded from new
+    /// assignments; in-flight sessions are unaffected.
+    pub fn agent_profile_enabled(&self, provider: ProviderKind) -> io::Result<bool> {
+        let guard = self.storage_guard()?;
+        let connection = &guard.as_ref().expect("storage opened above").connection;
+        crate::agent_profile::agent_profile_enabled(connection, provider)
     }
 
     fn open(&self) -> io::Result<Connection> {
@@ -2801,6 +2893,107 @@ mod tests {
     }
 
     #[test]
+    fn agent_profile_update_bumps_version_and_rejects_stale_writes() {
+        use padu_protocol::agent_profile::CostTier;
+
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        assert_eq!(store.seed_agent_profiles(&[]).unwrap(), 14);
+
+        let updated = store
+            .update_agent_profile(UpdateAgentProfile {
+                agent_id: ProviderKind::Codex,
+                role_tags: vec!["plan".to_owned()],
+                cost_tier: CostTier::High,
+                priority: 0,
+                max_retry_before_escalate: 5,
+                enabled: false,
+                expected_version: 1,
+            })
+            .unwrap();
+        assert_eq!(updated.version, 2);
+        assert_eq!(updated.role_tags, ["plan"]);
+        assert_eq!(updated.priority, 0);
+        assert_eq!(updated.max_retry_before_escalate, 5);
+        assert!(!updated.enabled);
+
+        // A stale writer is rejected and must re-fetch via ListAgentProfiles.
+        let conflict = store.update_agent_profile(UpdateAgentProfile {
+            agent_id: ProviderKind::Codex,
+            role_tags: vec!["plan".to_owned()],
+            cost_tier: CostTier::High,
+            priority: 0,
+            max_retry_before_escalate: 5,
+            enabled: false,
+            expected_version: 1,
+        });
+        let error = conflict.unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(
+            error
+                .to_string()
+                .contains("version conflict: expected 1, current 2"),
+            "unexpected error: {error}"
+        );
+
+        // A row deleted out from under the writer reads as NotFound.
+        Connection::open(directory.join("app.db"))
+            .unwrap()
+            .execute("DELETE FROM agent_profiles WHERE agent_id = 'codex'", [])
+            .unwrap();
+        let missing = store.update_agent_profile(UpdateAgentProfile {
+            agent_id: ProviderKind::Codex,
+            role_tags: Vec::new(),
+            cost_tier: CostTier::High,
+            priority: 0,
+            max_retry_before_escalate: 3,
+            enabled: true,
+            expected_version: 2,
+        });
+        let error = missing.unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn agent_profile_disabled_excluded_from_candidacy_and_survives_restart() {
+        use padu_protocol::agent_profile::CostTier;
+
+        fn disable(provider: ProviderKind, version: u32) -> UpdateAgentProfile {
+            UpdateAgentProfile {
+                agent_id: provider,
+                role_tags: vec!["test".to_owned()],
+                cost_tier: CostTier::Medium,
+                priority: 0,
+                max_retry_before_escalate: 3,
+                enabled: false,
+                expected_version: version,
+            }
+        }
+
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        store.seed_agent_profiles(&[]).unwrap();
+        assert!(store.agent_profile_enabled(ProviderKind::Codex).unwrap());
+
+        store
+            .update_agent_profile(disable(ProviderKind::Codex, 1))
+            .unwrap();
+        assert!(!store.agent_profile_enabled(ProviderKind::Codex).unwrap());
+        // Disabling one agent leaves the rest of the registry untouched.
+        assert!(store.agent_profile_enabled(ProviderKind::Claude).unwrap());
+
+        // A restart re-seeds nothing and the toggle persists.
+        drop(store);
+        let reopened = store_in(&directory);
+        assert_eq!(reopened.seed_agent_profiles(&[]).unwrap(), 0);
+        assert!(!reopened.agent_profile_enabled(ProviderKind::Codex).unwrap());
+
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
     fn default_path_is_build_specific() {
         let path = StateStore::default_path();
         assert_eq!(path.file_name(), Some(std::ffi::OsStr::new("app.db")));
@@ -3323,6 +3516,19 @@ mod tests {
             "projects.linked_repo was added: {columns:?}"
         );
 
+        // Up: agent_profiles carries the P1-02 optimistic-concurrency guard.
+        let profile_columns: Vec<String> = connection
+            .prepare("PRAGMA table_info(agent_profiles)")
+            .unwrap()
+            .query_map([], |row| row.get("name"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+        assert!(
+            profile_columns.contains(&"version".to_string()),
+            "agent_profiles.version was added: {profile_columns:?}"
+        );
+
         // Roll back: the down-script removes the tables and the column...
         connection
             .execute_batch(AUTOMATION_TABLES_ROLLBACK)
@@ -3347,12 +3553,27 @@ mod tests {
             );
         }
 
-        // ...and the migration re-applies cleanly afterwards.
-        let (last, _) = MIGRATIONS.last().expect("at least one migration");
-        connection
-            .execute("DELETE FROM migrations WHERE tag = ?1", params![last])
-            .unwrap();
-        assert_eq!(apply_migrations(&connection).unwrap(), 1);
+        // ...and the automation migrations re-apply cleanly afterwards. Every
+        // migration touching the profile table is cleared, so multi-step
+        // features like the profile table + version column rebuild together.
+        let automation_tags: Vec<&&str> = MIGRATIONS
+            .iter()
+            .filter(|(_, sql)| sql.contains("agent_profiles"))
+            .map(|(tag, _)| tag)
+            .collect();
+        assert!(
+            !automation_tags.is_empty(),
+            "expected automation migrations"
+        );
+        for tag in &automation_tags {
+            connection
+                .execute("DELETE FROM migrations WHERE tag = ?1", params![*tag])
+                .unwrap();
+        }
+        assert_eq!(
+            apply_migrations(&connection).unwrap(),
+            automation_tags.len()
+        );
         connection
             .query_row::<String, _, _>(
                 "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'tasks'",

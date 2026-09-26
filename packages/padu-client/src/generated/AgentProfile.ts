@@ -10,4 +10,9 @@ export type AgentProfile = { agentId: ProviderKind, roleTags: Array<string>, cos
  * Lower runs first in "next available" / fallback chains. Seed order
  * follows `ProviderKind::ALL` (the canonical probe order).
  */
-priority: number, maxRetryBeforeEscalate: number, enabled: boolean, };
+priority: number, maxRetryBeforeEscalate: number, enabled: boolean,
+/**
+ * Optimistic-concurrency guard (P1-02). Bumped on every write; updates
+ * carry `expected_version` and fail when it no longer matches.
+ */
+version: number, };

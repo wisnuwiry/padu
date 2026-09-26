@@ -5,6 +5,7 @@ use serde_json::Value;
 use ts_rs::TS;
 use uuid::Uuid;
 
+use crate::agent_profile::{AgentProfile, UpdateAgentProfile};
 use crate::attachments::{AttachmentUpload, StoredAttachment};
 use crate::computer_use::ComputerPermissions;
 use crate::model::{
@@ -229,6 +230,13 @@ pub enum Command {
         project_id: Uuid,
         note_id: Uuid,
         expected_revision: u64,
+    },
+    /// Read the Agent Profile registry (PRD §6, P1-02), ordered by priority.
+    ListAgentProfiles,
+    /// Full-replace one profile with an `expected_version` guard (P1-02).
+    /// On conflict the daemon rejects and the client re-fetches.
+    UpdateAgentProfile {
+        update: UpdateAgentProfile,
     },
     StoreBlob {
         mime_type: String,
@@ -590,6 +598,12 @@ pub enum ResponsePayload {
     NoteDeleted {
         note_id: Uuid,
         revision: u64,
+    },
+    AgentProfiles {
+        profiles: Vec<AgentProfile>,
+    },
+    AgentProfileUpdated {
+        profile: AgentProfile,
     },
     BlobStored {
         reference: String,
