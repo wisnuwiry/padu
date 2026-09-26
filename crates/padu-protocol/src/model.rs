@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
+use crate::git_integration::LinkedRepo;
 use crate::notes::EmbeddedNote;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize, TS)]
@@ -711,6 +712,11 @@ pub struct Project {
     pub created_at: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scripts: Vec<ProjectScript>,
+    /// Connected repository handle (PRD §5.4 extension). `None` means never
+    /// connected; disconnect clears it. Old payloads without the field read
+    /// as `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked_repo: Option<LinkedRepo>,
 }
 
 /// Filesystem context a task runs in.
@@ -781,6 +787,7 @@ impl Project {
             path,
             created_at: unix_time(),
             scripts: Vec::new(),
+            linked_repo: None,
         }
     }
 

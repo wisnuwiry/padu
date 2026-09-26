@@ -3442,6 +3442,7 @@ mod tests {
             path: root.join("2026-08-23/task"),
             created_at: 0,
             scripts: Vec::new(),
+            linked_repo: None,
         };
         let ordinary = Project {
             id: Uuid::from_u128(2),
@@ -3449,6 +3450,7 @@ mod tests {
             path: PathBuf::from("/tmp/dev/ordinary"),
             created_at: 0,
             scripts: Vec::new(),
+            linked_repo: None,
         };
 
         assert!(sidebar_project_is_projectless(&projectless, Some(root)));
