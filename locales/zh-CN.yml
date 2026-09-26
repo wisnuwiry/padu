@@ -424,6 +424,13 @@ settings.share_anonymous_usage_data_description: 分享功能使用情况和可�
 providers.coding_agents: 编程智能体
 providers.description: Padu 调用安装在这台电脑上的智能体命令行工具。请先安装相应工具或完成登录，然后刷新
 providers.web_description: Padu 调用安装在守护进程主机上的智能体命令行工具。请先安装相应工具或完成登录，然后刷新
+providers.priority_description: 优先级决定 Padu 为新工作优先尝试哪个智能体。排在前面的优先使用，已禁用的智能体会被跳过。
+providers.move_up: 将%{provider}上移
+providers.move_down: 将%{provider}下移
+providers.priority_position: 优先级 %{position}/%{total}
+providers.toggle_tooltip: 关闭后，%{provider} 将不再承接新工作。正在运行的会话不受影响，可随时在此重新启用。
+providers.no_rewind_support: 不支持会话回滚或派生 — 在需要回溯的链路中会被跳过。
+providers.profiles_conflict: 智能体配置已在别处更改，列表已刷新，请重试。
 providers.check_failed: "无法检查 %{command}：%{error}"
 providers.show_settings: 显示 %{provider} 设置
 providers.hide_settings: 隐藏 %{provider} 设置

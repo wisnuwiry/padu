@@ -423,6 +423,13 @@ settings.share_anonymous_usage_data_description: Bantu tingkatkan Padu dengan me
 providers.coding_agents: Agen pengodean
 providers.description: Padu menjalankan CLI agen yang terpasang di komputer ini. Pasang atau masuk dengan CLI masing-masing agen, lalu segarkan
 providers.web_description: Padu menjalankan CLI agen yang terpasang di host daemon. Pasang atau masuk dengan CLI masing-masing agen, lalu segarkan
+providers.priority_description: Urutan prioritas menentukan agen yang dicoba Padu lebih dulu untuk pekerjaan baru. Baris yang lebih atas didahulukan; agen yang dimatikan dilewati.
+providers.move_up: Pindahkan %{provider} ke atas
+providers.move_down: Pindahkan %{provider} ke bawah
+providers.priority_position: Prioritas %{position} dari %{total}
+providers.toggle_tooltip: Matikan agar %{provider} dilewati untuk pekerjaan baru. Sesi yang berjalan tetap lanjut — nyalakan lagi di sini kapan saja.
+providers.no_rewind_support: Tanpa rollback atau fork percakapan — dilewati dalam rantai yang butuh rewind.
+providers.profiles_conflict: Profil agen berubah di tempat lain, jadi daftar dimuat ulang. Coba lagi.
 providers.check_failed: "Tidak dapat memeriksa %{command}: %{error}"
 providers.show_settings: Tampilkan pengaturan %{provider}
 providers.hide_settings: Sembunyikan pengaturan %{provider}

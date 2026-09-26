@@ -1,4 +1,5 @@
 import type {
+  AgentProfile,
   AgentSession,
   AgentInvocation,
   BranchSnapshot,
@@ -28,6 +29,7 @@ import type {
   SessionMessageMatch,
   SlashCommand,
   SkillsCatalog,
+  UpdateAgentProfile,
   UsageHistory,
   UsageWindow,
   PaduClient,
@@ -46,6 +48,7 @@ export const daemonKeys = {
   session: (address: string, sessionId: string) =>
     ['daemon', address, 'session', sessionId] as const,
   settings: (address: string) => ['daemon', address, 'settings'] as const,
+  agentProfiles: (address: string) => ['daemon', address, 'agent-profiles'] as const,
   providers: (address: string) => ['daemon', address, 'providers'] as const,
   provider: (address: string, provider: ProviderKind, binaryOverride: string | null = null) =>
     [...daemonKeys.providers(address), 'catalog', provider, binaryOverride] as const,
@@ -234,6 +237,19 @@ export async function updateDaemonSettings(
   settings: DaemonSettings,
 ): Promise<void> {
   expectResponse(await client.request({ type: 'updateSettings', settings }), 'ack')
+}
+
+export async function listAgentProfiles(client: PaduClient): Promise<AgentProfile[]> {
+  return expectResponse(await client.request({ type: 'listAgentProfiles' }), 'agentProfiles')
+    .profiles
+}
+
+export async function updateAgentProfile(
+  client: PaduClient,
+  update: UpdateAgentProfile,
+): Promise<AgentProfile> {
+  return expectResponse(await client.request({ type: 'updateAgentProfile', update }), 'agentProfileUpdated')
+    .profile
 }
 
 export async function probeProvider(

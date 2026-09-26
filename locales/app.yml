@@ -978,6 +978,20 @@ providers.description:
   en: Padu drives agent CLIs installed on this computer. Install or sign in with each agent's own CLI, then refresh
 providers.web_description:
   en: Padu drives agent CLIs installed on the daemon host. Install or sign in with each agent's own CLI, then refresh
+providers.priority_description:
+  en: Priority order decides which agent Padu tries first for new work. Higher rows run first; disabled agents are skipped.
+providers.move_up:
+  en: Move %{provider} up
+providers.move_down:
+  en: Move %{provider} down
+providers.priority_position:
+  en: Priority %{position} of %{total}
+providers.toggle_tooltip:
+  en: Turn off to skip %{provider} for new work. Running sessions keep going — re-enable here any time.
+providers.no_rewind_support:
+  en: No conversation rollback or fork — skipped in rewind-dependent chains.
+providers.profiles_conflict:
+  en: Agent profiles changed elsewhere, so the list was refreshed. Try again.
 providers.check_failed:
   en: "Could not check %{command}: %{error}"
 providers.show_settings:

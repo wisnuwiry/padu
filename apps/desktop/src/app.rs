@@ -1222,6 +1222,15 @@ pub struct Padu {
     /// Providers the running re-detection has not answered for yet; empty
     /// means no re-detection is in flight.
     provider_detection_remaining: usize,
+    /// Agent Profile registry snapshot from the daemon (`ListAgentProfiles`),
+    /// ordered by priority. Empty until the Providers page loads it; rows
+    /// fall back to `ProviderKind::ALL` order with settings-backed toggles
+    /// while empty, so a slow or unreachable daemon never blanks the page.
+    agent_profiles: Vec<padu_client::agent_profile::AgentProfile>,
+    /// Whether an agent-profile fetch is in flight.
+    agent_profiles_pending: bool,
+    /// Generation used to discard stale profile fetches and mutations.
+    agent_profiles_generation: u64,
     /// The current lifecycle/operation state of Antigravity ACP (install, auth, logout, remove).
     pub(crate) agy_action: AgyActionState,
     /// Whether the current Agy ACP credential is authenticated.
@@ -3441,6 +3450,9 @@ impl Padu {
                 provider_detection_tx,
                 provider_detection_events,
                 provider_detection_remaining: 0,
+                agent_profiles: Vec::new(),
+                agent_profiles_pending: false,
+                agent_profiles_generation: 0,
                 agy_action: AgyActionState::Idle,
                 agy_authenticated: false,
                 agy_account: None,

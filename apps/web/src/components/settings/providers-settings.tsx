@@ -1,10 +1,10 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { DaemonSettings, PlanUsage, ProviderKind } from '@padu/client'
+import type { AgentProfile, DaemonSettings, PlanUsage, ProviderKind, UpdateAgentProfile } from '@padu/client'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { ProviderIcon, PROVIDERS, PaduIcon } from '@/components/padu-icon'
 import { Input } from '@/components/ui/input'
-import { useDaemonSettings, useProviderProbes } from '@/hooks/use-daemon-data'
+import { useAgentProfiles, useDaemonSettings, useProviderProbes } from '@/hooks/use-daemon-data'
 import {
   authenticateAgy,
   cancelAgyInstall,
@@ -15,6 +15,7 @@ import {
   installAgyAcp,
   logoutAgy,
   removeAgyAcp,
+  updateAgentProfile,
   updateDaemonSettings,
 } from '@/lib/daemon-api'
 import { useDaemon } from '@/lib/daemon-context'
@@ -27,6 +28,7 @@ export function ProvidersSettings() {
   const { client, config } = useDaemon()
   const queryClient = useQueryClient()
   const settings = useDaemonSettings()
+  const profiles = useAgentProfiles()
   const probes = useProviderProbes()
   const [expanded, setExpanded] = useState<ProviderKind | null>(null)
   const [paths, setPaths] = useState<Partial<Record<ProviderKind, string>>>({})
@@ -86,14 +88,108 @@ export function ProvidersSettings() {
     setExpanded(expanded === provider ? null : provider)
   }
 
+  const profileById = new Map((profiles.data ?? []).map((profile) => [profile.agentId, profile]))
+  const ordered =
+    profiles.data && profiles.data.length > 0
+      ? [...profiles.data]
+          .sort((a, b) => a.priority - b.priority)
+          .map((profile) => PROVIDERS.find((candidate) => candidate.id === profile.agentId))
+          .filter((provider): provider is (typeof PROVIDERS)[number] => Boolean(provider))
+      : PROVIDERS
+
+  async function refreshProfiles() {
+    if (!config) return
+    await queryClient.invalidateQueries({ queryKey: daemonKeys.agentProfiles(config.address) })
+    // The daemon derives legacy disabled_providers from the registry, so the
+    // settings snapshot must be re-read after every profile write.
+    await queryClient.invalidateQueries({ queryKey: daemonKeys.settings(config.address) })
+  }
+
+  async function sendProfileUpdate(update: UpdateAgentProfile) {
+    if (!client || !config) return
+    try {
+      const profile = await updateAgentProfile(client, update)
+      queryClient.setQueryData<AgentProfile[]>(
+        daemonKeys.agentProfiles(config.address),
+        (current) =>
+          current?.map((candidate) =>
+            candidate.agentId === profile.agentId ? profile : candidate,
+          ),
+      )
+      await queryClient.invalidateQueries({ queryKey: daemonKeys.settings(config.address) })
+    } catch (error) {
+      if (errorMessage(error).includes('version conflict')) {
+        await refreshProfiles()
+        toast.error(t('providers.profiles_conflict'))
+      } else {
+        toast.error(errorMessage(error))
+      }
+    }
+  }
+
+  function toggleProfile(providerId: ProviderKind, enabled: boolean) {
+    const profile = profileById.get(providerId)
+    if (!client || !profile) {
+      if (!settings.data) return
+      const disabledProviders = enabled
+        ? settings.data.disabled_providers.filter((kind) => kind !== providerId)
+        : [...new Set([...settings.data.disabled_providers, providerId])]
+      void apply({ ...settings.data, disabled_providers: disabledProviders })
+      return
+    }
+    void sendProfileUpdate({
+      agentId: profile.agentId,
+      roleTags: profile.roleTags,
+      costTier: profile.costTier,
+      priority: profile.priority,
+      maxRetryBeforeEscalate: profile.maxRetryBeforeEscalate,
+      enabled,
+      expectedVersion: profile.version,
+    })
+  }
+
+  function moveProfile(providerId: ProviderKind, up: boolean) {
+    const index = ordered.findIndex((provider) => provider.id === providerId)
+    const neighbor = up ? ordered[index - 1] : ordered[index + 1]
+    const mover = profileById.get(providerId)
+    const other = neighbor ? profileById.get(neighbor.id) : undefined
+    if (!client || !mover || !other) return
+    const swap = (profile: AgentProfile, priority: number): UpdateAgentProfile => ({
+      agentId: profile.agentId,
+      roleTags: profile.roleTags,
+      costTier: profile.costTier,
+      priority,
+      maxRetryBeforeEscalate: profile.maxRetryBeforeEscalate,
+      enabled: profile.enabled,
+      expectedVersion: profile.version,
+    })
+    void (async () => {
+      try {
+        await updateAgentProfile(client, swap(mover, other.priority))
+        await updateAgentProfile(client, swap(other, mover.priority))
+        await refreshProfiles()
+      } catch (error) {
+        if (errorMessage(error).includes('version conflict')) {
+          await refreshProfiles()
+          toast.error(t('providers.profiles_conflict'))
+        } else {
+          toast.error(errorMessage(error))
+        }
+      }
+    })()
+  }
+
   return (
     <div className="mt-[15px] overflow-hidden rounded-[13px] bg-[var(--raised)] px-5 py-[14px]">
       <div className="flex items-start gap-5">
         <div className="min-w-0 flex-1">
           <div className="text-[13.5px] font-medium">{t('providers.coding_agents')}</div>
-          <p className="mt-[5px] text-[12px] leading-[18px] text-[var(--text-secondary)]">
-            {t('providers.web_description')}
-          </p>
+            <p className="mt-[5px] text-[12px] leading-[18px] text-[var(--text-secondary)]">
+              {t('providers.web_description')}
+            </p>
+            <p className="mt-[5px] text-[12px] leading-[18px] text-[var(--text-secondary)]">
+              {t('providers.priority_description')}
+            </p>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           <button
@@ -114,13 +210,26 @@ export function ProvidersSettings() {
         </div>
       </div>
       <div className="mt-1 flex flex-col">
-        {PROVIDERS.map((provider) => {
+        {ordered.map((provider, index) => {
           const probe = probes.data[provider.id]
           const probeState = probes.states[provider.id]
           const installed = probe?.installed ?? false
-          const disabled = settings.data?.disabled_providers.includes(provider.id) ?? false
+          const profile = profileById.get(provider.id)
+          // The registry is the source of truth once loaded; the legacy
+          // settings list covers the pre-load window.
+          const disabled = profile ? !profile.enabled : (settings.data?.disabled_providers.includes(provider.id) ?? false)
           const open = expanded === provider.id
           const detail = providerProbeDetail(provider.command, probe, probeState, disabled, t)
+          const detailParts = [detail]
+          if (profile) {
+            detailParts.unshift(
+              t('providers.priority_position', { position: index + 1, total: ordered.length }),
+            )
+          }
+          if (NO_REWIND_SUPPORT.includes(provider.id)) {
+            detailParts.push(t('providers.no_rewind_support'))
+          }
+          const detailText = detailParts.join('  ·  ')
           const dotColor = probeState.error
             ? 'bg-[var(--warning)]'
             : !installed
@@ -142,8 +251,34 @@ export function ProvidersSettings() {
                       <span className="shrink-0 font-mono text-[10px] text-[var(--text-tertiary)]">v{probe.version}</span>
                     )}
                   </span>
-                  <span className="mt-[3px] block truncate text-[10.5px] text-[var(--text-tertiary)]" title={detail}>{detail}</span>
+                  <span className="mt-[3px] block truncate text-[10.5px] text-[var(--text-tertiary)]" title={detailText}>{detailText}</span>
                 </span>
+                {profile && (
+                  <span className="flex shrink-0 flex-col">
+                    {index > 0 && (
+                      <button
+                        aria-label={t('providers.move_up', { provider: provider.name })}
+                        className="grid size-6 shrink-0 place-items-center rounded-[7px] text-[var(--text-tertiary)] outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
+                        title={t('providers.move_up', { provider: provider.name })}
+                        type="button"
+                        onClick={() => moveProfile(provider.id, true)}
+                      >
+                        <PaduIcon className="size-2.5" name="chevronUp" />
+                      </button>
+                    )}
+                    {index + 1 < ordered.length && (
+                      <button
+                        aria-label={t('providers.move_down', { provider: provider.name })}
+                        className="grid size-6 shrink-0 place-items-center rounded-[7px] text-[var(--text-tertiary)] outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
+                        title={t('providers.move_down', { provider: provider.name })}
+                        type="button"
+                        onClick={() => moveProfile(provider.id, false)}
+                      >
+                        <PaduIcon className="size-2.5" name="chevronDown" />
+                      </button>
+                    )}
+                  </span>
+                )}
                 <button
                   aria-expanded={open}
                   aria-label={t(open ? 'providers.hide_settings' : 'providers.show_settings', { provider: provider.name })}
@@ -154,17 +289,13 @@ export function ProvidersSettings() {
                   <PaduIcon className="size-2.5" name={open ? 'chevronDown' : 'chevronRight'} />
                 </button>
                 {installed && (
-                  <Toggle
-                    checked={!disabled}
-                    label={t(disabled ? 'providers.enable' : 'providers.disable', { provider: provider.name })}
-                    onChange={(enabled) => {
-                      if (!settings.data) return
-                      const disabledProviders = enabled
-                        ? settings.data.disabled_providers.filter((kind) => kind !== provider.id)
-                        : [...new Set([...settings.data.disabled_providers, provider.id])]
-                      void apply({ ...settings.data, disabled_providers: disabledProviders })
-                    }}
-                  />
+                  <span title={t('providers.toggle_tooltip', { provider: provider.name })}>
+                    <Toggle
+                      checked={!disabled}
+                      label={t(disabled ? 'providers.enable' : 'providers.disable', { provider: provider.name })}
+                      onChange={(enabled) => toggleProfile(provider.id, enabled)}
+                    />
+                  </span>
                 )}
               </div>
               {open && settings.data && (
@@ -396,6 +527,12 @@ function providerCheckedLabel(updatedAt: number, t: Translator) {
 /// placeholder. Mirrors the desktop's `PLAN_USAGE_PROVIDERS` refresh on row
 /// expand.
 const PLAN_USAGE_PROVIDERS: ProviderKind[] = ['claude', 'codex', 'openCode', 'grok']
+
+/// Providers without conversation rollback or fork. Mirrors
+/// `ProviderKind::supports_conversation_rollback` /
+/// `supports_conversation_fork` in `crates/padu-protocol/src/model.rs`;
+/// rows for these carry the no-rewind capability note.
+const NO_REWIND_SUPPORT: ProviderKind[] = ['kimi', 'fx']
 
 function ProviderAccountLine({
   provider,

@@ -7,6 +7,7 @@ import {
   discoverComposerCommands,
   hydrateSession,
   inspectWorkspaceBranches,
+  listAgentProfiles,
   listSessionTurnRefs,
   listComposerFiles,
   loadComposerDrafts,
@@ -124,6 +125,16 @@ export function useDaemonSettings() {
   return useQuery({
     queryKey: daemonKeys.settings(config?.address ?? 'disconnected'),
     queryFn: () => loadDaemonSettings(requireClient(client)),
+    enabled: phase === 'connected' && Boolean(client && config),
+    staleTime: 60_000,
+  })
+}
+
+export function useAgentProfiles() {
+  const { client, config, phase } = useDaemon()
+  return useQuery({
+    queryKey: daemonKeys.agentProfiles(config?.address ?? 'disconnected'),
+    queryFn: () => listAgentProfiles(requireClient(client)),
     enabled: phase === 'connected' && Boolean(client && config),
     staleTime: 60_000,
   })

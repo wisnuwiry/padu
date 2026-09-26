@@ -47,6 +47,9 @@ impl Padu {
         if page == SettingsPage::Usage {
             self.ensure_usage_history(false, cx);
         }
+        if page == SettingsPage::Providers {
+            self.ensure_agent_profiles(false, cx);
+        }
         if page == SettingsPage::Skills {
             self.ensure_skills_catalog(false, cx);
         }

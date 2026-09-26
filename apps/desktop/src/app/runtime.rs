@@ -1624,9 +1624,16 @@ impl Padu {
     }
 
     /// Whether the provider can back a new session: installed and not switched
-    /// off in the Providers settings.
+    /// off in the Providers settings. The profile registry is the source of
+    /// truth once loaded; the settings mirror covers the pre-load window.
     pub(super) fn provider_enabled(&self, provider: ProviderKind) -> bool {
-        !self.state.disabled_providers.contains(&provider)
+        let switched_on = self
+            .agent_profiles
+            .iter()
+            .find(|profile| profile.agent_id == provider)
+            .map(|profile| profile.enabled)
+            .unwrap_or_else(|| !self.state.disabled_providers.contains(&provider));
+        switched_on
             && self
                 .provider_probe(provider)
                 .is_some_and(|probe| probe.installed)
