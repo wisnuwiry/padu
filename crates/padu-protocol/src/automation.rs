@@ -14,5 +14,4 @@ use ts_rs::TS;
 /// `requires_approval`, `cooldown_secs`, and chain-depth guards.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct AutomationRule {}

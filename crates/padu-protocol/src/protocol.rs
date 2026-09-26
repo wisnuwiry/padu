@@ -381,6 +381,96 @@ pub enum ServerMessage {
     TaskStateChanged {
         revision: u64,
     },
+    // Canonical automation event catalog (PRD §5.2.1, §7.3) — Phase 0 shells.
+    //
+    // Catalog names are snake_case (`task_queued`); the wire discriminator
+    // follows the usual camelCase convention (`taskQueued`). Every variant
+    // carries `event_id` so consumers can dedup.
+    //
+    // Replay: these are live broadcasts to all subscribers, like
+    // `TaskStateChanged` — they are NOT journaled in the daemon `Hub` and
+    // are NOT replayed on reconnect. Only `Event(SequencedEvent)` replays,
+    // per (session, runtime) with epoch/sequence cursors. A client that
+    // (re)connects must re-sync through the list commands, and a daemon
+    // restart drops in-flight catalog events (the epoch changes).
+    //
+    // Dedup: consumers key on `event_id`. The daemon rule engine (Phase 4)
+    // additionally dedups through `idempotency_key = hash(rule_id,
+    // trigger_event_id)` (P0-04), so restarts never double-apply.
+    //
+    // Shapes are minimal on purpose; later phases flesh them out alongside
+    // their producers (lifecycle P1-06, Git poll P2-04, engine P4-02).
+    /// `task_queued`: a card entered Queued (manual drag or automation).
+    TaskQueued {
+        event_id: Uuid,
+        task_id: Uuid,
+    },
+    /// `workspace_started`: worktree materialized, provider process spawned.
+    WorkspaceStarted {
+        event_id: Uuid,
+        task_id: Uuid,
+        session_id: Uuid,
+    },
+    /// `agent_completed`: provider settled (checkpoint Ready or not).
+    AgentCompleted {
+        event_id: Uuid,
+        task_id: Uuid,
+        session_id: Uuid,
+    },
+    /// `checkpoint_failed`: checkpoint failure; `streak` counts consecutive
+    /// failures for the threshold rule.
+    CheckpointFailed {
+        event_id: Uuid,
+        task_id: Uuid,
+        session_id: Uuid,
+        streak: u32,
+    },
+    /// `card_updated`: any other card transition; re-fetch the card.
+    CardUpdated {
+        event_id: Uuid,
+        task_id: Uuid,
+    },
+    /// `rule_triggered`: an automation rule matched its trigger.
+    RuleTriggered {
+        event_id: Uuid,
+        rule_id: Uuid,
+    },
+    /// `approval_requested`: a gated action waits in the approval queue.
+    ApprovalRequested {
+        event_id: Uuid,
+        rule_id: Uuid,
+        approval_id: Uuid,
+    },
+    /// `issue_created`: a linked remote issue was created.
+    IssueCreated {
+        event_id: Uuid,
+        task_id: Uuid,
+        url: String,
+    },
+    /// `pr_opened`: a linked pull request was opened.
+    PrOpened {
+        event_id: Uuid,
+        task_id: Uuid,
+        url: String,
+    },
+    /// `pr_merged`: a linked GitHub pull request merged.
+    PrMerged {
+        event_id: Uuid,
+        task_id: Uuid,
+        url: String,
+    },
+    /// `mr_merged`: a linked GitLab merge request merged.
+    MrMerged {
+        event_id: Uuid,
+        task_id: Uuid,
+        url: String,
+    },
+    /// `issue_closed`: a linked remote issue closed.
+    IssueClosed {
+        event_id: Uuid,
+        task_id: Uuid,
+        url: String,
+    },
     /// Live progress for a daemon-side provider installation. This is not
     /// replayed because it only describes the current download operation.
     ProviderInstallProgress {
@@ -653,6 +743,117 @@ mod tests {
             "01900000-0000-7000-8000-000000000001"
         );
         assert_eq!(load["cwd"], "/tmp/project");
+    }
+
+    #[test]
+    fn automation_catalog_wire_tags_and_event_ids_are_stable() {
+        // Catalog name (snake_case) -> wire discriminator (camelCase).
+        let cases: Vec<(ServerMessage, &str)> = vec![
+            (
+                ServerMessage::TaskQueued {
+                    event_id: Uuid::from_u128(1),
+                    task_id: Uuid::from_u128(2),
+                },
+                "taskQueued",
+            ),
+            (
+                ServerMessage::WorkspaceStarted {
+                    event_id: Uuid::from_u128(1),
+                    task_id: Uuid::from_u128(2),
+                    session_id: Uuid::from_u128(3),
+                },
+                "workspaceStarted",
+            ),
+            (
+                ServerMessage::AgentCompleted {
+                    event_id: Uuid::from_u128(1),
+                    task_id: Uuid::from_u128(2),
+                    session_id: Uuid::from_u128(3),
+                },
+                "agentCompleted",
+            ),
+            (
+                ServerMessage::CheckpointFailed {
+                    event_id: Uuid::from_u128(1),
+                    task_id: Uuid::from_u128(2),
+                    session_id: Uuid::from_u128(3),
+                    streak: 3,
+                },
+                "checkpointFailed",
+            ),
+            (
+                ServerMessage::CardUpdated {
+                    event_id: Uuid::from_u128(1),
+                    task_id: Uuid::from_u128(2),
+                },
+                "cardUpdated",
+            ),
+            (
+                ServerMessage::RuleTriggered {
+                    event_id: Uuid::from_u128(1),
+                    rule_id: Uuid::from_u128(4),
+                },
+                "ruleTriggered",
+            ),
+            (
+                ServerMessage::ApprovalRequested {
+                    event_id: Uuid::from_u128(1),
+                    rule_id: Uuid::from_u128(4),
+                    approval_id: Uuid::from_u128(5),
+                },
+                "approvalRequested",
+            ),
+            (
+                ServerMessage::IssueCreated {
+                    event_id: Uuid::from_u128(1),
+                    task_id: Uuid::from_u128(2),
+                    url: "https://github.com/o/r/issues/7".into(),
+                },
+                "issueCreated",
+            ),
+            (
+                ServerMessage::PrOpened {
+                    event_id: Uuid::from_u128(1),
+                    task_id: Uuid::from_u128(2),
+                    url: "https://github.com/o/r/pull/8".into(),
+                },
+                "prOpened",
+            ),
+            (
+                ServerMessage::PrMerged {
+                    event_id: Uuid::from_u128(1),
+                    task_id: Uuid::from_u128(2),
+                    url: "https://github.com/o/r/pull/8".into(),
+                },
+                "prMerged",
+            ),
+            (
+                ServerMessage::MrMerged {
+                    event_id: Uuid::from_u128(1),
+                    task_id: Uuid::from_u128(2),
+                    url: "https://gitlab.com/o/r/-/merge_requests/9".into(),
+                },
+                "mrMerged",
+            ),
+            (
+                ServerMessage::IssueClosed {
+                    event_id: Uuid::from_u128(1),
+                    task_id: Uuid::from_u128(2),
+                    url: "https://github.com/o/r/issues/7".into(),
+                },
+                "issueClosed",
+            ),
+        ];
+        assert_eq!(cases.len(), 12, "the full P0-03 catalog is covered");
+
+        for (message, tag) in cases {
+            let json = serde_json::to_value(&message).unwrap();
+            assert_eq!(json["type"], *tag);
+            // Every catalog event carries a string event_id for dedup.
+            assert_eq!(json["eventId"], Uuid::from_u128(1).to_string());
+            let round_tripped: ServerMessage = serde_json::from_value(json).unwrap();
+            assert_eq!(serde_json::to_value(&round_tripped).unwrap()["type"], *tag);
+        }
     }
 
     #[test]

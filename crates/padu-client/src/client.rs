@@ -384,6 +384,20 @@ fn run_client(
                     }
                     ServerMessage::ShuttingDown => break,
                     ServerMessage::Hello { .. } | ServerMessage::Rejected { .. } => {}
+                    // P0-03 catalog shells: no producers or subscribers yet;
+                    // later phases fan these out to task/rule subscribers.
+                    ServerMessage::TaskQueued { .. }
+                    | ServerMessage::WorkspaceStarted { .. }
+                    | ServerMessage::AgentCompleted { .. }
+                    | ServerMessage::CheckpointFailed { .. }
+                    | ServerMessage::CardUpdated { .. }
+                    | ServerMessage::RuleTriggered { .. }
+                    | ServerMessage::ApprovalRequested { .. }
+                    | ServerMessage::IssueCreated { .. }
+                    | ServerMessage::PrOpened { .. }
+                    | ServerMessage::PrMerged { .. }
+                    | ServerMessage::MrMerged { .. }
+                    | ServerMessage::IssueClosed { .. } => {}
                 }
             }
             Ok(Message::Close(_)) => break,

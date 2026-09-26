@@ -14,5 +14,4 @@ use ts_rs::TS;
 /// `linked_issue`/`linked_pr`, `version`, flags, and timestamps.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct Task {}

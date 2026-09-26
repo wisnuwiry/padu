@@ -14,5 +14,4 @@ use ts_rs::TS;
 /// Fleshed out in Phase 2 with `provider`, `owner`, and `repo`.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct LinkedRepo {}

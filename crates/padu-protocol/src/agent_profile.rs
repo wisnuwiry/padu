@@ -14,5 +14,4 @@ use ts_rs::TS;
 /// `priority`, `max_retry_before_escalate`, and `enabled`.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct AgentProfile {}
