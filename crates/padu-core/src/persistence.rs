@@ -3254,6 +3254,105 @@ mod tests {
         );
     }
 
+    /// Manual rollback for the P0-02 automation-tables migration
+    /// (`tasks`, `agent_profiles`, `rules`, `pending_approvals`,
+    /// `automation_outbox`, `audit_log`, plus `projects.linked_repo`).
+    ///
+    /// The runner is forward-only by design, so this is a documented
+    /// down-script rather than a wired-in migration: dropping the tables
+    /// also drops their indexes, and the up-migration re-applies cleanly
+    /// afterwards (plain `CREATE TABLE` / `ADD COLUMN`, no `IF NOT EXISTS`
+    /// masking). Only valid on databases where that migration applied.
+    const AUTOMATION_TABLES_ROLLBACK: &str = "
+        DROP TABLE IF EXISTS audit_log;
+        DROP TABLE IF EXISTS automation_outbox;
+        DROP TABLE IF EXISTS pending_approvals;
+        DROP TABLE IF EXISTS rules;
+        DROP TABLE IF EXISTS agent_profiles;
+        DROP TABLE IF EXISTS tasks;
+        ALTER TABLE projects DROP COLUMN linked_repo;
+    ";
+
+    #[test]
+    fn automation_tables_migrate_and_roll_back() {
+        let connection = Connection::open_in_memory().unwrap();
+        assert_eq!(
+            apply_migrations(&connection).unwrap(),
+            MIGRATIONS.len(),
+            "all run on a fresh database"
+        );
+
+        // Up: all six tables exist.
+        for table in [
+            "tasks",
+            "agent_profiles",
+            "rules",
+            "pending_approvals",
+            "automation_outbox",
+            "audit_log",
+        ] {
+            let name: String = connection
+                .query_row(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    params![table],
+                    |row| row.get(0),
+                )
+                .unwrap_or_else(|_| panic!("migration created table {table}"));
+            assert_eq!(name, table);
+        }
+
+        // Up: projects gained the nullable linked_repo column.
+        let columns: Vec<String> = connection
+            .prepare("PRAGMA table_info(projects)")
+            .unwrap()
+            .query_map([], |row| row.get("name"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+        assert!(
+            columns.contains(&"linked_repo".to_string()),
+            "projects.linked_repo was added: {columns:?}"
+        );
+
+        // Roll back: the down-script removes the tables and the column...
+        connection
+            .execute_batch(AUTOMATION_TABLES_ROLLBACK)
+            .unwrap();
+        for table in [
+            "tasks",
+            "agent_profiles",
+            "rules",
+            "pending_approvals",
+            "automation_outbox",
+            "audit_log",
+        ] {
+            assert!(
+                connection
+                    .query_row::<String, _, _>(
+                        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                        params![table],
+                        |row| row.get(0),
+                    )
+                    .is_err(),
+                "rollback dropped table {table}"
+            );
+        }
+
+        // ...and the migration re-applies cleanly afterwards.
+        let (last, _) = MIGRATIONS.last().expect("at least one migration");
+        connection
+            .execute("DELETE FROM migrations WHERE tag = ?1", params![last])
+            .unwrap();
+        assert_eq!(apply_migrations(&connection).unwrap(), 1);
+        connection
+            .query_row::<String, _, _>(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'tasks'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("tasks exists again after re-apply");
+    }
+
     #[test]
     fn auto_title_migration_preserves_existing_generated_titles_as_fallbacks() {
         let connection = Connection::open_in_memory().unwrap();

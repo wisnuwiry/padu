@@ -50,6 +50,13 @@
       "when": 1789786263494,
       "tag": "0006_mature_metal_master",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1790396772418,
+      "tag": "0007_lonely_stone_men",
+      "breakpoints": true
     }
   ]
 }
