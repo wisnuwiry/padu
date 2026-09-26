@@ -69,9 +69,9 @@ use crate::ui::{
 use crate::{
     CancelTaskSwitch, CancelTurn, CloseFind, CloseWindow, ConfirmTaskSwitch, CopySelection,
     FindNext, FindPrevious, FocusComposer, NavigateBack, NavigateForward, NewProject, NewSession,
-    NextRightPanelTab, OpenBrowser, OpenFilePicker, OpenFiles, OpenFind, OpenFindReplace,
-    OpenNotePicker, OpenNotes, OpenResumePicker, OpenReview, OpenSettings, OpenTerminal,
-    PrevRightPanelTab, ReplaceAllMatches, SaveFile, SelectFirstTask, SelectLastTask,
+    NextRightPanelTab, OpenBoard, OpenBrowser, OpenFilePicker, OpenFiles, OpenFind,
+    OpenFindReplace, OpenNotePicker, OpenNotes, OpenResumePicker, OpenReview, OpenSettings,
+    OpenTerminal, PrevRightPanelTab, ReplaceAllMatches, SaveFile, SelectFirstTask, SelectLastTask,
     SelectNextSession, SelectPreviousSession, SwitchTaskBackward, SwitchTaskForward,
     ToggleCommandPalette, ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord,
     ToggleFpsCounter, ToggleModelPicker, ToggleRightPanel, ToggleRightPanelFullscreen,
@@ -230,6 +230,7 @@ enum WorkspaceRepoStatus {
 enum WorkspacePage {
     Conversation,
     Notes,
+    Board,
 }
 
 #[derive(Debug, Default)]
@@ -1654,6 +1655,28 @@ pub struct Padu {
     /// so frame work stays proportional to the visible rows.
     notes_list_state: ListState,
     notes_scrollbar: Rc<ScrollbarState>,
+    board_tasks: Vec<padu_client::kanban::TaskSummary>,
+    board_loaded: bool,
+    board_load_pending: bool,
+    board_load_generation: u64,
+    board_filter_project: Option<Uuid>,
+    board_filter_agent: Option<ProviderKind>,
+    board_filter_needs_attention: bool,
+    board_filter_sync_failed: bool,
+    board_search: Entity<TextInput>,
+    board_selected_task_id: Option<Uuid>,
+    board_hydrated_task: Option<padu_client::kanban::Task>,
+    board_hydrated_markdown: RefCell<Option<(String, MarkdownView)>>,
+    board_hydrated_selection: TranscriptSelection,
+    board_hydrated_scroll_handle: ScrollHandle,
+    board_hydrated_scrollbar: Rc<ScrollbarState>,
+    board_new_task_modal_open: bool,
+    board_new_task_project_id: Option<Uuid>,
+    board_new_task_title: Entity<TextInput>,
+    board_new_task_description: Entity<TextInput>,
+    board_new_task_agent: Option<ProviderKind>,
+    board_new_task_cancel_focus: FocusHandle,
+    card_updated_events: Receiver<Uuid>,
     /// The Settings page's library snapshot, scanned off-thread. Frames read
     /// only this; `None` means the first scan has not landed yet.
     skills_catalog: Option<Rc<crate::skills::SkillsCatalog>>,
@@ -1844,6 +1867,7 @@ pub struct Padu {
     transcript_pane: Entity<PaduPane>,
     right_panel_pane: Entity<PaduPane>,
     notes_pane: Entity<PaduPane>,
+    board_pane: Entity<PaduPane>,
     /// The unix second the pending time-label wake-up targets, or `None` when
     /// none is armed. See `schedule_time_label_wake`.
     time_label_wake: Cell<Option<u64>>,
@@ -1858,6 +1882,7 @@ pub struct Padu {
 mod activity_diff;
 mod autocomplete;
 mod background_work;
+mod board;
 mod branches;
 mod command_palette;
 mod components;
@@ -1998,6 +2023,11 @@ impl Padu {
         }
         self.workspace_navigation.visit(self.workspace_page, page);
         self.workspace_page = page;
+        if page == WorkspacePage::Notes {
+            self.ensure_notes_loaded(cx);
+        } else if page == WorkspacePage::Board {
+            self.ensure_board_tasks_loaded(cx);
+        }
         cx.notify();
     }
 
@@ -2006,6 +2036,11 @@ impl Padu {
             return false;
         };
         self.workspace_page = page;
+        if page == WorkspacePage::Notes {
+            self.ensure_notes_loaded(cx);
+        } else if page == WorkspacePage::Board {
+            self.ensure_board_tasks_loaded(cx);
+        }
         cx.notify();
         true
     }
@@ -2017,6 +2052,8 @@ impl Padu {
         self.workspace_page = page;
         if page == WorkspacePage::Notes {
             self.ensure_notes_loaded(cx);
+        } else if page == WorkspacePage::Board {
+            self.ensure_board_tasks_loaded(cx);
         }
         cx.notify();
         true
@@ -2270,6 +2307,7 @@ impl Padu {
     fn apply_new_daemon(&mut self, daemon: padu_client::DaemonSupervisor, cx: &mut Context<Self>) {
         self.agy_install_progress_events = daemon.client().subscribe_provider_install_progress();
         self.agy_auth_url_events = daemon.client().subscribe_provider_auth_url();
+        self.card_updated_events = daemon.client().subscribe_card_updated();
         self.daemon = daemon.clone();
         self.store = StateStore::remote(daemon.clone());
         self.composer_draft_store = ComposerDraftStore::remote(daemon.clone());
@@ -2318,6 +2356,12 @@ impl Padu {
         self.notes_data_generation = self.notes_data_generation.wrapping_add(1);
         if self.workspace_page == WorkspacePage::Notes {
             self.ensure_notes_loaded(cx);
+        }
+        self.board_loaded = false;
+        self.board_load_pending = false;
+        self.board_tasks.clear();
+        if self.workspace_page == WorkspacePage::Board {
+            self.ensure_board_tasks_loaded(cx);
         }
 
         let row_count = self.transcript_row_count();
@@ -2572,6 +2616,19 @@ impl Padu {
                 .clear_on_escape()
                 .placeholder(tr!("notes.search_placeholder"))
         });
+        let board_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .placeholder(tr!("board.filter_search_placeholder"))
+        });
+        let board_new_task_title =
+            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("board.task_title")));
+        let board_new_task_description = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .multi_line()
+                .syntax(Some("markdown"))
+                .placeholder(tr!("board.task_description"))
+        });
         let keybindings_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -2620,6 +2677,7 @@ impl Padu {
         let transcript_pane = PaduPane::new(Padu::transcript_pane_content, cx);
         let right_panel_pane = PaduPane::new(Padu::right_panel_pane_content, cx);
         let notes_pane = PaduPane::new(Padu::notes_pane_content, cx);
+        let board_pane = PaduPane::new(Padu::board_pane_content, cx);
         let workspace_client = padu_client::WorkspaceClient::new(daemon.client());
         let (projectless_migrated, projectless_migration_error) =
             migrate_legacy_projectless_projects(&mut state, &workspace_client);
@@ -2785,6 +2843,7 @@ impl Padu {
         let (provider_detection_tx, provider_detection_events) = unbounded();
         let agy_install_progress_events = daemon.client().subscribe_provider_install_progress();
         let agy_auth_url_events = daemon.client().subscribe_provider_auth_url();
+        let card_updated_events = daemon.client().subscribe_card_updated();
         let (computer_permission_tx, computer_permission_events) = unbounded();
         let (plan_usage_tx, plan_usage_events) = unbounded();
         let (event_wake_tx, event_wake_events) = smol::channel::bounded(1);
@@ -3193,6 +3252,12 @@ impl Padu {
             )
             .detach();
             cx.subscribe(&notes_search, |_: &mut Self, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Edited) {
+                    cx.notify();
+                }
+            })
+            .detach();
+            cx.subscribe(&board_search, |_: &mut Self, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Edited) {
                     cx.notify();
                 }
@@ -3674,6 +3739,27 @@ impl Padu {
                 notes_filtered_generation: 0,
                 notes_list_state: ListState::new(0, ListAlignment::Top, px(480.0)),
                 notes_scrollbar: ScrollbarState::new(),
+                board_tasks: Vec::new(),
+                board_loaded: false,
+                board_load_pending: false,
+                board_load_generation: 0,
+                board_filter_project: None,
+                board_filter_agent: None,
+                board_filter_needs_attention: false,
+                board_filter_sync_failed: false,
+                board_search,
+                board_selected_task_id: None,
+                board_hydrated_task: None,
+                board_hydrated_markdown: RefCell::new(None),
+                board_hydrated_selection: TranscriptSelection::default(),
+                board_hydrated_scroll_handle: ScrollHandle::new(),
+                board_hydrated_scrollbar: ScrollbarState::new(),
+                board_new_task_modal_open: false,
+                board_new_task_project_id: None,
+                board_new_task_title,
+                board_new_task_description,
+                board_new_task_agent: None,
+                board_new_task_cancel_focus: cx.focus_handle(),
                 notification_permission:
                     crate::platform::NotificationPermissionStatus::NotDetermined,
 
@@ -3763,6 +3849,8 @@ impl Padu {
                 transcript_pane: transcript_pane.clone(),
                 right_panel_pane: right_panel_pane.clone(),
                 notes_pane: notes_pane.clone(),
+                board_pane: board_pane.clone(),
+                card_updated_events,
                 time_label_wake: Cell::new(None),
                 time_label_wake_generation: Cell::new(0),
                 fps_last_frame: Instant::now(),
@@ -3776,6 +3864,7 @@ impl Padu {
             &transcript_pane,
             &right_panel_pane,
             &notes_pane,
+            &board_pane,
         ] {
             pane.update(cx, |pane, cx| pane.bind(&entity, cx));
         }

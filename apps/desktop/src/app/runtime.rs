@@ -1033,6 +1033,17 @@ impl Padu {
         }
     }
 
+    fn drain_card_updated_events(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut had_updates = false;
+        while let Ok(_task_id) = self.card_updated_events.try_recv() {
+            had_updates = true;
+        }
+        if had_updates && self.workspace_page == WorkspacePage::Board {
+            self.load_board_tasks_from_daemon(cx);
+        }
+        had_updates
+    }
+
     fn apply_remote_task_state(
         &mut self,
         snapshot: RemoteTaskStateSnapshot,
@@ -3599,6 +3610,7 @@ impl Padu {
             | self.drain_computer_permission_events()
             | self.drain_plan_usage_events()
             | self.drain_task_state_sync_events(cx)
+            | self.drain_card_updated_events(cx)
         {
             cx.notify();
         }
