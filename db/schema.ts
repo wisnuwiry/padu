@@ -140,6 +140,8 @@ export const tasks = sqliteTable(
     status: text("status").notNull(),
     /** AgentProfile.agent_id this task is assigned to, if any. */
     assignedAgent: text("assigned_agent"),
+    /** Optional specific model override for the assigned agent. */
+    model: text("model"),
     /** Active AgentSession id; null in backlog / done-without-run. */
     sessionId: text("session_id"),
     /** SessionWorkspace kind at queue time: local | new_worktree | worktree. */

@@ -64,6 +64,13 @@
       "when": 1790402734981,
       "tag": "0008_early_major_mapleleaf",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1790414802329,
+      "tag": "0009_loud_catseye",
+      "breakpoints": true
     }
   ]
 }
