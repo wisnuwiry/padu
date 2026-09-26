@@ -110,7 +110,8 @@ impl EventSink {
     }
 
     pub fn send_checkpoint_failed(&self, task_id: Uuid, session_id: Uuid, streak: u32) {
-        self.hub.broadcast_checkpoint_failed(task_id, session_id, streak);
+        self.hub
+            .broadcast_checkpoint_failed(task_id, session_id, streak);
     }
 
     pub fn send_task_state_changed(&self) {
@@ -296,7 +297,11 @@ impl Hub {
             .retain(|_, subscriber| subscriber.send(message.clone()).is_ok());
     }
 
-    pub(crate) fn subscribe(&self, resume_from: &[ReplayCursor], sender: Sender<ServerMessage>) -> u64 {
+    pub(crate) fn subscribe(
+        &self,
+        resume_from: &[ReplayCursor],
+        sender: Sender<ServerMessage>,
+    ) -> u64 {
         let mut state = self.state.lock();
         for (&(session_id, runtime_id), events) in &state.journal {
             let sequence = resume_from

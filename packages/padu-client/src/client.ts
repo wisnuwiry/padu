@@ -70,6 +70,7 @@ export class PaduClient {
   private subscriptions = new Map<string, Set<EventListener>>();
   private pendingEvents = new Map<string, SequencedEvent[]>();
   private taskStateListeners = new Set<(revision: number) => void>();
+  private cardUpdatedListeners = new Set<(taskId: string) => void>();
   private providerInstallProgressListeners = new Set<
     (progress: { provider: string; phase: string; percent: number }) => void
   >();
@@ -297,6 +298,11 @@ export class PaduClient {
     return () => this.taskStateListeners.delete(listener);
   }
 
+  subscribeCardUpdated(listener: (taskId: string) => void): () => void {
+    this.cardUpdatedListeners.add(listener);
+    return () => this.cardUpdatedListeners.delete(listener);
+  }
+
   subscribeProviderInstallProgress(
     listener: (progress: { provider: string; phase: string; percent: number }) => void,
   ): () => void {
@@ -387,6 +393,21 @@ export class PaduClient {
     }
     if (message.type === "taskStateChanged") {
       for (const listener of this.taskStateListeners) listener(message.revision);
+      return;
+    }
+    if (message.type === "cardUpdated") {
+      for (const listener of this.cardUpdatedListeners) listener(message.taskId);
+      for (const listener of this.taskStateListeners) listener(0);
+      return;
+    }
+    if (
+      message.type === "taskQueued" ||
+      message.type === "workspaceStarted" ||
+      message.type === "agentCompleted" ||
+      message.type === "checkpointFailed"
+    ) {
+      for (const listener of this.cardUpdatedListeners) listener(message.taskId);
+      for (const listener of this.taskStateListeners) listener(0);
       return;
     }
     if (message.type === "providerInstallProgress") {

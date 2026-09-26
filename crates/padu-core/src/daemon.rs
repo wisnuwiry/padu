@@ -143,7 +143,8 @@ impl PaduBackend {
                     })
                 {
                     self.checkpoint_failure_streaks.lock().remove(&session_id);
-                    if let Ok(Some(mut task)) = self.task_store.find_task_by_session_id(session_id) {
+                    if let Ok(Some(mut task)) = self.task_store.find_task_by_session_id(session_id)
+                    {
                         if task.status == TaskStatus::Running {
                             task.status = TaskStatus::Review;
                             task.needs_attention = false;
@@ -202,9 +203,8 @@ impl PaduBackend {
                 if streak >= threshold {
                     task.status = TaskStatus::Review;
                     task.needs_attention = true;
-                    task.sync_failed = Some(format!(
-                        "checkpoint failed {streak} consecutive times"
-                    ));
+                    task.sync_failed =
+                        Some(format!("checkpoint failed {streak} consecutive times"));
                     let version = task.version;
                     if let Ok(updated) = self.task_store.update_task(task, version) {
                         events.send_card_updated(updated.id);
@@ -271,11 +271,7 @@ impl PaduBackend {
         let project_id = existing.project_id;
         let project = {
             let state = self.task_state.lock();
-            state
-                .projects
-                .iter()
-                .find(|p| p.id == project_id)
-                .cloned()
+            state.projects.iter().find(|p| p.id == project_id).cloned()
         };
         let project = match project {
             Some(p) => p,
@@ -356,8 +352,9 @@ impl PaduBackend {
         // Update task
         let mut task_to_update = existing;
         task_to_update.session_id = Some(session_id);
-        task_to_update.workspace_kind =
-            Some(TaskWorkspaceKind::from_session_workspace(&session.workspace));
+        task_to_update.workspace_kind = Some(TaskWorkspaceKind::from_session_workspace(
+            &session.workspace,
+        ));
         task_to_update.assigned_agent = Some(provider);
         task_to_update.status = TaskStatus::Queued;
         task_to_update.needs_attention = false;
@@ -379,7 +376,9 @@ impl PaduBackend {
         events: &EventSink,
     ) -> anyhow::Result<Task> {
         if status == TaskStatus::Running {
-            bail!("cannot manually move task to running: only the daemon transitions a task to running when its workspace and provider process start");
+            bail!(
+                "cannot manually move task to running: only the daemon transitions a task to running when its workspace and provider process start"
+            );
         }
 
         let existing = self
@@ -405,7 +404,9 @@ impl PaduBackend {
             bail!("cannot move task to review: task has not completed an agent run");
         }
         if status == TaskStatus::Done && existing.status == TaskStatus::Running {
-            bail!("cannot mark a running task as done: wait for the agent to complete or reopen to backlog");
+            bail!(
+                "cannot mark a running task as done: wait for the agent to complete or reopen to backlog"
+            );
         }
         if status == TaskStatus::Done && existing.status == TaskStatus::Queued {
             bail!("cannot mark a queued task as done: cancel to backlog first");
@@ -1153,7 +1154,9 @@ impl Backend for PaduBackend {
 
                 if task.status != existing.status {
                     if task.status == TaskStatus::Running {
-                        bail!("cannot manually move task to running: only the daemon transitions a task to running when its workspace and provider process start");
+                        bail!(
+                            "cannot manually move task to running: only the daemon transitions a task to running when its workspace and provider process start"
+                        );
                     }
                     if task.status == TaskStatus::Review
                         && existing.status != TaskStatus::Running
@@ -1162,7 +1165,9 @@ impl Backend for PaduBackend {
                         bail!("cannot move task to review: task has not completed an agent run");
                     }
                     if task.status == TaskStatus::Done && existing.status == TaskStatus::Running {
-                        bail!("cannot mark a running task as done: wait for the agent to complete or reopen to backlog");
+                        bail!(
+                            "cannot mark a running task as done: wait for the agent to complete or reopen to backlog"
+                        );
                     }
                     if task.status == TaskStatus::Done && existing.status == TaskStatus::Queued {
                         bail!("cannot mark a queued task as done: cancel to backlog first");
@@ -1180,7 +1185,9 @@ impl Backend for PaduBackend {
                     task_to_save.sync_failed = None;
                 }
                 Ok(ResponsePayload::TaskUpdated {
-                    task: self.task_store.update_task(task_to_save, expected_version)?,
+                    task: self
+                        .task_store
+                        .update_task(task_to_save, expected_version)?,
                 })
             }
             Command::MoveTask {
@@ -1288,7 +1295,8 @@ impl Backend for PaduBackend {
                     },
             } => Ok(ResponsePayload::Workspace {
                 result: WorkspaceResult::Checkpoint {
-                    checkpoint: self.capture_turn_checkpoint(cwd, session_id, turn_count, &events)?,
+                    checkpoint: self
+                        .capture_turn_checkpoint(cwd, session_id, turn_count, &events)?,
                 },
             }),
             Command::Workspace { operation } => Ok(ResponsePayload::Workspace {
@@ -2926,7 +2934,10 @@ mod tests {
                 sink.clone(),
             )
             .unwrap_err();
-        assert!(err.to_string().contains("cannot manually move task to running"));
+        assert!(
+            err.to_string()
+                .contains("cannot manually move task to running")
+        );
 
         // Direct UpdateTask to Running rejected
         let mut update_task = task.clone();
@@ -2945,7 +2956,10 @@ mod tests {
                 sink,
             )
             .unwrap_err();
-        assert!(err.to_string().contains("cannot manually move task to running"));
+        assert!(
+            err.to_string()
+                .contains("cannot manually move task to running")
+        );
 
         std::fs::remove_dir_all(dir).ok();
     }
@@ -3001,7 +3015,10 @@ mod tests {
             .expect("session created");
         assert_eq!(session.title, "Task with Description");
         assert_eq!(session.queued_messages.len(), 1);
-        assert_eq!(session.queued_messages[0].content, "Enqueued prompt content");
+        assert_eq!(
+            session.queued_messages[0].content,
+            "Enqueued prompt content"
+        );
         assert!(matches!(
             session.workspace,
             SessionWorkspace::NewWorktree { base_branch: None }
@@ -3111,7 +3128,10 @@ mod tests {
         let session_id = Uuid::new_v4();
         task.session_id = Some(session_id);
         task.status = TaskStatus::Running;
-        let task = backend.task_store.update_task(task.clone(), task.version).unwrap();
+        let task = backend
+            .task_store
+            .update_task(task.clone(), task.version)
+            .unwrap();
 
         // 1. Checkpoint Ready -> moves Running to Review, emits AgentCompleted
         let mut session = AgentSession::new(project.id, ProviderKind::Codex);
@@ -3144,7 +3164,10 @@ mod tests {
         // Put task back into Running
         let mut running_task = after_complete;
         running_task.status = TaskStatus::Running;
-        let running_task = backend.task_store.update_task(running_task.clone(), running_task.version).unwrap();
+        let running_task = backend
+            .task_store
+            .update_task(running_task.clone(), running_task.version)
+            .unwrap();
 
         // Streak 1 error
         {
@@ -3153,7 +3176,11 @@ mod tests {
             *count += 1;
         }
         sink.send_checkpoint_failed(running_task.id, session_id, 1);
-        let current = backend.task_store.get_task(running_task.id).unwrap().unwrap();
+        let current = backend
+            .task_store
+            .get_task(running_task.id)
+            .unwrap()
+            .unwrap();
         assert_eq!(current.status, TaskStatus::Running);
 
         // Streak reaches threshold (3) -> moves to Review with needs_attention = true
@@ -3165,7 +3192,10 @@ mod tests {
         failed_task.status = TaskStatus::Review;
         failed_task.needs_attention = true;
         failed_task.sync_failed = Some("checkpoint failed 3 consecutive times".into());
-        let updated = backend.task_store.update_task(failed_task.clone(), failed_task.version).unwrap();
+        let updated = backend
+            .task_store
+            .update_task(failed_task.clone(), failed_task.version)
+            .unwrap();
         assert_eq!(updated.status, TaskStatus::Review);
         assert!(updated.needs_attention);
         assert!(updated.sync_failed.is_some());
@@ -3237,7 +3267,10 @@ mod tests {
 
         // Queued cannot be marked Done directly
         task.status = TaskStatus::Queued;
-        let task = backend.task_store.update_task(task.clone(), task.version).unwrap();
+        let task = backend
+            .task_store
+            .update_task(task.clone(), task.version)
+            .unwrap();
         let err = backend
             .handle(
                 Request {
@@ -3253,12 +3286,18 @@ mod tests {
                 sink.clone(),
             )
             .unwrap_err();
-        assert!(err.to_string().contains("cannot mark a queued task as done"));
+        assert!(
+            err.to_string()
+                .contains("cannot mark a queued task as done")
+        );
 
         // Running cannot be marked Done directly
         let mut running = task;
         running.status = TaskStatus::Running;
-        let running = backend.task_store.update_task(running.clone(), running.version).unwrap();
+        let running = backend
+            .task_store
+            .update_task(running.clone(), running.version)
+            .unwrap();
         let err = backend
             .handle(
                 Request {
@@ -3274,12 +3313,18 @@ mod tests {
                 sink.clone(),
             )
             .unwrap_err();
-        assert!(err.to_string().contains("cannot mark a running task as done"));
+        assert!(
+            err.to_string()
+                .contains("cannot mark a running task as done")
+        );
 
         // Put into Review
         let mut review = running;
         review.status = TaskStatus::Review;
-        let review = backend.task_store.update_task(review.clone(), review.version).unwrap();
+        let review = backend
+            .task_store
+            .update_task(review.clone(), review.version)
+            .unwrap();
 
         // External signal completes Review task to Done
         let done = backend
