@@ -245,12 +245,56 @@ impl Padu {
         .detach();
     }
 
+    pub(super) fn board_models_for_provider(
+        &self,
+        provider: ProviderKind,
+    ) -> Vec<(String, String)> {
+        if let Some(probe) = self.provider_probe(provider) {
+            if !probe.models.is_empty() {
+                return probe
+                    .models
+                    .iter()
+                    .map(|m| (m.id.clone(), m.name.clone()))
+                    .collect();
+            }
+        }
+        match provider {
+            ProviderKind::Claude => vec![
+                ("claude-3-7-sonnet".into(), "Claude 3.7 Sonnet".into()),
+                ("claude-3-5-sonnet".into(), "Claude 3.5 Sonnet".into()),
+                ("claude-3-5-haiku".into(), "Claude 3.5 Haiku".into()),
+            ],
+            ProviderKind::Codex => vec![
+                ("gpt-4o".into(), "GPT-4o".into()),
+                ("o3-mini".into(), "o3-mini".into()),
+                ("o1".into(), "o1".into()),
+                ("gpt-4o-mini".into(), "GPT-4o-mini".into()),
+            ],
+            ProviderKind::Cursor => vec![
+                ("claude-3.5-sonnet".into(), "Claude 3.5 Sonnet".into()),
+                ("gpt-4o".into(), "GPT-4o".into()),
+            ],
+            ProviderKind::Agy => vec![
+                ("gemini-2.0-flash".into(), "Gemini 2.0 Flash".into()),
+                ("gemini-2.0-pro".into(), "Gemini 2.0 Pro".into()),
+                ("gemini-1.5-pro".into(), "Gemini 1.5 Pro".into()),
+            ],
+            ProviderKind::DeepSeek => vec![
+                ("deepseek-chat".into(), "DeepSeek Chat".into()),
+                ("deepseek-reasoner".into(), "DeepSeek Reasoner".into()),
+            ],
+            ProviderKind::OpenCode => vec![("default".into(), "Default".into())],
+            _ => vec![],
+        }
+    }
+
     pub(super) fn create_board_task(
         &mut self,
         project_id: Uuid,
         title: String,
         description: String,
         assigned_agent: Option<ProviderKind>,
+        model: Option<String>,
         cx: &mut Context<Self>,
     ) {
         let title = title.trim().to_owned();
@@ -258,6 +302,7 @@ impl Padu {
             return;
         }
         self.board_new_task_modal_open = false;
+        self.board_new_task_model = None;
         let daemon = self.daemon.clone();
         cx.spawn(async move |padu, cx| {
             let result = cx
@@ -273,6 +318,7 @@ impl Padu {
                                 description,
                                 labels: vec![],
                                 assigned_agent,
+                                model,
                             },
                         },
                     )?;
@@ -416,6 +462,131 @@ impl Padu {
             || self.board_filter_sync_failed
             || !self.board_search.read(cx).content().trim().is_empty();
 
+        let project_handle = self.menu_handle("board-filter-project", cx);
+        let current_project_id = self.board_filter_project;
+        let current_project_name = current_project_id
+            .and_then(|id| self.state.projects.iter().find(|p| p.id == id))
+            .map(|p| p.display_name())
+            .unwrap_or_else(|| tr!("board.all_projects"));
+        let project_options = self
+            .state
+            .projects
+            .iter()
+            .filter(|p| !p.is_projectless())
+            .map(|p| (p.id, p.display_name()))
+            .collect::<Vec<_>>();
+        let weak_project = cx.entity().downgrade();
+        let project_filter_selector = dropdown_menu(
+            MenuChip::new("board-filter-project-chip")
+                .icon("icons/folder.svg", theme.text_tertiary)
+                .label(current_project_name)
+                .outlined()
+                .background(theme.inset)
+                .height(px(28.0))
+                .selected(project_handle.is_open()),
+            "board-filter-project-menu",
+            &project_handle,
+            MenuAlign::BelowLeft,
+            move |_| {
+                let mut items = Vec::new();
+                let weak = weak_project.clone();
+                items.push(
+                    MenuItem::new(tr!("board.all_projects"), move |_, cx| {
+                        let _ = weak.update(cx, |this, cx| {
+                            this.board_filter_project = None;
+                            cx.notify();
+                        });
+                    })
+                    .icon("icons/folder.svg")
+                    .selected(current_project_id.is_none()),
+                );
+                if !project_options.is_empty() {
+                    items.push(MenuItem::Separator);
+                }
+                for (pid, pname) in project_options.clone() {
+                    let weak = weak_project.clone();
+                    let is_sel = current_project_id == Some(pid);
+                    items.push(
+                        MenuItem::new(pname, move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.board_filter_project = Some(pid);
+                                cx.notify();
+                            });
+                        })
+                        .icon("icons/folder.svg")
+                        .selected(is_sel),
+                    );
+                }
+                items
+            },
+        );
+
+        let agent_handle = self.menu_handle("board-filter-agent", cx);
+        let current_agent = self.board_filter_agent;
+        let current_agent_name = current_agent
+            .map(|a| a.short_name().to_string())
+            .unwrap_or_else(|| tr!("board.all_agents"));
+        let weak_agent = cx.entity().downgrade();
+        let agent_filter_selector = dropdown_menu(
+            MenuChip::new("board-filter-agent-chip")
+                .icon(
+                    match current_agent {
+                        Some(a) => provider_icon(a),
+                        None => "icons/bot.svg",
+                    },
+                    if current_agent.is_some() {
+                        theme.accent
+                    } else {
+                        theme.text_tertiary
+                    },
+                )
+                .label(current_agent_name)
+                .outlined()
+                .background(theme.inset)
+                .height(px(28.0))
+                .selected(agent_handle.is_open()),
+            "board-filter-agent-menu",
+            &agent_handle,
+            MenuAlign::BelowLeft,
+            move |_| {
+                let mut items = Vec::new();
+                let weak = weak_agent.clone();
+                items.push(
+                    MenuItem::new(tr!("board.all_agents"), move |_, cx| {
+                        let _ = weak.update(cx, |this, cx| {
+                            this.board_filter_agent = None;
+                            cx.notify();
+                        });
+                    })
+                    .icon("icons/bot.svg")
+                    .selected(current_agent.is_none()),
+                );
+                items.push(MenuItem::Separator);
+                for p in [
+                    ProviderKind::Agy,
+                    ProviderKind::Claude,
+                    ProviderKind::Codex,
+                    ProviderKind::Cursor,
+                    ProviderKind::DeepSeek,
+                    ProviderKind::OpenCode,
+                ] {
+                    let weak = weak_agent.clone();
+                    let is_sel = current_agent == Some(p);
+                    items.push(
+                        MenuItem::new(p.short_name(), move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.board_filter_agent = Some(p);
+                                cx.notify();
+                            });
+                        })
+                        .icon(provider_icon(p))
+                        .selected(is_sel),
+                    );
+                }
+                items
+            },
+        );
+
         let header = div()
             .id("board-header")
             .h(px(48.0))
@@ -430,7 +601,7 @@ impl Padu {
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(12.0))
+                    .gap(px(10.0))
                     .when(!self.sidebar_visible, |element| {
                         element
                             .child(
@@ -455,7 +626,7 @@ impl Padu {
                     // Search field
                     .child(
                         div()
-                            .w(px(200.0))
+                            .w(px(180.0))
                             .h(px(28.0))
                             .rounded(px(6.0))
                             .bg(theme.inset)
@@ -464,6 +635,10 @@ impl Padu {
                                     .icon("icons/search.svg", 12.0),
                             ),
                     )
+                    // Project dropdown filter
+                    .child(project_filter_selector)
+                    // Agent dropdown filter
+                    .child(agent_filter_selector)
                     // Needs Attention chip
                     .child({
                         let active = self.board_filter_needs_attention;
@@ -567,7 +742,7 @@ impl Padu {
                                 .text_size(sp(11.0))
                                 .text_color(theme.text_tertiary)
                                 .hover(|s| s.text_color(theme.text))
-                                .child("Clear filters")
+                                .child(tr!("board.clear_filters"))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.board_filter_project = None;
                                     this.board_filter_agent = None;
@@ -627,8 +802,11 @@ impl Padu {
                                     .update(cx, |t, cx| t.set_content("", cx));
                                 this.board_new_task_description
                                     .update(cx, |t, cx| t.set_content("", cx));
-                                this.board_new_task_project_id = this.current_project_id();
+                                this.board_new_task_project_id = this
+                                    .board_filter_project
+                                    .or_else(|| this.current_project_id());
                                 this.board_new_task_agent = None;
+                                this.board_new_task_model = None;
                                 cx.notify();
                             })),
                     ),
@@ -650,6 +828,75 @@ impl Padu {
         let label = task_status_label(status);
         let count = tasks.len();
 
+        let is_collapsed = self.board_collapsed_columns.contains(&status);
+        if is_collapsed {
+            let status_for_toggle = status;
+            return div()
+                .id(SharedString::from(format!(
+                    "board-col-{:?}-collapsed",
+                    status
+                )))
+                .w(px(40.0))
+                .min_w(px(40.0))
+                .h_full()
+                .flex()
+                .flex_col()
+                .items_center()
+                .py(px(10.0))
+                .gap(px(10.0))
+                .rounded(px(10.0))
+                .bg(theme.surface)
+                .border_1()
+                .border_color(theme.border)
+                .cursor_pointer()
+                .hover(|s| s.bg(theme.inset))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.board_collapsed_columns.remove(&status_for_toggle);
+                    cx.notify();
+                }))
+                .child(
+                    div()
+                        .w(px(24.0))
+                        .h(px(24.0))
+                        .rounded(px(4.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .hover(|s| s.bg(theme.overlay_strong))
+                        .child(icon("icons/chevron-right.svg", 13.0, theme.text_secondary)),
+                )
+                .child(div().w(px(8.0)).h(px(8.0)).rounded_full().bg(status_color))
+                .child(
+                    div()
+                        .h(px(20.0))
+                        .px(px(6.0))
+                        .rounded_full()
+                        .bg(theme.inset)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_size(sp(11.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text_secondary)
+                        .child(count.to_string()),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap(px(2.0))
+                        .mt(px(4.0))
+                        .children(label.chars().map(|c| {
+                            div()
+                                .text_size(sp(10.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text_tertiary)
+                                .child(c.to_string())
+                        })),
+                );
+        }
+
         let mut column = div()
             .id(SharedString::from(format!("board-col-{:?}", status)))
             .w(px(280.0))
@@ -663,6 +910,7 @@ impl Padu {
             .border_color(theme.border);
 
         // Column Header
+        let status_for_collapse = status;
         let col_header = div()
             .h(px(40.0))
             .flex_none()
@@ -688,17 +936,40 @@ impl Padu {
             )
             .child(
                 div()
-                    .h(px(20.0))
-                    .px(px(6.0))
-                    .rounded_full()
-                    .bg(theme.inset)
                     .flex()
                     .items_center()
-                    .justify_center()
-                    .text_size(sp(11.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.text_secondary)
-                    .child(count.to_string()),
+                    .gap(px(6.0))
+                    .child(
+                        div()
+                            .h(px(20.0))
+                            .px(px(6.0))
+                            .rounded_full()
+                            .bg(theme.inset)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_size(sp(11.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text_secondary)
+                            .child(count.to_string()),
+                    )
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("collapse-col-{:?}", status)))
+                            .w(px(20.0))
+                            .h(px(20.0))
+                            .rounded(px(4.0))
+                            .cursor_pointer()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .hover(|s| s.bg(theme.overlay_strong))
+                            .child(icon("icons/chevron-left.svg", 12.0, theme.text_tertiary))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.board_collapsed_columns.insert(status_for_collapse);
+                                cx.notify();
+                            })),
+                    ),
             );
 
         column = column.child(col_header);
@@ -828,6 +1099,29 @@ impl Padu {
                             .text_size(sp(10.5))
                             .text_color(theme.text_secondary)
                             .child(agent.short_name()),
+                    ),
+            );
+        }
+
+        // Model Badge
+        if let Some(model) = &task.model {
+            badges_row = badges_row.child(
+                div()
+                    .h(px(18.0))
+                    .px(px(5.0))
+                    .rounded(px(4.0))
+                    .bg(theme.surface)
+                    .border_1()
+                    .border_color(theme.border)
+                    .flex()
+                    .items_center()
+                    .gap(px(3.0))
+                    .child(icon("icons/sparkle.svg", 10.0, theme.text_tertiary))
+                    .child(
+                        div()
+                            .text_size(sp(10.0))
+                            .text_color(theme.text_tertiary)
+                            .child(model.clone()),
                     ),
             );
         }
@@ -997,6 +1291,10 @@ impl Padu {
             .map(|t| t.version)
             .or_else(|| task_summary.as_ref().map(|t| t.version))
             .unwrap_or_default();
+        let model = hydrated
+            .as_ref()
+            .and_then(|t| t.model.clone())
+            .or_else(|| task_summary.as_ref().and_then(|t| t.model.clone()));
         let description = hydrated
             .as_ref()
             .map(|t| t.description.clone())
@@ -1166,6 +1464,36 @@ impl Padu {
                     },
                 )),
         );
+
+        // Model row
+        if let Some(m) = model {
+            info_section = info_section.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_size(sp(12.0))
+                            .text_color(theme.text_secondary)
+                            .child(tr!("board.model")),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(4.0))
+                            .child(icon("icons/sparkle.svg", 11.0, theme.text_secondary))
+                            .child(
+                                div()
+                                    .text_size(sp(12.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(m),
+                            ),
+                    ),
+            );
+        }
 
         // Linked Session row
         if let Some(sid) = session_id {
@@ -1376,6 +1704,55 @@ impl Padu {
             .unwrap_or_else(Uuid::nil);
         let agent = self.board_new_task_agent;
 
+        let project_modal_handle = self.menu_handle("board-new-task-project", cx);
+        let current_modal_project_id = self
+            .board_new_task_project_id
+            .or_else(|| self.current_project_id());
+        let current_modal_project_name = current_modal_project_id
+            .and_then(|id| self.state.projects.iter().find(|p| p.id == id))
+            .map(|p| p.display_name())
+            .unwrap_or_else(|| tr!("board.all_projects"));
+        let modal_project_options = self
+            .state
+            .projects
+            .iter()
+            .filter(|p| !p.is_projectless())
+            .map(|p| (p.id, p.display_name()))
+            .collect::<Vec<_>>();
+        let weak_modal_project = cx.entity().downgrade();
+        let modal_project_selector = dropdown_menu(
+            MenuChip::new("modal-project-chip")
+                .icon("icons/folder.svg", theme.text_tertiary)
+                .label(current_modal_project_name)
+                .outlined()
+                .background(theme.inset)
+                .height(px(28.0))
+                .selected(project_modal_handle.is_open())
+                .w_full()
+                .justify_between(),
+            "modal-project-menu",
+            &project_modal_handle,
+            MenuAlign::BelowLeft,
+            move |_| {
+                let mut items = Vec::new();
+                for (pid, pname) in modal_project_options.clone() {
+                    let weak = weak_modal_project.clone();
+                    let is_sel = current_modal_project_id == Some(pid);
+                    items.push(
+                        MenuItem::new(pname, move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.board_new_task_project_id = Some(pid);
+                                cx.notify();
+                            });
+                        })
+                        .icon("icons/folder.svg")
+                        .selected(is_sel),
+                    );
+                }
+                items
+            },
+        );
+
         let card =
             dialog_card("board-new-task-dialog", theme, px(480.0))
                 .child(
@@ -1390,6 +1767,21 @@ impl Padu {
                         .flex()
                         .flex_col()
                         .gap(px(12.0))
+                        // Project selector
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(4.0))
+                                .child(
+                                    div()
+                                        .text_size(sp(12.0))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(theme.text_secondary)
+                                        .child(tr!("board.filter_project")),
+                                )
+                                .child(modal_project_selector),
+                        )
                         // Title field
                         .child(
                             div()
@@ -1468,6 +1860,7 @@ impl Padu {
                                             .child(tr!("board.no_agent"))
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.board_new_task_agent = None;
+                                                this.board_new_task_model = None;
                                                 cx.notify();
                                             })),
                                     );
@@ -1476,6 +1869,7 @@ impl Padu {
                                         ProviderKind::Claude,
                                         ProviderKind::Codex,
                                         ProviderKind::Cursor,
+                                        ProviderKind::DeepSeek,
                                         ProviderKind::OpenCode,
                                     ] {
                                         let selected = agent == Some(p);
@@ -1519,13 +1913,108 @@ impl Padu {
                                                 .child(p.short_name())
                                                 .on_click(cx.listener(move |this, _, _, cx| {
                                                     this.board_new_task_agent = Some(p);
+                                                    this.board_new_task_model = None;
                                                     cx.notify();
                                                 })),
                                         );
                                     }
                                     row
                                 }),
-                        ),
+                        )
+                        // Model selector chips (only when agent is selected)
+                        .when_some(agent, |element, p| {
+                            let models = self.board_models_for_provider(p);
+                            if models.is_empty() {
+                                return element;
+                            }
+                            let current_model = self.board_new_task_model.clone();
+                            let default_selected = current_model.is_none();
+                            let mut model_chips = div().flex().flex_wrap().gap(px(6.0));
+
+                            // Default model chip
+                            model_chips = model_chips.child(
+                                div()
+                                    .id("board-new-task-model-default")
+                                    .h(px(24.0))
+                                    .px(px(8.0))
+                                    .rounded(px(4.0))
+                                    .cursor_pointer()
+                                    .flex()
+                                    .items_center()
+                                    .text_size(sp(11.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .when(default_selected, |chip| {
+                                        chip.bg(theme.accent.opacity(0.18))
+                                            .text_color(theme.accent)
+                                            .border_1()
+                                            .border_color(theme.accent.opacity(0.4))
+                                    })
+                                    .when(!default_selected, |chip| {
+                                        chip.bg(theme.inset)
+                                            .text_color(theme.text_secondary)
+                                            .border_1()
+                                            .border_color(theme.border)
+                                    })
+                                    .child(tr!("board.default_model"))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.board_new_task_model = None;
+                                        cx.notify();
+                                    })),
+                            );
+
+                            for (m_id, m_name) in models {
+                                let is_selected = current_model.as_deref() == Some(&m_id);
+                                let m_id_for_click = m_id.clone();
+                                model_chips = model_chips.child(
+                                    div()
+                                        .id(SharedString::from(format!(
+                                            "board-new-task-model-{}",
+                                            m_id
+                                        )))
+                                        .h(px(24.0))
+                                        .px(px(8.0))
+                                        .rounded(px(4.0))
+                                        .cursor_pointer()
+                                        .flex()
+                                        .items_center()
+                                        .text_size(sp(11.0))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .when(is_selected, |chip| {
+                                            chip.bg(theme.accent.opacity(0.18))
+                                                .text_color(theme.accent)
+                                                .border_1()
+                                                .border_color(theme.accent.opacity(0.4))
+                                        })
+                                        .when(!is_selected, |chip| {
+                                            chip.bg(theme.inset)
+                                                .text_color(theme.text_secondary)
+                                                .border_1()
+                                                .border_color(theme.border)
+                                        })
+                                        .child(m_name)
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.board_new_task_model =
+                                                Some(m_id_for_click.clone());
+                                            cx.notify();
+                                        })),
+                                );
+                            }
+
+                            element.child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(4.0))
+                                    .child(
+                                        div()
+                                            .text_size(sp(12.0))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(theme.text_secondary)
+                                            .child(tr!("board.model")),
+                                    )
+                                    .child(model_chips),
+                            )
+                        }),
                 )
                 // Footer
                 .child(
@@ -1565,11 +2054,13 @@ impl Padu {
                                 .hover(|s| s.opacity(0.92))
                                 .child(tr!("board.create_task"))
                                 .on_click(cx.listener(move |this, _, _, cx| {
+                                    let model = this.board_new_task_model.clone();
                                     this.create_board_task(
                                         project_id,
                                         title_str.clone(),
                                         desc_str.clone(),
                                         agent,
+                                        model,
                                         cx,
                                     );
                                 }))

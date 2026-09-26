@@ -1675,7 +1675,9 @@ pub struct Padu {
     board_new_task_title: Entity<TextInput>,
     board_new_task_description: Entity<TextInput>,
     board_new_task_agent: Option<ProviderKind>,
+    board_new_task_model: Option<String>,
     board_new_task_cancel_focus: FocusHandle,
+    board_collapsed_columns: std::collections::HashSet<padu_client::kanban::TaskStatus>,
     card_updated_events: Receiver<Uuid>,
     /// The Settings page's library snapshot, scanned off-thread. Frames read
     /// only this; `None` means the first scan has not landed yet.
@@ -3759,7 +3761,9 @@ impl Padu {
                 board_new_task_title,
                 board_new_task_description,
                 board_new_task_agent: None,
+                board_new_task_model: None,
                 board_new_task_cancel_focus: cx.focus_handle(),
+                board_collapsed_columns: std::collections::HashSet::new(),
                 notification_permission:
                     crate::platform::NotificationPermissionStatus::NotDetermined,
 
