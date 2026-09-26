@@ -3270,3 +3270,39 @@ board.reopen_task:
   en: Reopen
 board.drag_running_rejected:
   en: Tasks enter Running automatically when the agent workspace starts
+board.empty_column:
+  en: No tasks
+board.open_in_chat:
+  en: Open in Chat
+board.linked_session:
+  en: Linked Session
+board.queue_action:
+  en: Queue
+board.reopen:
+  en: Reopen
+board.cancel:
+  en: Cancel
+board.save:
+  en: Save
+board.preview:
+  en: Preview
+board.edit:
+  en: Edit
+board.collapse_column:
+  en: Collapse column
+board.expand_column:
+  en: Expand column
+board.model:
+  en: Model
+board.default_model:
+  en: Default model
+board.select_model:
+  en: Select model…
+board.filter_project:
+  en: Project
+board.filter_agent:
+  en: Agent
+board.all_projects:
+  en: All Projects
+board.all_agents:
+  en: All Agents

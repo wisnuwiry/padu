@@ -1604,3 +1604,21 @@ board.queue_task: Masukkan Antrean
 board.mark_done: Tandai Selesai
 board.reopen_task: Buka Kembali
 board.drag_running_rejected: Tugas masuk ke Berjalan secara otomatis saat workspace agen dimulai
+board.empty_column: Tidak ada tugas
+board.open_in_chat: Buka di Chat
+board.linked_session: Sesi Terkait
+board.queue_action: Antrekan
+board.reopen: Buka Kembali
+board.cancel: Batal
+board.save: Simpan
+board.preview: Pratinjau
+board.edit: Edit
+board.collapse_column: Ciutkan kolom
+board.expand_column: Perluas kolom
+board.model: Model
+board.default_model: Model bawaan
+board.select_model: Pilih model…
+board.filter_project: Proyek
+board.filter_agent: Agen
+board.all_projects: Semua Proyek
+board.all_agents: Semua Agen
