@@ -435,6 +435,7 @@ providers.web_description: Padu はデーモンホストにインストールさ
 providers.priority_description: 優先順位によって、新しい作業で Padu が最初に試すエージェントが決まります。上の行が先に使われ、無効なエージェントはスキップされます。
 providers.move_up: "%{provider} を上に移動"
 providers.move_down: "%{provider} を下に移動"
+providers.drag_to_reorder: "ドラッグして %{provider} の優先度を変更"
 providers.priority_position: 優先度 %{position} / %{total}
 providers.toggle_tooltip: 新しい作業の対象から %{provider} を外すにはオフにします。実行中のセッションは続行されます。ここでいつでもオンに戻せます。
 providers.no_rewind_support: 会話のロールバックやフォークに非対応 — 巻き戻しが必要なチェーンではスキップされます。

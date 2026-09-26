@@ -984,6 +984,8 @@ providers.move_up:
   en: Move %{provider} up
 providers.move_down:
   en: Move %{provider} down
+providers.drag_to_reorder:
+  en: Drag to reorder %{provider} priority
 providers.priority_position:
   en: Priority %{position} of %{total}
 providers.toggle_tooltip:

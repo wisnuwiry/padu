@@ -426,6 +426,7 @@ providers.web_description: Padu menjalankan CLI agen yang terpasang di host daem
 providers.priority_description: Urutan prioritas menentukan agen yang dicoba Padu lebih dulu untuk pekerjaan baru. Baris yang lebih atas didahulukan; agen yang dimatikan dilewati.
 providers.move_up: Pindahkan %{provider} ke atas
 providers.move_down: Pindahkan %{provider} ke bawah
+providers.drag_to_reorder: Tarik untuk mengubah urutan prioritas %{provider}
 providers.priority_position: Prioritas %{position} dari %{total}
 providers.toggle_tooltip: Matikan agar %{provider} dilewati untuk pekerjaan baru. Sesi yang berjalan tetap lanjut — nyalakan lagi di sini kapan saja.
 providers.no_rewind_support: Tanpa rollback atau fork percakapan — dilewati dalam rantai yang butuh rewind.

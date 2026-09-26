@@ -427,6 +427,7 @@ providers.web_description: Padu 调用安装在守护进程主机上的智能体
 providers.priority_description: 优先级决定 Padu 为新工作优先尝试哪个智能体。排在前面的优先使用，已禁用的智能体会被跳过。
 providers.move_up: 将%{provider}上移
 providers.move_down: 将%{provider}下移
+providers.drag_to_reorder: 拖动以调整%{provider}优先级
 providers.priority_position: 优先级 %{position}/%{total}
 providers.toggle_tooltip: 关闭后，%{provider} 将不再承接新工作。正在运行的会话不受影响，可随时在此重新启用。
 providers.no_rewind_support: 不支持会话回滚或派生 — 在需要回溯的链路中会被跳过。
