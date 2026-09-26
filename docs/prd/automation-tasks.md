@@ -13,7 +13,7 @@ Conventions used below: daemon = `crates/padu-core` + `crates/padu-daemon`; wire
 - [x] **P0-01** Add wire modules skeleton: `crates/padu-protocol/src/{kanban,agent_profile,automation,git_integration}.rs` with `TS`-derived empty shells + `export_types` wiring; `bun run protocol:generate` passes with no behavior change.
 - [x] **P0-02** Daemon storage plan: SQLite tables `tasks`, `agent_profiles`, `rules`, `pending_approvals`, `automation_outbox`, `audit_log` (+ `projects.linked_repo` nullable column); migration + rollback test.
 - [x] **P0-03** Event catalog: define canonical daemon events (`task_queued`, `workspace_started`, `agent_completed`, `checkpoint_failed`, `card_updated`, `rule_triggered`, `approval_requested`, `issue_created`, `pr_opened`, `pr_merged`/`mr_merged`, `issue_closed`) as `ServerMessage` variants with replay/dedup semantics documented.
-- [ ] **P0-04** Idempotency + audit helpers: `idempotency_key = hash(rule_id, trigger_event_id)` dedup layer + append-only audit writer + keychain token-store abstraction (macOS Keychain / Win Credential Manager / Linux Secret Service); unit tests for dedup + redaction (no secrets in logs/DB).
+- [x] **P0-04** Idempotency + audit helpers: `idempotency_key = hash(rule_id, trigger_event_id)` dedup layer + append-only audit writer + keychain token-store abstraction (macOS Keychain / Win Credential Manager / Linux Secret Service); unit tests for dedup + redaction (no secrets in logs/DB).
 
 ## Phase 1 — Kanban + Agent Profile (protocol 8 → 9)
 
