@@ -14,7 +14,7 @@ use crate::model::{ProviderKind, SessionWorkspace};
 
 /// Board column (PRD §5.2). Snake-case spelling matches the
 /// `tasks.status` column (`backlog | queued | running | review | done`).
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
     #[default]
@@ -63,6 +63,8 @@ pub struct Task {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assigned_agent: Option<ProviderKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_kind: Option<TaskWorkspaceKind>,
@@ -96,6 +98,8 @@ pub struct TaskSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assigned_agent: Option<ProviderKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<Uuid>,
     #[serde(default)]
     pub labels: Vec<String>,
@@ -116,6 +120,7 @@ impl TaskSummary {
             description_preview: task_preview(&task.description),
             status: task.status,
             assigned_agent: task.assigned_agent,
+            model: task.model.clone(),
             session_id: task.session_id,
             labels: task.labels.clone(),
             needs_attention: task.needs_attention,
@@ -158,6 +163,8 @@ pub struct CreateTask {
     pub labels: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assigned_agent: Option<ProviderKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 #[cfg(test)]
@@ -174,6 +181,7 @@ mod tests {
             labels: vec!["bug".to_owned()],
             status: TaskStatus::Queued,
             assigned_agent: Some(ProviderKind::Codex),
+            model: Some("gpt-4o".to_owned()),
             session_id: Some(Uuid::new_v4()),
             workspace_kind: Some(TaskWorkspaceKind::NewWorktree),
             linked_issue: Some(LinkedIssue {

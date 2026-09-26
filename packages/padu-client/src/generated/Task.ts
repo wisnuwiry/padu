@@ -9,7 +9,7 @@ import type { TaskWorkspaceKind } from "./TaskWorkspaceKind";
  * Kanban card (PRD §5.4). `assigned_agent` references
  * `AgentProfile.agent_id`, never free text.
  */
-export type Task = { id: string, projectId: string, title: string, description: string, labels: Array<string>, status: TaskStatus, assignedAgent?: ProviderKind | null, sessionId?: string | null, workspaceKind?: TaskWorkspaceKind | null, linkedIssue?: LinkedIssue | null, linkedPr?: LinkedPr | null, needsAttention: boolean, syncFailed?: string | null, idempotencyKeys: Array<string>,
+export type Task = { id: string, projectId: string, title: string, description: string, labels: Array<string>, status: TaskStatus, assignedAgent?: ProviderKind | null, model?: string | null, sessionId?: string | null, workspaceKind?: TaskWorkspaceKind | null, linkedIssue?: LinkedIssue | null, linkedPr?: LinkedPr | null, needsAttention: boolean, syncFailed?: string | null, idempotencyKeys: Array<string>,
 /**
  * Optimistic-concurrency guard, checked on every update (P1-05).
  */

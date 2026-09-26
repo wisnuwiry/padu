@@ -7,4 +7,4 @@ import type { TaskStatus } from "./TaskStatus";
  * everything a card renders, none of the heavy detail. Full rows,
  * checkpoint bodies, and logs arrive via `HydrateTask`.
  */
-export type TaskSummary = { id: string, projectId: string, title: string, descriptionPreview: string, status: TaskStatus, assignedAgent?: ProviderKind | null, sessionId?: string | null, labels: Array<string>, needsAttention: boolean, syncFailed?: string | null, updatedAt: number, version: number, archived: boolean, };
+export type TaskSummary = { id: string, projectId: string, title: string, descriptionPreview: string, status: TaskStatus, assignedAgent?: ProviderKind | null, model?: string | null, sessionId?: string | null, labels: Array<string>, needsAttention: boolean, syncFailed?: string | null, updatedAt: number, version: number, archived: boolean, };

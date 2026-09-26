@@ -5,4 +5,4 @@ import type { ProviderKind } from "./ProviderKind";
  * `CreateTask` input (P1-05). The daemon assigns id, backlog status,
  * version 1, and timestamps; everything else defaults to empty/unset.
  */
-export type CreateTask = { projectId: string, title: string, description: string, labels: Array<string>, assignedAgent?: ProviderKind | null, };
+export type CreateTask = { projectId: string, title: string, description: string, labels: Array<string>, assignedAgent?: ProviderKind | null, model?: string | null, };
