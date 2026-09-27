@@ -395,18 +395,20 @@ export class PaduClient {
       for (const listener of this.taskStateListeners) listener(message.revision);
       return;
     }
-    if (message.type === "cardUpdated") {
+    if (message.type === "cardUpdated" || message.type === "checkpointFailed") {
       for (const listener of this.cardUpdatedListeners) listener(message.taskId);
-      for (const listener of this.taskStateListeners) listener(0);
       return;
     }
     if (
       message.type === "taskQueued" ||
       message.type === "workspaceStarted" ||
-      message.type === "agentCompleted" ||
-      message.type === "checkpointFailed"
+      message.type === "agentCompleted"
     ) {
       for (const listener of this.cardUpdatedListeners) listener(message.taskId);
+      // These events can also change the session catalog (queueing creates a
+      // session; start/complete mutate its status), and the daemon only
+      // broadcasts taskStateChanged on the queue path — so snapshots refresh
+      // here too instead of going stale.
       for (const listener of this.taskStateListeners) listener(0);
       return;
     }
