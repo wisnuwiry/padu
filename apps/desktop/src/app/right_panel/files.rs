@@ -780,6 +780,15 @@ impl Padu {
         let (editor_state, writable, dirty) =
             self.ensure_right_panel_file_editor(&relative_path, window, cx);
 
+        // File editors share one horizontal scroll handle: when the visible
+        // file changes, re-arm caret following on the returning editor so a
+        // caret left offscreen by another file's pan comes back into view.
+        // Manual pans never touch this path.
+        if self.right_panel_files_reconciled_path.as_deref() != Some(relative_path.as_str()) {
+            self.right_panel_files_reconciled_path = Some(relative_path.clone());
+            editor_state.update(cx, |input, cx| input.reset_caret_reconciliation(cx));
+        }
+
         // Markdown files carry the global source/preview toggle; every other
         // language always shows source.
         let is_markdown = file_highlighter_language(&relative_path) == "markdown";
@@ -1193,7 +1202,11 @@ impl Padu {
         let theme = Theme::current(cx);
         let field = editor_state.read(cx);
         let line_count = field.content().split('\n').count().max(1);
-        let heights = field.wrapped_line_heights();
+        let heights = if wrap {
+            field.wrapped_line_heights()
+        } else {
+            Vec::new()
+        };
         // A mono digit advances ~0.6em, so the gutter tracks the font size.
         let digit_width = (text_size * 0.6).ceil();
         let gutter_width = 20.0 + digit_width * (line_count.to_string().len() as f32);
@@ -1209,17 +1222,22 @@ impl Padu {
             |_, _, _| (),
             move |bounds: gpui::Bounds<Pixels>, _, window: &mut Window, cx: &mut App| {
                 let visible = viewport.bounds();
-                let mut y = bounds.origin.y;
-                for number in 1..=line_count {
-                    let height = heights
-                        .get(number - 1)
-                        .copied()
-                        .unwrap_or_else(|| px(line_height));
-                    // Everything below the viewport is unreachable from here on.
-                    if y > visible.bottom() {
-                        break;
+                let lh = px(line_height);
+                if heights.is_empty() {
+                    if lh <= px(0.0) {
+                        return;
                     }
-                    if y + height >= visible.top() {
+                    let top_diff = visible.top() - bounds.origin.y;
+                    let start_line = if top_diff > px(0.0) {
+                        ((top_diff / lh).floor() as usize).min(line_count)
+                    } else {
+                        0
+                    };
+                    let mut y = bounds.origin.y + lh * start_line as f32;
+                    for number in (start_line + 1)..=line_count {
+                        if y > visible.bottom() {
+                            break;
+                        }
                         let text = SharedString::from(number.to_string());
                         let run = gpui::TextRun {
                             len: text.len(),
@@ -1232,16 +1250,34 @@ impl Padu {
                                 .text_system()
                                 .shape_line(text, px(text_size), &[run], None);
                         let origin = point(bounds.right() - line.width, y);
-                        let _ = line.paint(
-                            origin,
-                            px(line_height),
-                            gpui::TextAlign::Left,
-                            None,
-                            window,
-                            cx,
-                        );
+                        let _ = line.paint(origin, lh, gpui::TextAlign::Left, None, window, cx);
+                        y += lh;
                     }
-                    y += height;
+                } else {
+                    let mut y = bounds.origin.y;
+                    for number in 1..=line_count {
+                        let height = heights.get(number - 1).copied().unwrap_or(lh);
+                        // Everything below the viewport is unreachable from here on.
+                        if y > visible.bottom() {
+                            break;
+                        }
+                        if y + height >= visible.top() {
+                            let text = SharedString::from(number.to_string());
+                            let run = gpui::TextRun {
+                                len: text.len(),
+                                font: gpui::font(md::render::MONO_FAMILY),
+                                color: number_color,
+                                ..Default::default()
+                            };
+                            let line =
+                                window
+                                    .text_system()
+                                    .shape_line(text, px(text_size), &[run], None);
+                            let origin = point(bounds.right() - line.width, y);
+                            let _ = line.paint(origin, lh, gpui::TextAlign::Left, None, window, cx);
+                        }
+                        y += height;
+                    }
                 }
             },
         )
@@ -1274,6 +1310,7 @@ impl Padu {
                             .id(SharedString::from(format!("file-editor-{relative_path}")))
                             .size_full()
                             .overflow_y_scroll()
+                            .restrict_scroll_to_axis()
                             .track_scroll(&self.right_panel_editor_scroll_handle)
                             .child(
                                 div()

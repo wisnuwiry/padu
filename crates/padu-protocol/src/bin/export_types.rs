@@ -38,6 +38,15 @@ fn export_to(output: &Path) -> Result<(), Box<dyn std::error::Error>> {
     DaemonReady::export_all(&config)?;
     padu_protocol::model::Project::export_all(&config)?;
     padu_protocol::persistence::HostProfile::export_all(&config)?;
+    // Phase 0 scaffolding (P0-01): reserve codegen roots for the
+    // Kanban / Agent Profile / Automation / Git-integration shells.
+    // These types are not referenced from Command/ServerMessage yet,
+    // so this only adds new .ts files with no behavior change.
+    padu_protocol::kanban::Task::export_all(&config)?;
+    padu_protocol::agent_profile::AgentProfile::export_all(&config)?;
+    padu_protocol::agent_profile::UpdateAgentProfile::export_all(&config)?;
+    padu_protocol::automation::AutomationRule::export_all(&config)?;
+    padu_protocol::git_integration::LinkedRepo::export_all(&config)?;
     strip_trailing_whitespace(output)?;
     fs::write(
         output.join("constants.ts"),

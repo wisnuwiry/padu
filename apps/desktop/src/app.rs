@@ -69,9 +69,9 @@ use crate::ui::{
 use crate::{
     CancelTaskSwitch, CancelTurn, CloseFind, CloseWindow, ConfirmTaskSwitch, CopySelection,
     FindNext, FindPrevious, FocusComposer, NavigateBack, NavigateForward, NewProject, NewSession,
-    NextRightPanelTab, OpenBrowser, OpenFilePicker, OpenFiles, OpenFind, OpenFindReplace,
-    OpenNotePicker, OpenNotes, OpenResumePicker, OpenReview, OpenSettings, OpenTerminal,
-    PrevRightPanelTab, ReplaceAllMatches, SaveFile, SelectFirstTask, SelectLastTask,
+    NextRightPanelTab, OpenBoard, OpenBrowser, OpenFilePicker, OpenFiles, OpenFind,
+    OpenFindReplace, OpenNotePicker, OpenNotes, OpenResumePicker, OpenReview, OpenSettings,
+    OpenTerminal, PrevRightPanelTab, ReplaceAllMatches, SaveFile, SelectFirstTask, SelectLastTask,
     SelectNextSession, SelectPreviousSession, SwitchTaskBackward, SwitchTaskForward,
     ToggleCommandPalette, ToggleFindCaseSensitive, ToggleFindRegex, ToggleFindWholeWord,
     ToggleFpsCounter, ToggleModelPicker, ToggleRightPanel, ToggleRightPanelFullscreen,
@@ -230,6 +230,7 @@ enum WorkspaceRepoStatus {
 enum WorkspacePage {
     Conversation,
     Notes,
+    Board,
 }
 
 #[derive(Debug, Default)]
@@ -1222,6 +1223,15 @@ pub struct Padu {
     /// Providers the running re-detection has not answered for yet; empty
     /// means no re-detection is in flight.
     provider_detection_remaining: usize,
+    /// Agent Profile registry snapshot from the daemon (`ListAgentProfiles`),
+    /// ordered by priority. Empty until the Providers page loads it; rows
+    /// fall back to `ProviderKind::ALL` order with settings-backed toggles
+    /// while empty, so a slow or unreachable daemon never blanks the page.
+    agent_profiles: Vec<padu_client::agent_profile::AgentProfile>,
+    /// Whether an agent-profile fetch is in flight.
+    agent_profiles_pending: bool,
+    /// Generation used to discard stale profile fetches and mutations.
+    agent_profiles_generation: u64,
     /// The current lifecycle/operation state of Antigravity ACP (install, auth, logout, remove).
     pub(crate) agy_action: AgyActionState,
     /// Whether the current Agy ACP credential is authenticated.
@@ -1573,6 +1583,10 @@ pub struct Padu {
     pub(crate) right_panel_files_cursor: Option<usize>,
     right_panel_file_tree_width: f32,
     right_panel_file_editors: HashMap<String, RightPanelFileEditor>,
+    /// Last file whose editor had caret following re-armed. File editors
+    /// share one horizontal scroll handle, so switching files must reset
+    /// the returning editor's reconciliation state (see input.rs).
+    right_panel_files_reconciled_path: Option<String>,
     /// Find-and-replace over the visible file editor. Created on first use of
     /// the primary find shortcut and kept for the window's lifetime so the
     /// query and toggles survive closing the bar; `open` says whether it shows.
@@ -1645,6 +1659,35 @@ pub struct Padu {
     /// so frame work stays proportional to the visible rows.
     notes_list_state: ListState,
     notes_scrollbar: Rc<ScrollbarState>,
+    board_tasks: Vec<padu_client::kanban::TaskSummary>,
+    board_loaded: bool,
+    board_load_pending: bool,
+    board_load_generation: u64,
+    board_filter_project: Option<Uuid>,
+    board_filter_agent: Option<ProviderKind>,
+    board_filter_needs_attention: bool,
+    board_filter_sync_failed: bool,
+    board_search: Entity<TextInput>,
+    board_selected_task_id: Option<Uuid>,
+    board_hydrated_task: Option<padu_client::kanban::Task>,
+    board_new_task_modal_open: bool,
+    board_new_task_project_id: Option<Uuid>,
+    board_new_task_title: Entity<TextInput>,
+    board_new_task_description: Entity<TextInput>,
+    board_new_task_agent: Option<ProviderKind>,
+    board_new_task_model: Option<String>,
+    board_new_task_cancel_focus: FocusHandle,
+    board_new_task_preview: bool,
+    board_edit_title: Entity<TextInput>,
+    board_edit_description: Entity<TextInput>,
+    board_edit_labels: Entity<TextInput>,
+    board_edit_labels_list: Vec<String>,
+    board_edit_agent: Option<ProviderKind>,
+    board_edit_saving: bool,
+    board_edit_preview: bool,
+    board_markdown_preview: RefCell<MarkdownView>,
+    board_collapsed_columns: std::collections::HashSet<padu_client::kanban::TaskStatus>,
+    card_updated_events: Receiver<Uuid>,
     /// The Settings page's library snapshot, scanned off-thread. Frames read
     /// only this; `None` means the first scan has not landed yet.
     skills_catalog: Option<Rc<crate::skills::SkillsCatalog>>,
@@ -1835,6 +1878,7 @@ pub struct Padu {
     transcript_pane: Entity<PaduPane>,
     right_panel_pane: Entity<PaduPane>,
     notes_pane: Entity<PaduPane>,
+    board_pane: Entity<PaduPane>,
     /// The unix second the pending time-label wake-up targets, or `None` when
     /// none is armed. See `schedule_time_label_wake`.
     time_label_wake: Cell<Option<u64>>,
@@ -1849,6 +1893,7 @@ pub struct Padu {
 mod activity_diff;
 mod autocomplete;
 mod background_work;
+mod board;
 mod branches;
 mod command_palette;
 mod components;
@@ -1989,6 +2034,11 @@ impl Padu {
         }
         self.workspace_navigation.visit(self.workspace_page, page);
         self.workspace_page = page;
+        if page == WorkspacePage::Notes {
+            self.ensure_notes_loaded(cx);
+        } else if page == WorkspacePage::Board {
+            self.ensure_board_tasks_loaded(cx);
+        }
         cx.notify();
     }
 
@@ -1997,6 +2047,11 @@ impl Padu {
             return false;
         };
         self.workspace_page = page;
+        if page == WorkspacePage::Notes {
+            self.ensure_notes_loaded(cx);
+        } else if page == WorkspacePage::Board {
+            self.ensure_board_tasks_loaded(cx);
+        }
         cx.notify();
         true
     }
@@ -2008,6 +2063,8 @@ impl Padu {
         self.workspace_page = page;
         if page == WorkspacePage::Notes {
             self.ensure_notes_loaded(cx);
+        } else if page == WorkspacePage::Board {
+            self.ensure_board_tasks_loaded(cx);
         }
         cx.notify();
         true
@@ -2261,6 +2318,7 @@ impl Padu {
     fn apply_new_daemon(&mut self, daemon: padu_client::DaemonSupervisor, cx: &mut Context<Self>) {
         self.agy_install_progress_events = daemon.client().subscribe_provider_install_progress();
         self.agy_auth_url_events = daemon.client().subscribe_provider_auth_url();
+        self.card_updated_events = daemon.client().subscribe_card_updated();
         self.daemon = daemon.clone();
         self.store = StateStore::remote(daemon.clone());
         self.composer_draft_store = ComposerDraftStore::remote(daemon.clone());
@@ -2309,6 +2367,13 @@ impl Padu {
         self.notes_data_generation = self.notes_data_generation.wrapping_add(1);
         if self.workspace_page == WorkspacePage::Notes {
             self.ensure_notes_loaded(cx);
+        }
+        self.board_loaded = false;
+        self.board_load_pending = false;
+        self.board_load_generation = self.board_load_generation.wrapping_add(1);
+        self.board_tasks.clear();
+        if self.workspace_page == WorkspacePage::Board {
+            self.ensure_board_tasks_loaded(cx);
         }
 
         let row_count = self.transcript_row_count();
@@ -2563,6 +2628,29 @@ impl Padu {
                 .clear_on_escape()
                 .placeholder(tr!("notes.search_placeholder"))
         });
+        let board_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .placeholder(tr!("board.filter_search_placeholder"))
+        });
+        let board_new_task_title =
+            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("board.task_title")));
+        let board_new_task_description = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .multi_line()
+                .syntax(Some("markdown"))
+                .placeholder(tr!("board.task_description"))
+        });
+        let board_edit_title =
+            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("board.task_title")));
+        let board_edit_description = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .multi_line()
+                .syntax(Some("markdown"))
+                .placeholder(tr!("board.task_description"))
+        });
+        let board_edit_labels =
+            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("board.labels_placeholder")));
         let keybindings_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -2611,6 +2699,7 @@ impl Padu {
         let transcript_pane = PaduPane::new(Padu::transcript_pane_content, cx);
         let right_panel_pane = PaduPane::new(Padu::right_panel_pane_content, cx);
         let notes_pane = PaduPane::new(Padu::notes_pane_content, cx);
+        let board_pane = PaduPane::new(Padu::board_pane_content, cx);
         let workspace_client = padu_client::WorkspaceClient::new(daemon.client());
         let (projectless_migrated, projectless_migration_error) =
             migrate_legacy_projectless_projects(&mut state, &workspace_client);
@@ -2776,6 +2865,7 @@ impl Padu {
         let (provider_detection_tx, provider_detection_events) = unbounded();
         let agy_install_progress_events = daemon.client().subscribe_provider_install_progress();
         let agy_auth_url_events = daemon.client().subscribe_provider_auth_url();
+        let card_updated_events = daemon.client().subscribe_card_updated();
         let (computer_permission_tx, computer_permission_events) = unbounded();
         let (plan_usage_tx, plan_usage_events) = unbounded();
         let (event_wake_tx, event_wake_events) = smol::channel::bounded(1);
@@ -3189,6 +3279,34 @@ impl Padu {
                 }
             })
             .detach();
+            cx.subscribe(&board_search, |_: &mut Self, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Edited) {
+                    cx.notify();
+                }
+            })
+            .detach();
+            cx.subscribe(
+                &board_edit_labels,
+                |this: &mut Self, input, event: &InputEvent, cx| match event {
+                    InputEvent::Submit(_) => {
+                        this.commit_board_edit_label(cx);
+                    }
+                    InputEvent::Edited => {
+                        let content = input.read(cx).content();
+                        if content.contains(',') || content.contains('，') || content.contains(';')
+                        {
+                            this.commit_board_edit_label(cx);
+                        }
+                    }
+                    InputEvent::BackspaceOnEmpty => {
+                        if this.board_edit_labels_list.pop().is_some() {
+                            cx.notify();
+                        }
+                    }
+                    _ => {}
+                },
+            )
+            .detach();
             cx.subscribe(
                 &notes_title,
                 |this: &mut Self, _, event: &InputEvent, cx| {
@@ -3441,6 +3559,9 @@ impl Padu {
                 provider_detection_tx,
                 provider_detection_events,
                 provider_detection_remaining: 0,
+                agent_profiles: Vec::new(),
+                agent_profiles_pending: false,
+                agent_profiles_generation: 0,
                 agy_action: AgyActionState::Idle,
                 agy_authenticated: false,
                 agy_account: None,
@@ -3618,6 +3739,7 @@ impl Padu {
                 right_panel_files_cursor: None,
                 right_panel_file_tree_width: DEFAULT_FILE_TREE_WIDTH,
                 right_panel_file_editors: HashMap::new(),
+                right_panel_files_reconciled_path: None,
                 file_search: None,
                 right_panel_diff_source: ReviewDiffSource::default(),
                 right_panel_diff_snapshot: None,
@@ -3662,6 +3784,34 @@ impl Padu {
                 notes_filtered_generation: 0,
                 notes_list_state: ListState::new(0, ListAlignment::Top, px(480.0)),
                 notes_scrollbar: ScrollbarState::new(),
+                board_tasks: Vec::new(),
+                board_loaded: false,
+                board_load_pending: false,
+                board_load_generation: 0,
+                board_filter_project: None,
+                board_filter_agent: None,
+                board_filter_needs_attention: false,
+                board_filter_sync_failed: false,
+                board_search,
+                board_selected_task_id: None,
+                board_hydrated_task: None,
+                board_new_task_modal_open: false,
+                board_new_task_project_id: None,
+                board_new_task_title,
+                board_new_task_description,
+                board_new_task_agent: None,
+                board_new_task_model: None,
+                board_new_task_cancel_focus: cx.focus_handle(),
+                board_new_task_preview: false,
+                board_edit_title,
+                board_edit_description,
+                board_edit_labels,
+                board_edit_labels_list: Vec::new(),
+                board_edit_agent: None,
+                board_edit_saving: false,
+                board_edit_preview: false,
+                board_markdown_preview: RefCell::new(MarkdownView::new()),
+                board_collapsed_columns: std::collections::HashSet::new(),
                 notification_permission:
                     crate::platform::NotificationPermissionStatus::NotDetermined,
 
@@ -3751,6 +3901,8 @@ impl Padu {
                 transcript_pane: transcript_pane.clone(),
                 right_panel_pane: right_panel_pane.clone(),
                 notes_pane: notes_pane.clone(),
+                board_pane: board_pane.clone(),
+                card_updated_events,
                 time_label_wake: Cell::new(None),
                 time_label_wake_generation: Cell::new(0),
                 fps_last_frame: Instant::now(),
@@ -3764,6 +3916,7 @@ impl Padu {
             &transcript_pane,
             &right_panel_pane,
             &notes_pane,
+            &board_pane,
         ] {
             pane.update(cx, |pane, cx| pane.bind(&entity, cx));
         }

@@ -423,6 +423,14 @@ settings.share_anonymous_usage_data_description: Bantu tingkatkan Padu dengan me
 providers.coding_agents: Agen pengodean
 providers.description: Padu menjalankan CLI agen yang terpasang di komputer ini. Pasang atau masuk dengan CLI masing-masing agen, lalu segarkan
 providers.web_description: Padu menjalankan CLI agen yang terpasang di host daemon. Pasang atau masuk dengan CLI masing-masing agen, lalu segarkan
+providers.priority_description: Urutan prioritas menentukan agen yang dicoba Padu lebih dulu untuk pekerjaan baru. Baris yang lebih atas didahulukan; agen yang dimatikan dilewati.
+providers.move_up: Pindahkan %{provider} ke atas
+providers.move_down: Pindahkan %{provider} ke bawah
+providers.drag_to_reorder: Tarik untuk mengubah urutan prioritas %{provider}
+providers.priority_position: Prioritas %{position} dari %{total}
+providers.toggle_tooltip: Matikan agar %{provider} dilewati untuk pekerjaan baru. Sesi yang berjalan tetap lanjut — nyalakan lagi di sini kapan saja.
+providers.no_rewind_support: Tanpa rollback atau fork percakapan — dilewati dalam rantai yang butuh rewind.
+providers.profiles_conflict: Profil agen berubah di tempat lain, jadi daftar dimuat ulang. Coba lagi.
 providers.check_failed: "Tidak dapat memeriksa %{command}: %{error}"
 providers.show_settings: Tampilkan pengaturan %{provider}
 providers.hide_settings: Sembunyikan pengaturan %{provider}
@@ -1557,3 +1565,69 @@ daemon.qr_restart_tunnel: Mulai Ulang Tunnel
 daemon.qr_tunnel_failed: "Tidak dapat memulai tunnel: %{error}"
 daemon.qr_field_placeholder: mis. 192.168.1.10 atau my-mac.tail-abc.ts.net
 daemon.qr_port_placeholder: mis. 19999
+
+board.title: Tugas
+board.backlog: Backlog
+board.queued: Antrean
+board.running: Agen Berjalan
+board.review: Menunggu Review
+board.done: Selesai
+board.new_task: Tugas Baru
+board.create_task: Buat Tugas
+board.edit_task: Edit Tugas
+board.delete_task: Hapus Tugas
+board.delete_task_confirm: Apakah Anda yakin ingin menghapus tugas ini?
+board.task_title: Judul
+board.task_title_placeholder: Judul tugas…
+board.task_description: Deskripsi
+board.task_description_placeholder: Apa yang perlu dikerjakan? Markdown didukung…
+board.assigned_agent: Agen Ditugaskan
+board.no_agent: Otomatis (antrean prioritas)
+board.status: Status
+board.project: Proyek
+board.labels: Label
+board.labels_placeholder: Tambah label (pisahkan dengan koma)…
+board.filter_all_projects: Semua Proyek
+board.filter_all_agents: Semua Agen
+board.filter_search_placeholder: Filter tugas…
+board.empty_backlog: Tidak ada tugas di Backlog
+board.empty_queued: Tidak ada tugas dalam antrean
+board.empty_running: Tidak ada agen yang berjalan
+board.empty_review: Tidak ada tugas menunggu review
+board.empty_done: Tidak ada tugas yang selesai
+board.filter_empty: Tidak ada tugas yang cocok dengan filter
+board.clear_filters: Hapus Filter
+board.clear_filters_short: Bersihkan
+board.clear_search: Hapus pencarian
+board.needs_attention: Perlu Perhatian
+board.needs_attention_short: Perhatian
+board.remove_label: Hapus %{label}
+board.sync_failed: Sinkronisasi Gagal
+board.sync_failed_short: Gagal
+board.open_session: Buka Sesi
+board.queue_task: Masukkan Antrean
+board.mark_done: Tandai Selesai
+board.reopen_task: Buka Kembali
+board.drag_running_rejected: Tugas masuk ke Berjalan secara otomatis saat workspace agen dimulai
+board.empty_column: Tidak ada tugas
+board.open_in_chat: Buka di Chat
+board.linked_session: Sesi Terkait
+board.queue_action: Antrekan
+board.reopen: Buka Kembali
+board.cancel: Batal
+board.save: Simpan
+board.preview: Pratinjau
+board.edit: Edit
+board.collapse_column: Ciutkan kolom
+board.expand_column: Perluas kolom
+board.model: Model
+board.default_model: Model bawaan
+board.select_model: Pilih model…
+board.filter_project: Proyek
+board.filter_agent: Agen
+board.all_projects: Semua Proyek
+board.all_agents: Semua Agen
+board.live_usage: Penggunaan langsung
+board.tokens_tooltip: Token yang digunakan sesi tertaut
+board.duration_tooltip: Waktu kerja agen
+board.agent_disabled_tooltip: Dinonaktifkan — aktifkan lagi di Pengaturan → Penyedia

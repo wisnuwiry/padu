@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as BoardRouteImport } from './routes/board'
 import { Route as NotesRouteImport } from './routes/notes'
 import { Route as SettingsIndexRouteImport } from './routes/settings.index'
 import { Route as SettingsPageRouteImport } from './routes/settings.$page'
@@ -17,6 +18,11 @@ import { Route as SettingsPageRouteImport } from './routes/settings.$page'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BoardRoute = BoardRouteImport.update({
+  id: '/board',
+  path: '/board',
   getParentRoute: () => rootRouteImport,
 } as any)
 const NotesRoute = NotesRouteImport.update({
@@ -37,12 +43,14 @@ const SettingsPageRoute = SettingsPageRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/board': typeof BoardRoute
   '/notes': typeof NotesRoute
   '/settings/$page': typeof SettingsPageRoute
   '/settings/': typeof SettingsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/board': typeof BoardRoute
   '/notes': typeof NotesRoute
   '/settings/$page': typeof SettingsPageRoute
   '/settings': typeof SettingsIndexRoute
@@ -50,20 +58,22 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/board': typeof BoardRoute
   '/notes': typeof NotesRoute
   '/settings/$page': typeof SettingsPageRoute
   '/settings/': typeof SettingsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/notes' | '/settings/$page' | '/settings/'
+  fullPaths: '/' | '/board' | '/notes' | '/settings/$page' | '/settings/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/notes' | '/settings/$page' | '/settings'
-  id: '__root__' | '/' | '/notes' | '/settings/$page' | '/settings/'
+  to: '/' | '/board' | '/notes' | '/settings/$page' | '/settings'
+  id: '__root__' | '/' | '/board' | '/notes' | '/settings/$page' | '/settings/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  BoardRoute: typeof BoardRoute
   NotesRoute: typeof NotesRoute
   SettingsPageRoute: typeof SettingsPageRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
@@ -76,6 +86,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/board': {
+      id: '/board'
+      path: '/board'
+      fullPath: '/board'
+      preLoaderRoute: typeof BoardRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/notes': {
@@ -104,6 +121,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  BoardRoute: BoardRoute,
   NotesRoute: NotesRoute,
   SettingsPageRoute: SettingsPageRoute,
   SettingsIndexRoute: SettingsIndexRoute,

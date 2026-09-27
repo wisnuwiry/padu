@@ -1,0 +1,1 @@
+ALTER TABLE `agent_profiles` ADD `version` integer DEFAULT 1 NOT NULL;

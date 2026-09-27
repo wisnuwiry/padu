@@ -25,6 +25,7 @@ export interface SessionGroup {
 
 export type SidebarListRow =
   | { kind: 'search'; key: 'search' }
+  | { kind: 'board'; key: 'board' }
   | { kind: 'notes'; key: 'notes' }
   | { kind: 'group'; key: string; group: SessionGroup; collapsed: boolean; first: boolean }
   | { kind: 'session'; key: string; item: SessionItem }
@@ -52,6 +53,7 @@ export function sidebarRows(
 ): SidebarListRow[] {
   const rows: SidebarListRow[] = [
     { kind: 'search', key: 'search' },
+    { kind: 'board', key: 'board' },
     { kind: 'notes', key: 'notes' },
     { kind: 'separator', key: 'actions-separator' },
     { kind: 'spacer', key: 'actions-spacer' },

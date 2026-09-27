@@ -1,10 +1,10 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { DaemonSettings, PlanUsage, ProviderKind } from '@padu/client'
+import type { AgentProfile, DaemonSettings, PlanUsage, ProviderKind, UpdateAgentProfile } from '@padu/client'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { ProviderIcon, PROVIDERS, PaduIcon } from '@/components/padu-icon'
 import { Input } from '@/components/ui/input'
-import { useDaemonSettings, useProviderProbes } from '@/hooks/use-daemon-data'
+import { useAgentProfiles, useDaemonSettings, useProviderProbes } from '@/hooks/use-daemon-data'
 import {
   authenticateAgy,
   cancelAgyInstall,
@@ -15,6 +15,7 @@ import {
   installAgyAcp,
   logoutAgy,
   removeAgyAcp,
+  updateAgentProfile,
   updateDaemonSettings,
 } from '@/lib/daemon-api'
 import { useDaemon } from '@/lib/daemon-context'
@@ -27,6 +28,7 @@ export function ProvidersSettings() {
   const { client, config } = useDaemon()
   const queryClient = useQueryClient()
   const settings = useDaemonSettings()
+  const profiles = useAgentProfiles()
   const probes = useProviderProbes()
   const [expanded, setExpanded] = useState<ProviderKind | null>(null)
   const [paths, setPaths] = useState<Partial<Record<ProviderKind, string>>>({})
@@ -34,6 +36,8 @@ export function ProvidersSettings() {
   const [agyInstallPercent, setAgyInstallPercent] = useState(0)
   const [agyAuthenticated, setAgyAuthenticated] = useState(false)
   const [agyAccount, setAgyAccount] = useState<string | null>(null)
+  const [draggedId, setDraggedId] = useState<ProviderKind | null>(null)
+  const [dragOverId, setDragOverId] = useState<ProviderKind | null>(null)
   const agyCancelRequested = useRef(false)
   useEffect(() => {
     if (!client) return
@@ -86,14 +90,146 @@ export function ProvidersSettings() {
     setExpanded(expanded === provider ? null : provider)
   }
 
+  const profileById = new Map((profiles.data ?? []).map((profile) => [profile.agentId, profile]))
+  const ordered =
+    profiles.data && profiles.data.length > 0
+      ? [...profiles.data]
+          .sort((a, b) => a.priority - b.priority)
+          .map((profile) => PROVIDERS.find((candidate) => candidate.id === profile.agentId))
+          .filter((provider): provider is (typeof PROVIDERS)[number] => Boolean(provider))
+      : PROVIDERS
+
+  async function refreshProfiles() {
+    if (!config) return
+    await queryClient.invalidateQueries({ queryKey: daemonKeys.agentProfiles(config.address) })
+    // The daemon derives legacy disabled_providers from the registry, so the
+    // settings snapshot must be re-read after every profile write.
+    await queryClient.invalidateQueries({ queryKey: daemonKeys.settings(config.address) })
+  }
+
+  async function sendProfileUpdate(update: UpdateAgentProfile) {
+    if (!client || !config) return
+    try {
+      const profile = await updateAgentProfile(client, update)
+      queryClient.setQueryData<AgentProfile[]>(
+        daemonKeys.agentProfiles(config.address),
+        (current) =>
+          current?.map((candidate) =>
+            candidate.agentId === profile.agentId ? profile : candidate,
+          ),
+      )
+      await queryClient.invalidateQueries({ queryKey: daemonKeys.settings(config.address) })
+    } catch (error) {
+      if (errorMessage(error).includes('version conflict')) {
+        await refreshProfiles()
+        toast.error(t('providers.profiles_conflict'))
+      } else {
+        toast.error(errorMessage(error))
+      }
+    }
+  }
+
+  function toggleProfile(providerId: ProviderKind, enabled: boolean) {
+    const profile = profileById.get(providerId)
+    if (!client || !profile) {
+      if (!settings.data) return
+      const disabledProviders = enabled
+        ? settings.data.disabled_providers.filter((kind) => kind !== providerId)
+        : [...new Set([...settings.data.disabled_providers, providerId])]
+      void apply({ ...settings.data, disabled_providers: disabledProviders })
+      return
+    }
+    void sendProfileUpdate({
+      agentId: profile.agentId,
+      roleTags: profile.roleTags,
+      costTier: profile.costTier,
+      priority: profile.priority,
+      maxRetryBeforeEscalate: profile.maxRetryBeforeEscalate,
+      enabled,
+      expectedVersion: profile.version,
+    })
+  }
+
+  function reorderProfile(moverId: ProviderKind, targetId: ProviderKind) {
+    if (moverId === targetId) return
+    const fromIndex = ordered.findIndex((p) => p.id === moverId)
+    const toIndex = ordered.findIndex((p) => p.id === targetId)
+    if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) return
+    if (!client || !config) return
+
+    const newOrdered = [...ordered]
+    const [moved] = newOrdered.splice(fromIndex, 1)
+    if (!moved) return
+    newOrdered.splice(toIndex, 0, moved)
+
+    const currentPriorities = ordered.map(
+      (p) => profileById.get(p.id)?.priority ?? Number.MAX_SAFE_INTEGER,
+    )
+
+    const updates: UpdateAgentProfile[] = []
+    for (let newIdx = 0; newIdx < newOrdered.length; newIdx++) {
+      const provider = newOrdered[newIdx]!
+      const profile = profileById.get(provider.id)
+      if (!profile) continue
+      const targetPriority =
+        newIdx < currentPriorities.length && currentPriorities[newIdx] !== Number.MAX_SAFE_INTEGER
+          ? currentPriorities[newIdx]!
+          : newIdx
+      if (profile.priority !== targetPriority) {
+        updates.push({
+          agentId: profile.agentId,
+          roleTags: profile.roleTags,
+          costTier: profile.costTier,
+          priority: targetPriority,
+          maxRetryBeforeEscalate: profile.maxRetryBeforeEscalate,
+          enabled: profile.enabled,
+          expectedVersion: profile.version,
+        })
+      }
+    }
+
+    if (updates.length === 0) return
+
+    queryClient.setQueryData<AgentProfile[]>(
+      daemonKeys.agentProfiles(config.address),
+      (current) => {
+        if (!current) return current
+        const map = new Map(updates.map((u) => [u.agentId, u]))
+        return current.map((p) => {
+          const u = map.get(p.agentId)
+          return u ? { ...p, priority: u.priority, version: p.version + 1 } : p
+        })
+      },
+    )
+
+    void (async () => {
+      try {
+        for (const update of updates) {
+          await updateAgentProfile(client, update)
+        }
+        await refreshProfiles()
+      } catch (error) {
+        if (errorMessage(error).includes('version conflict')) {
+          await refreshProfiles()
+          toast.error(t('providers.profiles_conflict'))
+        } else {
+          toast.error(errorMessage(error))
+        }
+      }
+    })()
+  }
+
   return (
     <div className="mt-[15px] overflow-hidden rounded-[13px] bg-[var(--raised)] px-5 py-[14px]">
       <div className="flex items-start gap-5">
         <div className="min-w-0 flex-1">
           <div className="text-[13.5px] font-medium">{t('providers.coding_agents')}</div>
-          <p className="mt-[5px] text-[12px] leading-[18px] text-[var(--text-secondary)]">
-            {t('providers.web_description')}
-          </p>
+            <p className="mt-[5px] text-[12px] leading-[18px] text-[var(--text-secondary)]">
+              {t('providers.web_description')}
+            </p>
+            <p className="mt-[5px] text-[12px] leading-[18px] text-[var(--text-secondary)]">
+              {t('providers.priority_description')}
+            </p>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           <button
@@ -114,13 +250,26 @@ export function ProvidersSettings() {
         </div>
       </div>
       <div className="mt-1 flex flex-col">
-        {PROVIDERS.map((provider) => {
+        {ordered.map((provider, index) => {
           const probe = probes.data[provider.id]
           const probeState = probes.states[provider.id]
           const installed = probe?.installed ?? false
-          const disabled = settings.data?.disabled_providers.includes(provider.id) ?? false
+          const profile = profileById.get(provider.id)
+          // The registry is the source of truth once loaded; the legacy
+          // settings list covers the pre-load window.
+          const disabled = profile ? !profile.enabled : (settings.data?.disabled_providers.includes(provider.id) ?? false)
           const open = expanded === provider.id
           const detail = providerProbeDetail(provider.command, probe, probeState, disabled, t)
+          const detailParts = [detail]
+          if (profile) {
+            detailParts.unshift(
+              t('providers.priority_position', { position: index + 1, total: ordered.length }),
+            )
+          }
+          if (NO_REWIND_SUPPORT.includes(provider.id)) {
+            detailParts.push(t('providers.no_rewind_support'))
+          }
+          const detailText = detailParts.join('  ·  ')
           const dotColor = probeState.error
             ? 'bg-[var(--warning)]'
             : !installed
@@ -128,9 +277,85 @@ export function ProvidersSettings() {
               : disabled
                 ? 'bg-[var(--warning)]'
                 : 'bg-[var(--success)]'
+          const isDragging = draggedId === provider.id
+          const isDragOver = dragOverId === provider.id && draggedId !== provider.id
           return (
-            <div className="border-b last:border-0" key={provider.id}>
-              <div className="flex items-center gap-3 py-[11px]">
+            <div
+              className={cn(
+                'border-b last:border-0 transition-colors',
+                isDragOver && 'rounded-[7px] bg-accent/60 ring-1 ring-inset ring-ring',
+                isDragging && 'opacity-40',
+              )}
+              key={provider.id}
+              onDragLeave={(e) => {
+                if (e.currentTarget.contains(e.relatedTarget as Node)) return
+                if (dragOverId === provider.id) {
+                  setDragOverId(null)
+                }
+              }}
+              onDragOver={(e) => {
+                if (draggedId && draggedId !== provider.id) {
+                  e.preventDefault()
+                  e.dataTransfer.dropEffect = 'move'
+                  if (dragOverId !== provider.id) {
+                    setDragOverId(provider.id)
+                  }
+                }
+              }}
+              onDrop={(e) => {
+                e.preventDefault()
+                setDragOverId(null)
+                const moverId = (e.dataTransfer.getData('text/plain') as ProviderKind) || draggedId
+                if (moverId && moverId !== provider.id) {
+                  reorderProfile(moverId, provider.id)
+                }
+                setDraggedId(null)
+              }}
+            >
+              <div className="flex items-center gap-2.5 py-[11px]">
+                {profile ? (
+                  <span className="flex shrink-0 flex-col items-center">
+                    <button
+                      aria-label={t('providers.move_up', { provider: provider.name })}
+                      className="grid h-3.5 w-6 place-items-center rounded text-[var(--text-tertiary)] outline-none hover:bg-accent hover:text-[var(--text-secondary)] focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-30"
+                      disabled={index === 0}
+                      title={t('providers.move_up', { provider: provider.name })}
+                      type="button"
+                      onClick={() => reorderProfile(provider.id, ordered[index - 1]!.id)}
+                    >
+                      <PaduIcon className="size-2.5" name="chevronUp" />
+                    </button>
+                    <span
+                      aria-label={t('providers.drag_to_reorder', { provider: provider.name })}
+                      className="grid size-6 shrink-0 cursor-grab place-items-center rounded-[7px] text-[var(--text-tertiary)] outline-none hover:bg-accent hover:text-[var(--text-secondary)] active:cursor-grabbing"
+                      draggable
+                      title={t('providers.drag_to_reorder', { provider: provider.name })}
+                      onDragEnd={() => {
+                        setDraggedId(null)
+                        setDragOverId(null)
+                      }}
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/plain', provider.id)
+                        e.dataTransfer.effectAllowed = 'move'
+                        setDraggedId(provider.id)
+                      }}
+                    >
+                      <PaduIcon className="size-3" name="gripVertical" />
+                    </span>
+                    <button
+                      aria-label={t('providers.move_down', { provider: provider.name })}
+                      className="grid h-3.5 w-6 place-items-center rounded text-[var(--text-tertiary)] outline-none hover:bg-accent hover:text-[var(--text-secondary)] focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-30"
+                      disabled={index + 1 >= ordered.length}
+                      title={t('providers.move_down', { provider: provider.name })}
+                      type="button"
+                      onClick={() => reorderProfile(ordered[index + 1]!.id, provider.id)}
+                    >
+                      <PaduIcon className="size-2.5" name="chevronDown" />
+                    </button>
+                  </span>
+                ) : (
+                  <span className="size-6 shrink-0" />
+                )}
                 <span className="relative grid size-[30px] shrink-0 place-items-center rounded-[7px] bg-accent">
                   <ProviderIcon className={cn('size-4', !installed && 'opacity-50')} provider={provider.id} />
                   <span className={cn('absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-[var(--raised)]', dotColor)} />
@@ -142,7 +367,7 @@ export function ProvidersSettings() {
                       <span className="shrink-0 font-mono text-[10px] text-[var(--text-tertiary)]">v{probe.version}</span>
                     )}
                   </span>
-                  <span className="mt-[3px] block truncate text-[10.5px] text-[var(--text-tertiary)]" title={detail}>{detail}</span>
+                  <span className="mt-[3px] block truncate text-[10.5px] text-[var(--text-tertiary)]" title={detailText}>{detailText}</span>
                 </span>
                 <button
                   aria-expanded={open}
@@ -154,17 +379,13 @@ export function ProvidersSettings() {
                   <PaduIcon className="size-2.5" name={open ? 'chevronDown' : 'chevronRight'} />
                 </button>
                 {installed && (
-                  <Toggle
-                    checked={!disabled}
-                    label={t(disabled ? 'providers.enable' : 'providers.disable', { provider: provider.name })}
-                    onChange={(enabled) => {
-                      if (!settings.data) return
-                      const disabledProviders = enabled
-                        ? settings.data.disabled_providers.filter((kind) => kind !== provider.id)
-                        : [...new Set([...settings.data.disabled_providers, provider.id])]
-                      void apply({ ...settings.data, disabled_providers: disabledProviders })
-                    }}
-                  />
+                  <span title={t('providers.toggle_tooltip', { provider: provider.name })}>
+                    <Toggle
+                      checked={!disabled}
+                      label={t(disabled ? 'providers.enable' : 'providers.disable', { provider: provider.name })}
+                      onChange={(enabled) => toggleProfile(provider.id, enabled)}
+                    />
+                  </span>
                 )}
               </div>
               {open && settings.data && (
@@ -396,6 +617,12 @@ function providerCheckedLabel(updatedAt: number, t: Translator) {
 /// placeholder. Mirrors the desktop's `PLAN_USAGE_PROVIDERS` refresh on row
 /// expand.
 const PLAN_USAGE_PROVIDERS: ProviderKind[] = ['claude', 'codex', 'openCode', 'grok']
+
+/// Providers without conversation rollback or fork. Mirrors
+/// `ProviderKind::supports_conversation_rollback` /
+/// `supports_conversation_fork` in `crates/padu-protocol/src/model.rs`;
+/// rows for these carry the no-rewind capability note.
+const NO_REWIND_SUPPORT: ProviderKind[] = ['kimi', 'fx']
 
 function ProviderAccountLine({
   provider,

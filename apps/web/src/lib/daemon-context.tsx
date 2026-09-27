@@ -223,6 +223,18 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
       void queryClient.invalidateQueries({
         queryKey: ['daemon', config.address, 'task-state'],
       })
+      void queryClient.invalidateQueries({
+        queryKey: ['daemon', config.address, 'tasks'],
+      })
+    })
+    const unsubscribeCardUpdated = client.subscribeCardUpdated((taskId) => {
+      if (!config) return
+      void queryClient.invalidateQueries({
+        queryKey: ['daemon', config.address, 'tasks'],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: ['daemon', config.address, 'task', taskId],
+      })
     })
     const timer = window.setInterval(() => {
       if (!client.connected) {
@@ -232,6 +244,7 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
     }, 1_000)
     return () => {
       unsubscribeTaskState()
+      unsubscribeCardUpdated()
       window.clearInterval(timer)
     }
   }, [client, config, locale, phase, queryClient])

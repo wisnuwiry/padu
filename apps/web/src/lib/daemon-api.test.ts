@@ -1,11 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import type {
+  AgentProfile,
   ComposerDraftChange,
   DaemonSettings,
   Project,
   ProviderSessionHistory,
   ProviderSessionSummary,
   PaduClient,
+  UpdateAgentProfile,
 } from '@padu/client'
 import {
   applyComposerDraftChanges,
@@ -16,6 +18,7 @@ import {
   createProject,
   createResumedSession,
   createSession,
+  listAgentProfiles,
   listProviderSessions,
   loadProviderSessionHistory,
   persistProject,
@@ -26,6 +29,7 @@ import {
   selectableProjects,
   setSessionArchived,
   setSessionPinned,
+  updateAgentProfile,
   writeWorkspaceTextFile,
   type DaemonDirectory,
 } from './daemon-api'
@@ -454,3 +458,50 @@ describe('removeSession', () => {
 function project(id: string, name: string, path: string): Project {
   return { id, name, path, created_at: 0 }
 }
+
+describe('agent profiles', () => {
+  const stored: AgentProfile = {
+    agentId: 'codex',
+    roleTags: ['fix'],
+    costTier: 'high',
+    priority: 3,
+    maxRetryBeforeEscalate: 3,
+    enabled: true,
+    version: 1,
+  }
+
+  test('listAgentProfiles unwraps the registry payload', async () => {
+    let command: unknown
+    const client = {
+      request: async (next: unknown) => {
+        command = next
+        return { type: 'agentProfiles', profiles: [stored] }
+      },
+    } as unknown as PaduClient
+
+    await expect(listAgentProfiles(client)).resolves.toEqual([stored])
+    expect(command).toEqual({ type: 'listAgentProfiles' })
+  })
+
+  test('updateAgentProfile sends the guarded write and unwraps the row', async () => {
+    let command: unknown
+    const client = {
+      request: async (next: unknown) => {
+        command = next
+        return { type: 'agentProfileUpdated', profile: { ...stored, version: 2 } }
+      },
+    } as unknown as PaduClient
+    const update: UpdateAgentProfile = {
+      agentId: 'codex',
+      roleTags: ['fix'],
+      costTier: 'high',
+      priority: 3,
+      maxRetryBeforeEscalate: 3,
+      enabled: false,
+      expectedVersion: 1,
+    }
+
+    await expect(updateAgentProfile(client, update)).resolves.toEqual({ ...stored, version: 2 })
+    expect(command).toEqual({ type: 'updateAgentProfile', update })
+  })
+})

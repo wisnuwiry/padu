@@ -50,6 +50,7 @@ interface SidebarProps {
   onSettings: () => void
   onUsage?: () => void
   onNotes?: () => void
+  onBoard?: () => void
 }
 
 const GROUP_TRANSLATION_KEYS: Record<DateGroup, string> = {
@@ -82,6 +83,7 @@ export function Sidebar({
   onSettings,
   onUsage,
   onNotes,
+  onBoard,
 }: SidebarProps) {
   const { t } = useI18n()
   const [showProvider] = useStoredBoolean('padu.sidebar_show_provider', true)
@@ -161,6 +163,7 @@ export function Sidebar({
   const projectShortcut = usePrimaryShortcut('⌘O', 'Ctrl+O')
   const newTaskShortcut = usePrimaryShortcut('⌘N', 'Ctrl+N')
   const searchShortcut = usePrimaryShortcut('⌘K', 'Ctrl+K')
+  const boardShortcut = usePrimaryShortcut('⌘⇧T', 'Ctrl+Shift+T')
   const notesShortcut = usePrimaryShortcut('⌘⇧M', 'Ctrl+Shift+M')
 
   useEffect(() => {
@@ -271,6 +274,21 @@ export function Sidebar({
                       label={t('sidebar.search')}
                       shortcut={searchShortcut}
                       onClick={onSearch}
+                    />
+                  </div>
+                )
+              }
+              if (row.kind === 'board') {
+                return (
+                  <div className="h-8 px-2.5">
+                    <SidebarAction
+                      icon={<PaduIcon name="listChecks" />}
+                      label={t('sidebar.tasks')}
+                      shortcut={boardShortcut}
+                      onClick={() => {
+                        onBoard?.()
+                        onMobileOpenChange(false)
+                      }}
                     />
                   </div>
                 )

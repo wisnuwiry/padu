@@ -49,6 +49,9 @@ fn main() -> anyhow::Result<()> {
     )
     .context("could not load daemon settings")?;
     let task_store = padu_core::persistence::StateStore::daemon(task_path);
+    task_store
+        .seed_agent_profiles(&settings.get().disabled_providers)
+        .context("could not seed agent profiles")?;
     padu_core::serve(
         listener,
         token,

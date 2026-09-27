@@ -258,6 +258,26 @@ describe("PaduClient", () => {
     expect(revisions).toEqual([7]);
   });
 
+  test("routes card events to card subscribers, snapshots only on session-changing events", async () => {
+    const { client, sockets } = fixture();
+    const socket = await connect(client, sockets);
+    const cards: string[] = [];
+    const revisions: number[] = [];
+    client.subscribeCardUpdated((taskId) => cards.push(taskId));
+    client.subscribeTaskState((revision) => revisions.push(revision));
+
+    socket.receive({ type: "cardUpdated", eventId: "e1", taskId: "task-1" });
+    socket.receive({ type: "checkpointFailed", eventId: "e2", taskId: "task-1", sessionId: "s1", streak: 3 });
+    expect(cards).toEqual(["task-1", "task-1"]);
+    expect(revisions).toEqual([]);
+
+    socket.receive({ type: "taskQueued", eventId: "e3", taskId: "task-2" });
+    socket.receive({ type: "workspaceStarted", eventId: "e4", taskId: "task-2", sessionId: "s2" });
+    socket.receive({ type: "agentCompleted", eventId: "e5", taskId: "task-2", sessionId: "s2" });
+    expect(cards).toEqual(["task-1", "task-1", "task-2", "task-2", "task-2"]);
+    expect(revisions).toEqual([0, 0, 0]);
+  });
+
   test("disconnected requests reject instead of throwing synchronously", async () => {
     const { client } = fixture();
     const request = client.request({ type: "getSettings" });

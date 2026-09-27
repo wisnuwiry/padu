@@ -34,12 +34,16 @@ impl Padu {
             })
             .on_click(cx.listener(|this, _, _, cx| {
                 this.refresh_provider_detection(None, cx);
+                this.ensure_agent_profiles(true, cx);
                 cx.notify();
             }));
 
         let mut rows = div().mt(px(4.0)).flex().flex_col();
-        let provider_count = ProviderKind::ALL.len();
-        for (index, kind) in ProviderKind::ALL.into_iter().enumerate() {
+        let order = self.profile_row_order();
+        let neighbor_order = order.clone();
+        let provider_count = order.len();
+        let profiles_loaded = !self.agent_profiles.is_empty();
+        for (index, kind) in order.into_iter().enumerate() {
             let probe = self.provider_probe(kind);
             let installed = probe.is_some_and(|probe| probe.installed);
             let binary_path = probe
@@ -52,6 +56,11 @@ impl Padu {
                 .get(&kind)
                 .and_then(|version| version.clone());
             let disabled = self.state.disabled_providers.contains(&kind);
+            let profile = self.agent_profile(kind);
+            // The registry is the source of truth once loaded; the local
+            // mirror stays in lockstep through every toggle path, so either
+            // flag reads as off during the transition.
+            let disabled = profile.as_ref().is_some_and(|profile| !profile.enabled) || disabled;
 
             let dot_color = if !installed {
                 theme.text_ghost
@@ -61,8 +70,18 @@ impl Padu {
                 theme.success
             };
 
+            let no_rewind_support =
+                !kind.supports_conversation_rollback() || !kind.supports_conversation_fork();
+
             let detail: AnyElement = if installed {
                 let mut parts = Vec::new();
+                if profiles_loaded {
+                    parts.push(tr!(
+                        "providers.priority_position",
+                        position = index + 1,
+                        total = provider_count
+                    ));
+                }
                 if let Some(path) = binary_path {
                     parts.push(path);
                 }
@@ -75,30 +94,53 @@ impl Padu {
                         tr!("providers.model_count_many", count = model_count)
                     });
                 }
+                if no_rewind_support {
+                    parts.push(tr!("providers.no_rewind_support"));
+                }
                 div()
                     .truncate()
                     .child(SharedString::from(parts.join("  ·  ")))
                     .into_any_element()
             } else {
+                let mut parts = vec![tr!("providers.not_detected_as", command = kind.command())];
+                if no_rewind_support {
+                    parts.push(tr!("providers.no_rewind_support"));
+                }
                 div()
                     .flex()
                     .items_baseline()
-                    .child(SharedString::from(tr!(
-                        "providers.not_detected_as",
-                        command = kind.command()
-                    )))
+                    .child(SharedString::from(parts.join("  ·  ")))
                     .into_any_element()
             };
 
-            let toggle_on = !disabled;
-            let toggle = toggle_switch(
-                SharedString::from(format!("provider-enabled-{}", kind.id())),
-                toggle_on,
-                false,
-                theme,
-                cx,
-                move |this, _, cx| this.set_provider_enabled(kind, disabled, cx),
-            );
+            let enabled = !disabled;
+            let has_profile = profile.is_some();
+            let toggle_tooltip = Tooltip::text(tr!(
+                "providers.toggle_tooltip",
+                provider = kind.display_name()
+            ));
+            let toggle = if let Some(profile) = profile {
+                let version = profile.version;
+                toggle_switch(
+                    SharedString::from(format!("provider-enabled-{}", kind.id())),
+                    enabled,
+                    false,
+                    theme,
+                    cx,
+                    move |this, _, cx| this.set_profile_enabled(kind, !enabled, version, cx),
+                )
+                .tooltip(toggle_tooltip)
+            } else {
+                toggle_switch(
+                    SharedString::from(format!("provider-enabled-{}", kind.id())),
+                    enabled,
+                    false,
+                    theme,
+                    cx,
+                    move |this, _, cx| this.set_provider_enabled(kind, !enabled, cx),
+                )
+                .tooltip(toggle_tooltip)
+            };
 
             let expanded = self.expanded_provider_settings == Some(kind);
             let expand_button = icon_button(
@@ -116,10 +158,109 @@ impl Padu {
                 this.toggle_provider_expanded(kind, window, cx);
             }));
 
+            // Priority reorder column: keyboard up/down steppers flanking the
+            // drag handle (P1-03). Steppers move the row one slot toward the
+            // neighbor; drag keeps its existing drop-anywhere behavior.
+            let drag_handle = if has_profile {
+                div()
+                    .id(SharedString::from(format!("provider-drag-{}", kind.id())))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .w(px(16.0))
+                    .h(px(24.0))
+                    .rounded(px(4.0))
+                    .cursor(gpui::CursorStyle::OpenHand)
+                    .hover(|element| element.bg(theme.overlay))
+                    .tooltip(Tooltip::text(tr!(
+                        "providers.drag_to_reorder",
+                        provider = kind.display_name()
+                    )))
+                    .child(icon("icons/grip-vertical.svg", 13.0, theme.text_tertiary))
+                    .on_drag(
+                        DraggedProvider {
+                            provider: kind,
+                            index,
+                        },
+                        |dragged, _, _, cx| cx.new(|_| *dragged),
+                    )
+                    .into_any_element()
+            } else {
+                div().w(px(16.0)).h(px(24.0)).into_any_element()
+            };
+            let reorder_controls = if has_profile {
+                let step_button = |id: SharedString,
+                                   icon_path: &'static str,
+                                   tooltip: String,
+                                   mover: ProviderKind,
+                                   target: ProviderKind,
+                                   cx: &mut Context<Self>| {
+                    div()
+                        .id(id)
+                        .tab_index(0)
+                        .focus_visible(|style| style.border_color(theme.accent))
+                        .w(px(16.0))
+                        .h(px(14.0))
+                        .rounded(px(4.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_pointer()
+                        .hover(|element| element.bg(theme.overlay))
+                        .tooltip(Tooltip::text(tooltip))
+                        .child(icon(icon_path, 10.0, theme.text_tertiary))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.reorder_profile_priority(mover, target, cx);
+                        }))
+                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                this.reorder_profile_priority(mover, target, cx);
+                                cx.stop_propagation();
+                            }
+                        }))
+                        .into_any_element()
+                };
+                let up = if index > 0 {
+                    step_button(
+                        SharedString::from(format!("provider-move-up-{}", kind.id())),
+                        "icons/chevron-up.svg",
+                        tr!("providers.move_up", provider = kind.display_name()),
+                        kind,
+                        neighbor_order[index - 1],
+                        cx,
+                    )
+                } else {
+                    div().w(px(16.0)).h(px(14.0)).into_any_element()
+                };
+                let down = if index + 1 < provider_count {
+                    step_button(
+                        SharedString::from(format!("provider-move-down-{}", kind.id())),
+                        "icons/chevron-down.svg",
+                        tr!("providers.move_down", provider = kind.display_name()),
+                        neighbor_order[index + 1],
+                        kind,
+                        cx,
+                    )
+                } else {
+                    div().w(px(16.0)).h(px(14.0)).into_any_element()
+                };
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .child(up)
+                    .child(drag_handle)
+                    .child(down)
+                    .into_any_element()
+            } else {
+                div().w(px(16.0)).into_any_element()
+            };
+
             let header = div()
                 .flex()
                 .items_center()
-                .gap(px(12.0))
+                .gap(px(10.0))
+                .child(reorder_controls)
                 .child(
                     div()
                         .relative()
@@ -192,11 +333,30 @@ impl Padu {
 
             rows = rows.child(
                 div()
+                    .id(SharedString::from(format!("provider-row-{}", kind.id())))
                     .py(px(11.0))
+                    .px(px(6.0))
+                    .mx(px(-6.0))
+                    .rounded(px(7.0))
                     .flex()
                     .flex_col()
                     .when(index + 1 != provider_count, |element| {
                         element.border_b_1().border_color(theme.border)
+                    })
+                    .when(has_profile, |element| {
+                        element
+                            .drag_over::<DraggedProvider>(move |style, dragged, _, _| {
+                                if dragged.provider != kind {
+                                    style.bg(theme.overlay)
+                                } else {
+                                    style
+                                }
+                            })
+                            .on_drop(cx.listener(move |this, dragged: &DraggedProvider, _, cx| {
+                                if dragged.provider != kind {
+                                    this.reorder_profile_priority(dragged.provider, kind, cx);
+                                }
+                            }))
                     })
                     .child(header)
                     .when(expanded, |element| {
@@ -235,6 +395,14 @@ impl Padu {
                                     .line_height(sp(18.0))
                                     .text_color(theme.text_secondary)
                                     .child(tr!("providers.description")),
+                            )
+                            .child(
+                                div()
+                                    .mt(px(5.0))
+                                    .text_size(sp(12.5))
+                                    .line_height(sp(18.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!("providers.priority_description")),
                             ),
                     )
                     .child(
@@ -1023,6 +1191,17 @@ impl Padu {
         enabled: bool,
         cx: &mut Context<Self>,
     ) {
+        self.sync_local_provider_enabled(provider, enabled);
+        if !enabled {
+            self.reassign_sessions_off_provider(provider);
+        }
+        self.save();
+        cx.notify();
+    }
+
+    /// Keep the local settings mirror in lockstep with a profile toggle, so
+    /// `save()` cannot clobber the daemon's derived list with a stale value.
+    fn sync_local_provider_enabled(&mut self, provider: ProviderKind, enabled: bool) {
         if enabled {
             self.state
                 .disabled_providers
@@ -1030,42 +1209,378 @@ impl Padu {
         } else if !self.state.disabled_providers.contains(&provider) {
             self.state.disabled_providers.push(provider);
         }
-        if !enabled
-            && let Some(fallback) = ProviderKind::ALL
-                .into_iter()
-                .find(|kind| self.provider_enabled(*kind))
-        {
-            // New work must land somewhere usable: move the new-session
-            // default and any unstarted drafts off the switched-off provider.
-            // The remembered model belongs to the old provider, so it resets
-            // with it.
-            if self.state.last_provider == provider {
-                self.state.last_provider = fallback;
-                self.state.last_model = None;
-                self.state.last_reasoning_effort = None;
-                self.state.last_service_tier = None;
-                self.state.last_context_window = None;
-            }
-            let draft_ids = self
-                .state
-                .sessions
-                .iter()
-                .filter(|session| session.provider == provider && !session.has_started())
-                .map(|session| session.id)
-                .collect::<Vec<_>>();
-            for id in draft_ids {
-                if let Some(session) = self.state.session_mut(id) {
-                    session.provider = fallback;
-                    session.model = None;
-                    session.reasoning_effort = None;
-                    session.service_tier = None;
-                    session.context_window = None;
-                }
+    }
+
+    /// Move the new-session default and any unstarted drafts off a
+    /// switched-off provider. The remembered model belongs to the old
+    /// provider, so it resets with it.
+    fn reassign_sessions_off_provider(&mut self, provider: ProviderKind) {
+        // Exclude the provider being disabled: the cached registry entry can
+        // still read `enabled` until the daemon round-trip lands, and would
+        // otherwise be selected as its own fallback.
+        let Some(fallback) = ProviderKind::ALL
+            .into_iter()
+            .find(|kind| *kind != provider && self.provider_enabled(*kind))
+        else {
+            return;
+        };
+        if self.state.last_provider == provider {
+            self.state.last_provider = fallback;
+            self.state.last_model = None;
+            self.state.last_reasoning_effort = None;
+            self.state.last_service_tier = None;
+            self.state.last_context_window = None;
+        }
+        let draft_ids = self
+            .state
+            .sessions
+            .iter()
+            .filter(|session| session.provider == provider && !session.has_started())
+            .map(|session| session.id)
+            .collect::<Vec<_>>();
+        for id in draft_ids {
+            if let Some(session) = self.state.session_mut(id) {
+                session.provider = fallback;
+                session.model = None;
+                session.reasoning_effort = None;
+                session.service_tier = None;
+                session.context_window = None;
             }
         }
-        self.save();
+    }
+
+    /// Cached profile for one provider, if the registry has loaded.
+    fn agent_profile(
+        &self,
+        provider: ProviderKind,
+    ) -> Option<padu_client::agent_profile::AgentProfile> {
+        self.agent_profiles
+            .iter()
+            .find(|profile| profile.agent_id == provider)
+            .cloned()
+    }
+
+    /// Row order: registry priority when loaded, otherwise the canonical
+    /// `ProviderKind::ALL` order with settings-backed toggles, so a slow or
+    /// unreachable daemon never blanks the page.
+    fn profile_row_order(&self) -> Vec<ProviderKind> {
+        order_providers_by_profiles(&self.agent_profiles)
+    }
+
+    /// Fetch the registry unless the snapshot is already loaded or a fetch is
+    /// in flight. `force` is the refresh button and post-mutation sync.
+    /// Results from superseded generations are discarded, so a slow fetch
+    /// cannot overwrite a newer snapshot.
+    pub(crate) fn ensure_agent_profiles(&mut self, force: bool, cx: &mut Context<Self>) {
+        if self.agent_profiles_pending {
+            return;
+        }
+        if !force && !self.agent_profiles.is_empty() {
+            return;
+        }
+        self.agent_profiles_pending = true;
+        self.agent_profiles_generation += 1;
+        let generation = self.agent_profiles_generation;
+        let daemon = self.daemon.client();
+        cx.spawn(async move |this, cx| {
+            let profiles = cx
+                .background_executor()
+                .spawn(async move {
+                    match daemon.request(
+                        uuid::Uuid::nil(),
+                        uuid::Uuid::nil(),
+                        padu_client::Command::ListAgentProfiles,
+                    ) {
+                        Ok(padu_client::ResponsePayload::AgentProfiles { profiles }) => {
+                            Ok(profiles)
+                        }
+                        Ok(response) => anyhow::bail!(
+                            "the daemon returned an invalid agent profiles response: {response:?}"
+                        ),
+                        Err(error) => Err(error),
+                    }
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                // A superseded fetch must not wedge the pending flag: later
+                // `ensure_agent_profiles` calls (including the forced refresh
+                // after an update) would block on it forever.
+                this.agent_profiles_pending = false;
+                if this.agent_profiles_generation != generation {
+                    return;
+                }
+                match profiles {
+                    Ok(profiles) => this.agent_profiles = profiles,
+                    Err(error) => this.show_toast(error.to_string()),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
         cx.notify();
     }
+
+    /// Profile-backed toggle (P1-03): optimistic local sync plus the daemon
+    /// command. On a version conflict the local sync is reverted and the
+    /// refreshed list tells the user to retry.
+    fn set_profile_enabled(
+        &mut self,
+        provider: ProviderKind,
+        enabled: bool,
+        expected_version: u32,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(profile) = self.agent_profile(provider) else {
+            return;
+        };
+        self.sync_local_provider_enabled(provider, enabled);
+        if !enabled {
+            self.reassign_sessions_off_provider(provider);
+        }
+        self.save();
+        let update = padu_client::agent_profile::UpdateAgentProfile {
+            agent_id: profile.agent_id,
+            role_tags: profile.role_tags,
+            cost_tier: profile.cost_tier,
+            priority: profile.priority,
+            max_retry_before_escalate: profile.max_retry_before_escalate,
+            enabled,
+            expected_version,
+        };
+        // `Some((provider, !enabled))` reverts the optimistic local sync on conflict.
+        self.send_profile_updates(vec![update], Some((provider, !enabled)), cx);
+    }
+
+    /// Reorder a dragged provider to the target provider's position.
+    fn reorder_profile_priority(
+        &mut self,
+        mover: ProviderKind,
+        target: ProviderKind,
+        cx: &mut Context<Self>,
+    ) {
+        let updates = compute_reordered_priority_updates(&self.agent_profiles, mover, target);
+        if !updates.is_empty() {
+            self.send_profile_updates(updates, None, cx);
+        }
+    }
+
+    /// Run guarded profile writes off-thread, then re-sync from the daemon.
+    /// `revert` restores the optimistic local toggle when the daemon reports
+    /// a version conflict (the conflicting write won).
+    fn send_profile_updates(
+        &mut self,
+        updates: Vec<padu_client::agent_profile::UpdateAgentProfile>,
+        revert: Option<(ProviderKind, bool)>,
+        cx: &mut Context<Self>,
+    ) {
+        self.agent_profiles_generation += 1;
+        let generation = self.agent_profiles_generation;
+        let daemon = self.daemon.client();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    for update in updates {
+                        match daemon.request(
+                            uuid::Uuid::nil(),
+                            uuid::Uuid::nil(),
+                            padu_client::Command::UpdateAgentProfile { update },
+                        ) {
+                            Ok(padu_client::ResponsePayload::AgentProfileUpdated { .. }) => {}
+                            Ok(response) => anyhow::bail!(
+                                "the daemon returned an invalid agent profile response: {response:?}"
+                            ),
+                            Err(error) => return Err(error),
+                        }
+                    }
+                    Ok(())
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.agent_profiles_generation != generation {
+                    return;
+                }
+                match result {
+                    Ok(()) => this.ensure_agent_profiles(true, cx),
+                    Err(error) if is_profile_version_conflict(&error) => {
+                        if let Some((provider, enabled)) = revert {
+                            this.sync_local_provider_enabled(provider, enabled);
+                            this.save();
+                        }
+                        this.ensure_agent_profiles(true, cx);
+                        this.show_toast(tr!("providers.profiles_conflict"));
+                    }
+                    Err(error) => this.show_toast(error.to_string()),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+}
+
+/// Drag payload and render entity for reordering provider priority rows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DraggedProvider {
+    pub(crate) provider: ProviderKind,
+    pub(crate) index: usize,
+}
+
+impl Render for DraggedProvider {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = Theme::current(cx);
+        div().pt(px(4.0)).pl(px(4.0)).child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(10.0))
+                .px(px(12.0))
+                .py(px(8.0))
+                .rounded(px(8.0))
+                .bg(theme.raised)
+                .border_1()
+                .border_color(theme.accent)
+                .shadow_lg()
+                .child(
+                    div()
+                        .w(px(26.0))
+                        .h(px(26.0))
+                        .rounded(px(6.0))
+                        .bg(theme.overlay)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(icon(
+                            provider_icon(self.provider),
+                            15.0,
+                            provider_color(&theme, self.provider),
+                        )),
+                )
+                .child(
+                    div()
+                        .text_size(sp(12.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(self.provider.display_name()),
+                )
+                .child(
+                    div()
+                        .text_size(sp(11.5))
+                        .text_color(theme.text_tertiary)
+                        .child(format!("#{}", self.index + 1)),
+                ),
+        )
+    }
+}
+
+/// Reorder `order` by moving `mover` to the position of `target`.
+fn reorder_providers_list(
+    order: &[ProviderKind],
+    mover: ProviderKind,
+    target: ProviderKind,
+) -> Vec<ProviderKind> {
+    if mover == target {
+        return order.to_vec();
+    }
+    let Some(from_pos) = order.iter().position(|kind| *kind == mover) else {
+        return order.to_vec();
+    };
+    let Some(to_pos) = order.iter().position(|kind| *kind == target) else {
+        return order.to_vec();
+    };
+    if from_pos == to_pos {
+        return order.to_vec();
+    }
+    let mut new_order = order.to_vec();
+    let item = new_order.remove(from_pos);
+    new_order.insert(to_pos, item);
+    new_order
+}
+
+/// Compute the profile updates needed when moving `mover` to `target`'s position.
+fn compute_reordered_priority_updates(
+    profiles: &[padu_client::agent_profile::AgentProfile],
+    mover: ProviderKind,
+    target: ProviderKind,
+) -> Vec<padu_client::agent_profile::UpdateAgentProfile> {
+    if mover == target {
+        return Vec::new();
+    }
+    let order = order_providers_by_profiles(profiles);
+    let Some(from_pos) = order.iter().position(|kind| *kind == mover) else {
+        return Vec::new();
+    };
+    let Some(to_pos) = order.iter().position(|kind| *kind == target) else {
+        return Vec::new();
+    };
+    if from_pos == to_pos {
+        return Vec::new();
+    }
+
+    let new_order = reorder_providers_list(&order, mover, target);
+
+    let current_priorities: Vec<u32> = order
+        .iter()
+        .map(|kind| {
+            profiles
+                .iter()
+                .find(|p| p.agent_id == *kind)
+                .map(|p| p.priority)
+                .unwrap_or(u32::MAX)
+        })
+        .collect();
+
+    let mut updates = Vec::new();
+    for (new_idx, kind) in new_order.into_iter().enumerate() {
+        if let Some(profile) = profiles.iter().find(|p| p.agent_id == kind) {
+            let target_priority =
+                if new_idx < current_priorities.len() && current_priorities[new_idx] != u32::MAX {
+                    current_priorities[new_idx]
+                } else {
+                    new_idx as u32
+                };
+            if profile.priority != target_priority {
+                updates.push(padu_client::agent_profile::UpdateAgentProfile {
+                    agent_id: profile.agent_id,
+                    role_tags: profile.role_tags.clone(),
+                    cost_tier: profile.cost_tier,
+                    priority: target_priority,
+                    max_retry_before_escalate: profile.max_retry_before_escalate,
+                    enabled: profile.enabled,
+                    expected_version: profile.version,
+                });
+            }
+        }
+    }
+    updates
+}
+
+/// Row order for the Providers page: registry priority when snapshots exist,
+/// otherwise the canonical probe order. Providers missing from a partial
+/// snapshot sink to the bottom keeping canonical relative order (stable
+/// sort), so no row ever vanishes and ties never shuffle.
+fn order_providers_by_profiles(
+    profiles: &[padu_client::agent_profile::AgentProfile],
+) -> Vec<ProviderKind> {
+    if profiles.is_empty() {
+        return ProviderKind::ALL.to_vec();
+    }
+    let mut order = ProviderKind::ALL.to_vec();
+    order.sort_by_key(|kind| {
+        profiles
+            .iter()
+            .find(|profile| profile.agent_id == *kind)
+            .map(|profile| profile.priority)
+            .unwrap_or(u32::MAX)
+    });
+    order
+}
+
+/// The daemon surfaces guard failures as `RpcError` message text; there is no
+/// typed conflict payload on the wire.
+fn is_profile_version_conflict(error: &anyhow::Error) -> bool {
+    error.to_string().contains("version conflict")
 }
 
 /// "Checked …" caption for the Providers page. Recomputed whenever the page
@@ -1093,6 +1608,9 @@ fn abbreviate_home_path(path: &Path, home: Option<&Path>) -> String {
 #[cfg(test)]
 mod tests {
     use super::abbreviate_home_path;
+    use super::{is_profile_version_conflict, order_providers_by_profiles};
+    use padu_client::agent_profile::{AgentProfile, CostTier};
+    use padu_client::model::ProviderKind;
     use std::path::Path;
 
     #[test]
@@ -1107,5 +1625,160 @@ mod tests {
             abbreviate_home_path(Path::new("/opt/homebrew/bin/codex"), Some(home)),
             "/opt/homebrew/bin/codex"
         );
+    }
+
+    fn profile(provider: ProviderKind, priority: u32) -> AgentProfile {
+        AgentProfile {
+            agent_id: provider,
+            role_tags: Vec::new(),
+            cost_tier: CostTier::Medium,
+            priority,
+            max_retry_before_escalate: 3,
+            enabled: true,
+            version: 1,
+        }
+    }
+
+    #[test]
+    fn empty_snapshot_falls_back_to_canonical_order() {
+        assert_eq!(order_providers_by_profiles(&[]), ProviderKind::ALL.to_vec());
+    }
+
+    #[test]
+    fn rows_follow_registry_priority_with_missing_rows_sunk() {
+        let profiles = vec![
+            profile(ProviderKind::Codex, 30),
+            profile(ProviderKind::Claude, 10),
+            profile(ProviderKind::Agy, 20),
+        ];
+        let order = order_providers_by_profiles(&profiles);
+        assert_eq!(order.len(), ProviderKind::ALL.len());
+        assert_eq!(
+            &order[..3],
+            [ProviderKind::Claude, ProviderKind::Agy, ProviderKind::Codex,]
+        );
+        // Providers absent from a partial snapshot keep canonical order.
+        let rest = order[3..].to_vec();
+        let mut canonical = ProviderKind::ALL.to_vec();
+        canonical.retain(|kind| {
+            ![ProviderKind::Claude, ProviderKind::Agy, ProviderKind::Codex].contains(kind)
+        });
+        assert_eq!(rest, canonical);
+    }
+
+    #[test]
+    fn version_conflict_detection_matches_daemon_guard_text() {
+        assert!(is_profile_version_conflict(&anyhow::anyhow!(
+            "agent profile version conflict: expected 1, current 2"
+        )));
+        assert!(!is_profile_version_conflict(&anyhow::anyhow!(
+            "the daemon is unreachable"
+        )));
+    }
+
+    #[test]
+    fn reorder_providers_list_moves_items_correctly() {
+        use super::reorder_providers_list;
+
+        let original = vec![
+            ProviderKind::Claude,
+            ProviderKind::Agy,
+            ProviderKind::Codex,
+            ProviderKind::Cursor,
+        ];
+
+        // Drag first to third (Claude to Codex)
+        let reordered =
+            reorder_providers_list(&original, ProviderKind::Claude, ProviderKind::Codex);
+        assert_eq!(
+            reordered,
+            vec![
+                ProviderKind::Agy,
+                ProviderKind::Codex,
+                ProviderKind::Claude,
+                ProviderKind::Cursor,
+            ]
+        );
+
+        // Drag last to first (Cursor to Claude)
+        let reordered =
+            reorder_providers_list(&original, ProviderKind::Cursor, ProviderKind::Claude);
+        assert_eq!(
+            reordered,
+            vec![
+                ProviderKind::Cursor,
+                ProviderKind::Claude,
+                ProviderKind::Agy,
+                ProviderKind::Codex,
+            ]
+        );
+
+        // Drag adjacent items (Agy to Claude - up)
+        let reordered = reorder_providers_list(&original, ProviderKind::Agy, ProviderKind::Claude);
+        assert_eq!(
+            reordered,
+            vec![
+                ProviderKind::Agy,
+                ProviderKind::Claude,
+                ProviderKind::Codex,
+                ProviderKind::Cursor,
+            ]
+        );
+
+        // Drag onto itself is no-op
+        let reordered = reorder_providers_list(&original, ProviderKind::Agy, ProviderKind::Agy);
+        assert_eq!(reordered, original);
+    }
+
+    #[test]
+    fn compute_reordered_priority_updates_assigns_correct_priorities() {
+        use super::compute_reordered_priority_updates;
+
+        let profiles = vec![
+            profile(ProviderKind::Claude, 10),
+            profile(ProviderKind::Agy, 20),
+            profile(ProviderKind::Codex, 30),
+        ];
+
+        // Drag Codex (30) to Claude (10)
+        let updates = compute_reordered_priority_updates(
+            &profiles,
+            ProviderKind::Codex,
+            ProviderKind::Claude,
+        );
+        assert_eq!(updates.len(), 3);
+        // Codex gets priority 10
+        let codex_update = updates
+            .iter()
+            .find(|u| u.agent_id == ProviderKind::Codex)
+            .unwrap();
+        assert_eq!(codex_update.priority, 10);
+        // Claude gets priority 20
+        let claude_update = updates
+            .iter()
+            .find(|u| u.agent_id == ProviderKind::Claude)
+            .unwrap();
+        assert_eq!(claude_update.priority, 20);
+        // Agy gets priority 30
+        let agy_update = updates
+            .iter()
+            .find(|u| u.agent_id == ProviderKind::Agy)
+            .unwrap();
+        assert_eq!(agy_update.priority, 30);
+
+        // Drag Agy (20) to Claude (10) - adjacent swap
+        let updates =
+            compute_reordered_priority_updates(&profiles, ProviderKind::Agy, ProviderKind::Claude);
+        assert_eq!(updates.len(), 2);
+        let agy_update = updates
+            .iter()
+            .find(|u| u.agent_id == ProviderKind::Agy)
+            .unwrap();
+        assert_eq!(agy_update.priority, 10);
+        let claude_update = updates
+            .iter()
+            .find(|u| u.agent_id == ProviderKind::Claude)
+            .unwrap();
+        assert_eq!(claude_update.priority, 20);
     }
 }

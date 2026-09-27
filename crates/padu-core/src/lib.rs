@@ -18,10 +18,12 @@ macro_rules! tr {
 }
 
 pub mod acp_session;
+pub mod agent_profile;
 pub mod agy_install;
 pub mod agy_session;
 pub mod amp_session;
 pub mod attachments;
+pub mod audit;
 pub mod blob_store;
 pub mod checkpoint;
 mod claude_metadata;
@@ -42,6 +44,7 @@ pub mod git_branch;
 pub mod git_commit;
 pub mod grok_session;
 pub mod i18n;
+pub mod idempotency;
 pub mod identity;
 pub mod kimi_session;
 pub mod model;
@@ -51,6 +54,8 @@ pub mod opencode_session;
 pub mod persistence;
 pub mod pi_session;
 pub mod projectless;
+pub mod redact;
+pub mod secret_store;
 pub mod settings;
 pub mod skills;
 mod slash_command_catalog;

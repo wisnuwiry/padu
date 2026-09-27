@@ -978,6 +978,22 @@ providers.description:
   en: Padu drives agent CLIs installed on this computer. Install or sign in with each agent's own CLI, then refresh
 providers.web_description:
   en: Padu drives agent CLIs installed on the daemon host. Install or sign in with each agent's own CLI, then refresh
+providers.priority_description:
+  en: Priority order decides which agent Padu tries first for new work. Higher rows run first; disabled agents are skipped.
+providers.move_up:
+  en: Move %{provider} up
+providers.move_down:
+  en: Move %{provider} down
+providers.drag_to_reorder:
+  en: Drag to reorder %{provider} priority
+providers.priority_position:
+  en: Priority %{position} of %{total}
+providers.toggle_tooltip:
+  en: Turn off to skip %{provider} for new work. Running sessions keep going — re-enable here any time.
+providers.no_rewind_support:
+  en: No conversation rollback or fork — skipped in rewind-dependent chains.
+providers.profiles_conflict:
+  en: Agent profiles changed elsewhere, so the list was refreshed. Try again.
 providers.check_failed:
   en: "Could not check %{command}: %{error}"
 providers.show_settings:
@@ -3177,3 +3193,134 @@ onboarding.slide3_item3_title:
   en: Switch Models On the Fly
 onboarding.slide3_item3_desc:
   en: Choose models, tune reasoning effort, and switch providers anytime with Cmd/Ctrl + /.
+
+board.title:
+  en: Tasks
+board.backlog:
+  en: Backlog
+board.queued:
+  en: Queued
+board.running:
+  en: Agent Running
+board.review:
+  en: Awaiting Review
+board.done:
+  en: Merged / Done
+board.new_task:
+  en: New Task
+board.create_task:
+  en: Create Task
+board.edit_task:
+  en: Edit Task
+board.delete_task:
+  en: Delete Task
+board.delete_task_confirm:
+  en: Are you sure you want to delete this task?
+board.task_title:
+  en: Title
+board.task_title_placeholder:
+  en: Task title…
+board.task_description:
+  en: Description
+board.task_description_placeholder:
+  en: What needs to be done? Markdown supported…
+board.assigned_agent:
+  en: Assigned Agent
+board.no_agent:
+  en: Auto (priority queue)
+board.status:
+  en: Status
+board.project:
+  en: Project
+board.labels:
+  en: Labels
+board.labels_placeholder:
+  en: Add labels (comma separated)…
+board.filter_all_projects:
+  en: All Projects
+board.filter_all_agents:
+  en: All Agents
+board.filter_search_placeholder:
+  en: Filter tasks…
+board.empty_backlog:
+  en: No tasks in Backlog
+board.empty_queued:
+  en: No queued tasks
+board.empty_running:
+  en: No running agents
+board.empty_review:
+  en: No tasks awaiting review
+board.empty_done:
+  en: No completed tasks
+board.filter_empty:
+  en: No tasks match filters
+board.clear_filters:
+  en: Clear Filters
+board.clear_filters_short:
+  en: Clear
+board.clear_search:
+  en: Clear search
+board.needs_attention:
+  en: Needs Attention
+board.needs_attention_short:
+  en: Attention
+board.remove_label:
+  en: Remove %{label}
+board.sync_failed:
+  en: Sync Failed
+board.sync_failed_short:
+  en: Failed
+board.open_session:
+  en: Open Session
+board.queue_task:
+  en: Queue Task
+board.mark_done:
+  en: Mark Done
+board.reopen_task:
+  en: Reopen
+board.drag_running_rejected:
+  en: Tasks enter Running automatically when the agent workspace starts
+board.empty_column:
+  en: No tasks
+board.open_in_chat:
+  en: Open in Chat
+board.linked_session:
+  en: Linked Session
+board.queue_action:
+  en: Queue
+board.reopen:
+  en: Reopen
+board.cancel:
+  en: Cancel
+board.save:
+  en: Save
+board.preview:
+  en: Preview
+board.edit:
+  en: Edit
+board.collapse_column:
+  en: Collapse column
+board.expand_column:
+  en: Expand column
+board.model:
+  en: Model
+board.default_model:
+  en: Default model
+board.select_model:
+  en: Select model…
+board.filter_project:
+  en: Project
+board.filter_agent:
+  en: Agent
+board.all_projects:
+  en: All Projects
+board.all_agents:
+  en: All Agents
+board.live_usage:
+  en: Live usage
+board.tokens_tooltip:
+  en: Tokens used by the linked session
+board.duration_tooltip:
+  en: Agent working time
+board.agent_disabled_tooltip:
+  en: Disabled — re-enable in Settings → Providers

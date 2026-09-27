@@ -490,6 +490,8 @@ pub(super) fn format_time_ago(seconds: u64) -> String {
 pub(super) enum SidebarRow {
     /// Opens the window-wide command palette and scrolls with history.
     Search,
+    /// Opens the task board workspace.
+    Board,
     /// Opens the notes workspace.
     Notes,
     /// Group header; the first row also carries the sidebar actions.
@@ -512,6 +514,7 @@ fn sidebar_session_row_index(rows: &[SidebarRow], session_id: Uuid) -> Option<us
 fn sidebar_row_height(row: SidebarRow, grouping: SidebarGrouping) -> Pixels {
     px(match row {
         SidebarRow::Search => SIDEBAR_ACTION_ROW_HEIGHT,
+        SidebarRow::Board => SIDEBAR_ACTION_ROW_HEIGHT,
         SidebarRow::Notes => SIDEBAR_ACTION_ROW_HEIGHT,
         SidebarRow::Header(_) => SIDEBAR_GROUP_HEADER_HEIGHT + SIDEBAR_GROUP_HEADER_BOTTOM_GAP,
         SidebarRow::Session(_) => {
@@ -1003,6 +1006,25 @@ impl Padu {
             .h(px(SIDEBAR_ACTION_ROW_HEIGHT))
             .flex_none()
             .child(search)
+    }
+
+    fn render_sidebar_board(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        self.render_sidebar_action_row(
+            "sidebar-board",
+            "icons/list-checks.svg",
+            tr!("board.title"),
+            Some(crate::platform::primary_shortcut("⌘⇧T", "Ctrl+Shift+T")),
+            cx,
+        )
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.open_board(cx);
+        }))
+        .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                this.open_board(cx);
+                cx.stop_propagation();
+            }
+        }))
     }
 
     fn render_sidebar_notes(&self, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -1745,6 +1767,7 @@ impl Padu {
 
         let mut rows = vec![
             SidebarRow::Search,
+            SidebarRow::Board,
             SidebarRow::Notes,
             SidebarRow::PinnedSeparator,
             SidebarRow::GroupSpacer,
@@ -1900,6 +1923,7 @@ impl Padu {
         };
         match *row {
             SidebarRow::Search => self.render_sidebar_search(cx).into_any_element(),
+            SidebarRow::Board => self.render_sidebar_board(cx).into_any_element(),
             SidebarRow::Notes => self.render_sidebar_notes(cx).into_any_element(),
             SidebarRow::Header(group) => {
                 let first_regular_group = rows.iter().position(|row| {
@@ -3442,6 +3466,7 @@ mod tests {
             path: root.join("2026-08-23/task"),
             created_at: 0,
             scripts: Vec::new(),
+            linked_repo: None,
         };
         let ordinary = Project {
             id: Uuid::from_u128(2),
@@ -3449,6 +3474,7 @@ mod tests {
             path: PathBuf::from("/tmp/dev/ordinary"),
             created_at: 0,
             scripts: Vec::new(),
+            linked_repo: None,
         };
 
         assert!(sidebar_project_is_projectless(&projectless, Some(root)));
@@ -3499,6 +3525,7 @@ mod tests {
         let group = SidebarGroup::Updated(SessionDateGroup::Today);
         let mut rows = vec![
             SidebarRow::Search,
+            SidebarRow::Board,
             SidebarRow::Notes,
             SidebarRow::PinnedSeparator,
             SidebarRow::GroupSpacer,
@@ -3511,8 +3538,8 @@ mod tests {
         let offset =
             sidebar_bottom_aligned_offset(&rows, index, px(400.0), SidebarGrouping::Updated);
 
-        assert_eq!(index, 35);
-        assert_eq!(offset.item_ix, 28);
+        assert_eq!(index, 36);
+        assert_eq!(offset.item_ix, 29);
         assert_eq!(offset.offset_in_item, px(16.0));
         let visible_height = rows[offset.item_ix..=index]
             .iter()

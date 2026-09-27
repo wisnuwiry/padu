@@ -34,6 +34,7 @@ struct ClientInner {
     sessions: Mutex<HashMap<(Uuid, Uuid), Sender<SequencedEvent>>>,
     pending_events: Mutex<HashMap<(Uuid, Uuid), VecDeque<SequencedEvent>>>,
     task_state_subscribers: Mutex<Vec<Sender<u64>>>,
+    card_updated_subscribers: Mutex<Vec<Sender<Uuid>>>,
     provider_install_subscribers:
         Mutex<Vec<Sender<(padu_protocol::model::ProviderKind, String, u8)>>>,
     provider_auth_url_subscribers: Mutex<Vec<Sender<(padu_protocol::model::ProviderKind, String)>>>,
@@ -113,6 +114,7 @@ impl DaemonClient {
             sessions: Mutex::new(HashMap::new()),
             pending_events: Mutex::new(HashMap::new()),
             task_state_subscribers: Mutex::new(Vec::new()),
+            card_updated_subscribers: Mutex::new(Vec::new()),
             provider_install_subscribers: Mutex::new(Vec::new()),
             provider_auth_url_subscribers: Mutex::new(Vec::new()),
             last_sequences: Mutex::new(last_sequences),
@@ -162,6 +164,12 @@ impl DaemonClient {
     pub fn subscribe_task_state(&self) -> Receiver<u64> {
         let (events, receiver) = unbounded();
         self.inner.task_state_subscribers.lock().push(events);
+        receiver
+    }
+
+    pub fn subscribe_card_updated(&self) -> Receiver<Uuid> {
+        let (events, receiver) = unbounded();
+        self.inner.card_updated_subscribers.lock().push(events);
         receiver
     }
 
@@ -384,6 +392,23 @@ fn run_client(
                     }
                     ServerMessage::ShuttingDown => break,
                     ServerMessage::Hello { .. } | ServerMessage::Rejected { .. } => {}
+                    ServerMessage::TaskQueued { task_id, .. }
+                    | ServerMessage::WorkspaceStarted { task_id, .. }
+                    | ServerMessage::AgentCompleted { task_id, .. }
+                    | ServerMessage::CheckpointFailed { task_id, .. }
+                    | ServerMessage::CardUpdated { task_id, .. } => {
+                        inner
+                            .card_updated_subscribers
+                            .lock()
+                            .retain(|subscriber| subscriber.send(task_id).is_ok());
+                    }
+                    ServerMessage::RuleTriggered { .. }
+                    | ServerMessage::ApprovalRequested { .. }
+                    | ServerMessage::IssueCreated { .. }
+                    | ServerMessage::PrOpened { .. }
+                    | ServerMessage::PrMerged { .. }
+                    | ServerMessage::MrMerged { .. }
+                    | ServerMessage::IssueClosed { .. } => {}
                 }
             }
             Ok(Message::Close(_)) => break,
@@ -411,6 +436,7 @@ fn run_client(
     // `processExited` event emitted by the daemon.
     drop(std::mem::take(&mut *inner.sessions.lock()));
     inner.task_state_subscribers.lock().clear();
+    inner.card_updated_subscribers.lock().clear();
 }
 
 fn set_client_read_timeout(

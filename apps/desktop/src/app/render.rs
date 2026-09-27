@@ -383,15 +383,17 @@ impl Render for Padu {
 
         let theme = Theme::current(cx);
         let notes_page = self.workspace_page == WorkspacePage::Notes;
-        let empty = !notes_page && should_render_empty_state(self.selected_session());
+        let board_page = self.workspace_page == WorkspacePage::Board;
+        let standalone_page = notes_page || board_page;
+        let empty = !standalone_page && should_render_empty_state(self.selected_session());
         let permission = self.render_permission(cx);
         let computer_use = self.render_computer_use_overlay(cx);
         let command_palette = self.render_command_palette(window, cx);
         let active_dialog = self.render_active_dialog(window, cx);
         let toast = self.render_active_toast(cx);
-        // Fullscreen owns the transcript column, except Notes which replaces
-        // the center workspace and never shares the right-panel takeover.
-        let fullscreen = self.right_panel_fullscreen_active() && !notes_page;
+        // Fullscreen owns the transcript column, except Notes/Board which replace
+        // the center workspace and never share the right-panel takeover.
+        let fullscreen = self.right_panel_fullscreen_active() && !standalone_page;
         let content = div()
             .key_context("Padu")
             .on_action(cx.listener(Self::close_window_or_right_panel_tab_action))
@@ -409,6 +411,7 @@ impl Render for Padu {
             .on_action(cx.listener(Self::open_file_picker_action))
             .on_action(cx.listener(Self::open_review_action))
             .on_action(cx.listener(|this, _: &OpenNotes, _, cx| this.open_notes(cx)))
+            .on_action(cx.listener(|this, _: &OpenBoard, _, cx| this.open_board(cx)))
             .on_action(cx.listener(Self::toggle_command_palette_action))
             .on_action(cx.listener(Self::open_resume_picker_action))
             .on_action(cx.listener(Self::open_note_picker_action))
@@ -481,11 +484,16 @@ impl Render for Padu {
                     .when(panels.sidebar > 0.0, |element| {
                         element.border_l_1().border_color(theme.sidebar_border)
                     })
-                    .when(!notes_page, |element| {
+                    .when(!standalone_page, |element| {
                         element.child(self.render_header(window, cx))
                     })
                     .child(if notes_page {
                         self.notes_pane
+                            .clone()
+                            .cached(StyleRefinement::default().flex_1().min_h(px(0.0)).w_full())
+                            .into_any_element()
+                    } else if board_page {
+                        self.board_pane
                             .clone()
                             .cached(StyleRefinement::default().flex_1().min_h(px(0.0)).w_full())
                             .into_any_element()
@@ -499,7 +507,7 @@ impl Render for Padu {
                     })
                     .children(permission)
                     .when(
-                        !notes_page && self.selected_project().is_some(),
+                        !standalone_page && self.selected_project().is_some(),
                         |element| {
                             element
                                 .children(self.render_queued_messages(cx))
@@ -520,7 +528,7 @@ impl Render for Padu {
                     .into_any_element()
             })
             .when(
-                panels.right_panel > 0.0 && !fullscreen && !notes_page,
+                panels.right_panel > 0.0 && !fullscreen && !standalone_page,
                 |root| {
                     root.child(
                         div()

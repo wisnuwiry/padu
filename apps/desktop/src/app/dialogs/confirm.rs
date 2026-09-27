@@ -27,11 +27,26 @@ pub fn init(cx: &mut App) {
 }
 
 pub(crate) enum ConfirmAction {
-    DeleteSession { session_id: Uuid },
-    DeletePath { path: PathBuf },
-    DeleteNote { note_id: Uuid },
-    DeleteHost { profile_id: String },
-    DeleteProjectScript { project_id: Uuid, script_id: String },
+    DeleteSession {
+        session_id: Uuid,
+    },
+    DeletePath {
+        path: PathBuf,
+    },
+    DeleteNote {
+        note_id: Uuid,
+    },
+    DeleteTask {
+        task_id: Uuid,
+        expected_version: u64,
+    },
+    DeleteHost {
+        profile_id: String,
+    },
+    DeleteProjectScript {
+        project_id: Uuid,
+        script_id: String,
+    },
     ReinstallAgy,
     RemoveAgy,
     SignOutAgy,
@@ -110,6 +125,38 @@ impl Padu {
             variant: ConfirmVariant::Danger,
             icon_name: Some("icons/trash.svg"),
             action: ConfirmAction::DeleteNote { note_id },
+            cancel_focus,
+            confirm_focus,
+            previous_focus,
+        });
+        cx.notify();
+    }
+
+    pub(crate) fn confirm_delete_task(
+        &mut self,
+        task_id: Uuid,
+        title: String,
+        expected_version: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let previous_focus = window.focused(cx);
+        let cancel_focus = cx.focus_handle();
+        let confirm_focus = cx.focus_handle();
+        let focus_target = confirm_focus.clone();
+        window.on_next_frame(move |window, cx| window.focus(&focus_target, cx));
+
+        self.confirm_dialog = Some(ConfirmDialogState {
+            title: tr!("board.delete_task").into(),
+            message: format!("{}\n\"{}\"", tr!("board.delete_task_confirm"), title).into(),
+            confirm_label: tr!("board.delete_task").into(),
+            cancel_label: tr!("board.cancel").into(),
+            variant: ConfirmVariant::Danger,
+            icon_name: Some("icons/trash.svg"),
+            action: ConfirmAction::DeleteTask {
+                task_id,
+                expected_version,
+            },
             cancel_focus,
             confirm_focus,
             previous_focus,
@@ -309,6 +356,12 @@ impl Padu {
                 if let Some(index) = self.notes.iter().position(|note| note.id == note_id) {
                     self.delete_note_at(index, cx);
                 }
+            }
+            ConfirmAction::DeleteTask {
+                task_id,
+                expected_version,
+            } => {
+                self.delete_board_task(task_id, expected_version, cx);
             }
             ConfirmAction::ReinstallAgy => {
                 self.install_agy_acp(cx);

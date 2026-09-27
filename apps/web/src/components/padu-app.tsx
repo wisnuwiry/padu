@@ -1355,6 +1355,18 @@ export function PaduApp() {
             window.sessionStorage.setItem('padu.note-target-session', current?.id ?? 'new')
             void navigate({ to: '/notes', search: { q: undefined, noteId: undefined, projectId: activeProject?.id } })
           }}
+          onBoard={() => {
+            void navigate({
+              to: '/board',
+              search: {
+                projectId: activeProject?.id,
+                q: undefined,
+                agent: undefined,
+                status: undefined,
+                taskId: undefined,
+              },
+            })
+          }}
           onRemoveSession={removeSessionById}
           onRenameSession={renameSession}
           onSetSessionArchived={(sessionId, archived) => updateSessionFlag(sessionId, 'archived_at', archived)}

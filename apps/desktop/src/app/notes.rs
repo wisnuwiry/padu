@@ -52,7 +52,7 @@ impl Padu {
     /// Returns the project owning the current workspace, including the
     /// projectless workspace. Notes are persisted against a project id, and
     /// the daemon accepts the projectless workspace as a valid scope too.
-    fn current_project_id(&self) -> Option<Uuid> {
+    pub(super) fn current_project_id(&self) -> Option<Uuid> {
         self.selected_session()
             .map(|session| session.project_id)
             .or(self.state.selected_project)

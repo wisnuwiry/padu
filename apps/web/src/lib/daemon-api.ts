@@ -1,4 +1,5 @@
 import type {
+  AgentProfile,
   AgentSession,
   AgentInvocation,
   BranchSnapshot,
@@ -28,6 +29,11 @@ import type {
   SessionMessageMatch,
   SlashCommand,
   SkillsCatalog,
+  CreateTask,
+  Task,
+  TaskStatus,
+  TaskSummary,
+  UpdateAgentProfile,
   UsageHistory,
   UsageWindow,
   PaduClient,
@@ -46,6 +52,11 @@ export const daemonKeys = {
   session: (address: string, sessionId: string) =>
     ['daemon', address, 'session', sessionId] as const,
   settings: (address: string) => ['daemon', address, 'settings'] as const,
+  agentProfiles: (address: string) => ['daemon', address, 'agent-profiles'] as const,
+  tasks: (address: string, projectId?: string) =>
+    ['daemon', address, 'tasks', projectId ?? 'all'] as const,
+  task: (address: string, taskId: string) =>
+    ['daemon', address, 'task', taskId] as const,
   providers: (address: string) => ['daemon', address, 'providers'] as const,
   provider: (address: string, provider: ProviderKind, binaryOverride: string | null = null) =>
     [...daemonKeys.providers(address), 'catalog', provider, binaryOverride] as const,
@@ -145,6 +156,69 @@ export async function deleteNote(client: PaduClient, projectId: string, noteId: 
   expectResponse(await client.request({ type: 'deleteNote', projectId, noteId, expectedRevision }), 'noteDeleted')
 }
 
+export async function listTasks(client: PaduClient): Promise<TaskSummary[]> {
+  const response = expectResponse(
+    await client.request({ type: 'listTasks' }),
+    'tasks',
+  )
+  return response.tasks
+}
+
+export async function createTask(client: PaduClient, task: CreateTask): Promise<Task> {
+  const response = expectResponse(
+    await client.request({ type: 'createTask', task }),
+    'taskCreated',
+  )
+  return response.task
+}
+
+export async function updateTask(
+  client: PaduClient,
+  task: Task,
+  expectedVersion: number,
+): Promise<Task> {
+  const response = expectResponse(
+    await client.request({ type: 'updateTask', task, expectedVersion }),
+    'taskUpdated',
+  )
+  return response.task
+}
+
+export async function moveTask(
+  client: PaduClient,
+  taskId: string,
+  status: TaskStatus,
+  expectedVersion: number,
+): Promise<Task> {
+  const response = expectResponse(
+    await client.request({ type: 'moveTask', taskId, status, expectedVersion }),
+    'taskMoved',
+  )
+  return response.task
+}
+
+export async function deleteTask(
+  client: PaduClient,
+  taskId: string,
+  expectedVersion: number,
+): Promise<void> {
+  expectResponse(
+    await client.request({ type: 'deleteTask', taskId, expectedVersion }),
+    'taskDeleted',
+  )
+}
+
+export async function hydrateTask(
+  client: PaduClient,
+  taskId: string,
+): Promise<{ task: Task; session: AgentSession | null }> {
+  const response = expectResponse(
+    await client.request({ type: 'hydrateTask', taskId }),
+    'taskHydrated',
+  )
+  return { task: response.task, session: response.session ?? null }
+}
+
 export async function searchSessionMessages(
   client: PaduClient,
   query: string,
@@ -234,6 +308,19 @@ export async function updateDaemonSettings(
   settings: DaemonSettings,
 ): Promise<void> {
   expectResponse(await client.request({ type: 'updateSettings', settings }), 'ack')
+}
+
+export async function listAgentProfiles(client: PaduClient): Promise<AgentProfile[]> {
+  return expectResponse(await client.request({ type: 'listAgentProfiles' }), 'agentProfiles')
+    .profiles
+}
+
+export async function updateAgentProfile(
+  client: PaduClient,
+  update: UpdateAgentProfile,
+): Promise<AgentProfile> {
+  return expectResponse(await client.request({ type: 'updateAgentProfile', update }), 'agentProfileUpdated')
+    .profile
 }
 
 export async function probeProvider(

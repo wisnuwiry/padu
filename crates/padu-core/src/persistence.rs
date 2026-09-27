@@ -34,6 +34,9 @@ use crate::model::{
     ProjectScript, ProviderKind, RuntimeMode, SessionWorkspace,
 };
 use crate::theme::ThemePreference;
+use padu_protocol::agent_profile::{AgentProfile, UpdateAgentProfile};
+use padu_protocol::git_integration::{LinkedIssue, LinkedPr};
+use padu_protocol::kanban::{CreateTask, Task, TaskStatus};
 use padu_protocol::notes::EmbeddedNote;
 pub use padu_protocol::notes::{CreateNote, Note, NoteSummary, UpdateNote};
 pub use padu_protocol::persistence::{
@@ -671,8 +674,246 @@ fn fingerprint(value: &str) -> u64 {
     hash
 }
 
-fn to_io_error(error: impl std::fmt::Display) -> io::Error {
+pub(crate) fn to_io_error(error: impl std::fmt::Display) -> io::Error {
     io::Error::other(error.to_string())
+}
+
+fn profile_version_error(
+    connection: &Connection,
+    provider: ProviderKind,
+    expected_version: u32,
+) -> io::Error {
+    let current: Option<i64> = connection
+        .query_row(
+            "SELECT version FROM agent_profiles WHERE agent_id = ?1",
+            params![provider.id()],
+            |row| row.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten();
+    match current {
+        Some(current) => io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "agent profile version conflict: expected {expected_version}, current {current}"
+            ),
+        ),
+        None => io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("agent profile {:?} not found", provider.id()),
+        ),
+    }
+}
+
+fn task_version_error(connection: &Connection, id: Uuid, expected_version: u64) -> io::Error {
+    let current: Option<i64> = connection
+        .query_row(
+            "SELECT version FROM tasks WHERE id = ?1",
+            params![id.to_string()],
+            |row| row.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten();
+    match current {
+        Some(current) => io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("task version conflict: expected {expected_version}, current {current}"),
+        ),
+        None => io::Error::new(io::ErrorKind::NotFound, "task not found"),
+    }
+}
+
+const UPSERT_TASK: &str = "INSERT INTO tasks(id, project_id, title, description, labels, status, \
+    assigned_agent, model, session_id, workspace_kind, linked_issue, linked_pr, needs_attention, \
+    sync_failed, idempotency_keys, version, created_at, updated_at, archived)
+     VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+     ON CONFLICT(id) DO UPDATE SET
+         project_id     = excluded.project_id,
+         title          = excluded.title,
+         description    = excluded.description,
+         labels         = excluded.labels,
+         status         = excluded.status,
+         assigned_agent = excluded.assigned_agent,
+         model          = excluded.model,
+         session_id     = excluded.session_id,
+         workspace_kind = excluded.workspace_kind,
+         linked_issue   = excluded.linked_issue,
+         linked_pr      = excluded.linked_pr,
+         needs_attention = excluded.needs_attention,
+         sync_failed    = excluded.sync_failed,
+         idempotency_keys = excluded.idempotency_keys,
+         version        = excluded.version,
+         created_at     = excluded.created_at,
+         updated_at     = excluded.updated_at,
+         archived       = excluded.archived";
+
+type TaskRowColumns = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    bool,
+    Option<String>,
+    String,
+    i64,
+    i64,
+    i64,
+    bool,
+);
+
+fn task_row_columns(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRowColumns> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+        row.get(8)?,
+        row.get(9)?,
+        row.get(10)?,
+        row.get(11)?,
+        row.get(12)?,
+        row.get(13)?,
+        row.get(14)?,
+        row.get(15)?,
+        row.get(16)?,
+        row.get(17)?,
+        row.get(18)?,
+    ))
+}
+
+fn upsert_task_row(connection: &Connection, task: &Task) -> io::Result<()> {
+    let labels = serde_json::to_string(&task.labels).map_err(to_io_error)?;
+    let idempotency_keys = serde_json::to_string(&task.idempotency_keys).map_err(to_io_error)?;
+    let linked_issue = task
+        .linked_issue
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(to_io_error)?;
+    let linked_pr = task
+        .linked_pr
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(to_io_error)?;
+    connection
+        .execute(
+            UPSERT_TASK,
+            params![
+                task.id.to_string(),
+                task.project_id.to_string(),
+                task.title,
+                task.description,
+                labels,
+                tag_of(task.status),
+                task.assigned_agent.map(tag_of),
+                task.model,
+                task.session_id.map(|id| id.to_string()),
+                task.workspace_kind.map(tag_of),
+                linked_issue,
+                linked_pr,
+                task.needs_attention,
+                task.sync_failed,
+                idempotency_keys,
+                task.version as i64,
+                task.created_at as i64,
+                task.updated_at as i64,
+                task.archived,
+            ],
+        )
+        .map_err(to_io_error)?;
+    Ok(())
+}
+
+fn task_from_columns(
+    (
+        id,
+        project_id,
+        title,
+        description,
+        labels,
+        status,
+        assigned_agent,
+        model,
+        session_id,
+        workspace_kind,
+        linked_issue,
+        linked_pr,
+        needs_attention,
+        sync_failed,
+        idempotency_keys,
+        version,
+        created_at,
+        updated_at,
+        archived,
+    ): TaskRowColumns,
+) -> io::Result<Task> {
+    Ok(Task {
+        id: parse_task_uuid("id", &id)?,
+        project_id: parse_task_uuid("project_id", &project_id)?,
+        title,
+        description,
+        labels: serde_json::from_str(&labels).map_err(|_| corrupt_task("labels"))?,
+        status: parse_task_enum("status", status)?,
+        assigned_agent: assigned_agent
+            .map(|value| parse_task_enum("assigned_agent", value))
+            .transpose()?,
+        model,
+        session_id: session_id
+            .map(|value| parse_task_uuid("session_id", &value))
+            .transpose()?,
+        workspace_kind: workspace_kind
+            .map(|value| parse_task_enum("workspace_kind", value))
+            .transpose()?,
+        linked_issue: linked_issue
+            .map(|json| {
+                serde_json::from_str::<LinkedIssue>(&json).map_err(|_| corrupt_task("linked_issue"))
+            })
+            .transpose()?,
+        linked_pr: linked_pr
+            .map(|json| {
+                serde_json::from_str::<LinkedPr>(&json).map_err(|_| corrupt_task("linked_pr"))
+            })
+            .transpose()?,
+        needs_attention,
+        sync_failed,
+        idempotency_keys: serde_json::from_str(&idempotency_keys)
+            .map_err(|_| corrupt_task("idempotency_keys"))?,
+        version: version as u64,
+        created_at: created_at as u64,
+        updated_at: updated_at as u64,
+        archived,
+    })
+}
+
+fn corrupt_task(field: &str) -> io::Error {
+    io::Error::other(format!("task has corrupt {field}"))
+}
+
+fn parse_task_uuid(field: &str, value: &str) -> io::Result<Uuid> {
+    Uuid::parse_str(value).map_err(|_| corrupt_task(field))
+}
+
+/// Parses a `tag_of`-spelled enum column back into its wire type.
+fn parse_task_enum<T>(field: &str, value: String) -> io::Result<T>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    serde_json::from_value(serde_json::Value::String(value)).map_err(|_| corrupt_task(field))
 }
 
 const SESSION_SEARCH_SNIPPET_CHARS: usize = 240;
@@ -1027,6 +1268,78 @@ impl StateStore {
         &self.path
     }
 
+    /// Seeds the Agent Profile registry (PRD §6, P1-01): one row per
+    /// `ProviderKind::ALL` with curated defaults, legacy
+    /// `disabled_providers` imported as `enabled = false` exactly once.
+    /// Returns how many rows were inserted (0 on a warm restart).
+    pub fn seed_agent_profiles(&self, disabled_providers: &[ProviderKind]) -> io::Result<usize> {
+        let connection = self.open()?;
+        crate::agent_profile::seed_agent_profiles(&connection, disabled_providers)
+    }
+
+    /// Reads the Agent Profile registry ordered by priority (P1-02).
+    pub fn list_agent_profiles(&self) -> io::Result<Vec<AgentProfile>> {
+        let guard = self.storage_guard()?;
+        let connection = &guard.as_ref().expect("storage opened above").connection;
+        crate::agent_profile::list_agent_profiles(connection)
+    }
+
+    /// Full-replace one profile with an `expected_version` guard (P1-02),
+    /// mirroring [`Self::update_note`]. Returns the stored row with the
+    /// bumped version. Disabling here never touches in-flight sessions:
+    /// they hold their own provider and keep running; only new candidacy
+    /// reads the flag.
+    pub fn update_agent_profile(&self, update: UpdateAgentProfile) -> io::Result<AgentProfile> {
+        let mut guard = self.storage_guard()?;
+        let connection = &mut guard.as_mut().expect("storage opened above").connection;
+        // One transaction keeps the UPDATE and its returned row atomic, so
+        // the caller can never observe another writer's values mid-commit.
+        let transaction = connection.transaction().map_err(to_io_error)?;
+        let role_tags = serde_json::to_string(&update.role_tags)
+            .map_err(|error| io::Error::other(format!("could not encode role tags: {error}")))?;
+        let changed = transaction
+            .execute(
+                "UPDATE agent_profiles
+                    SET role_tags = ?1, cost_tier = ?2, priority = ?3,
+                        max_retry_before_escalate = ?4, enabled = ?5, version = version + 1
+                  WHERE agent_id = ?6 AND version = ?7",
+                params![
+                    role_tags,
+                    update.cost_tier.as_str(),
+                    update.priority,
+                    update.max_retry_before_escalate,
+                    update.enabled,
+                    update.agent_id.id(),
+                    update.expected_version,
+                ],
+            )
+            .map_err(to_io_error)?;
+        if changed == 0 {
+            return Err(profile_version_error(
+                &transaction,
+                update.agent_id,
+                update.expected_version,
+            ));
+        }
+        let profile = crate::agent_profile::get_agent_profile(&transaction, update.agent_id)?
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "agent profile not found after update",
+                )
+            })?;
+        transaction.commit().map_err(to_io_error)?;
+        Ok(profile)
+    }
+
+    /// Candidacy check (P1-02): disabled agents are excluded from new
+    /// assignments; in-flight sessions are unaffected.
+    pub fn agent_profile_enabled(&self, provider: ProviderKind) -> io::Result<bool> {
+        let guard = self.storage_guard()?;
+        let connection = &guard.as_ref().expect("storage opened above").connection;
+        crate::agent_profile::agent_profile_enabled(connection, provider)
+    }
+
     fn open(&self) -> io::Result<Connection> {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
@@ -1170,7 +1483,7 @@ impl StateStore {
         }
 
         let mut projects = connection
-            .prepare("SELECT id, name, path, created_at, scripts FROM projects ORDER BY position")
+            .prepare("SELECT id, name, path, created_at, scripts, linked_repo FROM projects ORDER BY position")
             .map_err(to_io_error)?;
         state.projects = projects
             .query_map([], |row| {
@@ -1180,23 +1493,32 @@ impl StateStore {
                     row.get::<_, String>(2)?,
                     row.get::<_, i64>(3)?,
                     row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
                 ))
             })
             .map_err(to_io_error)?
             .filter_map(Result::ok)
-            .filter_map(|(id, name, path, created_at, scripts_json)| {
-                let scripts: Vec<ProjectScript> = scripts_json
-                    .as_deref()
-                    .and_then(|json| serde_json::from_str(json).ok())
-                    .unwrap_or_default();
-                Some(Project {
-                    id: Uuid::parse_str(&id).ok()?,
-                    name,
-                    path: PathBuf::from(path),
-                    created_at: created_at as u64,
-                    scripts,
-                })
-            })
+            .filter_map(
+                |(id, name, path, created_at, scripts_json, linked_repo_json)| {
+                    let scripts: Vec<ProjectScript> = scripts_json
+                        .as_deref()
+                        .and_then(|json| serde_json::from_str(json).ok())
+                        .unwrap_or_default();
+                    // A corrupt handle degrades to unconnected rather than
+                    // dropping the whole project row.
+                    let linked_repo = linked_repo_json
+                        .as_deref()
+                        .and_then(|json| serde_json::from_str(json).ok());
+                    Some(Project {
+                        id: Uuid::parse_str(&id).ok()?,
+                        name,
+                        path: PathBuf::from(path),
+                        created_at: created_at as u64,
+                        scripts,
+                        linked_repo,
+                    })
+                },
+            )
             .collect();
         drop(projects);
 
@@ -1414,6 +1736,10 @@ impl StateStore {
             for (position, project) in state.projects.iter().enumerate() {
                 let scripts_json =
                     serde_json::to_string(&project.scripts).unwrap_or_else(|_| "[]".to_string());
+                let linked_repo_json = project
+                    .linked_repo
+                    .as_ref()
+                    .map(|repo| serde_json::to_string(repo).unwrap_or_else(|_| "null".to_string()));
                 transaction
                     .execute(
                         INSERT_PROJECT,
@@ -1424,6 +1750,7 @@ impl StateStore {
                             position as i64,
                             project.created_at as i64,
                             scripts_json,
+                            linked_repo_json,
                         ],
                     )
                     .map_err(to_io_error)?;
@@ -1675,6 +2002,274 @@ impl StateStore {
             ));
         }
         Ok(expected_revision)
+    }
+
+    /// Merge-only bulk save for Kanban tasks (P1-04): every row upserts by
+    /// id inside one transaction, and rows absent from the snapshot are left
+    /// untouched — a stale snapshot can never delete another writer's rows.
+    /// Deletion is explicit via [`Self::delete_task`]. Commands land in P1-05.
+    pub fn save_tasks(&self, tasks: &[Task]) -> io::Result<()> {
+        let mut guard = self.storage_guard()?;
+        let connection = &mut guard.as_mut().expect("storage opened above").connection;
+        let transaction = connection.transaction().map_err(to_io_error)?;
+        for task in tasks {
+            upsert_task_row(&transaction, task)?;
+        }
+        transaction.commit().map_err(to_io_error)?;
+        Ok(())
+    }
+
+    /// Lists tasks newest-first. P1-05 adds the summary projection (no
+    /// checkpoint bodies/logs); the DAO returns full rows.
+    pub fn list_tasks(&self) -> io::Result<Vec<Task>> {
+        let guard = self.storage_guard()?;
+        let connection = &guard.as_ref().expect("storage opened above").connection;
+        let mut statement = connection
+            .prepare(
+                "SELECT id, project_id, title, description, labels, status, assigned_agent, model, \
+                        session_id, workspace_kind, linked_issue, linked_pr, needs_attention, \
+                        sync_failed, idempotency_keys, version, created_at, updated_at, archived \
+                 FROM tasks ORDER BY updated_at DESC, id ASC",
+            )
+            .map_err(to_io_error)?;
+        let rows = statement
+            .query_map([], task_row_columns)
+            .map_err(to_io_error)?;
+        rows.map(|row| task_from_columns(row.map_err(to_io_error)?))
+            .collect()
+    }
+
+    pub fn get_task(&self, id: Uuid) -> io::Result<Option<Task>> {
+        let guard = self.storage_guard()?;
+        let connection = &guard.as_ref().expect("storage opened above").connection;
+        connection
+            .query_row(
+                "SELECT id, project_id, title, description, labels, status, assigned_agent, model, \
+                        session_id, workspace_kind, linked_issue, linked_pr, needs_attention, \
+                        sync_failed, idempotency_keys, version, created_at, updated_at, archived \
+                 FROM tasks WHERE id = ?1",
+                params![id.to_string()],
+                task_row_columns,
+            )
+            .optional()
+            .map_err(to_io_error)?
+            .map(task_from_columns)
+            .transpose()
+    }
+
+    /// Finds a task by its linked session id (P1-06).
+    pub fn find_task_by_session_id(&self, session_id: Uuid) -> io::Result<Option<Task>> {
+        let guard = self.storage_guard()?;
+        let connection = &guard.as_ref().expect("storage opened above").connection;
+        connection
+            .query_row(
+                "SELECT id, project_id, title, description, labels, status, assigned_agent, model, \
+                        session_id, workspace_kind, linked_issue, linked_pr, needs_attention, \
+                        sync_failed, idempotency_keys, version, created_at, updated_at, archived \
+                 FROM tasks WHERE session_id = ?1",
+                params![session_id.to_string()],
+                task_row_columns,
+            )
+            .optional()
+            .map_err(to_io_error)?
+            .map(task_from_columns)
+            .transpose()
+    }
+
+    /// Explicit task deletion (P1-04) with an `expected_version` guard
+    /// (P1-05). Returns the deleted version. Merge-only saves never delete;
+    /// only this path removes rows.
+    pub fn delete_task(&self, id: Uuid, expected_version: u64) -> io::Result<u64> {
+        let guard = self.storage_guard()?;
+        let connection = &guard.as_ref().expect("storage opened above").connection;
+        let changed = connection
+            .execute(
+                "DELETE FROM tasks WHERE id = ?1 AND version = ?2",
+                params![id.to_string(), expected_version as i64],
+            )
+            .map_err(to_io_error)?;
+        if changed == 0 {
+            return Err(task_version_error(connection, id, expected_version));
+        }
+        Ok(expected_version)
+    }
+
+    /// Create one backlog card (P1-05). The project must exist; the daemon
+    /// assigns id, status, version, and timestamps.
+    pub fn create_task(&self, input: CreateTask) -> io::Result<Task> {
+        let guard = self.storage_guard()?;
+        let connection = &guard.as_ref().expect("storage opened above").connection;
+        let project_exists: bool = connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?1)",
+                params![input.project_id.to_string()],
+                |row| row.get(0),
+            )
+            .map_err(to_io_error)?;
+        if !project_exists {
+            return Err(io::Error::new(io::ErrorKind::NotFound, "project not found"));
+        }
+        let now = crate::model::unix_time();
+        let task = Task {
+            id: Uuid::new_v4(),
+            project_id: input.project_id,
+            title: input.title,
+            description: input.description,
+            labels: input.labels,
+            status: TaskStatus::Backlog,
+            assigned_agent: input.assigned_agent,
+            model: input.model,
+            session_id: None,
+            workspace_kind: None,
+            linked_issue: None,
+            linked_pr: None,
+            needs_attention: false,
+            sync_failed: None,
+            idempotency_keys: Vec::new(),
+            version: 1,
+            created_at: now,
+            updated_at: now,
+            archived: false,
+        };
+        upsert_task_row(connection, &task)?;
+        Ok(task)
+    }
+
+    /// Full-replace one card with an `expected_version` guard (P1-05),
+    /// mirroring [`Self::update_note`]. Returns the stored row with the
+    /// bumped version.
+    pub fn update_task(&self, task: Task, expected_version: u64) -> io::Result<Task> {
+        let mut guard = self.storage_guard()?;
+        let connection = &mut guard.as_mut().expect("storage opened above").connection;
+        // One transaction keeps the UPDATE and its returned row atomic, so
+        // the caller can never observe another writer's values mid-commit.
+        let transaction = connection.transaction().map_err(to_io_error)?;
+        let now = crate::model::unix_time();
+        let changed = transaction
+            .execute(
+                "UPDATE tasks
+                    SET project_id = ?1, title = ?2, description = ?3, labels = ?4,
+                        status = ?5, assigned_agent = ?6, model = ?7, session_id = ?8,
+                        workspace_kind = ?9, linked_issue = ?10, linked_pr = ?11,
+                        needs_attention = ?12, sync_failed = ?13, idempotency_keys = ?14,
+                        version = version + 1, created_at = ?15, updated_at = ?16,
+                        archived = ?17
+                  WHERE id = ?18 AND version = ?19",
+                params![
+                    task.project_id.to_string(),
+                    task.title,
+                    task.description,
+                    serde_json::to_string(&task.labels).map_err(to_io_error)?,
+                    tag_of(task.status),
+                    task.assigned_agent.map(tag_of),
+                    task.model,
+                    task.session_id.map(|id| id.to_string()),
+                    task.workspace_kind.map(tag_of),
+                    task.linked_issue
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()
+                        .map_err(to_io_error)?,
+                    task.linked_pr
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()
+                        .map_err(to_io_error)?,
+                    task.needs_attention,
+                    task.sync_failed,
+                    serde_json::to_string(&task.idempotency_keys).map_err(to_io_error)?,
+                    task.created_at as i64,
+                    now as i64,
+                    task.archived,
+                    task.id.to_string(),
+                    expected_version as i64,
+                ],
+            )
+            .map_err(to_io_error)?;
+        if changed == 0 {
+            return Err(task_version_error(&transaction, task.id, expected_version));
+        }
+        let updated = task_from_columns(
+            transaction
+                .query_row(
+                    "SELECT id, project_id, title, description, labels, status, assigned_agent, model, \
+                            session_id, workspace_kind, linked_issue, linked_pr, needs_attention, \
+                            sync_failed, idempotency_keys, version, created_at, updated_at, archived \
+                     FROM tasks WHERE id = ?1",
+                    params![task.id.to_string()],
+                    task_row_columns,
+                )
+                .optional()
+                .map_err(to_io_error)?
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::NotFound, "task not found after update")
+                })?,
+        )?;
+        transaction.commit().map_err(to_io_error)?;
+        Ok(updated)
+    }
+
+    /// Status-only transition write with an `expected_version` guard (P1-05).
+    /// Other columns are preserved verbatim; transition validation and
+    /// lifecycle side effects land in P1-06.
+    pub fn move_task(
+        &self,
+        id: Uuid,
+        status: TaskStatus,
+        expected_version: u64,
+    ) -> io::Result<Task> {
+        let mut guard = self.storage_guard()?;
+        let connection = &mut guard.as_mut().expect("storage opened above").connection;
+        let transaction = connection.transaction().map_err(to_io_error)?;
+        let changed = if status == TaskStatus::Backlog {
+            transaction
+                .execute(
+                    "UPDATE tasks SET status = ?1, needs_attention = 0, sync_failed = NULL, \
+                            version = version + 1, updated_at = ?2 \
+                      WHERE id = ?3 AND version = ?4",
+                    params![
+                        tag_of(status),
+                        crate::model::unix_time() as i64,
+                        id.to_string(),
+                        expected_version as i64,
+                    ],
+                )
+                .map_err(to_io_error)?
+        } else {
+            transaction
+                .execute(
+                    "UPDATE tasks SET status = ?1, version = version + 1, updated_at = ?2 \
+                      WHERE id = ?3 AND version = ?4",
+                    params![
+                        tag_of(status),
+                        crate::model::unix_time() as i64,
+                        id.to_string(),
+                        expected_version as i64,
+                    ],
+                )
+                .map_err(to_io_error)?
+        };
+        if changed == 0 {
+            return Err(task_version_error(&transaction, id, expected_version));
+        }
+        let updated = task_from_columns(
+            transaction
+                .query_row(
+                    "SELECT id, project_id, title, description, labels, status, assigned_agent, model, \
+                            session_id, workspace_kind, linked_issue, linked_pr, needs_attention, \
+                            sync_failed, idempotency_keys, version, created_at, updated_at, archived \
+                     FROM tasks WHERE id = ?1",
+                    params![id.to_string()],
+                    task_row_columns,
+                )
+                .optional()
+                .map_err(to_io_error)?
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::NotFound, "task not found after move")
+                })?,
+        )?;
+        transaction.commit().map_err(to_io_error)?;
+        Ok(updated)
     }
 
     /// Builds a blob sweep.
@@ -2030,14 +2625,16 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          pinned_at     = excluded.pinned_at,
          archived_at   = excluded.archived_at";
 
-const INSERT_PROJECT: &str = "INSERT INTO projects(id, name, path, position, created_at, scripts)
-     VALUES(?1, ?2, ?3, ?4, ?5, ?6)
+const INSERT_PROJECT: &str =
+    "INSERT INTO projects(id, name, path, position, created_at, scripts, linked_repo)
+     VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)
      ON CONFLICT(id) DO UPDATE SET
          name       = excluded.name,
          path       = excluded.path,
          position   = excluded.position,
          created_at = excluded.created_at,
-         scripts    = excluded.scripts";
+         scripts    = excluded.scripts,
+         linked_repo = excluded.linked_repo";
 
 /// The transcript, written alongside the list row it belongs to.
 const UPSERT_SESSION_DETAIL: &str = "INSERT INTO session_details(session_id, data)
@@ -2091,6 +2688,7 @@ mod tests {
         ActivityItem, ActivityKind, FavoriteModel, MessageRole, ReasoningBlock, TranscriptBlock,
     };
     use base64::Engine as _;
+    use padu_protocol::kanban::TaskWorkspaceKind;
 
     fn temporary_directory() -> PathBuf {
         std::env::temp_dir().join(format!("padu-state-{}", Uuid::new_v4()))
@@ -2792,6 +3390,366 @@ mod tests {
     }
 
     #[test]
+    fn agent_profile_update_bumps_version_and_rejects_stale_writes() {
+        use padu_protocol::agent_profile::CostTier;
+
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        assert_eq!(store.seed_agent_profiles(&[]).unwrap(), 14);
+
+        let updated = store
+            .update_agent_profile(UpdateAgentProfile {
+                agent_id: ProviderKind::Codex,
+                role_tags: vec!["plan".to_owned()],
+                cost_tier: CostTier::High,
+                priority: 0,
+                max_retry_before_escalate: 5,
+                enabled: false,
+                expected_version: 1,
+            })
+            .unwrap();
+        assert_eq!(updated.version, 2);
+        assert_eq!(updated.role_tags, ["plan"]);
+        assert_eq!(updated.priority, 0);
+        assert_eq!(updated.max_retry_before_escalate, 5);
+        assert!(!updated.enabled);
+
+        // A stale writer is rejected and must re-fetch via ListAgentProfiles.
+        let conflict = store.update_agent_profile(UpdateAgentProfile {
+            agent_id: ProviderKind::Codex,
+            role_tags: vec!["plan".to_owned()],
+            cost_tier: CostTier::High,
+            priority: 0,
+            max_retry_before_escalate: 5,
+            enabled: false,
+            expected_version: 1,
+        });
+        let error = conflict.unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(
+            error
+                .to_string()
+                .contains("version conflict: expected 1, current 2"),
+            "unexpected error: {error}"
+        );
+
+        // A row deleted out from under the writer reads as NotFound.
+        Connection::open(directory.join("app.db"))
+            .unwrap()
+            .execute("DELETE FROM agent_profiles WHERE agent_id = 'codex'", [])
+            .unwrap();
+        let missing = store.update_agent_profile(UpdateAgentProfile {
+            agent_id: ProviderKind::Codex,
+            role_tags: Vec::new(),
+            cost_tier: CostTier::High,
+            priority: 0,
+            max_retry_before_escalate: 3,
+            enabled: true,
+            expected_version: 2,
+        });
+        let error = missing.unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn agent_profile_disabled_excluded_from_candidacy_and_survives_restart() {
+        use padu_protocol::agent_profile::CostTier;
+
+        fn disable(provider: ProviderKind, version: u32) -> UpdateAgentProfile {
+            UpdateAgentProfile {
+                agent_id: provider,
+                role_tags: vec!["test".to_owned()],
+                cost_tier: CostTier::Medium,
+                priority: 0,
+                max_retry_before_escalate: 3,
+                enabled: false,
+                expected_version: version,
+            }
+        }
+
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        store.seed_agent_profiles(&[]).unwrap();
+        assert!(store.agent_profile_enabled(ProviderKind::Codex).unwrap());
+
+        store
+            .update_agent_profile(disable(ProviderKind::Codex, 1))
+            .unwrap();
+        assert!(!store.agent_profile_enabled(ProviderKind::Codex).unwrap());
+        // Disabling one agent leaves the rest of the registry untouched.
+        assert!(store.agent_profile_enabled(ProviderKind::Claude).unwrap());
+
+        // A restart re-seeds nothing and the toggle persists.
+        drop(store);
+        let reopened = store_in(&directory);
+        assert_eq!(reopened.seed_agent_profiles(&[]).unwrap(), 0);
+        assert!(!reopened.agent_profile_enabled(ProviderKind::Codex).unwrap());
+
+        fs::remove_dir_all(directory).ok();
+    }
+
+    fn kanban_task(id: Uuid, project_id: Uuid, title: &str, updated_at: u64) -> Task {
+        Task {
+            id,
+            project_id,
+            title: title.to_owned(),
+            description: "description".to_owned(),
+            labels: vec!["bug".to_owned()],
+            status: TaskStatus::Backlog,
+            assigned_agent: None,
+            model: None,
+            session_id: None,
+            workspace_kind: None,
+            linked_issue: None,
+            linked_pr: None,
+            needs_attention: false,
+            sync_failed: None,
+            idempotency_keys: Vec::new(),
+            version: 1,
+            created_at: updated_at,
+            updated_at,
+            archived: false,
+        }
+    }
+
+    #[test]
+    fn task_save_is_merge_only_and_delete_is_explicit() {
+        use padu_protocol::git_integration::{GitProvider, LinkedIssue};
+
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let project_id = Uuid::new_v4();
+
+        let mut task_b = kanban_task(Uuid::new_v4(), project_id, "B", 20);
+        task_b.status = TaskStatus::Queued;
+        task_b.assigned_agent = Some(ProviderKind::Codex);
+        task_b.session_id = Some(Uuid::new_v4());
+        task_b.workspace_kind = Some(TaskWorkspaceKind::NewWorktree);
+        task_b.linked_issue = Some(LinkedIssue {
+            provider: GitProvider::GitHub,
+            id: "7".to_owned(),
+            url: "https://github.com/example/repo/issues/7".to_owned(),
+        });
+        task_b.needs_attention = true;
+        task_b.sync_failed = Some("rate limited".to_owned());
+        task_b.idempotency_keys = vec!["key-one".to_owned()];
+        let task_a = kanban_task(Uuid::new_v4(), project_id, "A", 10);
+        store.save_tasks(&[task_a.clone(), task_b.clone()]).unwrap();
+
+        // Newest-first.
+        let listed = store.list_tasks().unwrap();
+        assert_eq!(listed, vec![task_b.clone(), task_a.clone()]);
+        assert_eq!(store.get_task(task_a.id).unwrap(), Some(task_a.clone()));
+
+        // A stale snapshot carrying modified A plus new C must update those
+        // rows without touching B.
+        let mut task_a2 = task_a.clone();
+        task_a2.title = "A revised".to_owned();
+        task_a2.version = 2;
+        task_a2.updated_at = 30;
+        let task_c = kanban_task(Uuid::new_v4(), project_id, "C", 25);
+        store
+            .save_tasks(&[task_a2.clone(), task_c.clone()])
+            .unwrap();
+
+        let listed = store.list_tasks().unwrap();
+        assert_eq!(listed.len(), 3);
+        assert_eq!(store.get_task(task_b.id).unwrap(), Some(task_b));
+        assert_eq!(store.get_task(task_a.id).unwrap(), Some(task_a2));
+
+        // Deletion is explicit and guarded: removing A leaves the rest
+        // intact, a stale version is rejected, and a second delete reports
+        // the row was already gone.
+        assert_eq!(store.delete_task(task_a.id, 2).unwrap(), 2);
+        let conflict = store.delete_task(task_c.id, 999).unwrap_err();
+        assert_eq!(conflict.kind(), io::ErrorKind::PermissionDenied);
+        assert!(conflict.to_string().contains("version conflict"));
+        let missing = store.delete_task(task_a.id, 2).unwrap_err();
+        assert_eq!(missing.kind(), io::ErrorKind::NotFound);
+        assert!(store.get_task(task_a.id).unwrap().is_none());
+        assert_eq!(store.list_tasks().unwrap().len(), 2);
+
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn task_round_trips_every_field() {
+        use padu_protocol::git_integration::{GitProvider, LinkedPr, PrState};
+
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut task = kanban_task(Uuid::new_v4(), Uuid::new_v4(), "Full", 42);
+        task.status = TaskStatus::Review;
+        task.assigned_agent = Some(ProviderKind::DeepSeek);
+        task.session_id = Some(Uuid::new_v4());
+        task.workspace_kind = Some(TaskWorkspaceKind::Worktree);
+        task.linked_pr = Some(LinkedPr {
+            provider: GitProvider::GitLab,
+            id: "9".to_owned(),
+            url: "https://gitlab.com/example/repo/-/merge_requests/9".to_owned(),
+            state: PrState::Merged,
+        });
+        task.needs_attention = true;
+        task.sync_failed = Some("boom".to_owned());
+        task.idempotency_keys = vec!["k1".to_owned(), "k2".to_owned()];
+        task.version = 7;
+        task.archived = true;
+        store.save_tasks(&[task.clone()]).unwrap();
+
+        assert_eq!(store.get_task(task.id).unwrap(), Some(task));
+
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn task_create_assigns_backlog_defaults_and_rejects_unknown_projects() {
+        use padu_protocol::kanban::CreateTask;
+
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+
+        let missing = store.create_task(CreateTask {
+            project_id: Uuid::new_v4(),
+            title: "Orphan".to_owned(),
+            description: String::new(),
+            labels: Vec::new(),
+            assigned_agent: None,
+            model: None,
+        });
+        assert_eq!(missing.unwrap_err().kind(), io::ErrorKind::NotFound);
+
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        store.save(&mut state).unwrap();
+        let project_id = state.projects[0].id;
+        let created = store
+            .create_task(CreateTask {
+                project_id,
+                title: "Queue me".to_owned(),
+                description: "details".to_owned(),
+                labels: vec!["feature".to_owned()],
+                assigned_agent: Some(ProviderKind::Codex),
+                model: None,
+            })
+            .unwrap();
+        assert_eq!(created.status, TaskStatus::Backlog);
+        assert_eq!(created.version, 1);
+        assert_eq!(created.assigned_agent, Some(ProviderKind::Codex));
+        assert_eq!(created.labels, ["feature"]);
+        assert!(created.created_at > 0 && created.updated_at > 0);
+        assert_eq!(store.get_task(created.id).unwrap(), Some(created));
+
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn task_update_replaces_and_rejects_stale_writes() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let task = kanban_task(Uuid::new_v4(), Uuid::new_v4(), "Edit me", 10);
+        store.save_tasks(&[task.clone()]).unwrap();
+
+        let mut revised = task.clone();
+        revised.title = "Edited".to_owned();
+        revised.status = TaskStatus::Review;
+        revised.labels = vec!["docs".to_owned()];
+        let updated = store.update_task(revised, 1).unwrap();
+        assert_eq!(updated.version, 2);
+        assert_eq!(updated.title, "Edited");
+        assert_eq!(updated.status, TaskStatus::Review);
+
+        let stale = store.update_task(task, 1).unwrap_err();
+        assert_eq!(stale.kind(), io::ErrorKind::PermissionDenied);
+        assert!(stale.to_string().contains("version conflict"));
+
+        let missing = store
+            .update_task(kanban_task(Uuid::new_v4(), Uuid::new_v4(), "Ghost", 10), 1)
+            .unwrap_err();
+        assert_eq!(missing.kind(), io::ErrorKind::NotFound);
+
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn task_move_changes_only_status_version_and_timestamp() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut task = kanban_task(Uuid::new_v4(), Uuid::new_v4(), "Move me", 10);
+        task.labels = vec!["keep".to_owned()];
+        task.needs_attention = true;
+        store.save_tasks(&[task.clone()]).unwrap();
+
+        let moved = store.move_task(task.id, TaskStatus::Queued, 1).unwrap();
+        assert_eq!(moved.status, TaskStatus::Queued);
+        assert_eq!(moved.version, 2);
+        assert_eq!(moved.labels, ["keep"]);
+        assert!(moved.needs_attention);
+        assert!(moved.updated_at >= task.updated_at);
+
+        let stale = store.move_task(task.id, TaskStatus::Done, 1).unwrap_err();
+        assert_eq!(stale.kind(), io::ErrorKind::PermissionDenied);
+
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn task_summary_projection_matches_stored_row() {
+        use padu_protocol::kanban::TaskSummary;
+
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let task = kanban_task(Uuid::new_v4(), Uuid::new_v4(), "Summarize", 10);
+        store.save_tasks(&[task.clone()]).unwrap();
+
+        let summaries: Vec<TaskSummary> = store
+            .list_tasks()
+            .unwrap()
+            .iter()
+            .map(TaskSummary::from_task)
+            .collect();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].id, task.id);
+        assert_eq!(summaries[0].version, task.version);
+
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn project_linked_repo_round_trips_through_save_and_load() {
+        use padu_protocol::git_integration::{GitProvider, LinkedRepo};
+
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        state.projects[0].linked_repo = Some(LinkedRepo {
+            provider: GitProvider::GitHub,
+            owner: "example".to_owned(),
+            repo: "padu".to_owned(),
+        });
+        store.save(&mut state).unwrap();
+
+        let restored = store_in(&directory).load().unwrap();
+        assert_eq!(
+            restored.projects[0].linked_repo,
+            Some(LinkedRepo {
+                provider: GitProvider::GitHub,
+                owner: "example".to_owned(),
+                repo: "padu".to_owned(),
+            })
+        );
+
+        // Disconnect clears the handle; projects without one stay None.
+        let mut cleared = restored;
+        cleared.projects[0].linked_repo = None;
+        store.save(&mut cleared).unwrap();
+        let restored = store_in(&directory).load().unwrap();
+        assert_eq!(restored.projects[0].linked_repo, None);
+
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
     fn default_path_is_build_specific() {
         let path = StateStore::default_path();
         assert_eq!(path.file_name(), Some(std::ffi::OsStr::new("app.db")));
@@ -3252,6 +4210,160 @@ mod tests {
             error.to_string().contains(last),
             "the failure names the migration: {error}"
         );
+    }
+
+    /// Manual rollback for the P0-02 automation-tables migration
+    /// (`tasks`, `agent_profiles`, `rules`, `pending_approvals`,
+    /// `automation_outbox`, `audit_log`, plus `projects.linked_repo`).
+    ///
+    /// The runner is forward-only by design, so this is a documented
+    /// down-script rather than a wired-in migration: dropping the tables
+    /// also drops their indexes, and the up-migration re-applies cleanly
+    /// afterwards (plain `CREATE TABLE` / `ADD COLUMN`, no `IF NOT EXISTS`
+    /// masking). Only valid on databases where that migration applied.
+    const AUTOMATION_TABLES_ROLLBACK: &str = "
+        DROP TABLE IF EXISTS audit_log;
+        DROP TABLE IF EXISTS automation_outbox;
+        DROP TABLE IF EXISTS pending_approvals;
+        DROP TABLE IF EXISTS rules;
+        DROP TABLE IF EXISTS agent_profiles;
+        DROP TABLE IF EXISTS tasks;
+        ALTER TABLE projects DROP COLUMN linked_repo;
+    ";
+
+    #[test]
+    fn automation_tables_migrate_and_roll_back() {
+        let connection = Connection::open_in_memory().unwrap();
+        assert_eq!(
+            apply_migrations(&connection).unwrap(),
+            MIGRATIONS.len(),
+            "all run on a fresh database"
+        );
+
+        // Up: all six tables exist.
+        for table in [
+            "tasks",
+            "agent_profiles",
+            "rules",
+            "pending_approvals",
+            "automation_outbox",
+            "audit_log",
+        ] {
+            let name: String = connection
+                .query_row(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    params![table],
+                    |row| row.get(0),
+                )
+                .unwrap_or_else(|_| panic!("migration created table {table}"));
+            assert_eq!(name, table);
+        }
+
+        // Up: projects gained the nullable linked_repo column.
+        let columns: Vec<String> = connection
+            .prepare("PRAGMA table_info(projects)")
+            .unwrap()
+            .query_map([], |row| row.get("name"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+        assert!(
+            columns.contains(&"linked_repo".to_string()),
+            "projects.linked_repo was added: {columns:?}"
+        );
+
+        // Up: agent_profiles carries the P1-02 optimistic-concurrency guard.
+        let profile_columns: Vec<String> = connection
+            .prepare("PRAGMA table_info(agent_profiles)")
+            .unwrap()
+            .query_map([], |row| row.get("name"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+        assert!(
+            profile_columns.contains(&"version".to_string()),
+            "agent_profiles.version was added: {profile_columns:?}"
+        );
+
+        // Roll back: the down-script removes the tables and the column...
+        connection
+            .execute_batch(AUTOMATION_TABLES_ROLLBACK)
+            .unwrap();
+        for table in [
+            "tasks",
+            "agent_profiles",
+            "rules",
+            "pending_approvals",
+            "automation_outbox",
+            "audit_log",
+        ] {
+            assert!(
+                connection
+                    .query_row::<String, _, _>(
+                        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                        params![table],
+                        |row| row.get(0),
+                    )
+                    .is_err(),
+                "rollback dropped table {table}"
+            );
+        }
+
+        // ...and the automation migrations re-apply cleanly afterwards. Every
+        // migration touching a dropped table is cleared, so multi-step
+        // features like the profile table + version column rebuild together
+        // and `tasks` regains later columns such as `model`.
+        let dropped = [
+            "`tasks`",
+            "`agent_profiles`",
+            "`rules`",
+            "`pending_approvals`",
+            "`automation_outbox`",
+            "`audit_log`",
+        ];
+        let automation_tags: Vec<&&str> = MIGRATIONS
+            .iter()
+            .filter(|(_, sql)| dropped.iter().any(|table| sql.contains(table)))
+            .map(|(tag, _)| tag)
+            .collect();
+        assert!(
+            !automation_tags.is_empty(),
+            "expected automation migrations"
+        );
+        for tag in &automation_tags {
+            connection
+                .execute("DELETE FROM migrations WHERE tag = ?1", params![*tag])
+                .unwrap();
+        }
+        assert_eq!(
+            apply_migrations(&connection).unwrap(),
+            automation_tags.len()
+        );
+        connection
+            .query_row::<String, _, _>(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'tasks'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("tasks exists again after re-apply");
+        // A task round-trips through the rebuilt table, proving later
+        // columns (e.g. `model` from 0009) came back with it.
+        connection
+            .execute(
+                "INSERT INTO tasks (id, project_id, title, status, created_at, updated_at)
+                 VALUES ('task-1', 'project-1', 'Round trip', 'backlog', 1, 1)",
+                [],
+            )
+            .expect("insert into rebuilt tasks");
+        let (title, model): (String, Option<String>) = connection
+            .query_row(
+                "SELECT title, model FROM tasks WHERE id = 'task-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("select from rebuilt tasks");
+        assert_eq!(title, "Round trip");
+        assert_eq!(model, None);
     }
 
     #[test]

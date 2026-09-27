@@ -6,9 +6,12 @@ import {
   daemonKeys,
   discoverComposerCommands,
   hydrateSession,
+  hydrateTask,
   inspectWorkspaceBranches,
+  listAgentProfiles,
   listSessionTurnRefs,
   listComposerFiles,
+  listTasks,
   loadComposerDrafts,
   loadSkills,
   loadDaemonSettings,
@@ -30,6 +33,24 @@ export function useTaskState() {
     queryKey: daemonKeys.taskState(config?.address ?? 'disconnected'),
     queryFn: () => loadTaskState(requireClient(client)),
     enabled: phase === 'connected' && Boolean(client && config),
+  })
+}
+
+export function useTasks(projectId?: string) {
+  const { client, config, phase } = useDaemon()
+  return useQuery({
+    queryKey: daemonKeys.tasks(config?.address ?? 'disconnected', projectId),
+    queryFn: () => listTasks(requireClient(client)),
+    enabled: phase === 'connected' && Boolean(client && config),
+  })
+}
+
+export function useTaskHydrated(taskId: string | null) {
+  const { client, config, phase } = useDaemon()
+  return useQuery({
+    queryKey: daemonKeys.task(config?.address ?? 'disconnected', taskId ?? 'none'),
+    queryFn: () => hydrateTask(requireClient(client), taskId!),
+    enabled: phase === 'connected' && Boolean(client && config && taskId),
   })
 }
 
@@ -124,6 +145,16 @@ export function useDaemonSettings() {
   return useQuery({
     queryKey: daemonKeys.settings(config?.address ?? 'disconnected'),
     queryFn: () => loadDaemonSettings(requireClient(client)),
+    enabled: phase === 'connected' && Boolean(client && config),
+    staleTime: 60_000,
+  })
+}
+
+export function useAgentProfiles() {
+  const { client, config, phase } = useDaemon()
+  return useQuery({
+    queryKey: daemonKeys.agentProfiles(config?.address ?? 'disconnected'),
+    queryFn: () => listAgentProfiles(requireClient(client)),
     enabled: phase === 'connected' && Boolean(client && config),
     staleTime: 60_000,
   })

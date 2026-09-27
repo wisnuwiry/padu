@@ -96,9 +96,34 @@ impl EventSink {
     ) {
         self.hub.broadcast_provider_auth_url(provider, url.into());
     }
+
+    pub fn send_task_queued(&self, task_id: Uuid) {
+        self.hub.broadcast_task_queued(task_id);
+    }
+
+    pub fn send_workspace_started(&self, task_id: Uuid, session_id: Uuid) {
+        self.hub.broadcast_workspace_started(task_id, session_id);
+    }
+
+    pub fn send_agent_completed(&self, task_id: Uuid, session_id: Uuid) {
+        self.hub.broadcast_agent_completed(task_id, session_id);
+    }
+
+    pub fn send_checkpoint_failed(&self, task_id: Uuid, session_id: Uuid, streak: u32) {
+        self.hub
+            .broadcast_checkpoint_failed(task_id, session_id, streak);
+    }
+
+    pub fn send_task_state_changed(&self) {
+        let mut state = self.hub.state.lock();
+        Hub::broadcast_task_state_changed(&mut state, 0);
+    }
+
+    pub fn send_card_updated(&self, task_id: Uuid) {
+        self.hub.broadcast_card_updated(0, task_id);
+    }
 }
 
-#[derive(Default)]
 struct HubState {
     next_subscriber_id: u64,
     task_state_revision: u64,
@@ -109,6 +134,22 @@ struct HubState {
     responses: VecDeque<(Uuid, ResponseOutcome)>,
     catalog_projects: HashMap<Uuid, ProjectCatalogEntry>,
     catalog_sessions: HashMap<Uuid, SessionCatalogEntry>,
+}
+
+impl Default for HubState {
+    fn default() -> Self {
+        Self {
+            next_subscriber_id: 1,
+            task_state_revision: 0,
+            subscribers: HashMap::new(),
+            active_runtimes: HashMap::new(),
+            next_sequences: HashMap::new(),
+            journal: HashMap::new(),
+            responses: VecDeque::new(),
+            catalog_projects: HashMap::new(),
+            catalog_sessions: HashMap::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -155,7 +196,7 @@ impl From<&AgentSession> for SessionCatalogEntry {
     }
 }
 
-struct Hub {
+pub(crate) struct Hub {
     epoch: Uuid,
     state: Mutex<HubState>,
 }
@@ -191,7 +232,7 @@ struct RequestDispatcher {
 }
 
 impl Hub {
-    fn event_sink(self: &Arc<Self>, session_id: Uuid, runtime_id: Uuid) -> EventSink {
+    pub(crate) fn event_sink(self: &Arc<Self>, session_id: Uuid, runtime_id: Uuid) -> EventSink {
         EventSink {
             session_id,
             runtime_id,
@@ -256,7 +297,11 @@ impl Hub {
             .retain(|_, subscriber| subscriber.send(message.clone()).is_ok());
     }
 
-    fn subscribe(&self, resume_from: &[ReplayCursor], sender: Sender<ServerMessage>) -> u64 {
+    pub(crate) fn subscribe(
+        &self,
+        resume_from: &[ReplayCursor],
+        sender: Sender<ServerMessage>,
+    ) -> u64 {
         let mut state = self.state.lock();
         for (&(session_id, runtime_id), events) in &state.journal {
             let sequence = resume_from
@@ -285,6 +330,70 @@ impl Hub {
     fn task_state_changed(&self, source_subscriber_id: u64) {
         let mut state = self.state.lock();
         Self::broadcast_task_state_changed(&mut state, source_subscriber_id);
+    }
+
+    /// Fan one card transition out to every client but the source (P1-05).
+    /// Clients re-fetch the card; the event carries a fresh id for dedup.
+    fn broadcast_card_updated(&self, source_subscriber_id: u64, task_id: Uuid) {
+        let message = ServerMessage::CardUpdated {
+            event_id: Uuid::new_v4(),
+            task_id,
+        };
+        self.state
+            .lock()
+            .subscribers
+            .retain(|subscriber_id, subscriber| {
+                (source_subscriber_id != 0 && *subscriber_id == source_subscriber_id)
+                    || subscriber.send(message.clone()).is_ok()
+            });
+    }
+
+    fn broadcast_task_queued(&self, task_id: Uuid) {
+        let message = ServerMessage::TaskQueued {
+            event_id: Uuid::new_v4(),
+            task_id,
+        };
+        self.state
+            .lock()
+            .subscribers
+            .retain(|_, subscriber| subscriber.send(message.clone()).is_ok());
+    }
+
+    fn broadcast_workspace_started(&self, task_id: Uuid, session_id: Uuid) {
+        let message = ServerMessage::WorkspaceStarted {
+            event_id: Uuid::new_v4(),
+            task_id,
+            session_id,
+        };
+        self.state
+            .lock()
+            .subscribers
+            .retain(|_, subscriber| subscriber.send(message.clone()).is_ok());
+    }
+
+    fn broadcast_agent_completed(&self, task_id: Uuid, session_id: Uuid) {
+        let message = ServerMessage::AgentCompleted {
+            event_id: Uuid::new_v4(),
+            task_id,
+            session_id,
+        };
+        self.state
+            .lock()
+            .subscribers
+            .retain(|_, subscriber| subscriber.send(message.clone()).is_ok());
+    }
+
+    fn broadcast_checkpoint_failed(&self, task_id: Uuid, session_id: Uuid, streak: u32) {
+        let message = ServerMessage::CheckpointFailed {
+            event_id: Uuid::new_v4(),
+            task_id,
+            session_id,
+            streak,
+        };
+        self.state
+            .lock()
+            .subscribers
+            .retain(|_, subscriber| subscriber.send(message.clone()).is_ok());
     }
 
     fn replace_task_catalog(&self, projects: &[Project], sessions: &[AgentSession]) {
@@ -357,7 +466,8 @@ impl Hub {
             revision: state.task_state_revision,
         };
         state.subscribers.retain(|subscriber_id, subscriber| {
-            *subscriber_id == source_subscriber_id || subscriber.send(message.clone()).is_ok()
+            (source_subscriber_id != 0 && *subscriber_id == source_subscriber_id)
+                || subscriber.send(message.clone()).is_ok()
         });
     }
 
@@ -873,8 +983,14 @@ struct HandledRequest {
 enum TaskCatalogAction {
     None,
     Load,
-    Save { projects: Vec<Project> },
+    Save {
+        projects: Vec<Project>,
+    },
     Changed,
+    /// A Kanban card mutation: broadcast `card_updated` with the affected
+    /// task id on success (P1-05). The id comes from the response, since
+    /// creates assign it.
+    CardUpdated,
 }
 
 fn handle_request(
@@ -934,6 +1050,11 @@ fn handle_request(
             (TaskCatalogAction::Changed, ResponseOutcome::Ok { .. }) => {
                 hub.task_state_changed(source_subscriber_id);
             }
+            (TaskCatalogAction::CardUpdated, ResponseOutcome::Ok { payload }) => {
+                if let Some(task_id) = card_updated_task_id(payload) {
+                    hub.broadcast_card_updated(source_subscriber_id, task_id);
+                }
+            }
             _ => {}
         }
     }
@@ -957,7 +1078,25 @@ fn task_catalog_action(command: &Command) -> TaskCatalogAction {
         | Command::SetSessionArchived { .. }
         | Command::ForkSessionFromResponse { .. }
         | Command::RewindSessionToMessage { .. } => TaskCatalogAction::Changed,
+        Command::CreateTask { .. }
+        | Command::UpdateTask { .. }
+        | Command::MoveTask { .. }
+        | Command::DeleteTask { .. } => TaskCatalogAction::CardUpdated,
         _ => TaskCatalogAction::None,
+    }
+}
+
+/// The card a task-mutation response carried, if any. Hydration reads are
+/// excluded by the caller: opening a detail panel must not fan other
+/// clients out to re-fetch.
+fn card_updated_task_id(payload: &ResponsePayload) -> Option<Uuid> {
+    match payload {
+        ResponsePayload::TaskCreated { task }
+        | ResponsePayload::TaskUpdated { task }
+        | ResponsePayload::TaskMoved { task }
+        | ResponsePayload::TaskHydrated { task, .. } => Some(task.id),
+        ResponsePayload::TaskDeleted { task_id, .. } => Some(*task_id),
+        _ => None,
     }
 }
 
@@ -1129,6 +1268,112 @@ mod tests {
             observer_rx.recv_timeout(Duration::from_secs(1)),
             Ok(ServerMessage::TaskStateChanged { revision: 1 })
         ));
+    }
+
+    #[test]
+    fn card_updates_notify_other_clients_only() {
+        let hub = Hub::default();
+        let (source_tx, source_rx) = unbounded();
+        let source_id = hub.subscribe(&[], source_tx);
+        let (observer_tx, observer_rx) = unbounded();
+        hub.subscribe(&[], observer_tx);
+
+        let task_id = Uuid::new_v4();
+        hub.broadcast_card_updated(source_id, task_id);
+
+        assert!(source_rx.try_recv().is_err());
+        assert!(matches!(
+            observer_rx.recv_timeout(Duration::from_secs(1)),
+            Ok(ServerMessage::CardUpdated {
+                task_id: received,
+                ..
+            }) if received == task_id
+        ));
+    }
+
+    #[test]
+    fn task_mutations_map_to_card_updates_but_reads_do_not() {
+        use padu_protocol::kanban::{CreateTask, Task, TaskStatus};
+
+        let project_id = Uuid::new_v4();
+        let task_id = Uuid::new_v4();
+        assert!(matches!(
+            task_catalog_action(&Command::CreateTask {
+                task: CreateTask {
+                    project_id,
+                    title: "New".into(),
+                    ..Default::default()
+                },
+            }),
+            TaskCatalogAction::CardUpdated
+        ));
+        assert!(matches!(
+            task_catalog_action(&Command::UpdateTask {
+                task: Task::default(),
+                expected_version: 1,
+            }),
+            TaskCatalogAction::CardUpdated
+        ));
+        assert!(matches!(
+            task_catalog_action(&Command::MoveTask {
+                task_id,
+                status: TaskStatus::Queued,
+                expected_version: 1,
+            }),
+            TaskCatalogAction::CardUpdated
+        ));
+        assert!(matches!(
+            task_catalog_action(&Command::DeleteTask {
+                task_id,
+                expected_version: 1,
+            }),
+            TaskCatalogAction::CardUpdated
+        ));
+        assert!(matches!(
+            task_catalog_action(&Command::ListTasks),
+            TaskCatalogAction::None
+        ));
+        assert!(matches!(
+            task_catalog_action(&Command::HydrateTask { task_id }),
+            TaskCatalogAction::None
+        ));
+    }
+
+    #[test]
+    fn card_updated_task_id_covers_mutation_responses() {
+        use padu_protocol::kanban::Task;
+
+        let task = Task {
+            id: Uuid::new_v4(),
+            ..Default::default()
+        };
+        assert_eq!(
+            card_updated_task_id(&ResponsePayload::TaskCreated { task: task.clone() }),
+            Some(task.id)
+        );
+        assert_eq!(
+            card_updated_task_id(&ResponsePayload::TaskUpdated { task: task.clone() }),
+            Some(task.id)
+        );
+        assert_eq!(
+            card_updated_task_id(&ResponsePayload::TaskMoved { task: task.clone() }),
+            Some(task.id)
+        );
+        assert_eq!(
+            card_updated_task_id(&ResponsePayload::TaskHydrated {
+                task: task.clone(),
+                session: None,
+            }),
+            Some(task.id)
+        );
+        assert_eq!(
+            card_updated_task_id(&ResponsePayload::TaskDeleted {
+                task_id: task.id,
+                version: 2,
+            }),
+            Some(task.id)
+        );
+        assert_eq!(card_updated_task_id(&ResponsePayload::Ack), None);
     }
 
     #[test]
