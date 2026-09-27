@@ -1138,6 +1138,12 @@ pub struct Padu {
     /// LAN IPv4 detected once at construction via the default route. Used as
     /// the Direct tab's default so the user does not have to type 192.168.x.x.
     daemon_lan_address: Option<String>,
+    /// Port the active local daemon bound to, refreshed whenever the supervisor
+    /// is replaced. `state.daemon_exposure.port` is only what the desktop asked
+    /// for: another Padu instance can own it, and the daemon then binds an
+    /// ephemeral loopback port. Cached because rendering must not take the
+    /// supervisor's lock.
+    daemon_local_port: Option<u16>,
     /// Whether the credentials card's "Details to connect" disclosure is open.
     /// Collapsed by default so the token stays out of sight until requested.
     daemon_connection_details_expanded: bool,
@@ -2215,7 +2221,15 @@ impl Padu {
 
         let existing_local = self.local_daemon.clone();
         let registry = self.host_transports.clone();
-        let local_port = self.state.daemon_exposure.port;
+        // A Cloudflare or SSH relay fronts *this* desktop's daemon, so it has to
+        // forward to the port that daemon actually bound. `daemon_exposure.port`
+        // is only what the desktop asked for, and another Padu instance can own
+        // it — the daemon then lands on an ephemeral port, and a relay aimed at
+        // the requested port would reach the other instance's daemon instead.
+        let local_port = existing_local
+            .as_ref()
+            .and_then(|daemon| daemon.local_port())
+            .unwrap_or(self.state.daemon_exposure.port);
 
         cx.spawn(async move |this, cx| {
             let result = cx
@@ -2319,6 +2333,9 @@ impl Padu {
         self.agy_install_progress_events = daemon.client().subscribe_provider_install_progress();
         self.agy_auth_url_events = daemon.client().subscribe_provider_auth_url();
         self.card_updated_events = daemon.client().subscribe_card_updated();
+        // The QR and tunnel target this daemon's bound port, so it has to
+        // follow every supervisor swap, not just the first construction.
+        self.daemon_local_port = daemon.local_port();
         self.daemon = daemon.clone();
         self.store = StateStore::remote(daemon.clone());
         self.composer_draft_store = ComposerDraftStore::remote(daemon.clone());
@@ -3495,12 +3512,14 @@ impl Padu {
             } else {
                 None
             };
+            let daemon_local_port = daemon.local_port();
 
             Self {
                 daemon,
                 local_daemon,
                 daemon_hostname,
                 daemon_lan_address,
+                daemon_local_port,
                 daemon_connection_details_expanded: false,
                 session_hydrations: HashSet::new(),
                 pending_session_activation: None,

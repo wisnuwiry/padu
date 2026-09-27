@@ -496,6 +496,7 @@ computer_use.grant_access: 授予权限
 computer_use.permission_check_failed: 无法检查电脑操作权限
 common.settings: 设置
 common.copy: 复制
+common.open_link: 打开链接
 common.remove: 移除
 common.rename: 重命名
 session.new_task: 新任务
@@ -1559,7 +1560,9 @@ daemon.qr_need_port: 请输入远程端口（1–65535）。
 daemon.qr_direct_hint: 仅限同一 Wi-Fi/局域网。请在可信网络中公开 — 该二维码为明文 ws:// 且携带完全访问令牌。
 daemon.qr_tailscale_hint: 两台设备须在同一 tailnet 且已开启公开。请输入 MagicDNS（*.ts.net）或 100.x 地址。
 daemon.qr_cloudflare_hint: 本机需要 cloudflared。无需共享网络 — 点击启动隧道，等待连接后再扫描。URL 每次重启都会变化。
-daemon.qr_cloudflare_install: brew install cloudflared
+daemon.qr_cloudflare_install_label: 安装 cloudflared
+daemon.qr_cloudflare_guide_label: 安装指南
+daemon.exposure_port_conflict: 另一个 Padu 实例占用了 %{port} 端口，因此此守护进程运行在私有端口上。Direct 与 Tailscale 二维码无法连接它 — 请使用 Cloudflare 隧道，或退出另一个实例后重启 Padu。
 daemon.qr_title: 连接其他设备
 daemon.qr_ssh_hint: 需要到自有跳板主机的 SSH 中继（GatewayPorts yes）。此二维码仅描述 wss://jump:port，请先启动中继。
 daemon.qr_ssh_needs_relay: 分享此二维码前请先启动 SSH 中继（添加主机 → SSH），否则它指向关闭的端口。

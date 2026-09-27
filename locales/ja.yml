@@ -506,6 +506,7 @@ computer_use.permission_check_failed: コンピュータ操作の権限を確認
 
 common.settings: 設定
 common.copy: コピー
+common.open_link: リンクを開く
 common.remove: 削除
 common.rename: 名前を変更
 
@@ -1612,7 +1613,9 @@ daemon.qr_need_port: リモートポート（1〜65535）を入力してくだ�
 daemon.qr_direct_hint: 同一 Wi-Fi/LAN 専用。信頼できるネットワークで公開してください。このコードは平文 ws:// でフルアクセスのトークンを含みます。
 daemon.qr_tailscale_hint: 両端末が同一テールネットに参加し、公開が有効である必要があります。MagicDNS（*.ts.net）または 100.x を入力してください。
 daemon.qr_cloudflare_hint: このマシンに cloudflared が必要です。共通ネットワークは不要です。トンネルを開始し、接続後にスキャンしてください。URL は再起動ごとに変わります。
-daemon.qr_cloudflare_install: brew install cloudflared
+daemon.qr_cloudflare_install_label: cloudflared をインストール
+daemon.qr_cloudflare_guide_label: インストールガイド
+daemon.exposure_port_conflict: 別の Padu がポート %{port} を使用しているため、このデーモンはプライベートポートで動作しています。Direct と Tailscale のコードは到達できません。Cloudflare トンネルを使うか、もう一方を終了して Padu を再起動してください。
 daemon.qr_title: 他の端末を接続
 daemon.qr_ssh_hint: 所有する踏み台ホストへの SSH リレーが必要です（GatewayPorts yes）。このコードは wss://jump:port の説明のみです。先にリレーを開始してください。
 daemon.qr_ssh_needs_relay: このコードを共有する前に SSH リレー（ホスト追加 → SSH）を開始してください。開始前は閉じたポートを指します。
