@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip } from '@/components/ui/tooltip'
+import { TagInput } from '@/components/ui/tag-input'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { MarkdownView } from '@/components/markdown-view'
 import { useTasks, useTaskHydrated, useTaskState, useProviderProbes, useAgentProfiles } from '@/hooks/use-daemon-data'
@@ -779,9 +780,7 @@ function TaskDetailDrawer({
   const [description, setDescription] = useState('')
   const [status, setStatus] = useState<TaskStatus>('backlog')
   const [assignedAgent, setAssignedAgent] = useState<ProviderKind | 'none'>('none')
-  const [labelInput, setLabelInput] = useState('')
   const [labels, setLabels] = useState<string[]>([])
-  const labelInputRef = useRef<HTMLInputElement>(null)
   const [showPreview, setShowPreview] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -795,25 +794,12 @@ function TaskDetailDrawer({
     setStatus(task.status)
     setAssignedAgent(task.assignedAgent ?? 'none')
     setLabels([...task.labels])
-    setLabelInput('')
   }
 
   const handleSave = async () => {
     if (!client || !task) return
     setIsSaving(true)
     try {
-      // Commit any unfinished tag typed into the input before saving
-      const finalLabels = [...labels]
-      const pending = labelInput
-        .split(/[,，;]/)
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0)
-      for (const p of pending) {
-        if (!finalLabels.includes(p)) {
-          finalLabels.push(p)
-        }
-      }
-
       // Status rides the guarded moveTask path (transition checks, lifecycle
       // side effects); updateTask carries content only so a stale drawer
       // status can never regress a concurrent daemon transition.
@@ -822,7 +808,7 @@ function TaskDetailDrawer({
         title: title.trim(),
         description: description.trim(),
         assignedAgent: assignedAgent === 'none' ? null : assignedAgent,
-        labels: finalLabels,
+        labels,
       }
       const saved = await updateTask(client, updated, task.version)
       if (status !== task.status) {
@@ -859,29 +845,6 @@ function TaskDetailDrawer({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [onClose])
 
-  const handleAddLabel = (rawText?: string) => {
-    const text = rawText !== undefined ? rawText : labelInput
-    const parts = text
-      .split(/[,，;]/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0)
-    if (parts.length > 0) {
-      setLabels((prev) => {
-        const next = [...prev]
-        for (const p of parts) {
-          if (!next.includes(p)) {
-            next.push(p)
-          }
-        }
-        return next
-      })
-    }
-    setLabelInput('')
-  }
-
-  const handleRemoveLabel = (labelToRemove: string) => {
-    setLabels(labels.filter((l) => l !== labelToRemove))
-  }
 
   return (
     <div className="fixed inset-y-0 right-0 z-40 flex w-full max-w-lg flex-col border-l border-border bg-sidebar-background shadow-2xl animate-in slide-in-from-right duration-200">
@@ -1011,57 +974,17 @@ function TaskDetailDrawer({
               )}
             </div>
 
-            {/* Labels (Auto-chip inside input container) */}
+            {/* Labels (TagInput) */}
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-foreground">
                 {t('board.labels')}
               </label>
-              <div
-                className="flex flex-wrap items-center gap-1.5 min-h-[36px] p-1.5 rounded-md bg-muted/40 cursor-text focus-within:ring-1 focus-within:ring-ring"
-                onClick={() => labelInputRef.current?.focus()}
-              >
-                {labels.map((l) => (
-                  <Badge
-                    key={l}
-                    variant="secondary"
-                    className="gap-1 text-xs px-2 py-0.5"
-                  >
-                    {l}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleRemoveLabel(l)
-                      }}
-                      className="hover:text-destructive text-muted-foreground ml-0.5"
-                    >
-                      ×
-                    </button>
-                  </Badge>
-                ))}
-                <input
-                  ref={labelInputRef}
-                  value={labelInput}
-                  onChange={(e) => {
-                    const val = e.target.value
-                    if (val.includes(',') || val.includes('，') || val.includes(';')) {
-                      handleAddLabel(val)
-                    } else {
-                      setLabelInput(val)
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ',') {
-                      e.preventDefault()
-                      handleAddLabel()
-                    } else if (e.key === 'Backspace' && !labelInput && labels.length > 0) {
-                      handleRemoveLabel(labels[labels.length - 1])
-                    }
-                  }}
-                  placeholder={labels.length === 0 ? t('board.labels_placeholder') : ''}
-                  className="bg-transparent border-0 outline-none text-xs flex-1 min-w-[80px] h-6 px-1 text-foreground placeholder:text-muted-foreground focus:ring-0 shadow-none"
-                />
-              </div>
+              <TagInput
+                value={labels}
+                onChange={setLabels}
+                placeholder={t('board.labels_placeholder')}
+                className="border-0 bg-muted/40 shadow-none"
+              />
             </div>
 
             {/* Live Usage (P1-08): same streamed session join as the cards */}
@@ -1198,7 +1121,7 @@ function NewTaskDialog({
   const [projectId, setProjectId] = useState(defaultProjectId ?? projects[0]?.id ?? '')
   const [assignedAgent, setAssignedAgent] = useState<ProviderKind | 'none'>('none')
   const [selectedModel, setSelectedModel] = useState<string>('')
-  const [labels, setLabels] = useState('')
+  const [labels, setLabels] = useState<string[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Compute available models for the assigned agent
@@ -1215,16 +1138,11 @@ function NewTaskDialog({
 
     setIsSubmitting(true)
     try {
-      const parsedLabels = labels
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean)
-
       const input: CreateTask = {
         projectId,
         title: title.trim(),
         description: description.trim(),
-        labels: parsedLabels,
+        labels,
         assignedAgent: assignedAgent === 'none' ? null : assignedAgent,
         model: assignedAgent !== 'none' && selectedModel ? selectedModel : undefined,
       }
@@ -1368,16 +1286,16 @@ function NewTaskDialog({
             )}
           </div>
 
-          {/* Labels */}
+          {/* Labels (TagInput) */}
           <div className="space-y-1">
             <label className="text-xs font-medium text-foreground">
               {t('board.labels')}
             </label>
-            <Input
+            <TagInput
               value={labels}
-              onChange={(e) => setLabels(e.target.value)}
+              onChange={setLabels}
               placeholder={t('board.labels_placeholder')}
-              className="h-8 text-xs"
+              className="border-0 bg-muted/40 shadow-none min-h-[32px] py-1"
             />
           </div>
 
