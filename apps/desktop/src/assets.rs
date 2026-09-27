@@ -220,6 +220,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "settings",
     "slash",
     "sparkle",
+    "sync-failed",
     "star",
     "star-filled",
     "stop",
