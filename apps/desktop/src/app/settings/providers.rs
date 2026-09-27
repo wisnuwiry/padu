@@ -40,6 +40,7 @@ impl Padu {
 
         let mut rows = div().mt(px(4.0)).flex().flex_col();
         let order = self.profile_row_order();
+        let neighbor_order = order.clone();
         let provider_count = order.len();
         let profiles_loaded = !self.agent_profiles.is_empty();
         for (index, kind) in order.into_iter().enumerate() {
@@ -157,6 +158,9 @@ impl Padu {
                 this.toggle_provider_expanded(kind, window, cx);
             }));
 
+            // Priority reorder column: keyboard up/down steppers flanking the
+            // drag handle (P1-03). Steppers move the row one slot toward the
+            // neighbor; drag keeps its existing drop-anywhere behavior.
             let drag_handle = if has_profile {
                 div()
                     .id(SharedString::from(format!("provider-drag-{}", kind.id())))
@@ -182,6 +186,73 @@ impl Padu {
                     )
                     .into_any_element()
             } else {
+                div().w(px(16.0)).h(px(24.0)).into_any_element()
+            };
+            let reorder_controls = if has_profile {
+                let step_button = |id: SharedString,
+                                   icon_path: &'static str,
+                                   tooltip: String,
+                                   mover: ProviderKind,
+                                   target: ProviderKind,
+                                   cx: &mut Context<Self>| {
+                    div()
+                        .id(id)
+                        .tab_index(0)
+                        .focus_visible(|style| style.border_color(theme.accent))
+                        .w(px(16.0))
+                        .h(px(14.0))
+                        .rounded(px(4.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_pointer()
+                        .hover(|element| element.bg(theme.overlay))
+                        .tooltip(Tooltip::text(tooltip))
+                        .child(icon(icon_path, 10.0, theme.text_tertiary))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.reorder_profile_priority(mover, target, cx);
+                        }))
+                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                this.reorder_profile_priority(mover, target, cx);
+                                cx.stop_propagation();
+                            }
+                        }))
+                        .into_any_element()
+                };
+                let up = if index > 0 {
+                    step_button(
+                        SharedString::from(format!("provider-move-up-{}", kind.id())),
+                        "icons/chevron-up.svg",
+                        tr!("providers.move_up", provider = kind.display_name()),
+                        kind,
+                        neighbor_order[index - 1],
+                        cx,
+                    )
+                } else {
+                    div().w(px(16.0)).h(px(14.0)).into_any_element()
+                };
+                let down = if index + 1 < provider_count {
+                    step_button(
+                        SharedString::from(format!("provider-move-down-{}", kind.id())),
+                        "icons/chevron-down.svg",
+                        tr!("providers.move_down", provider = kind.display_name()),
+                        neighbor_order[index + 1],
+                        kind,
+                        cx,
+                    )
+                } else {
+                    div().w(px(16.0)).h(px(14.0)).into_any_element()
+                };
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .child(up)
+                    .child(drag_handle)
+                    .child(down)
+                    .into_any_element()
+            } else {
                 div().w(px(16.0)).into_any_element()
             };
 
@@ -189,7 +260,7 @@ impl Padu {
                 .flex()
                 .items_center()
                 .gap(px(10.0))
-                .child(drag_handle)
+                .child(reorder_controls)
                 .child(
                     div()
                         .relative()

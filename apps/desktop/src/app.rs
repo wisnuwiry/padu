@@ -1666,10 +1666,6 @@ pub struct Padu {
     board_search: Entity<TextInput>,
     board_selected_task_id: Option<Uuid>,
     board_hydrated_task: Option<padu_client::kanban::Task>,
-    board_hydrated_markdown: RefCell<Option<(String, MarkdownView)>>,
-    board_hydrated_selection: TranscriptSelection,
-    board_hydrated_scroll_handle: ScrollHandle,
-    board_hydrated_scrollbar: Rc<ScrollbarState>,
     board_new_task_modal_open: bool,
     board_new_task_project_id: Option<Uuid>,
     board_new_task_title: Entity<TextInput>,
@@ -1677,6 +1673,11 @@ pub struct Padu {
     board_new_task_agent: Option<ProviderKind>,
     board_new_task_model: Option<String>,
     board_new_task_cancel_focus: FocusHandle,
+    board_edit_title: Entity<TextInput>,
+    board_edit_description: Entity<TextInput>,
+    board_edit_labels: Entity<TextInput>,
+    board_edit_agent: Option<ProviderKind>,
+    board_edit_saving: bool,
     board_collapsed_columns: std::collections::HashSet<padu_client::kanban::TaskStatus>,
     card_updated_events: Receiver<Uuid>,
     /// The Settings page's library snapshot, scanned off-thread. Frames read
@@ -2631,6 +2632,16 @@ impl Padu {
                 .syntax(Some("markdown"))
                 .placeholder(tr!("board.task_description"))
         });
+        let board_edit_title =
+            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("board.task_title")));
+        let board_edit_description = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .multi_line()
+                .syntax(Some("markdown"))
+                .placeholder(tr!("board.task_description"))
+        });
+        let board_edit_labels =
+            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("board.labels_placeholder")));
         let keybindings_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -3752,10 +3763,6 @@ impl Padu {
                 board_search,
                 board_selected_task_id: None,
                 board_hydrated_task: None,
-                board_hydrated_markdown: RefCell::new(None),
-                board_hydrated_selection: TranscriptSelection::default(),
-                board_hydrated_scroll_handle: ScrollHandle::new(),
-                board_hydrated_scrollbar: ScrollbarState::new(),
                 board_new_task_modal_open: false,
                 board_new_task_project_id: None,
                 board_new_task_title,
@@ -3763,6 +3770,11 @@ impl Padu {
                 board_new_task_agent: None,
                 board_new_task_model: None,
                 board_new_task_cancel_focus: cx.focus_handle(),
+                board_edit_title,
+                board_edit_description,
+                board_edit_labels,
+                board_edit_agent: None,
+                board_edit_saving: false,
                 board_collapsed_columns: std::collections::HashSet::new(),
                 notification_permission:
                     crate::platform::NotificationPermissionStatus::NotDetermined,

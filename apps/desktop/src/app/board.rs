@@ -3,8 +3,8 @@ use crate::model::ProviderKind;
 use crate::theme::{Theme, sp};
 use crate::ui::dialog::{dialog_backdrop, dialog_cancel_button, dialog_card};
 use crate::ui::text_field::TextField;
-use crate::ui::{icon, provider_icon, scrollbar};
-use padu_client::kanban::{CreateTask, TaskStatus, TaskSummary};
+use crate::ui::{icon, provider_icon};
+use padu_client::kanban::{CreateTask, Task, TaskStatus, TaskSummary};
 
 const BOARD_COLUMNS: [TaskStatus; 5] = [
     TaskStatus::Backlog,
@@ -12,6 +12,17 @@ const BOARD_COLUMNS: [TaskStatus; 5] = [
     TaskStatus::Running,
     TaskStatus::Review,
     TaskStatus::Done,
+];
+
+/// Curated assignee shortlist for the new-task modal. The detail drawer
+/// offers the full `ProviderKind::ALL` registry like the web client.
+const BOARD_MODAL_PROVIDERS: [ProviderKind; 6] = [
+    ProviderKind::Agy,
+    ProviderKind::Claude,
+    ProviderKind::Codex,
+    ProviderKind::Cursor,
+    ProviderKind::DeepSeek,
+    ProviderKind::OpenCode,
 ];
 
 pub fn task_status_label(status: TaskStatus) -> String {
@@ -32,6 +43,17 @@ pub fn task_status_color(status: TaskStatus, theme: &Theme) -> gpui::Hsla {
         TaskStatus::Review => theme.gauge,
         TaskStatus::Done => theme.success,
     }
+}
+
+/// Split the drawer's comma-separated labels input, mirroring the web
+/// client's label parsing in `board-page.tsx`.
+fn split_board_labels(input: &str) -> Vec<String> {
+    input
+        .split(',')
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 /// Live usage badges for a board card (P1-08).
@@ -105,10 +127,19 @@ pub fn task_live_badges(session: Option<&AgentSession>, now: u64) -> TaskLiveBad
     }
 }
 
+/// Which edit surface an assignee chip writes back to.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BoardAgentPickTarget {
+    NewTask,
+    Edit,
+}
+
 impl Padu {
     pub(super) fn open_board(&mut self, cx: &mut Context<Self>) {
         self.navigate_workspace_page(WorkspacePage::Board, cx);
         self.ensure_board_tasks_loaded(cx);
+        // Assignee pickers mark disabled profiles, so have the registry ready.
+        self.ensure_agent_profiles(false, cx);
     }
 
     pub(super) fn ensure_board_tasks_loaded(&mut self, cx: &mut Context<Self>) {
@@ -231,6 +262,14 @@ impl Padu {
     pub(super) fn select_board_task(&mut self, task_id: Option<Uuid>, cx: &mut Context<Self>) {
         self.board_selected_task_id = task_id;
         self.board_hydrated_task = None;
+        self.board_edit_agent = None;
+        self.board_edit_saving = false;
+        self.board_edit_title
+            .update(cx, |field, cx| field.set_content("", cx));
+        self.board_edit_description
+            .update(cx, |field, cx| field.set_content("", cx));
+        self.board_edit_labels
+            .update(cx, |field, cx| field.set_content("", cx));
         if let Some(id) = task_id {
             self.hydrate_selected_task(id, cx);
         }
@@ -257,7 +296,8 @@ impl Padu {
             let _ = padu.update(cx, |this, cx| match result {
                 Ok(task) => {
                     if this.board_selected_task_id == Some(task.id) {
-                        this.board_hydrated_task = Some(task);
+                        this.board_hydrated_task = Some(task.clone());
+                        this.sync_board_edit_fields(&task, cx);
                         cx.notify();
                     }
                 }
@@ -316,6 +356,101 @@ impl Padu {
         .detach();
     }
 
+    /// Whether the profile registry disables this provider for new work.
+    /// Unknown (not yet loaded) reads as enabled here — the daemon remains
+    /// the enforcing source of truth and re-resolves at queue time.
+    pub(super) fn board_profile_disabled(&self, provider: ProviderKind) -> bool {
+        self.agent_profiles
+            .iter()
+            .find(|profile| profile.agent_id == provider)
+            .is_some_and(|profile| !profile.enabled)
+    }
+
+    /// Fill the drawer's edit inputs from the hydrated task. Runs only on
+    /// hydrate (never while typing), so in-flight edits are never clobbered.
+    fn sync_board_edit_fields(&mut self, task: &Task, cx: &mut Context<Self>) {
+        self.board_edit_agent = task.assigned_agent;
+        self.board_edit_saving = false;
+        self.board_edit_title
+            .update(cx, |field, cx| field.set_content(&task.title, cx));
+        self.board_edit_description
+            .update(cx, |field, cx| field.set_content(&task.description, cx));
+        self.board_edit_labels.update(cx, |field, cx| {
+            field.set_content(&task.labels.join(", "), cx)
+        });
+    }
+
+    pub(super) fn save_board_task_edits(&mut self, cx: &mut Context<Self>) {
+        let Some(hydrated) = self.board_hydrated_task.clone() else {
+            return;
+        };
+        if self.board_edit_saving {
+            return;
+        }
+        let title = self.board_edit_title.read(cx).content().trim().to_owned();
+        if title.is_empty() {
+            return;
+        }
+        let description = self
+            .board_edit_description
+            .read(cx)
+            .content()
+            .trim()
+            .to_owned();
+        let labels = split_board_labels(&self.board_edit_labels.read(cx).content());
+        let mut updated = hydrated.clone();
+        updated.title = title;
+        updated.description = description;
+        updated.labels = labels;
+        updated.assigned_agent = self.board_edit_agent;
+        let expected_version = hydrated.version;
+        self.board_edit_saving = true;
+        cx.notify();
+
+        let daemon = self.daemon.clone();
+        cx.spawn(async move |padu, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let response = daemon.client().request(
+                        Uuid::nil(),
+                        Uuid::nil(),
+                        padu_client::Command::UpdateTask {
+                            task: updated,
+                            expected_version,
+                        },
+                    )?;
+                    let padu_client::ResponsePayload::TaskUpdated { task } = response else {
+                        anyhow::bail!("daemon returned an invalid TaskUpdated response");
+                    };
+                    Ok::<_, anyhow::Error>(task)
+                })
+                .await;
+            let _ = padu.update(cx, |this, cx| {
+                this.board_edit_saving = false;
+                match result {
+                    Ok(task) => {
+                        if let Some(summary) = this.board_tasks.iter_mut().find(|t| t.id == task.id)
+                        {
+                            *summary = TaskSummary::from_task(&task);
+                        }
+                        if this.board_selected_task_id == Some(task.id) {
+                            this.board_hydrated_task = Some(task.clone());
+                            this.sync_board_edit_fields(&task, cx);
+                        }
+                        this.show_success_toast(tr!("board.save"));
+                        cx.notify();
+                    }
+                    Err(error) => {
+                        this.show_toast(format!("Failed to save task: {error}"));
+                        this.load_board_tasks_from_daemon(cx);
+                    }
+                }
+            });
+        })
+        .detach();
+    }
+
     pub(super) fn board_models_for_provider(
         &self,
         provider: ProviderKind,
@@ -357,6 +492,22 @@ impl Padu {
             ProviderKind::OpenCode => vec![("default".into(), "Default".into())],
             _ => vec![],
         }
+    }
+
+    fn open_new_task_modal(&mut self, cx: &mut Context<Self>) {
+        self.board_new_task_modal_open = true;
+        self.board_new_task_title
+            .update(cx, |t, cx| t.set_content("", cx));
+        self.board_new_task_description
+            .update(cx, |t, cx| t.set_content("", cx));
+        self.board_new_task_project_id = self
+            .board_filter_project
+            .or_else(|| self.current_project_id());
+        self.board_new_task_agent = None;
+        self.board_new_task_model = None;
+        // Assignee chips mark disabled profiles, so have the registry ready.
+        self.ensure_agent_profiles(false, cx);
+        cx.notify();
     }
 
     pub(super) fn create_board_task(
@@ -763,10 +914,20 @@ impl Padu {
                                 },
                             ))
                             .child(tr!("board.needs_attention"))
+                            .tab_index(0)
+                            .focus_visible(|style| style.border_color(theme.accent))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.board_filter_needs_attention =
                                     !this.board_filter_needs_attention;
                                 cx.notify();
+                            }))
+                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    this.board_filter_needs_attention =
+                                        !this.board_filter_needs_attention;
+                                    cx.notify();
+                                    cx.stop_propagation();
+                                }
                             }))
                     })
                     // Sync Failed chip
@@ -809,9 +970,18 @@ impl Padu {
                                 },
                             ))
                             .child(tr!("board.sync_failed"))
+                            .tab_index(0)
+                            .focus_visible(|style| style.border_color(theme.accent))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.board_filter_sync_failed = !this.board_filter_sync_failed;
                                 cx.notify();
+                            }))
+                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    this.board_filter_sync_failed = !this.board_filter_sync_failed;
+                                    cx.notify();
+                                    cx.stop_propagation();
+                                }
                             }))
                     })
                     // Clear filters button if active
@@ -827,6 +997,8 @@ impl Padu {
                                 .text_color(theme.text_tertiary)
                                 .hover(|s| s.text_color(theme.text))
                                 .child(tr!("board.clear_filters"))
+                                .tab_index(0)
+                                .focus_visible(|style| style.border_color(theme.accent))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.board_filter_project = None;
                                     this.board_filter_agent = None;
@@ -834,6 +1006,17 @@ impl Padu {
                                     this.board_filter_sync_failed = false;
                                     this.board_search.update(cx, |s, cx| s.set_content("", cx));
                                     cx.notify();
+                                }))
+                                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                        this.board_filter_project = None;
+                                        this.board_filter_agent = None;
+                                        this.board_filter_needs_attention = false;
+                                        this.board_filter_sync_failed = false;
+                                        this.board_search.update(cx, |s, cx| s.set_content("", cx));
+                                        cx.notify();
+                                        cx.stop_propagation();
+                                    }
                                 })),
                         )
                     }),
@@ -858,8 +1041,16 @@ impl Padu {
                             .text_color(theme.text_secondary)
                             .hover(|s| s.bg(theme.overlay_strong).text_color(theme.text))
                             .child(icon("icons/rotate-cw.svg", 14.0, theme.text_secondary))
+                            .tab_index(0)
+                            .focus_visible(|style| style.border_color(theme.accent))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.load_board_tasks_from_daemon(cx);
+                            }))
+                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    this.load_board_tasks_from_daemon(cx);
+                                    cx.stop_propagation();
+                                }
                             })),
                     )
                     // New Task button
@@ -880,18 +1071,16 @@ impl Padu {
                             .hover(|s| s.opacity(0.92))
                             .child(icon("icons/plus.svg", 13.0, theme.on_inverse))
                             .child(tr!("board.new_task"))
+                            .tab_index(0)
+                            .focus_visible(|style| style.border_color(theme.accent))
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.board_new_task_modal_open = true;
-                                this.board_new_task_title
-                                    .update(cx, |t, cx| t.set_content("", cx));
-                                this.board_new_task_description
-                                    .update(cx, |t, cx| t.set_content("", cx));
-                                this.board_new_task_project_id = this
-                                    .board_filter_project
-                                    .or_else(|| this.current_project_id());
-                                this.board_new_task_agent = None;
-                                this.board_new_task_model = None;
-                                cx.notify();
+                                this.open_new_task_modal(cx);
+                            }))
+                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    this.open_new_task_modal(cx);
+                                    cx.stop_propagation();
+                                }
                             })),
                     ),
             );
@@ -935,9 +1124,18 @@ impl Padu {
                 .border_color(theme.border)
                 .cursor_pointer()
                 .hover(|s| s.bg(theme.inset))
+                .tab_index(0)
+                .focus_visible(|style| style.border_color(theme.accent))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.board_collapsed_columns.remove(&status_for_toggle);
                     cx.notify();
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        this.board_collapsed_columns.remove(&status_for_toggle);
+                        cx.notify();
+                        cx.stop_propagation();
+                    }
                 }))
                 .child(
                     div()
@@ -1049,10 +1247,19 @@ impl Padu {
                             .items_center()
                             .justify_center()
                             .hover(|s| s.bg(theme.overlay_strong))
+                            .tab_index(0)
+                            .focus_visible(|style| style.border_color(theme.accent))
                             .child(icon("icons/chevron-left.svg", 12.0, theme.text_tertiary))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.board_collapsed_columns.insert(status_for_collapse);
                                 cx.notify();
+                            }))
+                            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    this.board_collapsed_columns.insert(status_for_collapse);
+                                    cx.notify();
+                                    cx.stop_propagation();
+                                }
                             })),
                     ),
             );
@@ -1134,11 +1341,19 @@ impl Padu {
             .shadow_sm()
             .cursor_pointer()
             .hover(|s| s.border_color(theme.accent.opacity(0.8)))
+            .tab_index(0)
+            .focus_visible(|style| style.border_color(theme.accent))
             .flex()
             .flex_col()
             .gap(px(6.0))
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.select_board_task(Some(task_id), cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.select_board_task(Some(task_id), cx);
+                    cx.stop_propagation();
+                }
             }));
 
         // Title
@@ -1368,17 +1583,179 @@ impl Padu {
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(theme.text_secondary)
                         .hover(|s| s.bg(theme.overlay_strong).text_color(theme.text))
+                        .tab_index(0)
+                        .focus_visible(|style| style.border_color(theme.accent))
                         .child(icon(icon_path, 10.0, theme.text_secondary))
                         .child(label)
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.move_board_task(task_id, next_status, task_version, cx);
                             cx.stop_propagation();
+                        }))
+                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                this.move_board_task(task_id, next_status, task_version, cx);
+                                cx.stop_propagation();
+                            }
                         })),
                 ),
             );
         }
 
         card
+    }
+
+    /// Assignee chip row shared by the new-task modal and the detail drawer.
+    /// Disabled profiles render dimmed with a re-enable tooltip and are not
+    /// selectable (no tab stop, no action). `id_prefix` keeps element ids
+    /// unique per surface; `providers` lets the modal keep its curated six
+    /// while the drawer offers the full registry like the web client.
+    fn render_board_agent_chips(
+        &self,
+        selected: Option<ProviderKind>,
+        id_prefix: &str,
+        target: BoardAgentPickTarget,
+        providers: &[ProviderKind],
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let mut row = div().flex().flex_wrap().gap(px(6.0));
+        row = row.child(
+            div()
+                .id(SharedString::from(format!("{id_prefix}-agent-none")))
+                .h(px(24.0))
+                .px(px(8.0))
+                .rounded(px(4.0))
+                .cursor_pointer()
+                .flex()
+                .items_center()
+                .text_size(sp(11.0))
+                .font_weight(FontWeight::MEDIUM)
+                .tab_index(0)
+                .focus_visible(|style| style.border_color(theme.accent))
+                .when(selected.is_none(), |chip| {
+                    chip.bg(theme.accent.opacity(0.18))
+                        .text_color(theme.accent)
+                        .border_1()
+                        .border_color(theme.accent.opacity(0.4))
+                })
+                .when(selected.is_some(), |chip| {
+                    chip.bg(theme.inset)
+                        .text_color(theme.text_secondary)
+                        .border_1()
+                        .border_color(theme.border)
+                })
+                .child(tr!("board.no_agent"))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    match target {
+                        BoardAgentPickTarget::NewTask => {
+                            this.board_new_task_agent = None;
+                            this.board_new_task_model = None;
+                        }
+                        BoardAgentPickTarget::Edit => {
+                            this.board_edit_agent = None;
+                        }
+                    }
+                    cx.notify();
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        match target {
+                            BoardAgentPickTarget::NewTask => {
+                                this.board_new_task_agent = None;
+                                this.board_new_task_model = None;
+                            }
+                            BoardAgentPickTarget::Edit => {
+                                this.board_edit_agent = None;
+                            }
+                        }
+                        cx.notify();
+                        cx.stop_propagation();
+                    }
+                })),
+        );
+        for provider in providers {
+            let provider = *provider;
+            let is_selected = selected == Some(provider);
+            let is_disabled = self.board_profile_disabled(provider);
+            let mut chip = div()
+                .id(SharedString::from(format!(
+                    "{id_prefix}-agent-{}",
+                    provider.id()
+                )))
+                .h(px(24.0))
+                .px(px(8.0))
+                .rounded(px(4.0))
+                .flex()
+                .items_center()
+                .gap(px(4.0))
+                .text_size(sp(11.0))
+                .font_weight(FontWeight::MEDIUM)
+                .when(is_selected, |chip| {
+                    chip.bg(theme.accent.opacity(0.18))
+                        .text_color(theme.accent)
+                        .border_1()
+                        .border_color(theme.accent.opacity(0.4))
+                })
+                .when(!is_selected && !is_disabled, |chip| {
+                    chip.bg(theme.inset)
+                        .text_color(theme.text_secondary)
+                        .border_1()
+                        .border_color(theme.border)
+                        .cursor_pointer()
+                })
+                .when(is_disabled, |chip| {
+                    chip.bg(theme.inset)
+                        .text_color(theme.text_ghost)
+                        .border_1()
+                        .border_color(theme.border)
+                        .opacity(0.55)
+                        .tooltip(Tooltip::text(tr!("board.agent_disabled_tooltip")))
+                })
+                .child(icon(
+                    provider_icon(provider),
+                    11.0,
+                    if is_selected {
+                        theme.accent
+                    } else {
+                        theme.text_secondary
+                    },
+                ))
+                .child(provider.short_name());
+            if !is_disabled {
+                chip = chip
+                    .tab_index(0)
+                    .focus_visible(|style| style.border_color(theme.accent))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        match target {
+                            BoardAgentPickTarget::NewTask => {
+                                this.board_new_task_agent = Some(provider);
+                                this.board_new_task_model = None;
+                            }
+                            BoardAgentPickTarget::Edit => {
+                                this.board_edit_agent = Some(provider);
+                            }
+                        }
+                        cx.notify();
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            match target {
+                                BoardAgentPickTarget::NewTask => {
+                                    this.board_new_task_agent = Some(provider);
+                                    this.board_new_task_model = None;
+                                }
+                                BoardAgentPickTarget::Edit => {
+                                    this.board_edit_agent = Some(provider);
+                                }
+                            }
+                            cx.notify();
+                            cx.stop_propagation();
+                        }
+                    }));
+            }
+            row = row.child(chip);
+        }
+        row
     }
 
     fn render_task_detail_drawer(
@@ -1427,11 +1804,6 @@ impl Padu {
             .as_ref()
             .and_then(|t| t.model.clone())
             .or_else(|| task_summary.as_ref().and_then(|t| t.model.clone()));
-        let description = hydrated
-            .as_ref()
-            .map(|t| t.description.clone())
-            .or_else(|| task_summary.as_ref().map(|t| t.description_preview.clone()))
-            .unwrap_or_default();
 
         let mut drawer = div()
             .id("task-detail-drawer")
@@ -1485,21 +1857,47 @@ impl Padu {
                     .items_center()
                     .justify_center()
                     .hover(|s| s.bg(theme.overlay_strong))
+                    .tab_index(0)
+                    .focus_visible(|style| style.border_color(theme.accent))
                     .child(icon("icons/slash.svg", 14.0, theme.text_secondary))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.select_board_task(None, cx);
+                    }))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space" | "escape") {
+                            this.select_board_task(None, cx);
+                            cx.stop_propagation();
+                        }
                     })),
             );
 
         drawer = drawer.child(header);
 
-        // Task Title
+        // Task Title (editable — Save persists via UpdateTask)
+        let edit_title = self.board_edit_title.clone();
         drawer = drawer.child(
             div()
-                .text_size(sp(16.0))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme.text)
-                .child(title.clone()),
+                .flex()
+                .flex_col()
+                .gap(px(4.0))
+                .child(
+                    div()
+                        .text_size(sp(12.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text_secondary)
+                        .child(tr!("board.task_title")),
+                )
+                .child(
+                    div()
+                        .min_h(px(32.0))
+                        .rounded(px(6.0))
+                        .bg(theme.inset)
+                        .border_1()
+                        .border_color(theme.border)
+                        .px(px(8.0))
+                        .py(px(4.0))
+                        .child(TextField::new("task-edit-title", edit_title)),
+                ),
         );
 
         // Status Changer Buttons Row
@@ -1534,8 +1932,16 @@ impl Padu {
                             .border_color(theme.border)
                             .cursor_pointer()
                             .hover(|st| st.bg(theme.overlay_strong).text_color(theme.text))
+                            .tab_index(0)
+                            .focus_visible(|style| style.border_color(theme.accent))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.move_board_task(task_id, s, version, cx);
+                            }))
+                            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    this.move_board_task(task_id, s, version, cx);
+                                    cx.stop_propagation();
+                                }
                             }))
                     })
                     .when(is_running && !is_current, |btn| {
@@ -1701,16 +2107,72 @@ impl Padu {
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(theme.accent)
                             .hover(|s| s.bg(theme.accent.opacity(0.2)))
+                            .tab_index(0)
+                            .focus_visible(|style| style.border_color(theme.accent))
                             .child(icon("icons/external-link.svg", 11.0, theme.accent))
                             .child(tr!("board.open_in_chat"))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.select_session(sid, cx);
+                            }))
+                            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    this.select_session(sid, cx);
+                                    cx.stop_propagation();
+                                }
                             })),
                     ),
             );
         }
 
         drawer = drawer.child(info_section);
+
+        // Edit section: assignee chips + labels (title above, description below)
+        drawer = drawer.child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(4.0))
+                .child(
+                    div()
+                        .text_size(sp(12.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text_secondary)
+                        .child(tr!("board.assigned_agent")),
+                )
+                .child(self.render_board_agent_chips(
+                    self.board_edit_agent,
+                    "task-edit",
+                    BoardAgentPickTarget::Edit,
+                    &ProviderKind::ALL,
+                    theme,
+                    cx,
+                )),
+        );
+        let edit_labels = self.board_edit_labels.clone();
+        drawer = drawer.child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(4.0))
+                .child(
+                    div()
+                        .text_size(sp(12.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text_secondary)
+                        .child(tr!("board.labels")),
+                )
+                .child(
+                    div()
+                        .h(px(32.0))
+                        .rounded(px(6.0))
+                        .bg(theme.inset)
+                        .border_1()
+                        .border_color(theme.border)
+                        .px(px(8.0))
+                        .py(px(4.0))
+                        .child(TextField::new("task-edit-labels", edit_labels)),
+                ),
+        );
 
         // Alert banners
         if needs_attention {
@@ -1769,97 +2231,125 @@ impl Padu {
             );
         }
 
-        // Markdown Description
-        let palette = MarkdownPalette::from_theme(theme);
-        let cache_key = format!("task:{}", task_id);
-        let mut cache = self.board_hydrated_markdown.borrow_mut();
-        if !matches!(cache.as_ref(), Some((key, _)) if key == &cache_key) {
-            *cache = Some((cache_key.clone(), MarkdownView::new()));
-        }
-        let (_, view) = cache.as_mut().expect("task markdown cache entry");
-        view.set_text(&description, false);
-        let md_ctx = MarkdownCtx::new(
-            format!("task-desc-{}", task_id),
-            &palette,
-            self.scaled_markdown_metrics(MarkdownMetrics::BODY),
-            self.board_hydrated_selection.clone(),
-        );
-        let document = crate::md::render::markdown(view, &md_ctx);
-        drop(cache);
-
-        let selection_input = canvas(|_, _, _| (), {
-            let selection = self.board_hydrated_selection.clone();
-            move |_, _, window, _| crate::md::render::install_selection_input(window, &selection)
-        })
-        .absolute()
-        .w(px(0.0))
-        .h(px(0.0));
-
-        let desc_pane = div()
-            .flex_1()
-            .min_h_0()
-            .relative()
-            .rounded(px(8.0))
-            .bg(theme.inset)
-            .child(
-                div()
-                    .id("task-desc-scroll")
-                    .size_full()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.board_hydrated_scroll_handle)
-                    .p(px(12.0))
-                    .child(crate::md::render::frame_reset(
-                        self.board_hydrated_selection.clone(),
-                    ))
-                    .child(
-                        div()
-                            .w_full()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .whitespace_normal()
-                            .children(document),
-                    )
-                    .child(selection_input),
-            )
-            .child(scrollbar::vertical(
-                &self.board_hydrated_scroll_handle,
-                &self.board_hydrated_scrollbar,
-            ));
-
-        drawer = drawer.child(desc_pane);
-
-        // Delete button at bottom
-        let title_for_delete = title.clone();
+        // Description editor + Save row (UpdateTask with version guard)
+        let edit_description = self.board_edit_description.clone();
+        let can_save = hydrated.is_some()
+            && !self.board_edit_saving
+            && !self.board_edit_title.read(cx).content().trim().is_empty();
         drawer = drawer.child(
-            div().flex().justify_end().child(
-                div()
-                    .id("task-delete-button")
-                    .h(px(28.0))
-                    .px(px(10.0))
-                    .rounded(px(6.0))
-                    .bg(theme.danger.opacity(0.12))
-                    .border_1()
-                    .border_color(theme.danger.opacity(0.3))
-                    .cursor_pointer()
-                    .flex()
-                    .items_center()
-                    .gap(px(4.0))
-                    .text_size(sp(12.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.danger)
-                    .hover(|s| s.bg(theme.danger.opacity(0.2)))
-                    .child(icon("icons/trash.svg", 12.0, theme.danger))
-                    .child(tr!("board.delete_task"))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.confirm_delete_task(
-                            task_id,
-                            title_for_delete.clone(),
-                            version,
-                            window,
-                            cx,
-                        );
-                    })),
-            ),
+            div()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .gap(px(4.0))
+                .child(
+                    div()
+                        .text_size(sp(12.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text_secondary)
+                        .child(tr!("board.task_description")),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h(px(96.0))
+                        .rounded(px(8.0))
+                        .bg(theme.inset)
+                        .border_1()
+                        .border_color(theme.border)
+                        .px(px(8.0))
+                        .py(px(6.0))
+                        .child(TextField::new("task-edit-description", edit_description)),
+                ),
+        );
+
+        // Footer: Delete on the left, Save on the right
+        let title_for_delete_click = title.clone();
+        let title_for_delete_key = title.clone();
+        drawer = drawer.child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(
+                    div()
+                        .id("task-delete-button")
+                        .h(px(28.0))
+                        .px(px(10.0))
+                        .rounded(px(6.0))
+                        .bg(theme.danger.opacity(0.12))
+                        .border_1()
+                        .border_color(theme.danger.opacity(0.3))
+                        .cursor_pointer()
+                        .flex()
+                        .items_center()
+                        .gap(px(4.0))
+                        .text_size(sp(12.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.danger)
+                        .hover(|s| s.bg(theme.danger.opacity(0.2)))
+                        .tab_index(0)
+                        .focus_visible(|style| style.border_color(theme.danger))
+                        .child(icon("icons/trash.svg", 12.0, theme.danger))
+                        .child(tr!("board.delete_task"))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.confirm_delete_task(
+                                task_id,
+                                title_for_delete_click.clone(),
+                                version,
+                                window,
+                                cx,
+                            );
+                        }))
+                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                this.confirm_delete_task(
+                                    task_id,
+                                    title_for_delete_key.clone(),
+                                    version,
+                                    window,
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }
+                        })),
+                )
+                .child(
+                    div()
+                        .id("task-edit-save")
+                        .h(px(28.0))
+                        .px(px(14.0))
+                        .rounded(px(6.0))
+                        .bg(theme.inverse)
+                        .text_color(theme.on_inverse)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_size(sp(12.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .when(can_save, |element| {
+                            element
+                                .cursor_pointer()
+                                .hover(|s| s.opacity(0.92))
+                                .tab_index(0)
+                                .focus_visible(|style| style.border_color(theme.accent))
+                        })
+                        .when(!can_save, |element| element.opacity(0.45))
+                        .child(tr!("board.save"))
+                        .when(can_save, |element| {
+                            element
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.save_board_task_edits(cx);
+                                }))
+                                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                        this.save_board_task_edits(cx);
+                                        cx.stop_propagation();
+                                    }
+                                }))
+                        }),
+                ),
         );
 
         drawer
@@ -1994,7 +2484,7 @@ impl Padu {
                                     TextField::new("new-task-description", desc_input.clone()),
                                 )),
                         )
-                        // Agent selector chips
+                        // Agent selector chips (disabled profiles unselectable)
                         .child(
                             div()
                                 .flex()
@@ -2007,95 +2497,14 @@ impl Padu {
                                         .text_color(theme.text_secondary)
                                         .child(tr!("board.assigned_agent")),
                                 )
-                                .child({
-                                    let mut row = div().flex().flex_wrap().gap(px(6.0));
-                                    // Unassigned chip
-                                    row = row.child(
-                                        div()
-                                            .id("board-new-task-agent-none")
-                                            .h(px(24.0))
-                                            .px(px(8.0))
-                                            .rounded(px(4.0))
-                                            .cursor_pointer()
-                                            .flex()
-                                            .items_center()
-                                            .text_size(sp(11.0))
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .when(agent.is_none(), |chip| {
-                                                chip.bg(theme.accent.opacity(0.18))
-                                                    .text_color(theme.accent)
-                                                    .border_1()
-                                                    .border_color(theme.accent.opacity(0.4))
-                                            })
-                                            .when(agent.is_some(), |chip| {
-                                                chip.bg(theme.inset)
-                                                    .text_color(theme.text_secondary)
-                                                    .border_1()
-                                                    .border_color(theme.border)
-                                            })
-                                            .child(tr!("board.no_agent"))
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.board_new_task_agent = None;
-                                                this.board_new_task_model = None;
-                                                cx.notify();
-                                            })),
-                                    );
-                                    for p in [
-                                        ProviderKind::Agy,
-                                        ProviderKind::Claude,
-                                        ProviderKind::Codex,
-                                        ProviderKind::Cursor,
-                                        ProviderKind::DeepSeek,
-                                        ProviderKind::OpenCode,
-                                    ] {
-                                        let selected = agent == Some(p);
-                                        let p_id = p.id();
-                                        row = row.child(
-                                            div()
-                                                .id(SharedString::from(format!(
-                                                    "board-new-task-agent-{}",
-                                                    p_id
-                                                )))
-                                                .h(px(24.0))
-                                                .px(px(8.0))
-                                                .rounded(px(4.0))
-                                                .cursor_pointer()
-                                                .flex()
-                                                .items_center()
-                                                .gap(px(4.0))
-                                                .text_size(sp(11.0))
-                                                .font_weight(FontWeight::MEDIUM)
-                                                .when(selected, |chip| {
-                                                    chip.bg(theme.accent.opacity(0.18))
-                                                        .text_color(theme.accent)
-                                                        .border_1()
-                                                        .border_color(theme.accent.opacity(0.4))
-                                                })
-                                                .when(!selected, |chip| {
-                                                    chip.bg(theme.inset)
-                                                        .text_color(theme.text_secondary)
-                                                        .border_1()
-                                                        .border_color(theme.border)
-                                                })
-                                                .child(icon(
-                                                    provider_icon(p),
-                                                    11.0,
-                                                    if selected {
-                                                        theme.accent
-                                                    } else {
-                                                        theme.text_secondary
-                                                    },
-                                                ))
-                                                .child(p.short_name())
-                                                .on_click(cx.listener(move |this, _, _, cx| {
-                                                    this.board_new_task_agent = Some(p);
-                                                    this.board_new_task_model = None;
-                                                    cx.notify();
-                                                })),
-                                        );
-                                    }
-                                    row
-                                }),
+                                .child(self.render_board_agent_chips(
+                                    agent,
+                                    "board-new-task",
+                                    BoardAgentPickTarget::NewTask,
+                                    &BOARD_MODAL_PROVIDERS,
+                                    theme,
+                                    cx,
+                                )),
                         )
                         // Model selector chips (only when agent is selected)
                         .when_some(agent, |element, p| {
@@ -2387,6 +2796,19 @@ mod tests {
         assert_eq!(badges.tokens, Some(4_000));
         // No turns and no goal time: idle wall clock from `updated_at`.
         assert_eq!(badges.duration_secs, Some(1_000));
+    }
+
+    #[test]
+    fn drawer_labels_split_on_commas_and_trim() {
+        assert!(split_board_labels("").is_empty());
+        assert_eq!(
+            split_board_labels("bug, feature ,,  refactor "),
+            vec![
+                "bug".to_owned(),
+                "feature".to_owned(),
+                "refactor".to_owned()
+            ]
+        );
     }
 
     #[test]
