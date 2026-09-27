@@ -34,6 +34,77 @@ pub fn task_status_color(status: TaskStatus, theme: &Theme) -> gpui::Hsla {
     }
 }
 
+/// Live usage badges for a board card (P1-08).
+///
+/// The board joins each card's `session_id` to the in-memory `AgentSession`
+/// catalog, which already streams `UsageUpdated` / turn events at commit
+/// cadence (≤ ~8.3 Hz). Badges therefore refresh with the transcript: no UI
+/// polling, no I/O in `render` — a missing session simply means "not known
+/// yet" and renders no badges.
+///
+/// Tokens prefer `context_usage.tokens`, falling back to the Codex
+/// `thread_goal` ledger (whichever is larger). Duration sums settled turn
+/// spans plus the live running turn via `now`, falling back to the goal's
+/// `time_used_seconds` and finally the session wall clock. There is no live
+/// USD cost on the wire (costs only exist in the scanned `usage_history`),
+/// so tokens are the cost proxy.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TaskLiveBadges {
+    pub tokens: Option<u64>,
+    pub duration_secs: Option<u64>,
+}
+
+pub fn task_live_badges(session: Option<&AgentSession>, now: u64) -> TaskLiveBadges {
+    let Some(session) = session else {
+        return TaskLiveBadges::default();
+    };
+    let mut tokens = session.context_usage.map(|usage| usage.tokens);
+    if let Some(goal) = session.thread_goal.as_ref() {
+        let goal_tokens = goal.tokens_used.max(0) as u64;
+        tokens = Some(match tokens {
+            Some(current) => current.max(goal_tokens),
+            None => goal_tokens,
+        });
+    }
+    let tokens = tokens.filter(|count| *count > 0);
+
+    let mut duration_secs: Option<u64> = if session.turns.is_empty() {
+        None
+    } else {
+        Some(
+            session
+                .turns
+                .iter()
+                .map(|turn| {
+                    turn.completed_at
+                        .unwrap_or(now)
+                        .saturating_sub(turn.started_at)
+                })
+                .fold(0u64, |total, span| total.saturating_add(span)),
+        )
+    };
+    if duration_secs.is_none()
+        && let Some(goal) = session.thread_goal.as_ref()
+        && goal.time_used_seconds > 0
+    {
+        duration_secs = Some(goal.time_used_seconds.max(0) as u64);
+    }
+    if duration_secs.is_none() {
+        let end = if session.status.is_busy() {
+            now
+        } else {
+            session.last_reply_at.unwrap_or(session.updated_at)
+        };
+        duration_secs = Some(end.saturating_sub(session.created_at));
+    }
+    let duration_secs = duration_secs.filter(|secs| *secs > 0);
+
+    TaskLiveBadges {
+        tokens,
+        duration_secs,
+    }
+}
+
 impl Padu {
     pub(super) fn open_board(&mut self, cx: &mut Context<Self>) {
         self.navigate_workspace_page(WorkspacePage::Board, cx);
@@ -393,6 +464,18 @@ impl Padu {
             .cloned()
             .collect();
 
+        // Live usage badges, resolved once per frame from the in-memory
+        // session catalog (P1-08). The catalog already streams usage/turn
+        // events at commit cadence, so cards stay live with no polling and
+        // row builders below only do O(1) map lookups — no I/O in `render`.
+        let now = unix_time();
+        let live_badges: HashMap<Uuid, TaskLiveBadges> = self
+            .state
+            .sessions
+            .iter()
+            .map(|session| (session.id, task_live_badges(Some(session), now)))
+            .collect();
+
         // Root container
         let mut page = div()
             .id("board-page")
@@ -424,6 +507,7 @@ impl Padu {
                 status,
                 column_tasks,
                 selected_task_id,
+                &live_badges,
                 &theme,
                 window,
                 cx,
@@ -820,6 +904,7 @@ impl Padu {
         status: TaskStatus,
         tasks: Vec<TaskSummary>,
         selected_task_id: Option<Uuid>,
+        live_badges: &HashMap<Uuid, TaskLiveBadges>,
         theme: &Theme,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -1003,8 +1088,10 @@ impl Padu {
             );
         } else {
             for task in &tasks {
+                let live = live_badges.get(&task.id).copied().unwrap_or_default();
                 card_list = card_list.child(self.render_task_card(
                     task,
+                    live,
                     selected_task_id == Some(task.id),
                     theme,
                     window,
@@ -1019,6 +1106,7 @@ impl Padu {
     fn render_task_card(
         &self,
         task: &TaskSummary,
+        live: TaskLiveBadges,
         is_selected: bool,
         theme: &Theme,
         _window: &mut Window,
@@ -1193,6 +1281,50 @@ impl Padu {
                             .text_size(sp(10.0))
                             .text_color(theme.text_tertiary)
                             .child(tr!("board.linked_session")),
+                    ),
+            );
+        }
+
+        // Live usage badges (P1-08): tokens + duration from the linked
+        // session's streamed usage events. Icon + text, never color alone.
+        if let Some(tokens) = live.tokens {
+            badges_row = badges_row.child(
+                div()
+                    .h(px(18.0))
+                    .px(px(5.0))
+                    .rounded(px(4.0))
+                    .bg(theme.surface)
+                    .border_1()
+                    .border_color(theme.border)
+                    .flex()
+                    .items_center()
+                    .gap(px(3.0))
+                    .child(icon("icons/zap.svg", 10.0, theme.text_tertiary))
+                    .child(
+                        div()
+                            .text_size(sp(10.0))
+                            .text_color(theme.text_secondary)
+                            .child(crate::usage::format_tokens(tokens)),
+                    ),
+            );
+        }
+
+        if let Some(duration) = live.duration_secs {
+            badges_row = badges_row.child(
+                div()
+                    .h(px(18.0))
+                    .px(px(5.0))
+                    .rounded(px(4.0))
+                    .bg(theme.surface)
+                    .border_1()
+                    .border_color(theme.border)
+                    .flex()
+                    .items_center()
+                    .child(
+                        div()
+                            .text_size(sp(10.0))
+                            .text_color(theme.text_secondary)
+                            .child(super::transcript::format_working_elapsed(duration)),
                     ),
             );
         }
@@ -1490,6 +1622,50 @@ impl Padu {
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme.text)
                                     .child(m),
+                            ),
+                    ),
+            );
+        }
+
+        // Live usage row (P1-08): same streamed session join as the cards.
+        let live = session_id
+            .and_then(|sid| self.state.sessions.iter().find(|s| s.id == sid))
+            .map(|session| task_live_badges(Some(session), unix_time()))
+            .unwrap_or_default();
+        if live.tokens.is_some() || live.duration_secs.is_some() {
+            let mut value = String::new();
+            if let Some(tokens) = live.tokens {
+                value.push_str(&crate::usage::format_tokens(tokens));
+            }
+            if let Some(duration) = live.duration_secs {
+                if !value.is_empty() {
+                    value.push_str(" · ");
+                }
+                value.push_str(&super::transcript::format_working_elapsed(duration));
+            }
+            info_section = info_section.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_size(sp(12.0))
+                            .text_color(theme.text_secondary)
+                            .child(tr!("board.live_usage")),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(4.0))
+                            .child(icon("icons/zap.svg", 11.0, theme.text_secondary))
+                            .child(
+                                div()
+                                    .text_size(sp(12.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(value),
                             ),
                     ),
             );
@@ -2077,5 +2253,179 @@ impl Padu {
             },
             card,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::*;
+    use crate::model::{
+        AgentTurn, ContextUsage, InteractionMode, RuntimeMode, SessionStatus, SessionWorkspace,
+        ThreadGoal, ThreadGoalStatus, TurnStatus,
+    };
+
+    fn test_session() -> AgentSession {
+        AgentSession {
+            id: Uuid::new_v4(),
+            title: String::from("test session"),
+            auto_title: None,
+            project_id: Uuid::new_v4(),
+            workspace: SessionWorkspace::Local,
+            provider: ProviderKind::Codex,
+            model: None,
+            runtime_mode: RuntimeMode::FullAccess,
+            interaction_mode: InteractionMode::Build,
+            reasoning_effort: None,
+            service_tier: None,
+            context_window: None,
+            agent_preset: None,
+            status: SessionStatus::Working,
+            created_at: 1_000,
+            updated_at: 2_000,
+            last_reply_at: None,
+            pinned_at: None,
+            archived_at: None,
+            provider_cursor: None,
+            available_commands: Vec::new(),
+            thread_goal: None,
+            context_usage: None,
+            runtime_event_cursor: None,
+            provider_session_id: None,
+            messages: Vec::new(),
+            transcript_blocks: Vec::new(),
+            turns: Vec::new(),
+            queued_messages: Vec::new(),
+            detail_loaded: true,
+        }
+    }
+
+    fn test_turn(started_at: u64, completed_at: Option<u64>) -> AgentTurn {
+        AgentTurn {
+            id: Uuid::new_v4(),
+            turn_count: 1,
+            status: TurnStatus::Completed,
+            provider_turn_started: false,
+            provider_resume_at: None,
+            started_at,
+            completed_at,
+            checkpoint: None,
+        }
+    }
+
+    fn test_summary(index: u64, session_id: Option<Uuid>) -> TaskSummary {
+        TaskSummary {
+            id: Uuid::from_u128(index as u128),
+            project_id: Uuid::nil(),
+            title: format!("task {index}"),
+            description_preview: String::new(),
+            status: TaskStatus::Running,
+            assigned_agent: None,
+            model: None,
+            session_id,
+            labels: Vec::new(),
+            needs_attention: false,
+            sync_failed: None,
+            updated_at: 2_000,
+            version: 1,
+            archived: false,
+        }
+    }
+
+    #[test]
+    fn live_badges_absent_without_session() {
+        assert_eq!(task_live_badges(None, 5_000), TaskLiveBadges::default());
+    }
+
+    #[test]
+    fn live_badges_hide_zero_usage_but_tick_busy_wall_clock() {
+        let session = test_session();
+        assert_eq!(
+            task_live_badges(Some(&session), 5_000),
+            TaskLiveBadges {
+                tokens: None,
+                duration_secs: Some(4_000),
+            }
+        );
+    }
+
+    #[test]
+    fn live_badges_read_context_usage_and_turns() {
+        let mut session = test_session();
+        session.context_usage = Some(ContextUsage {
+            tokens: 12_500,
+            window: Some(200_000),
+        });
+        session.turns = vec![test_turn(1_000, Some(1_060)), test_turn(2_000, None)];
+        // The open turn ticks against `now`.
+        assert_eq!(
+            task_live_badges(Some(&session), 2_030),
+            TaskLiveBadges {
+                tokens: Some(12_500),
+                duration_secs: Some(90),
+            }
+        );
+    }
+
+    #[test]
+    fn live_badges_prefer_larger_goal_ledger() {
+        let mut session = test_session();
+        session.status = SessionStatus::Idle;
+        session.context_usage = Some(ContextUsage {
+            tokens: 100,
+            window: None,
+        });
+        session.thread_goal = Some(ThreadGoal {
+            objective: String::from("goal"),
+            status: ThreadGoalStatus::Active,
+            token_budget: Some(50_000),
+            tokens_used: 4_000,
+            time_used_seconds: 0,
+        });
+        let badges = task_live_badges(Some(&session), 9_000);
+        assert_eq!(badges.tokens, Some(4_000));
+        // No turns and no goal time: idle wall clock from `updated_at`.
+        assert_eq!(badges.duration_secs, Some(1_000));
+    }
+
+    #[test]
+    fn live_badges_stay_interactive_with_500_cards() {
+        let now = 1_000_000u64;
+        let mut sessions = Vec::with_capacity(500);
+        let mut summaries = Vec::with_capacity(500);
+        for index in 0..500u64 {
+            let session_id = Uuid::from_u128(1_000_000 + index as u128);
+            let mut session = test_session();
+            session.id = session_id;
+            session.context_usage = Some(ContextUsage {
+                tokens: 1_000 + index,
+                window: None,
+            });
+            session.turns = vec![test_turn(now - 300, Some(now - 240))];
+            sessions.push(session);
+            summaries.push(test_summary(index, Some(session_id)));
+        }
+
+        let started = Instant::now();
+        // One pass per frame, then O(1) lookups per visible row — the same
+        // shape as `render_board_page`.
+        let live: HashMap<Uuid, TaskLiveBadges> = sessions
+            .iter()
+            .map(|session| (session.id, task_live_badges(Some(session), now)))
+            .collect();
+        let mut rendered = 0u64;
+        for summary in &summaries {
+            if let Some(badges) = summary.session_id.and_then(|id| live.get(&id).copied()) {
+                rendered += u64::from(badges.tokens.is_some());
+            }
+        }
+        let elapsed = started.elapsed();
+
+        assert_eq!(rendered, 500);
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "500-card badge join took {elapsed:?}"
+        );
     }
 }
