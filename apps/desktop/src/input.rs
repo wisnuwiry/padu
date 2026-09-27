@@ -618,6 +618,10 @@ pub struct TextInput {
     /// changes, so a manual wheel scroll away from the caret holds until the
     /// caret itself next moves.
     caret_reconciled: Option<(usize, usize, Pixels)>,
+    /// The `(caret, content length, layout width)` the horizontal viewport last
+    /// followed. Prepaint pans the caret back into view only when the cursor
+    /// or content changes, so horizontal scrolling away from the caret holds.
+    h_caret_reconciled: Option<(usize, usize, Pixels)>,
     last_layout: Option<TextLayout>,
     /// Source/display mapping paired with `last_layout`.
     last_projection: Option<InlineFileProjection>,
@@ -698,6 +702,7 @@ impl TextInput {
             scrollbar_state: ScrollbarState::new(),
             padding_x: px(0.),
             caret_reconciled: None,
+            h_caret_reconciled: None,
             last_layout: None,
             last_projection: None,
             hovered_inline_file: None,
@@ -816,6 +821,8 @@ impl TextInput {
             return;
         }
         self.wrap = wrap;
+        self.caret_reconciled = None;
+        self.h_caret_reconciled = None;
         cx.notify();
     }
 
@@ -2668,7 +2675,13 @@ impl Element for InputElement {
             });
             // Only an unwrapped field pans horizontally, and only when the
             // embedding view gave it a viewport to follow.
-            let follow_x = (!input.wrap).then(|| input.h_scroll.clone()).flatten();
+            let follow_x = (!input.wrap).then(|| {
+                (
+                    (cursor, input.content.len(), layout.bounds().size.width),
+                    input.h_caret_reconciled,
+                    input.h_scroll.clone(),
+                )
+            });
             (cursor_position, quad, follow, follow_x)
         };
         if let Some((follow_state, reconciled, scroll_handle)) = follow
@@ -2680,10 +2693,14 @@ impl Element for InputElement {
             self.input
                 .update(cx, |input, _| input.caret_reconciled = Some(follow_state));
         }
-        if let Some(scroll_handle) = follow_x
-            && let Some(position) = cursor_position
+        if let Some((follow_state, reconciled, Some(scroll_handle))) = follow_x
+            && reconciled != Some(follow_state)
         {
-            follow_caret_x(position, &scroll_handle, window);
+            if let Some(position) = cursor_position {
+                follow_caret_x(position, &scroll_handle, window);
+            }
+            self.input
+                .update(cx, |input, _| input.h_caret_reconciled = Some(follow_state));
         }
         PrepaintState { cursor }
     }
@@ -3288,6 +3305,14 @@ mod tests {
             max.x > px(0.),
             "an unwrapped field must give its pane something to pan, got {max:?}"
         );
+
+        // Manual horizontal pan holds across frames when the cursor has not moved.
+        cx.update_entity(&harness, |harness, _| {
+            harness.pane.set_offset(gpui::point(-px(50.), px(0.)));
+        });
+        cx.run_until_parked();
+        let offset = cx.read_entity(&harness, |harness, _| harness.pane.offset());
+        assert_eq!(offset.x, -px(50.));
     }
 
     #[gpui::test]

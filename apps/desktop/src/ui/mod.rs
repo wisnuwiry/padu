@@ -155,9 +155,18 @@ pub fn contain_horizontal_scroll(
     }
     let delta = event.delta.pixel_delta(window.line_height());
     if delta.x != Pixels::ZERO {
-        // GPUI's own handler already moved the pane by this delta.
-        if nested_scroll_consumed_delta(handle.offset().x, max_offset) {
-            cx.stop_propagation();
+        // If the gesture is primarily vertical, do not contain it here — let it bubble
+        // to the enclosing vertical scroller.
+        if delta.x.abs() > delta.y.abs() {
+            let offset_x = handle.offset().x;
+            let consumed = if delta.x > Pixels::ZERO {
+                offset_x < px(0.0)
+            } else {
+                offset_x > -max_offset
+            };
+            if consumed {
+                cx.stop_propagation();
+            }
         }
         return;
     }
@@ -166,7 +175,7 @@ pub fn contain_horizontal_scroll(
     }
     let offset = handle.offset();
     let scrolled = -offset.x;
-    let next = (scrolled + delta.y).clamp(Pixels::ZERO, max_offset);
+    let next = (scrolled - delta.y).clamp(Pixels::ZERO, max_offset);
     if next == scrolled {
         return;
     }
