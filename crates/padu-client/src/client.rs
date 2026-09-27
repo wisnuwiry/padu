@@ -436,6 +436,7 @@ fn run_client(
     // `processExited` event emitted by the daemon.
     drop(std::mem::take(&mut *inner.sessions.lock()));
     inner.task_state_subscribers.lock().clear();
+    inner.card_updated_subscribers.lock().clear();
 }
 
 fn set_client_read_timeout(

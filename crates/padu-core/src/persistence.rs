@@ -4310,11 +4310,20 @@ mod tests {
         }
 
         // ...and the automation migrations re-apply cleanly afterwards. Every
-        // migration touching the profile table is cleared, so multi-step
-        // features like the profile table + version column rebuild together.
+        // migration touching a dropped table is cleared, so multi-step
+        // features like the profile table + version column rebuild together
+        // and `tasks` regains later columns such as `model`.
+        let dropped = [
+            "`tasks`",
+            "`agent_profiles`",
+            "`rules`",
+            "`pending_approvals`",
+            "`automation_outbox`",
+            "`audit_log`",
+        ];
         let automation_tags: Vec<&&str> = MIGRATIONS
             .iter()
-            .filter(|(_, sql)| sql.contains("agent_profiles"))
+            .filter(|(_, sql)| dropped.iter().any(|table| sql.contains(table)))
             .map(|(tag, _)| tag)
             .collect();
         assert!(
@@ -4337,6 +4346,24 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("tasks exists again after re-apply");
+        // A task round-trips through the rebuilt table, proving later
+        // columns (e.g. `model` from 0009) came back with it.
+        connection
+            .execute(
+                "INSERT INTO tasks (id, project_id, title, status, created_at, updated_at)
+                 VALUES ('task-1', 'project-1', 'Round trip', 'backlog', 1, 1)",
+                [],
+            )
+            .expect("insert into rebuilt tasks");
+        let (title, model): (String, Option<String>) = connection
+            .query_row(
+                "SELECT title, model FROM tasks WHERE id = 'task-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("select from rebuilt tasks");
+        assert_eq!(title, "Round trip");
+        assert_eq!(model, None);
     }
 
     #[test]

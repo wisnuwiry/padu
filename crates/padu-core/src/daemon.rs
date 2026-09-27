@@ -363,9 +363,22 @@ impl PaduBackend {
         task_to_update.needs_attention = false;
         task_to_update.sync_failed = None;
 
-        let updated = self
+        let updated = match self
             .task_store
-            .update_task(task_to_update, expected_version)?;
+            .update_task(task_to_update, expected_version)
+        {
+            Ok(updated) => updated,
+            Err(err) => {
+                // The session is already persisted: remove it so a lost
+                // version race cannot orphan a session no card links to.
+                let mut state = self.task_state.lock();
+                state
+                    .sessions
+                    .retain(|candidate| candidate.id != session_id);
+                let _ = self.task_store.save(&mut state);
+                return Err(err.into());
+            }
+        };
         events.send_task_queued(task_id);
         events.send_task_state_changed();
         Ok(updated)
@@ -3045,6 +3058,47 @@ mod tests {
         }
         assert!(got_task_queued, "expected TaskQueued event");
         assert!(got_task_state_changed, "expected TaskStateChanged event");
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn failed_queued_write_leaves_no_orphan_session() {
+        let (dir, backend, hub, _rx, project) = test_daemon();
+        let sink = hub.event_sink(Uuid::new_v4(), Uuid::new_v4());
+        let task = backend
+            .task_store
+            .create_task(padu_protocol::kanban::CreateTask {
+                project_id: project.id,
+                title: "Race me".into(),
+                description: "Enqueued prompt content".into(),
+                labels: vec![],
+                assigned_agent: None,
+                model: None,
+            })
+            .unwrap();
+
+        // First queue of the Backlog snapshot wins.
+        let queued = backend
+            .queue_backlog_task(task.clone(), task.version, &sink)
+            .unwrap();
+        assert_eq!(queued.status, TaskStatus::Queued);
+
+        // A loser racing the same Backlog snapshot fails the version guard
+        // after persisting its session; that session must be removed again.
+        backend
+            .queue_backlog_task(task.clone(), task.version, &sink)
+            .unwrap_err();
+
+        let state = backend.task_state.lock();
+        let tasks = backend.task_store.list_tasks().unwrap();
+        assert_eq!(state.sessions.len(), 1);
+        for session in &state.sessions {
+            assert!(
+                tasks.iter().any(|t| t.session_id == Some(session.id)),
+                "every session stays linked from a card"
+            );
+        }
 
         std::fs::remove_dir_all(dir).ok();
     }

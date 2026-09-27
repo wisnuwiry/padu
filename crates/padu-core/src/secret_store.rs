@@ -120,6 +120,10 @@ fn run_helper(
 ) -> Result<Output, SecretStoreError> {
     let mut command = Command::new(program);
     command.args(args).envs(envs.iter().copied());
+    // Pipe both streams: inheriting stdout would print a retrieved credential
+    // to the daemon's own stdout while `wait_with_output` returns empty, and
+    // inheriting stderr would break the miss-vs-error classification below.
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
     if stdin_bytes.is_some() {
         command.stdin(Stdio::piped());
     } else {
@@ -173,6 +177,11 @@ fn os_get(service: &str, account: &str) -> Result<Option<String>, SecretStoreErr
 
 #[cfg(target_os = "macos")]
 fn os_set(service: &str, account: &str, secret: &str) -> Result<(), SecretStoreError> {
+    // NOTE: `security add-generic-password` takes the secret as a `-w`
+    // argument — there is no stdin path — so the value is briefly visible to
+    // same-user process inspection while the helper runs. The daemon never
+    // logs it. The proper fix is a Keychain Services binding instead of the
+    // CLI; tracked as future work on this abstraction.
     let output = run_helper(
         "/usr/bin/security",
         &[
@@ -228,6 +237,14 @@ fn os_get(service: &str, account: &str) -> Result<Option<String>, SecretStoreErr
         None,
         &[],
     )?;
+    linux_lookup_outcome(&output)
+}
+
+/// Classify a `secret-tool lookup` result: `secret-tool` exits nonzero with
+/// no output when nothing matches, while a real backend failure reports on
+/// stderr — so only empty stderr reads as a miss.
+#[cfg(target_os = "linux")]
+fn linux_lookup_outcome(output: &Output) -> Result<Option<String>, SecretStoreError> {
     if output.status.success() {
         return Ok(Some(
             String::from_utf8_lossy(&output.stdout)
@@ -235,8 +252,15 @@ fn os_get(service: &str, account: &str) -> Result<Option<String>, SecretStoreErr
                 .to_owned(),
         ));
     }
-    // `secret-tool lookup` exits nonzero when nothing matches.
-    Ok(None)
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.trim().is_empty() {
+        Ok(None)
+    } else {
+        Err(SecretStoreError::Backend(format!(
+            "secret-tool lookup failed: {}",
+            stderr.trim()
+        )))
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -425,6 +449,34 @@ mod tests {
         assert_eq!(
             SecretStoreError::Backend("denied".to_owned()).to_string(),
             "credential store error: denied"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_lookup_distinguishes_miss_from_backend_error() {
+        use std::os::unix::process::ExitStatusExt;
+        use std::process::Output;
+
+        let outcome = |status: i32, stdout: &[u8], stderr: &[u8]| {
+            linux_lookup_outcome(&Output {
+                status: ExitStatusExt::from_raw(status),
+                stdout: stdout.to_vec(),
+                stderr: stderr.to_vec(),
+            })
+        };
+
+        // exit 1 with no output: nothing matches.
+        assert_eq!(outcome(256, b"", b"").unwrap(), None);
+        // exit 1 with stderr: the backend itself failed.
+        assert!(matches!(
+            outcome(256, b"", b"secret-tool: no secret service"),
+            Err(SecretStoreError::Backend(_))
+        ));
+        // success trims the trailing newline.
+        assert_eq!(
+            outcome(0, b"token\n", b"").unwrap().as_deref(),
+            Some("token")
         );
     }
 }
