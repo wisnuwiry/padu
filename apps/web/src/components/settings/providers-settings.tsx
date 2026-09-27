@@ -314,22 +314,44 @@ export function ProvidersSettings() {
             >
               <div className="flex items-center gap-2.5 py-[11px]">
                 {profile ? (
-                  <span
-                    aria-label={t('providers.drag_to_reorder', { provider: provider.name })}
-                    className="grid size-6 shrink-0 cursor-grab place-items-center rounded-[7px] text-[var(--text-tertiary)] outline-none hover:bg-accent hover:text-[var(--text-secondary)] active:cursor-grabbing"
-                    draggable
-                    title={t('providers.drag_to_reorder', { provider: provider.name })}
-                    onDragEnd={() => {
-                      setDraggedId(null)
-                      setDragOverId(null)
-                    }}
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData('text/plain', provider.id)
-                      e.dataTransfer.effectAllowed = 'move'
-                      setDraggedId(provider.id)
-                    }}
-                  >
-                    <PaduIcon className="size-3" name="gripVertical" />
+                  <span className="flex shrink-0 flex-col items-center">
+                    <button
+                      aria-label={t('providers.move_up', { provider: provider.name })}
+                      className="grid h-3.5 w-6 place-items-center rounded text-[var(--text-tertiary)] outline-none hover:bg-accent hover:text-[var(--text-secondary)] focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-30"
+                      disabled={index === 0}
+                      title={t('providers.move_up', { provider: provider.name })}
+                      type="button"
+                      onClick={() => reorderProfile(provider.id, ordered[index - 1]!.id)}
+                    >
+                      <PaduIcon className="size-2.5" name="chevronUp" />
+                    </button>
+                    <span
+                      aria-label={t('providers.drag_to_reorder', { provider: provider.name })}
+                      className="grid size-6 shrink-0 cursor-grab place-items-center rounded-[7px] text-[var(--text-tertiary)] outline-none hover:bg-accent hover:text-[var(--text-secondary)] active:cursor-grabbing"
+                      draggable
+                      title={t('providers.drag_to_reorder', { provider: provider.name })}
+                      onDragEnd={() => {
+                        setDraggedId(null)
+                        setDragOverId(null)
+                      }}
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/plain', provider.id)
+                        e.dataTransfer.effectAllowed = 'move'
+                        setDraggedId(provider.id)
+                      }}
+                    >
+                      <PaduIcon className="size-3" name="gripVertical" />
+                    </span>
+                    <button
+                      aria-label={t('providers.move_down', { provider: provider.name })}
+                      className="grid h-3.5 w-6 place-items-center rounded text-[var(--text-tertiary)] outline-none hover:bg-accent hover:text-[var(--text-secondary)] focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-30"
+                      disabled={index + 1 >= ordered.length}
+                      title={t('providers.move_down', { provider: provider.name })}
+                      type="button"
+                      onClick={() => reorderProfile(ordered[index + 1]!.id, provider.id)}
+                    >
+                      <PaduIcon className="size-2.5" name="chevronDown" />
+                    </button>
                   </span>
                 ) : (
                   <span className="size-6 shrink-0" />

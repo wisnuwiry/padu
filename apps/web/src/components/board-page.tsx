@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { Tooltip } from '@/components/ui/tooltip'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { MarkdownView } from '@/components/markdown-view'
-import { useTasks, useTaskHydrated, useTaskState, useProviderProbes } from '@/hooks/use-daemon-data'
+import { useTasks, useTaskHydrated, useTaskState, useProviderProbes, useAgentProfiles } from '@/hooks/use-daemon-data'
 import { useDaemon } from '@/lib/daemon-context'
 import { useI18n } from '@/lib/i18n'
 import {
@@ -552,7 +552,16 @@ function TaskCard({
       draggable={task.status !== 'running'}
       onDragStart={onDragStart}
       onClick={onSelect}
-      className="group relative flex flex-col gap-2 rounded-lg border border-border bg-card p-3 shadow-xs hover:border-primary/50 hover:shadow-sm cursor-pointer transition-all"
+      role="button"
+      tabIndex={0}
+      aria-label={task.title}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onSelect()
+        }
+      }}
+      className="group relative flex flex-col gap-2 rounded-lg border border-border bg-card p-3 shadow-xs hover:border-primary/50 hover:shadow-sm cursor-pointer transition-all outline-none focus-visible:ring-1 focus-visible:ring-ring"
     >
       {/* Title & Flags */}
       <div className="flex items-start justify-between gap-1.5">
@@ -694,6 +703,14 @@ function TaskDetailDrawer({
   const { t } = useI18n()
   const { client } = useDaemon()
   const navigate = useNavigate()
+  const profiles = useAgentProfiles()
+  const disabledAgentIdsForDrawer = useMemo(
+    () =>
+      new Set(
+        (profiles.data ?? []).filter((p) => !p.enabled).map((p) => p.agentId),
+      ),
+    [profiles.data],
+  )
 
   const taskQuery = useTaskHydrated(taskId)
   const task = taskQuery.data?.task
@@ -849,7 +866,12 @@ function TaskDetailDrawer({
                 >
                   <option value="none">{t('board.no_agent')}</option>
                   {PROVIDERS.map((p) => (
-                    <option key={p.id} value={p.id}>
+                    <option
+                      key={p.id}
+                      value={p.id}
+                      disabled={disabledAgentIdsForDrawer.has(p.id)}
+                      title={disabledAgentIdsForDrawer.has(p.id) ? t('board.agent_disabled_tooltip') : undefined}
+                    >
                       {p.name}
                     </option>
                   ))}
@@ -1053,6 +1075,16 @@ function NewTaskDialog({
   const { t } = useI18n()
   const { client } = useDaemon()
   const probes = useProviderProbes()
+  const profiles = useAgentProfiles()
+  // Disabled agents are unselectable with a re-enable tooltip (§6.4); the
+  // daemon remains the enforcing source of truth at queue time.
+  const disabledAgentIds = useMemo(
+    () =>
+      new Set(
+        (profiles.data ?? []).filter((p) => !p.enabled).map((p) => p.agentId),
+      ),
+    [profiles.data],
+  )
 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -1167,7 +1199,12 @@ function NewTaskDialog({
             >
               <option value="none">{t('board.no_agent')}</option>
               {PROVIDERS.map((p) => (
-                <option key={p.id} value={p.id}>
+                <option
+                  key={p.id}
+                  value={p.id}
+                  disabled={disabledAgentIds.has(p.id)}
+                  title={disabledAgentIds.has(p.id) ? t('board.agent_disabled_tooltip') : undefined}
+                >
                   {p.name}
                 </option>
               ))}
