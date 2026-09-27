@@ -1,6 +1,6 @@
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import type { AgentSession, CreateTask, ProviderKind, Task, TaskStatus, TaskSummary } from '@padu/client'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { PaduIcon, PROVIDERS, ProviderIcon } from '@/components/padu-icon'
 import { Sidebar } from '@/components/sidebar'
@@ -28,14 +28,15 @@ import {
 } from '@/lib/daemon-api'
 import { projectDisplayName } from '@/lib/project-presentation'
 import { formatDurationShort, formatTokens, taskLiveBadges } from '@/lib/task-live-badges'
+import { cn } from '@/lib/utils'
 
 const DEFAULT_PROVIDER_MODELS: Record<string, string[]> = {
   claude: ['claude-3-7-sonnet', 'claude-3-5-sonnet', 'claude-3-5-haiku'],
   codex: ['gpt-4o', 'o3-mini', 'o1', 'gpt-4o-mini'],
   cursor: ['claude-3.5-sonnet', 'gpt-4o'],
   agy: ['gemini-2.0-flash', 'gemini-2.0-pro', 'gemini-1.5-pro'],
-  deepseek: ['deepseek-chat', 'deepseek-reasoner'],
-  opencode: ['default'],
+  deepSeek: ['deepseek-chat', 'deepseek-reasoner'],
+  openCode: ['default'],
   grok: ['grok-2', 'grok-beta'],
   kimi: ['moonshot-v1-auto', 'moonshot-v1-128k'],
   pi: ['default'],
@@ -233,142 +234,200 @@ export function BoardPage() {
       {/* Main Board View */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Top Header */}
-        <header className="flex h-14 flex-none items-center justify-between border-b border-border px-4 gap-3 bg-card/40 backdrop-blur-xs">
-          <div className="flex items-center gap-2.5">
+        <header className="flex h-14 flex-none items-center justify-between border-b border-border px-3 sm:px-4 gap-2 sm:gap-3 bg-card/40 backdrop-blur-xs">
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 overflow-x-auto no-scrollbar py-1">
             {!sidebarVisible && (
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-8 w-8 p-0"
+                className="h-8 w-8 p-0 flex-none"
                 onClick={() => setSidebarVisible(true)}
               >
                 <PaduIcon name="panelLeft" className="size-4" />
               </Button>
             )}
-            <PaduIcon name="listChecks" className="size-5 text-primary" />
-            <h1 className="text-base font-semibold text-foreground">
-              {t('board.title')}
-            </h1>
-            <Badge variant="outline" className="ml-0.5 px-1.5 py-0 text-[11px] font-mono">
-              {filteredTasks.length}
-            </Badge>
-          </div>
+            <div className="flex items-center gap-2 flex-none">
+              <PaduIcon name="listChecks" className="size-5 text-primary" />
+              <h1 className="text-sm sm:text-base font-semibold text-foreground whitespace-nowrap">
+                {t('board.title')}
+              </h1>
+              <Badge variant="outline" className="px-1.5 py-0 text-[11px] font-mono">
+                {filteredTasks.length}
+              </Badge>
+            </div>
 
-          {/* Filter Toolbar */}
-          <div className="flex items-center gap-2">
-            {/* Search */}
-            <div className="relative w-44">
-              <PaduIcon
-                name="search"
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none"
-              />
-              <Input
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={t('board.filter_search_placeholder')}
-                className="h-8 pl-8 pr-7 text-xs bg-background/80"
-              />
-              {searchQuery && (
+            <div className="h-4 w-px bg-border flex-none" />
+
+            {/* Filter Toolbar (Responsive and grouped alongside Title) */}
+            <div className="flex items-center gap-2 flex-none">
+              {/* Search */}
+              <div className="relative w-32 sm:w-40 flex-none">
+                <PaduIcon
+                  name="search"
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none"
+                />
+                <Input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder={t('board.filter_search_placeholder')}
+                  className="h-8 pl-8 pr-7 text-xs bg-muted/40 border-border"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                  >
+                    <PaduIcon name="x" className="size-3" />
+                  </button>
+                )}
+              </div>
+
+              {/* Project Filter */}
+              <div className="relative flex items-center flex-none">
+                <PaduIcon
+                  name="folder"
+                  className={cn(
+                    'pointer-events-none absolute left-2.5 size-3.5',
+                    selectedProjectId !== 'all' ? 'text-primary' : 'text-muted-foreground',
+                  )}
+                />
+                <select
+                  value={selectedProjectId}
+                  onChange={(e) => setSelectedProjectId(e.target.value)}
+                  className={cn(
+                    'h-8 rounded-md border text-xs pl-8 pr-6 max-w-[130px] sm:max-w-[160px] truncate appearance-none cursor-pointer transition-colors focus:outline-none focus:ring-1 focus:ring-primary',
+                    selectedProjectId !== 'all'
+                      ? 'border-primary/50 bg-primary/10 text-primary font-medium'
+                      : 'border-border bg-muted/40 text-foreground',
+                  )}
+                >
+                  <option value="all">{t('board.all_projects')}</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {projectDisplayName(p, t('project.no_project_name'))}
+                    </option>
+                  ))}
+                </select>
+                <PaduIcon
+                  name="chevronDown"
+                  className="pointer-events-none absolute right-2 size-3 text-muted-foreground"
+                />
+              </div>
+
+              {/* Agent Filter */}
+              <div className="relative flex items-center flex-none">
+                <PaduIcon
+                  name="bot"
+                  className={cn(
+                    'pointer-events-none absolute left-2.5 size-3.5',
+                    selectedAgent !== 'all' ? 'text-primary' : 'text-muted-foreground',
+                  )}
+                />
+                <select
+                  value={selectedAgent}
+                  onChange={(e) => setSelectedAgent(e.target.value)}
+                  className={cn(
+                    'h-8 rounded-md border text-xs pl-8 pr-6 max-w-[110px] sm:max-w-[140px] truncate appearance-none cursor-pointer transition-colors focus:outline-none focus:ring-1 focus:ring-primary',
+                    selectedAgent !== 'all'
+                      ? 'border-primary/50 bg-primary/10 text-primary font-medium'
+                      : 'border-border bg-muted/40 text-foreground',
+                  )}
+                >
+                  <option value="all">{t('board.all_agents')}</option>
+                  {PROVIDERS.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+                <PaduIcon
+                  name="chevronDown"
+                  className="pointer-events-none absolute right-2 size-3 text-muted-foreground"
+                />
+              </div>
+
+              <div className="h-4 w-px bg-border flex-none" />
+
+              {/* Flags Filter Segmented Control */}
+              <div className="flex h-8 items-center rounded-lg border border-border bg-muted/40 p-0.5 gap-0.5 flex-none">
                 <button
                   type="button"
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                  onClick={() =>
+                    setFlagFilter((current) =>
+                      current === 'needs_attention' ? 'all' : 'needs_attention',
+                    )
+                  }
+                  className={cn(
+                    'flex h-7 items-center gap-1.5 rounded-md px-2 sm:px-2.5 text-xs font-medium transition-colors cursor-pointer',
+                    flagFilter === 'needs_attention'
+                      ? 'bg-amber-500/20 text-amber-500'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-background/50',
+                  )}
                 >
-                  <PaduIcon name="x" className="size-3" />
+                  <span className="size-1.5 rounded-full bg-amber-500 shrink-0" />
+                  <span className="hidden sm:inline">{t('board.needs_attention')}</span>
+                  <span className="sm:hidden text-[11px]">Attention</span>
                 </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setFlagFilter((current) => (current === 'sync_failed' ? 'all' : 'sync_failed'))
+                  }
+                  className={cn(
+                    'flex h-7 items-center gap-1.5 rounded-md px-2 sm:px-2.5 text-xs font-medium transition-colors cursor-pointer',
+                    flagFilter === 'sync_failed'
+                      ? 'bg-rose-500/20 text-rose-500'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-background/50',
+                  )}
+                >
+                  <PaduIcon
+                    name="syncFailed"
+                    className={cn(
+                      'size-3.5 shrink-0',
+                      flagFilter === 'sync_failed' ? 'text-rose-500' : 'text-muted-foreground',
+                    )}
+                  />
+                  <span className="hidden sm:inline">{t('board.sync_failed')}</span>
+                  <span className="sm:hidden text-[11px]">Failed</span>
+                </button>
+              </div>
+
+              {/* Clear Filters (Vertically centered with matching h-8 height) */}
+              {(searchQuery ||
+                selectedProjectId !== 'all' ||
+                selectedAgent !== 'all' ||
+                flagFilter !== 'all') && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSearchQuery('')
+                    setSelectedProjectId('all')
+                    setSelectedAgent('all')
+                    setFlagFilter('all')
+                  }}
+                  className="h-8 px-2.5 flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 border-border flex-none"
+                >
+                  <PaduIcon name="x" className="size-3 text-muted-foreground" />
+                  <span className="hidden sm:inline">{t('board.clear_filters')}</span>
+                  <span className="sm:hidden text-[11px]">Clear</span>
+                </Button>
               )}
             </div>
+          </div>
 
-            {/* Project Filter */}
-            <div className="relative flex items-center">
-              <select
-                value={selectedProjectId}
-                onChange={(e) => setSelectedProjectId(e.target.value)}
-                className="h-8 rounded-md border border-input bg-background/80 pl-2.5 pr-6 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary appearance-none cursor-pointer"
-              >
-                <option value="all">{t('board.all_projects')}</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {projectDisplayName(p, t('project.no_project_name'))}
-                  </option>
-                ))}
-              </select>
-              <PaduIcon
-                name="chevronDown"
-                className="pointer-events-none absolute right-2 size-3 text-muted-foreground"
-              />
-            </div>
-
-            {/* Agent Filter */}
-            <div className="relative flex items-center">
-              <select
-                value={selectedAgent}
-                onChange={(e) => setSelectedAgent(e.target.value)}
-                className="h-8 rounded-md border border-input bg-background/80 pl-2.5 pr-6 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary appearance-none cursor-pointer"
-              >
-                <option value="all">{t('board.all_agents')}</option>
-                {PROVIDERS.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-              <PaduIcon
-                name="chevronDown"
-                className="pointer-events-none absolute right-2 size-3 text-muted-foreground"
-              />
-            </div>
-
-            {/* Flags Filter */}
-            <div className="flex items-center rounded-md border border-input bg-background/80 p-0.5 gap-0.5">
-              <button
-                type="button"
-                onClick={() =>
-                  setFlagFilter((current) => (current === 'needs_attention' ? 'all' : 'needs_attention'))
-                }
-                className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium transition-colors cursor-pointer ${
-                  flagFilter === 'needs_attention'
-                    ? 'bg-amber-500/20 text-amber-500'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <span className="size-1.5 rounded-full bg-amber-500" />
-                {t('board.needs_attention')}
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  setFlagFilter((current) => (current === 'sync_failed' ? 'all' : 'sync_failed'))
-                }
-                className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium transition-colors cursor-pointer ${
-                  flagFilter === 'sync_failed'
-                    ? 'bg-rose-500/20 text-rose-500'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <span className="size-1.5 rounded-full bg-rose-500" />
-                {t('board.sync_failed')}
-              </button>
-            </div>
-
-            {/* Clear Filters */}
-            {(searchQuery || selectedProjectId !== 'all' || selectedAgent !== 'all' || flagFilter !== 'all') && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setSearchQuery('')
-                  setSelectedProjectId('all')
-                  setSelectedAgent('all')
-                  setFlagFilter('all')
-                }}
-                className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
-              >
-                {t('board.clear_filters')}
-              </Button>
-            )}
-
-            {/* New Task Button */}
+          {/* Right Header Actions */}
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-none">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 w-8 p-0"
+              onClick={() => tasksQuery.refetch?.()}
+              title={t('common.refresh')}
+            >
+              <PaduIcon name="rotateCw" className="size-3.5 text-muted-foreground" />
+            </Button>
             <Button
               size="sm"
               className="h-8 gap-1.5 text-xs font-medium shadow-xs"
@@ -378,7 +437,7 @@ export function BoardPage() {
               }}
             >
               <PaduIcon name="plus" className="size-3.5" />
-              {t('board.new_task')}
+              <span className="hidden sm:inline">{t('board.new_task')}</span>
             </Button>
           </div>
         </header>
@@ -579,7 +638,7 @@ function TaskCard({
           {task.syncFailed && (
             <Tooltip content={task.syncFailed}>
               <span className="flex size-4 items-center justify-center rounded-full bg-rose-500/10 text-rose-500">
-                <PaduIcon name="alert" className="size-3" />
+                <PaduIcon name="syncFailed" className="size-3" />
               </span>
             </Tooltip>
           )}
@@ -643,7 +702,7 @@ function TaskCard({
         </div>
 
         {/* Quick action buttons */}
-        <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+        <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100 transition-opacity flex items-center gap-1">
           {task.status === 'backlog' && (
             <Button
               variant="secondary"
@@ -722,6 +781,7 @@ function TaskDetailDrawer({
   const [assignedAgent, setAssignedAgent] = useState<ProviderKind | 'none'>('none')
   const [labelInput, setLabelInput] = useState('')
   const [labels, setLabels] = useState<string[]>([])
+  const labelInputRef = useRef<HTMLInputElement>(null)
   const [showPreview, setShowPreview] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -735,21 +795,39 @@ function TaskDetailDrawer({
     setStatus(task.status)
     setAssignedAgent(task.assignedAgent ?? 'none')
     setLabels([...task.labels])
+    setLabelInput('')
   }
 
   const handleSave = async () => {
     if (!client || !task) return
     setIsSaving(true)
     try {
+      // Commit any unfinished tag typed into the input before saving
+      const finalLabels = [...labels]
+      const pending = labelInput
+        .split(/[,，;]/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+      for (const p of pending) {
+        if (!finalLabels.includes(p)) {
+          finalLabels.push(p)
+        }
+      }
+
+      // Status rides the guarded moveTask path (transition checks, lifecycle
+      // side effects); updateTask carries content only so a stale drawer
+      // status can never regress a concurrent daemon transition.
       const updated: Task = {
         ...task,
         title: title.trim(),
         description: description.trim(),
-        status,
         assignedAgent: assignedAgent === 'none' ? null : assignedAgent,
-        labels,
+        labels: finalLabels,
       }
-      await updateTask(client, updated, task.version)
+      const saved = await updateTask(client, updated, task.version)
+      if (status !== task.status) {
+        await moveTask(client, task.id, status, saved.version)
+      }
       toast.success(t('common.saved'))
       onTaskUpdated()
     } catch (err) {
@@ -771,12 +849,34 @@ function TaskDetailDrawer({
     }
   }
 
-  const handleAddLabel = () => {
-    const trimmed = labelInput.trim()
-    if (trimmed && !labels.includes(trimmed)) {
-      setLabels([...labels, trimmed])
-      setLabelInput('')
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose()
+      }
     }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
+
+  const handleAddLabel = (rawText?: string) => {
+    const text = rawText !== undefined ? rawText : labelInput
+    const parts = text
+      .split(/[,，;]/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+    if (parts.length > 0) {
+      setLabels((prev) => {
+        const next = [...prev]
+        for (const p of parts) {
+          if (!next.includes(p)) {
+            next.push(p)
+          }
+        }
+        return next
+      })
+    }
+    setLabelInput('')
   }
 
   const handleRemoveLabel = (labelToRemove: string) => {
@@ -810,9 +910,12 @@ function TaskDetailDrawer({
           <>
             {/* Status & Alerts */}
             {task.syncFailed && (
-              <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-500">
-                <span className="font-semibold">{t('board.sync_failed')}: </span>
-                {task.syncFailed}
+              <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-500 flex items-start gap-2">
+                <PaduIcon name="syncFailed" className="size-4 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-semibold">{t('board.sync_failed')}: </span>
+                  {task.syncFailed}
+                </div>
               </div>
             )}
 
@@ -825,7 +928,7 @@ function TaskDetailDrawer({
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder={t('board.task_title_placeholder')}
-                className="text-sm font-medium"
+                className="text-sm font-medium border-0 bg-muted/40 shadow-none focus-visible:ring-1"
               />
             </div>
 
@@ -908,54 +1011,57 @@ function TaskDetailDrawer({
               )}
             </div>
 
-            {/* Labels */}
+            {/* Labels (Auto-chip inside input container) */}
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-foreground">
                 {t('board.labels')}
               </label>
-              <div className="flex gap-2">
-                <Input
+              <div
+                className="flex flex-wrap items-center gap-1.5 min-h-[36px] p-1.5 rounded-md bg-muted/40 cursor-text focus-within:ring-1 focus-within:ring-ring"
+                onClick={() => labelInputRef.current?.focus()}
+              >
+                {labels.map((l) => (
+                  <Badge
+                    key={l}
+                    variant="secondary"
+                    className="gap-1 text-xs px-2 py-0.5"
+                  >
+                    {l}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleRemoveLabel(l)
+                      }}
+                      className="hover:text-destructive text-muted-foreground ml-0.5"
+                    >
+                      ×
+                    </button>
+                  </Badge>
+                ))}
+                <input
+                  ref={labelInputRef}
                   value={labelInput}
-                  onChange={(e) => setLabelInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      handleAddLabel()
+                  onChange={(e) => {
+                    const val = e.target.value
+                    if (val.includes(',') || val.includes('，') || val.includes(';')) {
+                      handleAddLabel(val)
+                    } else {
+                      setLabelInput(val)
                     }
                   }}
-                  placeholder={t('board.labels_placeholder')}
-                  className="h-8 text-xs flex-1"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ',') {
+                      e.preventDefault()
+                      handleAddLabel()
+                    } else if (e.key === 'Backspace' && !labelInput && labels.length > 0) {
+                      handleRemoveLabel(labels[labels.length - 1])
+                    }
+                  }}
+                  placeholder={labels.length === 0 ? t('board.labels_placeholder') : ''}
+                  className="bg-transparent border-0 outline-none text-xs flex-1 min-w-[80px] h-6 px-1 text-foreground placeholder:text-muted-foreground focus:ring-0 shadow-none"
                 />
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={handleAddLabel}
-                  className="h-8 text-xs"
-                >
-                  {t('common.add')}
-                </Button>
               </div>
-              {labels.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {labels.map((l) => (
-                    <Badge
-                      key={l}
-                      variant="secondary"
-                      className="gap-1 text-xs px-2 py-0.5"
-                    >
-                      {l}
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveLabel(l)}
-                        className="hover:text-destructive"
-                      >
-                        ×
-                      </button>
-                    </Badge>
-                  ))}
-                </div>
-              )}
             </div>
 
             {/* Live Usage (P1-08): same streamed session join as the cards */}
@@ -1018,8 +1124,8 @@ function TaskDetailDrawer({
         )}
       </div>
 
-      {/* Drawer Footer */}
-      <div className="flex h-14 flex-none items-center justify-between border-t border-border px-5 bg-background">
+      {/* Drawer Footer (Sticky on bottom) */}
+      <div className="flex h-14 flex-none items-center justify-between border-t border-border px-5 bg-sidebar-background sticky bottom-0 z-10">
         <Button
           variant="destructive"
           size="sm"
@@ -1088,6 +1194,7 @@ function NewTaskDialog({
 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
+  const [showPreview, setShowPreview] = useState(false)
   const [projectId, setProjectId] = useState(defaultProjectId ?? projects[0]?.id ?? '')
   const [assignedAgent, setAssignedAgent] = useState<ProviderKind | 'none'>('none')
   const [selectedModel, setSelectedModel] = useState<string>('')
@@ -1233,17 +1340,32 @@ function NewTaskDialog({
           )}
 
           {/* Description */}
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-foreground">
-              {t('board.task_description')}
-            </label>
-            <Textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder={t('board.task_description_placeholder')}
-              rows={4}
-              className="text-xs"
-            />
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-foreground">
+                {t('board.task_description')}
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowPreview(!showPreview)}
+                className="text-[11px] text-primary hover:underline"
+              >
+                {showPreview ? t('common.edit') : t('common.preview')}
+              </button>
+            </div>
+            {showPreview ? (
+              <div className="min-h-[100px] rounded-md border border-input bg-background p-3 text-xs">
+                <MarkdownView text={description || '_No description provided._'} />
+              </div>
+            ) : (
+              <Textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder={t('board.task_description_placeholder')}
+                rows={4}
+                className="text-xs"
+              />
+            )}
           </div>
 
           {/* Labels */}

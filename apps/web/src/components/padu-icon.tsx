@@ -87,6 +87,8 @@ export const PADU_ICONS = {
   windowMaximize: 'i-padu-window-maximize',
   windowMinimize: 'i-padu-window-minimize',
   wrench: 'i-padu-wrench',
+  syncFailed: 'i-padu-sync-failed',
+  block: 'i-padu-block',
   x: 'i-padu-x',
   zap: 'i-padu-zap',
 } as const
