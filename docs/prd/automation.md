@@ -306,7 +306,7 @@ Automation ──calls──▶ Git Integration (create issue/PR) + Agent queue 
 Git signals (issue/PR open/close/merge) ──update──▶ Kanban cards
 ```
 
-Build order: **Agent Profile + Kanban (foundation) → Git read+write → Automation wiring**. Each phase bumps the wire protocol and ships desktop + web together (§13).
+Build order: **Agent Profile + Kanban (foundation) → Git read+write → Automation wiring**. Each phase runs protocol generation and checks and ships desktop + web together (§13); the wire protocol version bumps per the §13 roadmap (8 → 9 Kanban/Profile, → 10 Git, → 11 Automation) or on any other wire-contract change.
 
 ---
 

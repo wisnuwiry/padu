@@ -1600,7 +1600,7 @@ board.empty_queued: 无排队任务
 board.empty_running: 无运行中的智能体
 board.empty_review: 无待审核任务
 board.empty_done: 无已完成任务
-board.filter_empty: 没有匹配筛选条件的历史任务
+board.filter_empty: 没有匹配筛选条件的任务
 board.clear_filters: 清除筛选
 board.needs_attention: 需要关注
 board.sync_failed: 同步失败

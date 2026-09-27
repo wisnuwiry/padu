@@ -26,9 +26,10 @@ Conventions used below: daemon = `crates/padu-core` + `crates/padu-daemon`; wire
 - [x] **P1-04** `Task` entity per §5.4 (`session_id` nullable link, `version`, `needs_attention`, `sync_failed`, `idempotency_keys`, `archived`) + `Project.linked_repo` nullable extension; merge-only save semantics (stale snapshots never delete others' rows; explicit delete only).
 - [x] **P1-05** Daemon commands: `ListTasks` (summary projection, no checkpoint bodies/logs), `CreateTask`, `UpdateTask`/`MoveTask` (with `expected_version` reject + re-fetch), `DeleteTask` (explicit), `HydrateTask` (on-demand session/checkpoint/log); `card_updated` broadcast on every transition.
 - [x] **P1-06** Lifecycle wiring: Backlog→Queued creates `AgentSession` honoring worktree policy (`NewWorktree{base_branch}`/`Local`); Queued→Running on `workspace_started`; Running→Review on `agent_completed` (checkpoint `Ready`) or `checkpoint_failed` streak (stays in Review + `needs_attention`); Review→Done only on external merge signal or explicit Mark Done; manual drag into Running rejected with reason.
-- [x] **P1-07** Board UI (desktop + web): global board, per-project/agent/status/label/flag filters, virtualized cards, detail panel (checkpoint scrubber reuse, hydrate-on-open log/rewind/fork, linked issue/PR slots), optimistic drag + daemon reconciliation, empty/error states (filter-empty, disconnected-cached).
+- [x] **P1-07** Board UI (desktop + web): global board, per-project/agent/status/label/flag filters, detail panel (checkpoint scrubber reuse, hydrate-on-open log/rewind/fork, linked issue/PR slots), optimistic drag + daemon reconciliation, empty/error states (filter-empty, disconnected-cached).
 - [x] **P1-08** Live badges: cost/token/duration via existing usage events (≤ commit cadence ~8.3 Hz); no UI polling; 500-card interaction test.
 - [x] **P1-09** Phase 1 gates: §5.5 + §6.4 acceptance pass; protocol bump + codegen + reducers + web types; full checks green; pre-PR review.
+- [ ] **P1-10** Board virtualization follow-up: render board columns via virtualized `list()` per §10.3 (P1-08's 500-card data-layer test passes; rendering virtualization deferred here).
 
 ## Phase 2 — Git read (protocol → 10)
 
