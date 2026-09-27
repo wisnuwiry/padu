@@ -1228,7 +1228,7 @@ pub(super) fn format_worked_duration(seconds: u64) -> String {
 /// The live indicator's elapsed label: "9s", "1m 5s", "1h 2m". Compact where
 /// [`format_worked_duration`] is prose — the settled fold reads as a sentence,
 /// while this one ticks every second beside the pulsing dots.
-pub(super) fn format_working_elapsed(seconds: u64) -> String {
+pub(crate) fn format_working_elapsed(seconds: u64) -> String {
     match seconds {
         0..=59 => tr!("duration.seconds_short", count = seconds),
         60..=3599 => {
