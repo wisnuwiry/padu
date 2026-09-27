@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use gpui::{
     AnyElement, App, Div, ElementId, FontWeight, InteractiveElement, Interactivity, IntoElement,
-    ParentElement, RenderOnce, SharedString, Stateful, StyleRefinement, Styled, Window, div,
-    prelude::*, px,
+    KeyDownEvent, ParentElement, RenderOnce, SharedString, Stateful, StyleRefinement, Styled,
+    Window, div, prelude::*, px,
 };
 
 use crate::input::TextInput;
@@ -128,10 +128,26 @@ impl RenderOnce for TagInput {
                             .cursor_pointer()
                             .text_color(theme.text_tertiary)
                             .hover(|s| s.text_color(theme.danger))
+                            .tab_index(0)
+                            .focus_visible(|style| style.border_color(theme.accent))
                             .child(icon("icons/x.svg", 10.0, theme.text_tertiary))
-                            .on_click(move |_, window, cx| {
-                                if let Some(cb) = &remove_cb {
-                                    cb(i, window, cx);
+                            .on_click({
+                                let remove_cb = remove_cb.clone();
+                                move |_, window, cx| {
+                                    if let Some(cb) = &remove_cb {
+                                        cb(i, window, cx);
+                                    }
+                                }
+                            })
+                            .on_key_down({
+                                let remove_cb = remove_cb.clone();
+                                move |event: &KeyDownEvent, window, cx| {
+                                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                        if let Some(cb) = &remove_cb {
+                                            cb(i, window, cx);
+                                        }
+                                        cx.stop_propagation();
+                                    }
                                 }
                             }),
                     ),
