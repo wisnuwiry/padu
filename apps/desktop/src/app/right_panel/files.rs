@@ -780,6 +780,15 @@ impl Padu {
         let (editor_state, writable, dirty) =
             self.ensure_right_panel_file_editor(&relative_path, window, cx);
 
+        // File editors share one horizontal scroll handle: when the visible
+        // file changes, re-arm caret following on the returning editor so a
+        // caret left offscreen by another file's pan comes back into view.
+        // Manual pans never touch this path.
+        if self.right_panel_files_reconciled_path.as_deref() != Some(relative_path.as_str()) {
+            self.right_panel_files_reconciled_path = Some(relative_path.clone());
+            editor_state.update(cx, |input, cx| input.reset_caret_reconciliation(cx));
+        }
+
         // Markdown files carry the global source/preview toggle; every other
         // language always shows source.
         let is_markdown = file_highlighter_language(&relative_path) == "markdown";

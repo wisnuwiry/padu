@@ -4,6 +4,7 @@ use crate::theme::{Theme, sp};
 use crate::ui::dialog::{dialog_backdrop, dialog_cancel_button, dialog_card};
 use crate::ui::text_field::TextField;
 use crate::ui::{icon, provider_icon};
+use gpui::ElementId;
 use padu_client::kanban::{CreateTask, Task, TaskStatus, TaskSummary};
 
 const BOARD_COLUMNS: [TaskStatus; 5] = [
@@ -49,7 +50,7 @@ pub fn task_status_color(status: TaskStatus, theme: &Theme) -> gpui::Hsla {
 /// client's label parsing in `board-page.tsx`.
 fn split_board_labels(input: &str) -> Vec<String> {
     input
-        .split(',')
+        .split([',', '，', ';'])
         .map(str::trim)
         .filter(|label| !label.is_empty())
         .map(str::to_owned)
@@ -264,10 +265,12 @@ impl Padu {
         self.board_hydrated_task = None;
         self.board_edit_agent = None;
         self.board_edit_saving = false;
+        self.board_edit_preview = false;
         self.board_edit_title
             .update(cx, |field, cx| field.set_content("", cx));
         self.board_edit_description
             .update(cx, |field, cx| field.set_content("", cx));
+        self.board_edit_labels_list.clear();
         self.board_edit_labels
             .update(cx, |field, cx| field.set_content("", cx));
         if let Some(id) = task_id {
@@ -375,9 +378,26 @@ impl Padu {
             .update(cx, |field, cx| field.set_content(&task.title, cx));
         self.board_edit_description
             .update(cx, |field, cx| field.set_content(&task.description, cx));
-        self.board_edit_labels.update(cx, |field, cx| {
-            field.set_content(&task.labels.join(", "), cx)
-        });
+        self.board_edit_labels_list = task.labels.clone();
+        self.board_edit_labels
+            .update(cx, |field, cx| field.set_content("", cx));
+    }
+
+    pub(super) fn commit_board_edit_label(&mut self, cx: &mut Context<Self>) {
+        let raw = self.board_edit_labels.read(cx).content();
+        let parts = split_board_labels(&raw);
+        let mut added = false;
+        for part in parts {
+            if !self.board_edit_labels_list.contains(&part) {
+                self.board_edit_labels_list.push(part);
+                added = true;
+            }
+        }
+        self.board_edit_labels
+            .update(cx, |field, cx| field.set_content("", cx));
+        if added {
+            cx.notify();
+        }
     }
 
     pub(super) fn save_board_task_edits(&mut self, cx: &mut Context<Self>) {
@@ -391,13 +411,14 @@ impl Padu {
         if title.is_empty() {
             return;
         }
+        self.commit_board_edit_label(cx);
         let description = self
             .board_edit_description
             .read(cx)
             .content()
             .trim()
             .to_owned();
-        let labels = split_board_labels(&self.board_edit_labels.read(cx).content());
+        let labels = self.board_edit_labels_list.clone();
         let mut updated = hydrated.clone();
         updated.title = title;
         updated.description = description;
@@ -496,6 +517,7 @@ impl Padu {
 
     fn open_new_task_modal(&mut self, cx: &mut Context<Self>) {
         self.board_new_task_modal_open = true;
+        self.board_new_task_preview = false;
         self.board_new_task_title
             .update(cx, |t, cx| t.set_content("", cx));
         self.board_new_task_description
@@ -681,6 +703,15 @@ impl Padu {
 
         page = page.child(main_content);
 
+        if selected_task_id.is_some() && !self.board_new_task_modal_open {
+            page = page.on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key.as_str() == "escape" {
+                    this.select_board_task(None, cx);
+                    cx.stop_propagation();
+                }
+            }));
+        }
+
         // Modal for New Task
         if self.board_new_task_modal_open {
             page = page.child(self.render_new_task_modal(&theme, window, cx));
@@ -711,12 +742,55 @@ impl Padu {
             .map(|p| (p.id, p.display_name()))
             .collect::<Vec<_>>();
         let weak_project = cx.entity().downgrade();
+        let filtered_count = self
+            .board_tasks
+            .iter()
+            .filter(|t| {
+                if let Some(project_id) = self.board_filter_project {
+                    if t.project_id != project_id {
+                        return false;
+                    }
+                }
+                if let Some(agent) = self.board_filter_agent {
+                    if t.assigned_agent != Some(agent) {
+                        return false;
+                    }
+                }
+                if self.board_filter_needs_attention && !t.needs_attention {
+                    return false;
+                }
+                if self.board_filter_sync_failed && t.sync_failed.is_none() {
+                    return false;
+                }
+                let query = self.board_search.read(cx).content().trim().to_lowercase();
+                if !query.is_empty() {
+                    let matches_title = t.title.to_lowercase().contains(&query);
+                    let matches_desc = t.description_preview.to_lowercase().contains(&query);
+                    if !matches_title && !matches_desc {
+                        return false;
+                    }
+                }
+                true
+            })
+            .count();
+
         let project_filter_selector = dropdown_menu(
             MenuChip::new("board-filter-project-chip")
-                .icon("icons/folder.svg", theme.text_tertiary)
+                .icon(
+                    "icons/folder.svg",
+                    if current_project_id.is_some() {
+                        theme.accent
+                    } else {
+                        theme.text_tertiary
+                    },
+                )
                 .label(current_project_name)
                 .outlined()
-                .background(theme.inset)
+                .background(if current_project_id.is_some() {
+                    theme.accent.opacity(0.12)
+                } else {
+                    theme.inset
+                })
                 .height(px(28.0))
                 .selected(project_handle.is_open()),
             "board-filter-project-menu",
@@ -777,7 +851,11 @@ impl Padu {
                 )
                 .label(current_agent_name)
                 .outlined()
-                .background(theme.inset)
+                .background(if current_agent.is_some() {
+                    theme.accent.opacity(0.12)
+                } else {
+                    theme.inset
+                })
                 .height(px(28.0))
                 .selected(agent_handle.is_open()),
             "board-filter-agent-menu",
@@ -822,6 +900,175 @@ impl Padu {
             },
         );
 
+        let flags_group = div()
+            .id("board-filter-flags-group")
+            .h(px(28.0))
+            .p(px(2.0))
+            .rounded(px(7.0))
+            .bg(theme.inset)
+            .border_1()
+            .border_color(theme.border)
+            .flex()
+            .items_center()
+            .gap(px(2.0))
+            .child({
+                let active = self.board_filter_needs_attention;
+                div()
+                    .id("board-filter-attention")
+                    .h(px(24.0))
+                    .px(px(8.0))
+                    .rounded(px(5.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(5.0))
+                    .cursor_pointer()
+                    .text_size(sp(12.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .bg(if active {
+                        theme.warning.opacity(0.18)
+                    } else {
+                        gpui::transparent_black()
+                    })
+                    .text_color(if active {
+                        theme.warning
+                    } else {
+                        theme.text_secondary
+                    })
+                    .hover(|s| {
+                        if !active {
+                            s.bg(theme.overlay_strong).text_color(theme.text)
+                        } else {
+                            s.opacity(0.85)
+                        }
+                    })
+                    .child(icon(
+                        "icons/alert.svg",
+                        12.0,
+                        if active {
+                            theme.warning
+                        } else {
+                            theme.text_tertiary
+                        },
+                    ))
+                    .child(tr!("board.needs_attention"))
+                    .tab_index(0)
+                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.board_filter_needs_attention = !this.board_filter_needs_attention;
+                        cx.notify();
+                    }))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            this.board_filter_needs_attention = !this.board_filter_needs_attention;
+                            cx.notify();
+                            cx.stop_propagation();
+                        }
+                    }))
+            })
+            .child({
+                let active = self.board_filter_sync_failed;
+                div()
+                    .id("board-filter-sync-failed")
+                    .h(px(24.0))
+                    .px(px(8.0))
+                    .rounded(px(5.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(5.0))
+                    .cursor_pointer()
+                    .text_size(sp(12.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .bg(if active {
+                        theme.danger.opacity(0.18)
+                    } else {
+                        gpui::transparent_black()
+                    })
+                    .text_color(if active {
+                        theme.danger
+                    } else {
+                        theme.text_secondary
+                    })
+                    .hover(|s| {
+                        if !active {
+                            s.bg(theme.overlay_strong).text_color(theme.text)
+                        } else {
+                            s.opacity(0.85)
+                        }
+                    })
+                    .child(icon(
+                        "icons/sync-failed.svg",
+                        12.0,
+                        if active {
+                            theme.danger
+                        } else {
+                            theme.text_tertiary
+                        },
+                    ))
+                    .child(tr!("board.sync_failed"))
+                    .tab_index(0)
+                    .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.board_filter_sync_failed = !this.board_filter_sync_failed;
+                        cx.notify();
+                    }))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            this.board_filter_sync_failed = !this.board_filter_sync_failed;
+                            cx.notify();
+                            cx.stop_propagation();
+                        }
+                    }))
+            });
+
+        let clear_filters_button = if has_filter {
+            Some(
+                div()
+                    .id("board-clear-filters")
+                    .h(px(28.0))
+                    .px(px(8.0))
+                    .rounded(px(6.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(4.0))
+                    .cursor_pointer()
+                    .bg(theme.inset)
+                    .border_1()
+                    .border_color(theme.border)
+                    .text_size(sp(11.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_secondary)
+                    .hover(|s| s.bg(theme.overlay_strong).text_color(theme.text))
+                    .child(icon("icons/x.svg", 11.0, theme.text_secondary))
+                    .child(tr!("board.clear_filters"))
+                    .tab_index(0)
+                    .focus_visible(|style| style.border_color(theme.accent))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.board_filter_project = None;
+                        this.board_filter_agent = None;
+                        this.board_filter_needs_attention = false;
+                        this.board_filter_sync_failed = false;
+                        this.board_search.update(cx, |s, cx| s.set_content("", cx));
+                        cx.notify();
+                    }))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            this.board_filter_project = None;
+                            this.board_filter_agent = None;
+                            this.board_filter_needs_attention = false;
+                            this.board_filter_sync_failed = false;
+                            this.board_search.update(cx, |s, cx| s.set_content("", cx));
+                            cx.notify();
+                            cx.stop_propagation();
+                        }
+                    })),
+            )
+        } else {
+            None
+        };
+
         let header = div()
             .id("board-header")
             .h(px(48.0))
@@ -834,9 +1081,12 @@ impl Padu {
             .border_color(theme.border)
             .child(
                 div()
+                    .id("board-header-left")
                     .flex()
                     .items_center()
-                    .gap(px(10.0))
+                    .gap(px(8.0))
+                    .min_w_0()
+                    .overflow_x_scroll()
                     .when(!self.sidebar_visible, |element| {
                         element
                             .child(
@@ -853,15 +1103,32 @@ impl Padu {
                     })
                     .child(
                         div()
+                            .flex_none()
                             .text_size(sp(15.0))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme.text)
                             .child(tr!("board.title")),
                     )
+                    .child(
+                        div()
+                            .flex_none()
+                            .px(px(6.0))
+                            .py(px(1.0))
+                            .rounded(px(10.0))
+                            .bg(theme.inset)
+                            .border_1()
+                            .border_color(theme.border)
+                            .text_size(sp(11.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text_secondary)
+                            .child(filtered_count.to_string()),
+                    )
+                    .child(div().w(px(1.0)).h(px(16.0)).flex_none().bg(theme.border))
                     // Search field
                     .child(
                         div()
-                            .w(px(180.0))
+                            .w(px(140.0))
+                            .flex_shrink_0()
                             .h(px(28.0))
                             .rounded(px(6.0))
                             .bg(theme.inset)
@@ -874,158 +1141,18 @@ impl Padu {
                     .child(project_filter_selector)
                     // Agent dropdown filter
                     .child(agent_filter_selector)
-                    // Needs Attention chip
-                    .child({
-                        let active = self.board_filter_needs_attention;
-                        div()
-                            .id("board-filter-attention")
-                            .h(px(26.0))
-                            .px(px(8.0))
-                            .rounded(px(6.0))
-                            .flex()
-                            .items_center()
-                            .gap(px(4.0))
-                            .cursor_pointer()
-                            .text_size(sp(12.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .bg(if active {
-                                theme.warning.opacity(0.18)
-                            } else {
-                                theme.inset
-                            })
-                            .text_color(if active {
-                                theme.warning
-                            } else {
-                                theme.text_secondary
-                            })
-                            .border_1()
-                            .border_color(if active {
-                                theme.warning.opacity(0.4)
-                            } else {
-                                theme.border
-                            })
-                            .child(icon(
-                                "icons/alert.svg",
-                                12.0,
-                                if active {
-                                    theme.warning
-                                } else {
-                                    theme.text_tertiary
-                                },
-                            ))
-                            .child(tr!("board.needs_attention"))
-                            .tab_index(0)
-                            .focus_visible(|style| style.border_color(theme.accent))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.board_filter_needs_attention =
-                                    !this.board_filter_needs_attention;
-                                cx.notify();
-                            }))
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                    this.board_filter_needs_attention =
-                                        !this.board_filter_needs_attention;
-                                    cx.notify();
-                                    cx.stop_propagation();
-                                }
-                            }))
-                    })
-                    // Sync Failed chip
-                    .child({
-                        let active = self.board_filter_sync_failed;
-                        div()
-                            .id("board-filter-sync-failed")
-                            .h(px(26.0))
-                            .px(px(8.0))
-                            .rounded(px(6.0))
-                            .flex()
-                            .items_center()
-                            .gap(px(4.0))
-                            .cursor_pointer()
-                            .text_size(sp(12.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .bg(if active {
-                                theme.danger.opacity(0.18)
-                            } else {
-                                theme.inset
-                            })
-                            .text_color(if active {
-                                theme.danger
-                            } else {
-                                theme.text_secondary
-                            })
-                            .border_1()
-                            .border_color(if active {
-                                theme.danger.opacity(0.4)
-                            } else {
-                                theme.border
-                            })
-                            .child(icon(
-                                "icons/block.svg",
-                                12.0,
-                                if active {
-                                    theme.danger
-                                } else {
-                                    theme.text_tertiary
-                                },
-                            ))
-                            .child(tr!("board.sync_failed"))
-                            .tab_index(0)
-                            .focus_visible(|style| style.border_color(theme.accent))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.board_filter_sync_failed = !this.board_filter_sync_failed;
-                                cx.notify();
-                            }))
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                    this.board_filter_sync_failed = !this.board_filter_sync_failed;
-                                    cx.notify();
-                                    cx.stop_propagation();
-                                }
-                            }))
-                    })
+                    .child(div().w(px(1.0)).h(px(16.0)).flex_none().bg(theme.border))
+                    // Flags group
+                    .child(flags_group)
                     // Clear filters button if active
-                    .when(has_filter, |element| {
-                        element.child(
-                            div()
-                                .id("board-clear-filters")
-                                .h(px(24.0))
-                                .px(px(6.0))
-                                .rounded(px(4.0))
-                                .cursor_pointer()
-                                .text_size(sp(11.0))
-                                .text_color(theme.text_tertiary)
-                                .hover(|s| s.text_color(theme.text))
-                                .child(tr!("board.clear_filters"))
-                                .tab_index(0)
-                                .focus_visible(|style| style.border_color(theme.accent))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.board_filter_project = None;
-                                    this.board_filter_agent = None;
-                                    this.board_filter_needs_attention = false;
-                                    this.board_filter_sync_failed = false;
-                                    this.board_search.update(cx, |s, cx| s.set_content("", cx));
-                                    cx.notify();
-                                }))
-                                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                        this.board_filter_project = None;
-                                        this.board_filter_agent = None;
-                                        this.board_filter_needs_attention = false;
-                                        this.board_filter_sync_failed = false;
-                                        this.board_search.update(cx, |s, cx| s.set_content("", cx));
-                                        cx.notify();
-                                        cx.stop_propagation();
-                                    }
-                                })),
-                        )
-                    }),
+                    .children(clear_filters_button),
             )
             .child(
                 div()
                     .flex()
                     .items_center()
                     .gap(px(8.0))
+                    .flex_none()
                     // Refresh button
                     .child(
                         div()
@@ -1038,9 +1165,11 @@ impl Padu {
                             .justify_center()
                             .cursor_pointer()
                             .bg(theme.inset)
+                            .border_1()
+                            .border_color(theme.border)
                             .text_color(theme.text_secondary)
                             .hover(|s| s.bg(theme.overlay_strong).text_color(theme.text))
-                            .child(icon("icons/rotate-cw.svg", 14.0, theme.text_secondary))
+                            .child(icon("icons/rotate-cw.svg", 13.0, theme.text_secondary))
                             .tab_index(0)
                             .focus_visible(|style| style.border_color(theme.accent))
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -1112,6 +1241,7 @@ impl Padu {
                 )))
                 .w(px(40.0))
                 .min_w(px(40.0))
+                .flex_none()
                 .h_full()
                 .flex()
                 .flex_col()
@@ -1122,10 +1252,17 @@ impl Padu {
                 .bg(theme.surface)
                 .border_1()
                 .border_color(theme.border)
+                .overflow_hidden()
                 .cursor_pointer()
                 .hover(|s| s.bg(theme.inset))
                 .tab_index(0)
                 .focus_visible(|style| style.border_color(theme.accent))
+                .tooltip(Tooltip::text(format!(
+                    "{} ({}) — {}",
+                    label,
+                    count,
+                    tr!("board.expand_column")
+                )))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.board_collapsed_columns.remove(&status_for_toggle);
                     cx.notify();
@@ -1162,21 +1299,6 @@ impl Padu {
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(theme.text_secondary)
                         .child(count.to_string()),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .gap(px(2.0))
-                        .mt(px(4.0))
-                        .children(label.chars().map(|c| {
-                            div()
-                                .text_size(sp(10.5))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.text_tertiary)
-                                .child(c.to_string())
-                        })),
                 );
         }
 
@@ -1184,6 +1306,7 @@ impl Padu {
             .id(SharedString::from(format!("board-col-{:?}", status)))
             .w(px(280.0))
             .min_w(px(280.0))
+            .flex_none()
             .h_full()
             .flex()
             .flex_col()
@@ -1249,6 +1372,7 @@ impl Padu {
                             .hover(|s| s.bg(theme.overlay_strong))
                             .tab_index(0)
                             .focus_visible(|style| style.border_color(theme.accent))
+                            .tooltip(Tooltip::text(tr!("board.collapse_column")))
                             .child(icon("icons/chevron-left.svg", 12.0, theme.text_tertiary))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.board_collapsed_columns.insert(status_for_collapse);
@@ -1466,7 +1590,7 @@ impl Padu {
                     .flex()
                     .items_center()
                     .gap(px(3.0))
-                    .child(icon("icons/block.svg", 10.0, theme.danger))
+                    .child(icon("icons/sync-failed.svg", 10.0, theme.danger))
                     .child(
                         div()
                             .text_size(sp(10.0))
@@ -1758,11 +1882,421 @@ impl Padu {
         row
     }
 
+    fn apply_markdown_format(
+        input: &Entity<TextInput>,
+        prefix: &str,
+        suffix: &str,
+        default_text: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        input.update(cx, |this, cx| {
+            let range = this.selected_range();
+            let content = this.content().to_string();
+            if range.is_empty() {
+                let insert = format!("{prefix}{default_text}{suffix}");
+                this.replace_range(range.clone(), &insert, cx);
+                let start = range.start + prefix.len();
+                let end = start + default_text.len();
+                this.select_range(start..end, cx);
+            } else {
+                let selected = &content[range.clone()];
+                let insert = format!("{prefix}{selected}{suffix}");
+                let start = range.start;
+                let end = start + insert.len();
+                this.replace_range(range, &insert, cx);
+                this.select_range(start..end, cx);
+            }
+        });
+        let focus = input.read(cx).focus();
+        window.focus(&focus, cx);
+        cx.notify();
+    }
+
+    fn markdown_toolbar_btn(
+        id: impl Into<ElementId>,
+        label: impl IntoElement,
+        tooltip_str: impl Into<SharedString>,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+        on_click: impl Fn(&mut Window, &mut Context<Self>) + 'static + Clone,
+    ) -> impl IntoElement {
+        let tooltip_text = tooltip_str.into();
+        let on_click_action = on_click.clone();
+        let on_key_action = on_click;
+        div()
+            .id(id)
+            .h(px(22.0))
+            .px(px(6.0))
+            .rounded(px(4.0))
+            .cursor_pointer()
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_size(sp(11.0))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(theme.text_secondary)
+            .hover(|s| s.bg(theme.overlay_strong).text_color(theme.text))
+            .tab_index(0)
+            .focus_visible(|s| s.border_color(theme.accent))
+            .tooltip(Tooltip::text(tooltip_text))
+            .child(label)
+            .on_click(cx.listener(move |_this, _, window, cx| {
+                on_click_action(window, cx);
+            }))
+            .on_key_down(cx.listener(move |_this, event: &KeyDownEvent, window, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    on_key_action(window, cx);
+                    cx.stop_propagation();
+                }
+            }))
+    }
+
+    fn render_board_markdown_editor(
+        &self,
+        field_id: &'static str,
+        input: &Entity<TextInput>,
+        is_preview: bool,
+        min_height: Pixels,
+        max_preview_height: Pixels,
+        theme: &Theme,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        on_toggle_preview: impl Fn(&mut Self, bool, &mut Context<Self>) + 'static + Clone,
+    ) -> Div {
+        let on_edit_click = on_toggle_preview.clone();
+        let on_edit_key = on_toggle_preview.clone();
+        let on_prev_click = on_toggle_preview.clone();
+        let on_prev_key = on_toggle_preview;
+
+        let header = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .text_size(sp(12.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_secondary)
+                    .child(tr!("board.task_description")),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(2.0))
+                    .p(px(2.0))
+                    .rounded(px(6.0))
+                    .bg(theme.inset)
+                    .border_1()
+                    .border_color(theme.border)
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("{field_id}-tab-edit")))
+                            .h(px(22.0))
+                            .px(px(8.0))
+                            .rounded(px(4.0))
+                            .cursor_pointer()
+                            .flex()
+                            .items_center()
+                            .gap(px(4.0))
+                            .text_size(sp(11.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .when(!is_preview, |tab| {
+                                tab.bg(theme.surface)
+                                    .text_color(theme.text)
+                                    .border_1()
+                                    .border_color(theme.border)
+                            })
+                            .when(is_preview, |tab| {
+                                tab.text_color(theme.text_tertiary)
+                                    .hover(|s| s.text_color(theme.text))
+                            })
+                            .tab_index(0)
+                            .focus_visible(|s| s.border_color(theme.accent))
+                            .child(icon(
+                                "icons/pencil.svg",
+                                11.0,
+                                if !is_preview {
+                                    theme.text
+                                } else {
+                                    theme.text_tertiary
+                                },
+                            ))
+                            .child(tr!("board.edit"))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                on_edit_click(this, false, cx);
+                            }))
+                            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    on_edit_key(this, false, cx);
+                                    cx.stop_propagation();
+                                }
+                            })),
+                    )
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("{field_id}-tab-preview")))
+                            .h(px(22.0))
+                            .px(px(8.0))
+                            .rounded(px(4.0))
+                            .cursor_pointer()
+                            .flex()
+                            .items_center()
+                            .gap(px(4.0))
+                            .text_size(sp(11.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .when(is_preview, |tab| {
+                                tab.bg(theme.surface)
+                                    .text_color(theme.text)
+                                    .border_1()
+                                    .border_color(theme.border)
+                            })
+                            .when(!is_preview, |tab| {
+                                tab.text_color(theme.text_tertiary)
+                                    .hover(|s| s.text_color(theme.text))
+                            })
+                            .tab_index(0)
+                            .focus_visible(|s| s.border_color(theme.accent))
+                            .child(icon(
+                                "icons/eye.svg",
+                                11.0,
+                                if is_preview {
+                                    theme.text
+                                } else {
+                                    theme.text_tertiary
+                                },
+                            ))
+                            .child(tr!("board.preview"))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                on_prev_click(this, true, cx);
+                            }))
+                            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    on_prev_key(this, true, cx);
+                                    cx.stop_propagation();
+                                }
+                            })),
+                    ),
+            );
+
+        let mut editor_container = div().flex().flex_col().gap(px(6.0)).child(header);
+
+        if is_preview {
+            let content = input.read(cx).content().to_string();
+            let (display_text, is_empty) = if content.trim().is_empty() {
+                (String::from("_No description provided._"), true)
+            } else {
+                (content, false)
+            };
+            let mut cache = self.board_markdown_preview.borrow_mut();
+            cache.set_text(&display_text, false);
+            let palette = MarkdownPalette::from_theme(theme);
+            let ctx = MarkdownCtx::new(
+                format!("{field_id}-preview"),
+                &palette,
+                self.scaled_markdown_metrics(MarkdownMetrics::COMPACT),
+                TranscriptSelection::default(),
+            );
+            let rendered = md::render::markdown(&cache, &ctx).unwrap_or_else(|| {
+                div()
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_tertiary)
+                    .child(display_text)
+                    .into_any_element()
+            });
+            drop(cache);
+
+            editor_container = editor_container.child(
+                div()
+                    .id(SharedString::from(format!("{field_id}-preview-pane")))
+                    .min_h(min_height)
+                    .max_h(max_preview_height)
+                    .overflow_y_scroll()
+                    .rounded(px(6.0))
+                    .bg(theme.inset)
+                    .border_1()
+                    .border_color(theme.border)
+                    .p(px(10.0))
+                    .when(is_empty, |s| s.text_color(theme.text_tertiary))
+                    .child(rendered),
+            );
+        } else {
+            let input_bold = input.clone();
+            let input_italic = input.clone();
+            let input_heading = input.clone();
+            let input_code = input.clone();
+            let input_codeblock = input.clone();
+            let input_list = input.clone();
+            let input_checklist = input.clone();
+            let input_link = input.clone();
+
+            let toolbar = div()
+                .flex()
+                .items_center()
+                .gap(px(3.0))
+                .p(px(2.0))
+                .rounded(px(6.0))
+                .bg(theme.surface)
+                .border_1()
+                .border_color(theme.border)
+                .child(Self::markdown_toolbar_btn(
+                    SharedString::from(format!("{field_id}-btn-bold")),
+                    div().font_weight(FontWeight::BOLD).child("B"),
+                    "Bold (**text**)",
+                    theme,
+                    cx,
+                    move |window, cx| {
+                        Self::apply_markdown_format(
+                            &input_bold,
+                            "**",
+                            "**",
+                            "bold text",
+                            window,
+                            cx,
+                        );
+                    },
+                ))
+                .child(Self::markdown_toolbar_btn(
+                    SharedString::from(format!("{field_id}-btn-italic")),
+                    div().italic().child("I"),
+                    "Italic (*text*)",
+                    theme,
+                    cx,
+                    move |window, cx| {
+                        Self::apply_markdown_format(
+                            &input_italic,
+                            "*",
+                            "*",
+                            "italic text",
+                            window,
+                            cx,
+                        );
+                    },
+                ))
+                .child(Self::markdown_toolbar_btn(
+                    SharedString::from(format!("{field_id}-btn-heading")),
+                    div().font_weight(FontWeight::BOLD).child("H"),
+                    "Heading (### title)",
+                    theme,
+                    cx,
+                    move |window, cx| {
+                        Self::apply_markdown_format(
+                            &input_heading,
+                            "### ",
+                            "",
+                            "Heading",
+                            window,
+                            cx,
+                        );
+                    },
+                ))
+                .child(Self::markdown_toolbar_btn(
+                    SharedString::from(format!("{field_id}-btn-code")),
+                    div().font_weight(FontWeight::MEDIUM).child("` `"),
+                    "Inline code (`code`)",
+                    theme,
+                    cx,
+                    move |window, cx| {
+                        Self::apply_markdown_format(&input_code, "`", "`", "code", window, cx);
+                    },
+                ))
+                .child(Self::markdown_toolbar_btn(
+                    SharedString::from(format!("{field_id}-btn-codeblock")),
+                    div().font_weight(FontWeight::MEDIUM).child("```"),
+                    "Code block (```)",
+                    theme,
+                    cx,
+                    move |window, cx| {
+                        Self::apply_markdown_format(
+                            &input_codeblock,
+                            "```\n",
+                            "\n```",
+                            "code",
+                            window,
+                            cx,
+                        );
+                    },
+                ))
+                .child(Self::markdown_toolbar_btn(
+                    SharedString::from(format!("{field_id}-btn-list")),
+                    icon("icons/list.svg", 12.0, theme.text_secondary),
+                    "Bullet list (- item)",
+                    theme,
+                    cx,
+                    move |window, cx| {
+                        Self::apply_markdown_format(&input_list, "- ", "", "item", window, cx);
+                    },
+                ))
+                .child(Self::markdown_toolbar_btn(
+                    SharedString::from(format!("{field_id}-btn-checklist")),
+                    icon("icons/list-checks.svg", 12.0, theme.text_secondary),
+                    "Task list (- [ ] task)",
+                    theme,
+                    cx,
+                    move |window, cx| {
+                        Self::apply_markdown_format(
+                            &input_checklist,
+                            "- [ ] ",
+                            "",
+                            "task",
+                            window,
+                            cx,
+                        );
+                    },
+                ))
+                .child(Self::markdown_toolbar_btn(
+                    SharedString::from(format!("{field_id}-btn-link")),
+                    icon("icons/external-link.svg", 12.0, theme.text_secondary),
+                    "Link ([text](url))",
+                    theme,
+                    cx,
+                    move |window, cx| {
+                        Self::apply_markdown_format(
+                            &input_link,
+                            "[",
+                            "](url)",
+                            "link text",
+                            window,
+                            cx,
+                        );
+                    },
+                ));
+
+            let is_focused = input.read(cx).is_visually_focused(window);
+            let input_focus = input.clone();
+
+            editor_container = editor_container.child(toolbar).child(
+                div()
+                    .id(SharedString::from(format!("{field_id}-edit-box")))
+                    .min_h(min_height)
+                    .rounded(px(6.0))
+                    .bg(theme.inset)
+                    .border_1()
+                    .border_color(if is_focused {
+                        theme.accent
+                    } else {
+                        theme.border
+                    })
+                    .p(px(8.0))
+                    .cursor_text()
+                    .on_click(cx.listener(move |_, _, window, cx| {
+                        let focus = input_focus.read(cx).focus();
+                        window.focus(&focus, cx);
+                    }))
+                    .child(input.clone()),
+            );
+        }
+
+        editor_container
+    }
+
     fn render_task_detail_drawer(
         &mut self,
         task_id: Uuid,
         theme: &Theme,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let task_summary = self.board_tasks.iter().find(|t| t.id == task_id).cloned();
@@ -1818,11 +2352,22 @@ impl Padu {
             .shadow_xl()
             .flex()
             .flex_col()
-            .p(px(16.0))
-            .gap(px(14.0));
+            .tab_index(0)
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key.as_str() == "escape" {
+                    this.select_board_task(None, cx);
+                    cx.stop_propagation();
+                }
+            }));
 
-        // Drawer Header: Close button and Title
+        // Drawer Header: Close button and Title (sticky on top)
         let header = div()
+            .id("task-detail-header")
+            .flex_none()
+            .px(px(16.0))
+            .py(px(12.0))
+            .border_b_1()
+            .border_color(theme.border)
             .flex()
             .items_center()
             .justify_between()
@@ -1859,7 +2404,8 @@ impl Padu {
                     .hover(|s| s.bg(theme.overlay_strong))
                     .tab_index(0)
                     .focus_visible(|style| style.border_color(theme.accent))
-                    .child(icon("icons/slash.svg", 14.0, theme.text_secondary))
+                    .tooltip(Tooltip::text(format!("{} (Esc)", tr!("board.cancel"))))
+                    .child(icon("icons/x.svg", 14.0, theme.text_secondary))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.select_board_task(None, cx);
                     }))
@@ -1873,9 +2419,21 @@ impl Padu {
 
         drawer = drawer.child(header);
 
+        // Drawer Body: Scrollable middle section
+        let mut body = div()
+            .id("task-detail-body")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .p(px(16.0))
+            .flex()
+            .flex_col()
+            .gap(px(14.0));
+
         // Task Title (editable — Save persists via UpdateTask)
         let edit_title = self.board_edit_title.clone();
-        drawer = drawer.child(
+        let edit_title_click = edit_title.clone();
+        body = body.child(
             div()
                 .flex()
                 .flex_col()
@@ -1889,14 +2447,20 @@ impl Padu {
                 )
                 .child(
                     div()
+                        .id("task-edit-title-container")
                         .min_h(px(32.0))
                         .rounded(px(6.0))
                         .bg(theme.inset)
-                        .border_1()
-                        .border_color(theme.border)
                         .px(px(8.0))
-                        .py(px(4.0))
-                        .child(TextField::new("task-edit-title", edit_title)),
+                        .py(px(6.0))
+                        .flex()
+                        .items_center()
+                        .cursor_text()
+                        .on_click(cx.listener(move |_, _, window, cx| {
+                            let focus = edit_title_click.read(cx).focus();
+                            window.focus(&focus, cx);
+                        }))
+                        .child(div().w_full().child(edit_title)),
                 ),
         );
 
@@ -1955,7 +2519,7 @@ impl Padu {
             );
         }
 
-        drawer = drawer.child(status_row);
+        body = body.child(status_row);
 
         // Info Badges: Agent & Session
         let mut info_section = div()
@@ -2124,10 +2688,10 @@ impl Padu {
             );
         }
 
-        drawer = drawer.child(info_section);
+        body = body.child(info_section);
 
         // Edit section: assignee chips + labels (title above, description below)
-        drawer = drawer.child(
+        body = body.child(
             div()
                 .flex()
                 .flex_col()
@@ -2148,35 +2712,93 @@ impl Padu {
                     cx,
                 )),
         );
+
+        // Auto-chip in input labels: chips rendered directly inside the input container
         let edit_labels = self.board_edit_labels.clone();
-        drawer = drawer.child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(4.0))
-                .child(
-                    div()
-                        .text_size(sp(12.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text_secondary)
-                        .child(tr!("board.labels")),
-                )
-                .child(
-                    div()
-                        .h(px(32.0))
-                        .rounded(px(6.0))
-                        .bg(theme.inset)
-                        .border_1()
-                        .border_color(theme.border)
-                        .px(px(8.0))
-                        .py(px(4.0))
-                        .child(TextField::new("task-edit-labels", edit_labels)),
-                ),
-        );
+        let edit_labels_click = edit_labels.clone();
+        let chips = self.board_edit_labels_list.clone();
+
+        let mut chips_box = div()
+            .id("task-edit-labels-container")
+            .min_h(px(34.0))
+            .rounded(px(6.0))
+            .bg(theme.inset)
+            .p(px(5.0))
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(4.0))
+            .cursor_text()
+            .on_click(cx.listener(move |_, _, window, cx| {
+                let focus = edit_labels_click.read(cx).focus();
+                window.focus(&focus, cx);
+            }));
+
+        for (idx, label_text) in chips.into_iter().enumerate() {
+            let label_to_remove = label_text.clone();
+            chips_box = chips_box.child(
+                div()
+                    .id(SharedString::from(format!("tag-chip-{idx}")))
+                    .h(px(22.0))
+                    .px(px(6.0))
+                    .rounded(px(4.0))
+                    .bg(theme.surface)
+                    .border_1()
+                    .border_color(theme.border)
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .text_size(sp(11.0))
+                    .text_color(theme.text_secondary)
+                    .child(label_text)
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("remove-tag-{idx}")))
+                            .cursor_pointer()
+                            .hover(|s| s.text_color(theme.danger))
+                            .tab_index(0)
+                            .focus_visible(|style| style.text_color(theme.danger))
+                            .child("×")
+                            .on_click(cx.listener({
+                                let label_to_remove = label_to_remove.clone();
+                                move |this, _, _, cx| {
+                                    this.board_edit_labels_list
+                                        .retain(|l| l != &label_to_remove);
+                                    cx.notify();
+                                }
+                            }))
+                            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                                    this.board_edit_labels_list
+                                        .retain(|l| l != &label_to_remove);
+                                    cx.notify();
+                                    cx.stop_propagation();
+                                }
+                            })),
+                    ),
+            );
+        }
+
+        chips_box = chips_box.child(div().min_w(px(70.0)).flex_1().child(edit_labels));
+
+        let labels_section = div()
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .child(
+                div()
+                    .text_size(sp(12.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text_secondary)
+                    .child(tr!("board.labels")),
+            )
+            .child(chips_box);
+
+        body = body.child(labels_section);
 
         // Alert banners
         if needs_attention {
-            drawer = drawer.child(
+            body = body.child(
                 div()
                     .p(px(8.0))
                     .rounded(px(6.0))
@@ -2198,7 +2820,7 @@ impl Padu {
         }
 
         if let Some(err) = sync_failed {
-            drawer = drawer.child(
+            body = body.child(
                 div()
                     .p(px(8.0))
                     .rounded(px(6.0))
@@ -2213,7 +2835,7 @@ impl Padu {
                             .flex()
                             .items_center()
                             .gap(px(6.0))
-                            .child(icon("icons/block.svg", 13.0, theme.danger))
+                            .child(icon("icons/sync-failed.svg", 13.0, theme.danger))
                             .child(
                                 div()
                                     .text_size(sp(11.5))
@@ -2231,126 +2853,121 @@ impl Padu {
             );
         }
 
-        // Description editor + Save row (UpdateTask with version guard)
-        let edit_description = self.board_edit_description.clone();
+        // Description editor (markdown editor with Write/Preview tabs & toolbar)
         let can_save = hydrated.is_some()
             && !self.board_edit_saving
             && !self.board_edit_title.read(cx).content().trim().is_empty();
-        drawer = drawer.child(
-            div()
-                .flex_1()
-                .min_h_0()
-                .flex()
-                .flex_col()
-                .gap(px(4.0))
-                .child(
-                    div()
-                        .text_size(sp(12.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text_secondary)
-                        .child(tr!("board.task_description")),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_h(px(96.0))
-                        .rounded(px(8.0))
-                        .bg(theme.inset)
-                        .border_1()
-                        .border_color(theme.border)
-                        .px(px(8.0))
-                        .py(px(6.0))
-                        .child(TextField::new("task-edit-description", edit_description)),
-                ),
-        );
+        body = body.child(self.render_board_markdown_editor(
+            "task-edit-description",
+            &self.board_edit_description,
+            self.board_edit_preview,
+            px(110.0),
+            px(280.0),
+            theme,
+            window,
+            cx,
+            |this, preview, cx| {
+                this.board_edit_preview = preview;
+                cx.notify();
+            },
+        ));
 
-        // Footer: Delete on the left, Save on the right
+        drawer = drawer.child(body);
+
+        // Sticky Footer: Delete on the left, Save on the right
         let title_for_delete_click = title.clone();
         let title_for_delete_key = title.clone();
-        drawer = drawer.child(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .child(
-                    div()
-                        .id("task-delete-button")
-                        .h(px(28.0))
-                        .px(px(10.0))
-                        .rounded(px(6.0))
-                        .bg(theme.danger.opacity(0.12))
-                        .border_1()
-                        .border_color(theme.danger.opacity(0.3))
-                        .cursor_pointer()
-                        .flex()
-                        .items_center()
-                        .gap(px(4.0))
-                        .text_size(sp(12.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.danger)
-                        .hover(|s| s.bg(theme.danger.opacity(0.2)))
-                        .tab_index(0)
-                        .focus_visible(|style| style.border_color(theme.danger))
-                        .child(icon("icons/trash.svg", 12.0, theme.danger))
-                        .child(tr!("board.delete_task"))
-                        .on_click(cx.listener(move |this, _, window, cx| {
+        let footer = div()
+            .id("task-detail-footer")
+            .flex_none()
+            .px(px(16.0))
+            .py(px(12.0))
+            .border_t_1()
+            .border_color(theme.border)
+            .bg(theme.raised)
+            .flex()
+            .items_center()
+            .justify_between()
+            .child(
+                div()
+                    .id("task-delete-button")
+                    .h(px(28.0))
+                    .px(px(10.0))
+                    .rounded(px(6.0))
+                    .bg(theme.danger.opacity(0.12))
+                    .border_1()
+                    .border_color(theme.danger.opacity(0.3))
+                    .cursor_pointer()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .text_size(sp(12.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.danger)
+                    .hover(|s| s.bg(theme.danger.opacity(0.2)))
+                    .tab_index(0)
+                    .focus_visible(|style| style.border_color(theme.danger))
+                    .child(icon("icons/trash.svg", 12.0, theme.danger))
+                    .child(tr!("board.delete_task"))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.confirm_delete_task(
+                            task_id,
+                            title_for_delete_click.clone(),
+                            version,
+                            window,
+                            cx,
+                        );
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
                             this.confirm_delete_task(
                                 task_id,
-                                title_for_delete_click.clone(),
+                                title_for_delete_key.clone(),
                                 version,
                                 window,
                                 cx,
                             );
-                        }))
-                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                this.confirm_delete_task(
-                                    task_id,
-                                    title_for_delete_key.clone(),
-                                    version,
-                                    window,
-                                    cx,
-                                );
-                                cx.stop_propagation();
-                            }
-                        })),
-                )
-                .child(
-                    div()
-                        .id("task-edit-save")
-                        .h(px(28.0))
-                        .px(px(14.0))
-                        .rounded(px(6.0))
-                        .bg(theme.inverse)
-                        .text_color(theme.on_inverse)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_size(sp(12.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .when(can_save, |element| {
-                            element
-                                .cursor_pointer()
-                                .hover(|s| s.opacity(0.92))
-                                .tab_index(0)
-                                .focus_visible(|style| style.border_color(theme.accent))
-                        })
-                        .when(!can_save, |element| element.opacity(0.45))
-                        .child(tr!("board.save"))
-                        .when(can_save, |element| {
-                            element
-                                .on_click(cx.listener(|this, _, _, cx| {
+                            cx.stop_propagation();
+                        }
+                    })),
+            )
+            .child(
+                div()
+                    .id("task-edit-save")
+                    .h(px(28.0))
+                    .px(px(14.0))
+                    .rounded(px(6.0))
+                    .bg(theme.inverse)
+                    .text_color(theme.on_inverse)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(sp(12.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .when(can_save, |element| {
+                        element
+                            .cursor_pointer()
+                            .hover(|s| s.opacity(0.92))
+                            .tab_index(0)
+                            .focus_visible(|style| style.border_color(theme.accent))
+                    })
+                    .when(!can_save, |element| element.opacity(0.45))
+                    .child(tr!("board.save"))
+                    .when(can_save, |element| {
+                        element
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.save_board_task_edits(cx);
+                            }))
+                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
                                     this.save_board_task_edits(cx);
-                                }))
-                                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                        this.save_board_task_edits(cx);
-                                        cx.stop_propagation();
-                                    }
-                                }))
-                        }),
-                ),
-        );
+                                    cx.stop_propagation();
+                                }
+                            }))
+                    }),
+            );
+
+        drawer = drawer.child(footer);
 
         drawer
     }
@@ -2358,7 +2975,7 @@ impl Padu {
     fn render_new_task_modal(
         &mut self,
         theme: &Theme,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let cancel_focus = self.board_new_task_cancel_focus.clone();
@@ -2419,107 +3036,142 @@ impl Padu {
             },
         );
 
-        let card =
-            dialog_card("board-new-task-dialog", theme, px(480.0))
-                .child(
-                    div()
-                        .text_size(sp(16.0))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(theme.text)
-                        .child(tr!("board.create_task")),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(12.0))
-                        // Project selector
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap(px(4.0))
-                                .child(
-                                    div()
-                                        .text_size(sp(12.0))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(theme.text_secondary)
-                                        .child(tr!("board.filter_project")),
-                                )
-                                .child(modal_project_selector),
-                        )
-                        // Title field
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap(px(4.0))
-                                .child(
-                                    div()
-                                        .text_size(sp(12.0))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(theme.text_secondary)
-                                        .child(tr!("board.task_title")),
-                                )
-                                .child(
-                                    div().h(px(32.0)).rounded(px(6.0)).bg(theme.inset).child(
-                                        TextField::new("new-task-title", title_input.clone()),
-                                    ),
-                                ),
-                        )
-                        // Description field
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap(px(4.0))
-                                .child(
-                                    div()
-                                        .text_size(sp(12.0))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(theme.text_secondary)
-                                        .child(tr!("board.task_description")),
-                                )
-                                .child(div().h(px(100.0)).rounded(px(6.0)).bg(theme.inset).child(
-                                    TextField::new("new-task-description", desc_input.clone()),
-                                )),
-                        )
-                        // Agent selector chips (disabled profiles unselectable)
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap(px(4.0))
-                                .child(
-                                    div()
-                                        .text_size(sp(12.0))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(theme.text_secondary)
-                                        .child(tr!("board.assigned_agent")),
-                                )
-                                .child(self.render_board_agent_chips(
-                                    agent,
-                                    "board-new-task",
-                                    BoardAgentPickTarget::NewTask,
-                                    &BOARD_MODAL_PROVIDERS,
-                                    theme,
-                                    cx,
-                                )),
-                        )
-                        // Model selector chips (only when agent is selected)
-                        .when_some(agent, |element, p| {
-                            let models = self.board_models_for_provider(p);
-                            if models.is_empty() {
-                                return element;
-                            }
-                            let current_model = self.board_new_task_model.clone();
-                            let default_selected = current_model.is_none();
-                            let mut model_chips = div().flex().flex_wrap().gap(px(6.0));
+        let card = dialog_card("board-new-task-dialog", theme, px(480.0))
+            .child(
+                div()
+                    .text_size(sp(16.0))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme.text)
+                    .child(tr!("board.create_task")),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(12.0))
+                    // Project selector
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(4.0))
+                            .child(
+                                div()
+                                    .text_size(sp(12.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!("board.filter_project")),
+                            )
+                            .child(modal_project_selector),
+                    )
+                    // Title field
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(4.0))
+                            .child(
+                                div()
+                                    .text_size(sp(12.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!("board.task_title")),
+                            )
+                            .child(
+                                div()
+                                    .h(px(32.0))
+                                    .rounded(px(6.0))
+                                    .bg(theme.inset)
+                                    .child(TextField::new("new-task-title", title_input.clone())),
+                            ),
+                    )
+                    // Description field with markdown editor
+                    .child(self.render_board_markdown_editor(
+                        "new-task-description",
+                        &self.board_new_task_description,
+                        self.board_new_task_preview,
+                        px(96.0),
+                        px(200.0),
+                        theme,
+                        window,
+                        cx,
+                        |this, preview, cx| {
+                            this.board_new_task_preview = preview;
+                            cx.notify();
+                        },
+                    ))
+                    // Agent selector chips (disabled profiles unselectable)
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(4.0))
+                            .child(
+                                div()
+                                    .text_size(sp(12.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!("board.assigned_agent")),
+                            )
+                            .child(self.render_board_agent_chips(
+                                agent,
+                                "board-new-task",
+                                BoardAgentPickTarget::NewTask,
+                                &BOARD_MODAL_PROVIDERS,
+                                theme,
+                                cx,
+                            )),
+                    )
+                    // Model selector chips (only when agent is selected)
+                    .when_some(agent, |element, p| {
+                        let models = self.board_models_for_provider(p);
+                        if models.is_empty() {
+                            return element;
+                        }
+                        let current_model = self.board_new_task_model.clone();
+                        let default_selected = current_model.is_none();
+                        let mut model_chips = div().flex().flex_wrap().gap(px(6.0));
 
-                            // Default model chip
+                        // Default model chip
+                        model_chips = model_chips.child(
+                            div()
+                                .id("board-new-task-model-default")
+                                .h(px(24.0))
+                                .px(px(8.0))
+                                .rounded(px(4.0))
+                                .cursor_pointer()
+                                .flex()
+                                .items_center()
+                                .text_size(sp(11.0))
+                                .font_weight(FontWeight::MEDIUM)
+                                .when(default_selected, |chip| {
+                                    chip.bg(theme.accent.opacity(0.18))
+                                        .text_color(theme.accent)
+                                        .border_1()
+                                        .border_color(theme.accent.opacity(0.4))
+                                })
+                                .when(!default_selected, |chip| {
+                                    chip.bg(theme.inset)
+                                        .text_color(theme.text_secondary)
+                                        .border_1()
+                                        .border_color(theme.border)
+                                })
+                                .child(tr!("board.default_model"))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.board_new_task_model = None;
+                                    cx.notify();
+                                })),
+                        );
+
+                        for (m_id, m_name) in models {
+                            let is_selected = current_model.as_deref() == Some(&m_id);
+                            let m_id_for_click = m_id.clone();
                             model_chips = model_chips.child(
                                 div()
-                                    .id("board-new-task-model-default")
+                                    .id(SharedString::from(format!(
+                                        "board-new-task-model-{}",
+                                        m_id
+                                    )))
                                     .h(px(24.0))
                                     .px(px(8.0))
                                     .rounded(px(4.0))
@@ -2528,129 +3180,92 @@ impl Padu {
                                     .items_center()
                                     .text_size(sp(11.0))
                                     .font_weight(FontWeight::MEDIUM)
-                                    .when(default_selected, |chip| {
+                                    .when(is_selected, |chip| {
                                         chip.bg(theme.accent.opacity(0.18))
                                             .text_color(theme.accent)
                                             .border_1()
                                             .border_color(theme.accent.opacity(0.4))
                                     })
-                                    .when(!default_selected, |chip| {
+                                    .when(!is_selected, |chip| {
                                         chip.bg(theme.inset)
                                             .text_color(theme.text_secondary)
                                             .border_1()
                                             .border_color(theme.border)
                                     })
-                                    .child(tr!("board.default_model"))
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.board_new_task_model = None;
+                                    .child(m_name)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.board_new_task_model = Some(m_id_for_click.clone());
                                         cx.notify();
                                     })),
                             );
+                        }
 
-                            for (m_id, m_name) in models {
-                                let is_selected = current_model.as_deref() == Some(&m_id);
-                                let m_id_for_click = m_id.clone();
-                                model_chips = model_chips.child(
-                                    div()
-                                        .id(SharedString::from(format!(
-                                            "board-new-task-model-{}",
-                                            m_id
-                                        )))
-                                        .h(px(24.0))
-                                        .px(px(8.0))
-                                        .rounded(px(4.0))
-                                        .cursor_pointer()
-                                        .flex()
-                                        .items_center()
-                                        .text_size(sp(11.0))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .when(is_selected, |chip| {
-                                            chip.bg(theme.accent.opacity(0.18))
-                                                .text_color(theme.accent)
-                                                .border_1()
-                                                .border_color(theme.accent.opacity(0.4))
-                                        })
-                                        .when(!is_selected, |chip| {
-                                            chip.bg(theme.inset)
-                                                .text_color(theme.text_secondary)
-                                                .border_1()
-                                                .border_color(theme.border)
-                                        })
-                                        .child(m_name)
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.board_new_task_model =
-                                                Some(m_id_for_click.clone());
-                                            cx.notify();
-                                        })),
-                                );
-                            }
-
-                            element.child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(4.0))
-                                    .child(
-                                        div()
-                                            .text_size(sp(12.0))
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(theme.text_secondary)
-                                            .child(tr!("board.model")),
-                                    )
-                                    .child(model_chips),
-                            )
-                        }),
-                )
-                // Footer
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .justify_end()
-                        .gap(px(8.0))
-                        .mt(px(8.0))
-                        .child(dialog_cancel_button(
-                            "cancel-new-task",
-                            tr!("board.cancel"),
-                            &cancel_focus,
-                            theme,
-                            cx,
-                            |this, _, cx| {
-                                this.board_new_task_modal_open = false;
-                                cx.notify();
-                            },
-                        ))
-                        .child({
-                            let title_str = title_input.read(cx).content().to_owned();
-                            let desc_str = desc_input.read(cx).content().to_owned();
+                        element.child(
                             div()
-                                .id("create-new-task-submit")
-                                .h(px(32.0))
-                                .px(px(14.0))
-                                .rounded(px(7.0))
-                                .bg(theme.inverse)
-                                .text_color(theme.on_inverse)
-                                .cursor_pointer()
                                 .flex()
-                                .items_center()
-                                .justify_center()
-                                .text_size(sp(13.0))
-                                .font_weight(FontWeight::MEDIUM)
-                                .hover(|s| s.opacity(0.92))
-                                .child(tr!("board.create_task"))
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    let model = this.board_new_task_model.clone();
-                                    this.create_board_task(
-                                        project_id,
-                                        title_str.clone(),
-                                        desc_str.clone(),
-                                        agent,
-                                        model,
-                                        cx,
-                                    );
-                                }))
-                        }),
-                );
+                                .flex_col()
+                                .gap(px(4.0))
+                                .child(
+                                    div()
+                                        .text_size(sp(12.0))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(theme.text_secondary)
+                                        .child(tr!("board.model")),
+                                )
+                                .child(model_chips),
+                        )
+                    }),
+            )
+            // Footer
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap(px(8.0))
+                    .mt(px(8.0))
+                    .child(dialog_cancel_button(
+                        "cancel-new-task",
+                        tr!("board.cancel"),
+                        &cancel_focus,
+                        theme,
+                        cx,
+                        |this, _, cx| {
+                            this.board_new_task_modal_open = false;
+                            cx.notify();
+                        },
+                    ))
+                    .child({
+                        let title_str = title_input.read(cx).content().to_owned();
+                        let desc_str = desc_input.read(cx).content().to_owned();
+                        div()
+                            .id("create-new-task-submit")
+                            .h(px(32.0))
+                            .px(px(14.0))
+                            .rounded(px(7.0))
+                            .bg(theme.inverse)
+                            .text_color(theme.on_inverse)
+                            .cursor_pointer()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_size(sp(13.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .hover(|s| s.opacity(0.92))
+                            .child(tr!("board.create_task"))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                let model = this.board_new_task_model.clone();
+                                this.create_board_task(
+                                    project_id,
+                                    title_str.clone(),
+                                    desc_str.clone(),
+                                    agent,
+                                    model,
+                                    cx,
+                                );
+                            }))
+                    }),
+            );
 
         dialog_backdrop(
             "new-task-dialog-backdrop",

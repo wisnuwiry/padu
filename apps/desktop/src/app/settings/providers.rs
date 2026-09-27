@@ -1215,9 +1215,12 @@ impl Padu {
     /// switched-off provider. The remembered model belongs to the old
     /// provider, so it resets with it.
     fn reassign_sessions_off_provider(&mut self, provider: ProviderKind) {
+        // Exclude the provider being disabled: the cached registry entry can
+        // still read `enabled` until the daemon round-trip lands, and would
+        // otherwise be selected as its own fallback.
         let Some(fallback) = ProviderKind::ALL
             .into_iter()
-            .find(|kind| self.provider_enabled(*kind))
+            .find(|kind| *kind != provider && self.provider_enabled(*kind))
         else {
             return;
         };
@@ -1299,10 +1302,13 @@ impl Padu {
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {
+                // A superseded fetch must not wedge the pending flag: later
+                // `ensure_agent_profiles` calls (including the forced refresh
+                // after an update) would block on it forever.
+                this.agent_profiles_pending = false;
                 if this.agent_profiles_generation != generation {
                     return;
                 }
-                this.agent_profiles_pending = false;
                 match profiles {
                     Ok(profiles) => this.agent_profiles = profiles,
                     Err(error) => this.show_toast(error.to_string()),

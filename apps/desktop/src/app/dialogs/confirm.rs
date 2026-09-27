@@ -148,7 +148,7 @@ impl Padu {
 
         self.confirm_dialog = Some(ConfirmDialogState {
             title: tr!("board.delete_task").into(),
-            message: format!("{}\n\"{}\"", tr!("board.delete_task"), title).into(),
+            message: format!("{}\n\"{}\"", tr!("board.delete_task_confirm"), title).into(),
             confirm_label: tr!("board.delete_task").into(),
             cancel_label: tr!("board.cancel").into(),
             variant: ConfirmVariant::Danger,

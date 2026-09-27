@@ -1143,8 +1143,24 @@ impl TextInput {
         self.refresh_highlight();
         self.pause_blink_cursor(cx);
         if changed {
+            // New content is a new baseline for caret following: same-length
+            // replacement text must still re-follow, and the caret sits at
+            // the end of the load either way.
+            self.caret_reconciled = None;
+            self.h_caret_reconciled = None;
             cx.emit(InputEvent::Edited);
         }
+        cx.notify();
+    }
+
+    /// Re-arm caret following for the currently visible content, e.g. when an
+    /// editor becomes visible again after another editor panned a shared
+    /// scroll handle. Ordinary manual pans must not call this — only
+    /// activation-style transitions where the viewport may have moved without
+    /// the cursor or content changing.
+    pub fn reset_caret_reconciliation(&mut self, cx: &mut Context<Self>) {
+        self.caret_reconciled = None;
+        self.h_caret_reconciled = None;
         cx.notify();
     }
 
@@ -3313,6 +3329,73 @@ mod tests {
         cx.run_until_parked();
         let offset = cx.read_entity(&harness, |harness, _| harness.pane.offset());
         assert_eq!(offset.x, -px(50.));
+    }
+
+    /// Loading different text of the same length must re-arm caret following,
+    /// or a caret panned offscreen stays offscreen: cursor, length, and width
+    /// all match the last reconciled state.
+    #[gpui::test]
+    fn set_content_with_same_length_text_re_arms_caret_follow(cx: &mut TestAppContext) {
+        struct ReloadHarness {
+            input: Entity<TextInput>,
+            pane: ScrollHandle,
+        }
+        impl Render for ReloadHarness {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().w(px(200.)).h(px(120.)).child(
+                    div()
+                        .id("reload-pan")
+                        .size_full()
+                        .flex()
+                        .overflow_x_scroll()
+                        .track_scroll(&self.pane)
+                        .child(self.input.clone()),
+                )
+            }
+        }
+
+        cx.update(super::init);
+        let (harness, cx) = cx.add_window_view(|window, cx| {
+            let pane = ScrollHandle::new();
+            let input = cx.new(|cx| {
+                let mut input = TextInput::new(window, cx)
+                    .multi_line()
+                    .soft_wrap(false)
+                    .horizontal_scroll(pane.clone());
+                input.set_content("x".repeat(400), cx);
+                input
+            });
+            ReloadHarness { input, pane }
+        });
+        cx.run_until_parked();
+
+        // The caret starts followed at the end of the long line...
+        let followed = cx.read_entity(&harness, |harness, _| harness.pane.offset());
+        assert!(
+            followed.x < px(0.),
+            "caret should start followed, got {followed:?}"
+        );
+
+        // ...a manual pan away holds...
+        cx.update_entity(&harness, |harness, _| {
+            harness.pane.set_offset(gpui::point(px(0.), px(0.)));
+        });
+        cx.run_until_parked();
+        let held = cx.read_entity(&harness, |harness, _| harness.pane.offset());
+        assert_eq!(held.x, px(0.));
+
+        // ...but loading different text of the same length re-follows it.
+        cx.update_entity(&harness, |harness, cx| {
+            harness.input.update(cx, |input, cx| {
+                input.set_content("y".repeat(400), cx);
+            });
+        });
+        cx.run_until_parked();
+        let refollowed = cx.read_entity(&harness, |harness, _| harness.pane.offset());
+        assert!(
+            refollowed.x < px(0.),
+            "same-length reload must re-follow the caret, got {refollowed:?}"
+        );
     }
 
     #[gpui::test]

@@ -1583,6 +1583,10 @@ pub struct Padu {
     pub(crate) right_panel_files_cursor: Option<usize>,
     right_panel_file_tree_width: f32,
     right_panel_file_editors: HashMap<String, RightPanelFileEditor>,
+    /// Last file whose editor had caret following re-armed. File editors
+    /// share one horizontal scroll handle, so switching files must reset
+    /// the returning editor's reconciliation state (see input.rs).
+    right_panel_files_reconciled_path: Option<String>,
     /// Find-and-replace over the visible file editor. Created on first use of
     /// the primary find shortcut and kept for the window's lifetime so the
     /// query and toggles survive closing the bar; `open` says whether it shows.
@@ -1673,11 +1677,15 @@ pub struct Padu {
     board_new_task_agent: Option<ProviderKind>,
     board_new_task_model: Option<String>,
     board_new_task_cancel_focus: FocusHandle,
+    board_new_task_preview: bool,
     board_edit_title: Entity<TextInput>,
     board_edit_description: Entity<TextInput>,
     board_edit_labels: Entity<TextInput>,
+    board_edit_labels_list: Vec<String>,
     board_edit_agent: Option<ProviderKind>,
     board_edit_saving: bool,
+    board_edit_preview: bool,
+    board_markdown_preview: RefCell<MarkdownView>,
     board_collapsed_columns: std::collections::HashSet<padu_client::kanban::TaskStatus>,
     card_updated_events: Receiver<Uuid>,
     /// The Settings page's library snapshot, scanned off-thread. Frames read
@@ -2362,6 +2370,7 @@ impl Padu {
         }
         self.board_loaded = false;
         self.board_load_pending = false;
+        self.board_load_generation = self.board_load_generation.wrapping_add(1);
         self.board_tasks.clear();
         if self.workspace_page == WorkspacePage::Board {
             self.ensure_board_tasks_loaded(cx);
@@ -3277,6 +3286,28 @@ impl Padu {
             })
             .detach();
             cx.subscribe(
+                &board_edit_labels,
+                |this: &mut Self, input, event: &InputEvent, cx| match event {
+                    InputEvent::Submit(_) => {
+                        this.commit_board_edit_label(cx);
+                    }
+                    InputEvent::Edited => {
+                        let content = input.read(cx).content();
+                        if content.contains(',') || content.contains('，') || content.contains(';')
+                        {
+                            this.commit_board_edit_label(cx);
+                        }
+                    }
+                    InputEvent::BackspaceOnEmpty => {
+                        if this.board_edit_labels_list.pop().is_some() {
+                            cx.notify();
+                        }
+                    }
+                    _ => {}
+                },
+            )
+            .detach();
+            cx.subscribe(
                 &notes_title,
                 |this: &mut Self, _, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Edited) {
@@ -3708,6 +3739,7 @@ impl Padu {
                 right_panel_files_cursor: None,
                 right_panel_file_tree_width: DEFAULT_FILE_TREE_WIDTH,
                 right_panel_file_editors: HashMap::new(),
+                right_panel_files_reconciled_path: None,
                 file_search: None,
                 right_panel_diff_source: ReviewDiffSource::default(),
                 right_panel_diff_snapshot: None,
@@ -3770,11 +3802,15 @@ impl Padu {
                 board_new_task_agent: None,
                 board_new_task_model: None,
                 board_new_task_cancel_focus: cx.focus_handle(),
+                board_new_task_preview: false,
                 board_edit_title,
                 board_edit_description,
                 board_edit_labels,
+                board_edit_labels_list: Vec::new(),
                 board_edit_agent: None,
                 board_edit_saving: false,
+                board_edit_preview: false,
+                board_markdown_preview: RefCell::new(MarkdownView::new()),
                 board_collapsed_columns: std::collections::HashSet::new(),
                 notification_permission:
                     crate::platform::NotificationPermissionStatus::NotDetermined,

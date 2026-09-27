@@ -652,6 +652,7 @@ mod tests {
             "icons/rotate-cw.svg",
             "icons/package.svg",
             "icons/trash.svg",
+            "icons/sync-failed.svg",
         ];
         for provider in ProviderKind::ALL {
             paths.push(provider_icon(provider));
