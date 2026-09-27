@@ -1655,8 +1655,13 @@ board.empty_review: レビュー待ちのタスクはありません
 board.empty_done: 完了したタスクはありません
 board.filter_empty: フィルターに一致するタスクはありません
 board.clear_filters: フィルターをクリア
+board.clear_filters_short: クリア
+board.clear_search: 検索をクリア
 board.needs_attention: 要確認
+board.needs_attention_short: 要対応
+board.remove_label: "%{label}を削除"
 board.sync_failed: 同期失敗
+board.sync_failed_short: 失敗
 board.open_session: セッションを開く
 board.queue_task: キューに追加
 board.mark_done: 完了にする

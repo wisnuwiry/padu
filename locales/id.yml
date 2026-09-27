@@ -1597,8 +1597,13 @@ board.empty_review: Tidak ada tugas menunggu review
 board.empty_done: Tidak ada tugas yang selesai
 board.filter_empty: Tidak ada tugas yang cocok dengan filter
 board.clear_filters: Hapus Filter
+board.clear_filters_short: Bersihkan
+board.clear_search: Hapus pencarian
 board.needs_attention: Perlu Perhatian
+board.needs_attention_short: Perhatian
+board.remove_label: Hapus %{label}
 board.sync_failed: Sinkronisasi Gagal
+board.sync_failed_short: Gagal
 board.open_session: Buka Sesi
 board.queue_task: Masukkan Antrean
 board.mark_done: Tandai Selesai

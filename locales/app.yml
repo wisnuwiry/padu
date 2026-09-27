@@ -3256,10 +3256,20 @@ board.filter_empty:
   en: No tasks match filters
 board.clear_filters:
   en: Clear Filters
+board.clear_filters_short:
+  en: Clear
+board.clear_search:
+  en: Clear search
 board.needs_attention:
   en: Needs Attention
+board.needs_attention_short:
+  en: Attention
+board.remove_label:
+  en: Remove %{label}
 board.sync_failed:
   en: Sync Failed
+board.sync_failed_short:
+  en: Failed
 board.open_session:
   en: Open Session
 board.queue_task:
