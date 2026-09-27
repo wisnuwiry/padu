@@ -22,7 +22,13 @@ use crate::usage::PlanUsage;
 use crate::usage_history::{UsageHistory, UsageWindow};
 use crate::workspace::{WorkspaceOperation, WorkspaceResult};
 
-pub const PROTOCOL_VERSION: u32 = 8;
+/// Wire protocol version. Bumped to 9 for Phase 1 (Kanban + Agent Profile):
+/// new `kanban` / `agent_profile` commands, `Task` / `AgentProfile` payloads,
+/// and the canonical automation event catalog (`task_queued`,
+/// `workspace_started`, `agent_completed`, `checkpoint_failed`,
+/// `card_updated`, …). Clients and daemons on different versions refuse the
+/// handshake, so every surface upgrades in lockstep.
+pub const PROTOCOL_VERSION: u32 = 9;
 pub const MAX_WIRE_MESSAGE_BYTES: usize = 48 * 1024 * 1024;
 pub const DAEMON_TOKEN_ENV: &str = "PADU_DAEMON_TOKEN";
 pub const DAEMON_ADDRESS_ENV: &str = "PADU_DAEMON_ADDRESS";
