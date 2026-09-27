@@ -1,5 +1,5 @@
 import { useNavigate, useSearch } from '@tanstack/react-router'
-import type { CreateTask, ProviderKind, Task, TaskStatus, TaskSummary } from '@padu/client'
+import type { AgentSession, CreateTask, ProviderKind, Task, TaskStatus, TaskSummary } from '@padu/client'
 import { useCallback, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { PaduIcon, PROVIDERS, ProviderIcon } from '@/components/padu-icon'
@@ -27,6 +27,7 @@ import {
   setSessionPinned,
 } from '@/lib/daemon-api'
 import { projectDisplayName } from '@/lib/project-presentation'
+import { formatDurationShort, formatTokens, taskLiveBadges } from '@/lib/task-live-badges'
 
 const DEFAULT_PROVIDER_MODELS: Record<string, string[]> = {
   claude: ['claude-3-7-sonnet', 'claude-3-5-sonnet', 'claude-3-5-haiku'],
@@ -92,6 +93,18 @@ export function BoardPage() {
   // Queries
   const tasksQuery = useTasks()
   const tasks = tasksQuery.data ?? []
+
+  // Live usage badges (P1-08): join each card's sessionId to the in-memory
+  // session catalog, which refreshes on the daemon's task-state/card-updated
+  // events. No polling — a missing session renders no badges.
+  const sessionsById = useMemo(() => {
+    const map = new Map<string, AgentSession>()
+    for (const session of taskState.data?.sessions ?? []) {
+      map.set(session.id, session)
+    }
+    return map
+  }, [taskState.data])
+  const nowSec = Math.floor(Date.now() / 1000)
 
   // Filtered tasks
   const filteredTasks = useMemo(() => {
@@ -471,6 +484,8 @@ export function BoardPage() {
                         key={task.id}
                         task={task}
                         project={projects.find((p) => p.id === task.projectId)}
+                        session={task.sessionId ? sessionsById.get(task.sessionId) : undefined}
+                        nowSec={nowSec}
                         onSelect={() => setSelectedTaskId(task.id)}
                         onDragStart={(e) => handleDragStart(e, task.id)}
                         onQuickMove={handleQuickMove}
@@ -515,17 +530,22 @@ export function BoardPage() {
 function TaskCard({
   task,
   project,
+  session,
+  nowSec,
   onSelect,
   onDragStart,
   onQuickMove,
 }: {
   task: TaskSummary
   project: { name: string } | undefined
+  session: AgentSession | undefined
+  nowSec: number
   onSelect: () => void
   onDragStart: (e: React.DragEvent) => void
   onQuickMove: (task: TaskSummary, targetStatus: TaskStatus) => void
 }) {
   const { t } = useI18n()
+  const live = taskLiveBadges(session, nowSec)
 
   return (
     <div
@@ -592,6 +612,23 @@ function TaskCard({
           {task.model && (
             <span className="truncate max-w-[85px] font-mono text-[9px] px-1 py-0.5 rounded bg-muted text-muted-foreground border border-border/40" title={task.model}>
               {task.model}
+            </span>
+          )}
+          {live.tokens !== undefined && (
+            <span
+              className="flex items-center gap-0.5 font-mono text-foreground/80"
+              title={t('board.tokens_tooltip')}
+            >
+              <PaduIcon name="zap" className="size-3" />
+              {formatTokens(live.tokens)}
+            </span>
+          )}
+          {live.durationSecs !== undefined && (
+            <span
+              className="font-mono tabular-nums"
+              title={t('board.duration_tooltip')}
+            >
+              {formatDurationShort(live.durationSecs, t)}
             </span>
           )}
         </div>
@@ -898,6 +935,31 @@ function TaskDetailDrawer({
                 </div>
               )}
             </div>
+
+            {/* Live Usage (P1-08): same streamed session join as the cards */}
+            {(() => {
+              const live = taskLiveBadges(session ?? undefined, Math.floor(Date.now() / 1000))
+              if (live.tokens === undefined && live.durationSecs === undefined) return null
+              const parts: string[] = []
+              if (live.tokens !== undefined) parts.push(formatTokens(live.tokens))
+              if (live.durationSecs !== undefined) {
+                parts.push(formatDurationShort(live.durationSecs, t))
+              }
+              return (
+                <div className="flex items-center justify-between rounded-lg border border-border/80 bg-muted/30 px-3 py-2">
+                  <span className="text-xs text-muted-foreground">
+                    {t('board.live_usage')}
+                  </span>
+                  <span
+                    className="flex items-center gap-1 text-xs font-medium text-foreground"
+                    title={t('board.tokens_tooltip')}
+                  >
+                    <PaduIcon name="zap" className="size-3.5" />
+                    {parts.join(' · ')}
+                  </span>
+                </div>
+              )
+            })()}
 
             {/* Linked Session Info */}
             {task.sessionId && (
