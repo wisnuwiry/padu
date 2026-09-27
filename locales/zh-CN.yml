@@ -1627,3 +1627,6 @@ board.filter_project: 项目
 board.filter_agent: 智能体
 board.all_projects: 所有项目
 board.all_agents: 所有智能体
+board.live_usage: 实时用量
+board.tokens_tooltip: 关联会话已使用的 token 数量
+board.duration_tooltip: 智能体工作时长

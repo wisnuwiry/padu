@@ -3306,3 +3306,9 @@ board.all_projects:
   en: All Projects
 board.all_agents:
   en: All Agents
+board.live_usage:
+  en: Live usage
+board.tokens_tooltip:
+  en: Tokens used by the linked session
+board.duration_tooltip:
+  en: Agent working time
