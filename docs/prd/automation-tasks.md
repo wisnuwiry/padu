@@ -28,7 +28,7 @@ Conventions used below: daemon = `crates/padu-core` + `crates/padu-daemon`; wire
 - [x] **P1-06** Lifecycle wiring: Backlog→Queued creates `AgentSession` honoring worktree policy (`NewWorktree{base_branch}`/`Local`); Queued→Running on `workspace_started`; Running→Review on `agent_completed` (checkpoint `Ready`) or `checkpoint_failed` streak (stays in Review + `needs_attention`); Review→Done only on external merge signal or explicit Mark Done; manual drag into Running rejected with reason.
 - [x] **P1-07** Board UI (desktop + web): global board, per-project/agent/status/label/flag filters, virtualized cards, detail panel (checkpoint scrubber reuse, hydrate-on-open log/rewind/fork, linked issue/PR slots), optimistic drag + daemon reconciliation, empty/error states (filter-empty, disconnected-cached).
 - [x] **P1-08** Live badges: cost/token/duration via existing usage events (≤ commit cadence ~8.3 Hz); no UI polling; 500-card interaction test.
-- [ ] **P1-09** Phase 1 gates: §5.5 + §6.4 acceptance pass; protocol bump + codegen + reducers + web types; full checks green; pre-PR review.
+- [x] **P1-09** Phase 1 gates: §5.5 + §6.4 acceptance pass; protocol bump + codegen + reducers + web types; full checks green; pre-PR review.
 
 ## Phase 2 — Git read (protocol → 10)
 
