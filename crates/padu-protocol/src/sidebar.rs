@@ -467,6 +467,7 @@ mod tests {
                 path: "/tmp/first".into(),
                 created_at: 0,
                 scripts: Vec::new(),
+                linked_repo: None,
             },
             Project {
                 id: second_project,
@@ -474,6 +475,7 @@ mod tests {
                 path: "/tmp/second".into(),
                 created_at: 0,
                 scripts: Vec::new(),
+                linked_repo: None,
             },
         ];
         let today = NaiveDate::from_ymd_opt(2026, 8, 12).unwrap();
@@ -503,6 +505,7 @@ mod tests {
             path: "/tmp/p".into(),
             created_at: 0,
             scripts: Vec::new(),
+            linked_repo: None,
         }];
         let now = 1_000_000u64;
         let cutoff = now - SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS;
@@ -563,6 +566,7 @@ mod tests {
             path: "/tmp/p".into(),
             created_at: 0,
             scripts: Vec::new(),
+            linked_repo: None,
         }];
         let now = 1_000_000u64;
         let cutoff = now - SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS;
