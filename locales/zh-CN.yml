@@ -1630,3 +1630,4 @@ board.all_agents: 所有智能体
 board.live_usage: 实时用量
 board.tokens_tooltip: 关联会话已使用的 token 数量
 board.duration_tooltip: 智能体工作时长
+board.agent_disabled_tooltip: 已禁用 — 请在设置 → 服务商中重新启用

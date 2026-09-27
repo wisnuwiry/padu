@@ -1683,3 +1683,4 @@ board.all_agents: すべてのエージェント
 board.live_usage: ライブ使用量
 board.tokens_tooltip: リンクされたセッションの使用トークン数
 board.duration_tooltip: エージェント作業時間
+board.agent_disabled_tooltip: 無効 — 設定 → プロバイダーで再度有効化してください

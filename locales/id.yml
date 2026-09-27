@@ -1625,3 +1625,4 @@ board.all_agents: Semua Agen
 board.live_usage: Penggunaan langsung
 board.tokens_tooltip: Token yang digunakan sesi tertaut
 board.duration_tooltip: Waktu kerja agen
+board.agent_disabled_tooltip: Dinonaktifkan — aktifkan lagi di Pengaturan → Penyedia

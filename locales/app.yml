@@ -3312,3 +3312,5 @@ board.tokens_tooltip:
   en: Tokens used by the linked session
 board.duration_tooltip:
   en: Agent working time
+board.agent_disabled_tooltip:
+  en: Disabled — re-enable in Settings → Providers
