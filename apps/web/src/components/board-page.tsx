@@ -276,6 +276,7 @@ export function BoardPage() {
                 {searchQuery && (
                   <button
                     type="button"
+                    aria-label={t('board.clear_search')}
                     onClick={() => setSearchQuery('')}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
                   >
@@ -354,6 +355,7 @@ export function BoardPage() {
               <div className="flex h-8 items-center rounded-lg border border-border bg-muted/40 p-0.5 gap-0.5 flex-none">
                 <button
                   type="button"
+                  aria-pressed={flagFilter === 'needs_attention'}
                   onClick={() =>
                     setFlagFilter((current) =>
                       current === 'needs_attention' ? 'all' : 'needs_attention',
@@ -368,10 +370,11 @@ export function BoardPage() {
                 >
                   <span className="size-1.5 rounded-full bg-amber-500 shrink-0" />
                   <span className="hidden sm:inline">{t('board.needs_attention')}</span>
-                  <span className="sm:hidden text-[11px]">Attention</span>
+                  <span className="sm:hidden text-[11px]">{t('board.needs_attention_short')}</span>
                 </button>
                 <button
                   type="button"
+                  aria-pressed={flagFilter === 'sync_failed'}
                   onClick={() =>
                     setFlagFilter((current) => (current === 'sync_failed' ? 'all' : 'sync_failed'))
                   }
@@ -390,7 +393,7 @@ export function BoardPage() {
                     )}
                   />
                   <span className="hidden sm:inline">{t('board.sync_failed')}</span>
-                  <span className="sm:hidden text-[11px]">Failed</span>
+                  <span className="sm:hidden text-[11px]">{t('board.sync_failed_short')}</span>
                 </button>
               </div>
 
@@ -412,7 +415,7 @@ export function BoardPage() {
                 >
                   <PaduIcon name="x" className="size-3 text-muted-foreground" />
                   <span className="hidden sm:inline">{t('board.clear_filters')}</span>
-                  <span className="sm:hidden text-[11px]">Clear</span>
+                  <span className="sm:hidden text-[11px]">{t('board.clear_filters_short')}</span>
                 </Button>
               )}
             </div>
@@ -787,11 +790,13 @@ function TaskDetailDrawer({
 
   // Initialize fields once loaded
   const [loadedTaskId, setLoadedTaskId] = useState<string | null>(null)
+  const [loadedStatus, setLoadedStatus] = useState<TaskStatus | null>(null)
   if (task && task.id !== loadedTaskId) {
     setLoadedTaskId(task.id)
     setTitle(task.title)
     setDescription(task.description)
     setStatus(task.status)
+    setLoadedStatus(task.status)
     setAssignedAgent(task.assignedAgent ?? 'none')
     setLabels([...task.labels])
   }
@@ -801,8 +806,9 @@ function TaskDetailDrawer({
     setIsSaving(true)
     try {
       // Status rides the guarded moveTask path (transition checks, lifecycle
-      // side effects); updateTask carries content only so a stale drawer
-      // status can never regress a concurrent daemon transition.
+      // side effects); updateTask carries content only. The move compares
+      // against the loaded status — not the possibly-refreshed task — so a
+      // concurrent daemon transition is never regressed by a content save.
       const updated: Task = {
         ...task,
         title: title.trim(),
@@ -811,11 +817,13 @@ function TaskDetailDrawer({
         labels,
       }
       const saved = await updateTask(client, updated, task.version)
-      if (status !== task.status) {
-        await moveTask(client, task.id, status, saved.version)
+      onTaskUpdated()
+      if (status !== loadedStatus) {
+        const moved = await moveTask(client, task.id, status, saved.version)
+        setLoadedStatus(moved.status)
+        onTaskUpdated()
       }
       toast.success(t('common.saved'))
-      onTaskUpdated()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {
@@ -837,13 +845,15 @@ function TaskDetailDrawer({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      // Let the delete confirmation consume Escape first; closing the
+      // drawer underneath would discard unsaved edits.
+      if (e.key === 'Escape' && !isDeleting && !e.defaultPrevented) {
         onClose()
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
+  }, [onClose, isDeleting])
 
 
   return (
@@ -983,6 +993,7 @@ function TaskDetailDrawer({
                 value={labels}
                 onChange={setLabels}
                 placeholder={t('board.labels_placeholder')}
+                getRemoveLabel={(tag) => t('board.remove_label', { label: tag })}
                 className="border-0 bg-muted/40 shadow-none"
               />
             </div>
@@ -1295,6 +1306,7 @@ function NewTaskDialog({
               value={labels}
               onChange={setLabels}
               placeholder={t('board.labels_placeholder')}
+              getRemoveLabel={(tag) => t('board.remove_label', { label: tag })}
               className="border-0 bg-muted/40 shadow-none min-h-[32px] py-1"
             />
           </div>

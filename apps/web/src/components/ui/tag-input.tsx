@@ -8,6 +8,8 @@ export interface TagInputProps extends Omit<React.HTMLAttributes<HTMLDivElement>
   placeholder?: string
   disabled?: boolean
   className?: string
+  /** Localized accessible name for a tag's remove button. Defaults to English. */
+  getRemoveLabel?: (tag: string) => string
 }
 
 export function TagInput({
@@ -16,6 +18,7 @@ export function TagInput({
   placeholder,
   disabled = false,
   className,
+  getRemoveLabel,
   ...props
 }: TagInputProps) {
   const [input, setInput] = React.useState('')
@@ -66,9 +69,9 @@ export function TagInput({
                 removeTag(idx)
               }}
               className="hover:text-destructive text-muted-foreground ml-0.5 cursor-pointer leading-none"
-              aria-label={`Remove tag ${tag}`}
+              aria-label={getRemoveLabel ? getRemoveLabel(tag) : `Remove tag ${tag}`}
             >
-              ×
+              <span aria-hidden="true">×</span>
             </button>
           )}
         </Badge>
