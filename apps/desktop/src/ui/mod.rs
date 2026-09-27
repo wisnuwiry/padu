@@ -11,8 +11,11 @@ pub mod motion;
 pub mod scrollbar;
 pub mod shortcut_recorder;
 pub mod slider;
+pub mod tag_input;
 pub mod text_field;
 pub mod tooltip;
+
+pub use tag_input::TagInput;
 
 #[allow(unused_imports)]
 pub use dialog::ConfirmVariant;
