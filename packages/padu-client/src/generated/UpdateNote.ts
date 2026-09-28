@@ -2,6 +2,7 @@
 
 export type UpdateNote = { projectId: string, noteId: string, title: string, content: string,
 /**
- * Full replacement set of free-form tags.
+ * Full replacement set of free-form tags. If omitted by an older client,
+ * existing tags are preserved.
  */
-tags: Array<string>, expectedRevision: number, };
+tags?: Array<string> | null, expectedRevision: number, };

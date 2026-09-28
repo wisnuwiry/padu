@@ -1950,22 +1950,37 @@ impl StateStore {
         // caller can never observe another writer's values mid-commit.
         let transaction = connection.transaction().map_err(to_io_error)?;
         let now = crate::model::unix_time();
-        let changed = transaction
-            .execute(
+        let changed = if let Some(tags) = input.tags.as_ref() {
+            transaction.execute(
                 "UPDATE notes
                     SET title = ?1, content = ?2, tags = ?3, revision = revision + 1, updated_at = ?4
                   WHERE project_id = ?5 AND id = ?6 AND revision = ?7",
                 params![
                     input.title,
                     input.content,
-                    encode_note_tags(&input.tags),
+                    encode_note_tags(tags),
                     now as i64,
                     input.project_id.to_string(),
                     input.note_id.to_string(),
                     input.expected_revision as i64,
                 ],
             )
-            .map_err(to_io_error)?;
+        } else {
+            transaction.execute(
+                "UPDATE notes
+                    SET title = ?1, content = ?2, revision = revision + 1, updated_at = ?3
+                  WHERE project_id = ?4 AND id = ?5 AND revision = ?6",
+                params![
+                    input.title,
+                    input.content,
+                    now as i64,
+                    input.project_id.to_string(),
+                    input.note_id.to_string(),
+                    input.expected_revision as i64,
+                ],
+            )
+        }
+        .map_err(to_io_error)?;
         if changed == 0 {
             return Err(note_revision_error(
                 &transaction,
@@ -3381,7 +3396,7 @@ mod tests {
                 note_id: note.id,
                 title: "Updated".into(),
                 content: "details".into(),
-                tags: vec!["design".into()],
+                tags: Some(vec!["design".into()]),
                 expected_revision: 1,
             })
             .unwrap();
@@ -3391,12 +3406,53 @@ mod tests {
             store.get_note(project_id, note.id).unwrap().unwrap().tags,
             ["design"]
         );
+
+        // Updating with tags: None (simulating an older client) preserves existing tags.
+        let preserved = store
+            .update_note(UpdateNote {
+                project_id,
+                note_id: note.id,
+                title: "Preserved tags".into(),
+                content: "new content".into(),
+                tags: None,
+                expected_revision: 2,
+            })
+            .unwrap();
+        assert_eq!(preserved.revision, 3);
+        assert_eq!(preserved.tags, ["design"]);
+        assert_eq!(
+            store.get_note(project_id, note.id).unwrap().unwrap().tags,
+            ["design"]
+        );
+
+        // Updating with tags: Some(vec![]) clears the tags.
+        let cleared = store
+            .update_note(UpdateNote {
+                project_id,
+                note_id: note.id,
+                title: "Cleared tags".into(),
+                content: "new content".into(),
+                tags: Some(vec![]),
+                expected_revision: 3,
+            })
+            .unwrap();
+        assert_eq!(cleared.revision, 4);
+        assert!(cleared.tags.is_empty());
+        assert!(
+            store
+                .get_note(project_id, note.id)
+                .unwrap()
+                .unwrap()
+                .tags
+                .is_empty()
+        );
+
         let conflict = store.update_note(UpdateNote {
             project_id,
             note_id: note.id,
             title: "stale".into(),
             content: "stale".into(),
-            tags: vec![],
+            tags: None,
             expected_revision: 1,
         });
         assert!(
@@ -3406,7 +3462,7 @@ mod tests {
                 .contains("revision conflict")
         );
         assert!(store.get_note(Uuid::new_v4(), note.id).unwrap().is_none());
-        assert_eq!(store.delete_note(project_id, note.id, 2).unwrap(), 2);
+        assert_eq!(store.delete_note(project_id, note.id, 4).unwrap(), 4);
         assert!(store.get_note(project_id, note.id).unwrap().is_none());
 
         fs::remove_dir_all(directory).ok();

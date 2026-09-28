@@ -65,9 +65,10 @@ pub struct UpdateNote {
     pub note_id: Uuid,
     pub title: String,
     pub content: String,
-    /// Full replacement set of free-form tags.
-    #[serde(default)]
-    pub tags: Vec<String>,
+    /// Full replacement set of free-form tags. If omitted by an older client,
+    /// existing tags are preserved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
     pub expected_revision: u64,
 }
 
