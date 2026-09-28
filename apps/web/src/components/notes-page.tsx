@@ -452,6 +452,7 @@ function NotesWorkspace({
   }
 
   function flushPendingSave() {
+    const hadPendingTimer = saveTimer.current !== null
     if (saveTimer.current !== null) {
       window.clearTimeout(saveTimer.current)
       saveTimer.current = null
@@ -460,7 +461,7 @@ function NotesWorkspace({
     if (!pending || !selected || pending.id !== selected.id) return
     const tags = selected.tags ?? []
     const key = `${selected.id}:${selected.title}:${selected.content}:${tags.join(',')}`
-    if (autosaveKey.current === key) return
+    if (!hadPendingTimer && autosaveKey.current === key) return
     autosaveKey.current = key
     pendingSave.current = {
       id: selected.id,
