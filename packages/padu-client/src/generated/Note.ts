@@ -3,4 +3,8 @@
 /**
  * The complete, editable representation of a note.
  */
-export type Note = { id: string, projectId: string, title: string, content: string, revision: number, createdAt: number, updatedAt: number, };
+export type Note = { id: string, projectId: string, title: string, content: string,
+/**
+ * Free-form tags, JSON-serialized string array in storage.
+ */
+tags: Array<string>, revision: number, createdAt: number, updatedAt: number, };

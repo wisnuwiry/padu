@@ -10,6 +10,9 @@ pub struct NoteSummary {
     pub project_id: Uuid,
     pub title: String,
     pub preview: String,
+    /// Free-form tags, JSON-serialized string array in storage.
+    #[serde(default)]
+    pub tags: Vec<String>,
     pub revision: u64,
     pub created_at: u64,
     pub updated_at: u64,
@@ -36,6 +39,9 @@ pub struct Note {
     pub project_id: Uuid,
     pub title: String,
     pub content: String,
+    /// Free-form tags, JSON-serialized string array in storage.
+    #[serde(default)]
+    pub tags: Vec<String>,
     pub revision: u64,
     pub created_at: u64,
     pub updated_at: u64,
@@ -47,6 +53,9 @@ pub struct CreateNote {
     pub project_id: Uuid,
     pub title: String,
     pub content: String,
+    /// Free-form tags. Older clients omit this; it defaults to untagged.
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
@@ -56,6 +65,10 @@ pub struct UpdateNote {
     pub note_id: Uuid,
     pub title: String,
     pub content: String,
+    /// Full replacement set of free-form tags. If omitted by an older client,
+    /// existing tags are preserved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
     pub expected_revision: u64,
 }
 
@@ -70,6 +83,7 @@ mod tests {
             project_id: Uuid::from_u128(2),
             title: "Plan".into(),
             content: "Details".into(),
+            tags: vec!["design".to_owned()],
             revision: 3,
             created_at: 4,
             updated_at: 5,

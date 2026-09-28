@@ -969,9 +969,10 @@ fn note_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Note> {
         })?,
         title: row.get(2)?,
         content: row.get(3)?,
-        revision: row.get::<_, i64>(4)? as u64,
-        created_at: row.get::<_, i64>(5)? as u64,
-        updated_at: row.get::<_, i64>(6)? as u64,
+        tags: parse_note_tags(&row.get::<_, String>(4)?),
+        revision: row.get::<_, i64>(5)? as u64,
+        created_at: row.get::<_, i64>(6)? as u64,
+        updated_at: row.get::<_, i64>(7)? as u64,
     })
 }
 
@@ -982,10 +983,21 @@ fn note_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<NoteSummar
         project_id: note.project_id,
         title: note.title,
         preview: note_preview(&note.content),
+        tags: note.tags,
         revision: note.revision,
         created_at: note.created_at,
         updated_at: note.updated_at,
     })
+}
+
+/// Note tags are stored as a JSON string array. A corrupt value degrades to
+/// untagged rather than failing the whole row read.
+fn parse_note_tags(raw: &str) -> Vec<String> {
+    serde_json::from_str::<Vec<String>>(raw).unwrap_or_default()
+}
+
+fn encode_note_tags(tags: &[String]) -> String {
+    serde_json::to_string(tags).unwrap_or_else(|_| "[]".to_owned())
 }
 
 fn note_preview(content: &str) -> String {
@@ -1852,14 +1864,14 @@ impl StateStore {
         let mut statement = if project_id.is_nil() {
             connection
                 .prepare(
-                    "SELECT id, project_id, title, content, revision, created_at, updated_at
+                    "SELECT id, project_id, title, content, tags, revision, created_at, updated_at
                      FROM notes ORDER BY updated_at DESC, id",
                 )
                 .map_err(to_io_error)?
         } else {
             connection
                 .prepare(
-                    "SELECT id, project_id, title, content, revision, created_at, updated_at
+                    "SELECT id, project_id, title, content, tags, revision, created_at, updated_at
                      FROM notes WHERE project_id = ?1 ORDER BY updated_at DESC, id",
                 )
                 .map_err(to_io_error)?
@@ -1878,7 +1890,7 @@ impl StateStore {
         let connection = &guard.as_ref().expect("storage opened above").connection;
         connection
             .query_row(
-                "SELECT id, project_id, title, content, revision, created_at, updated_at
+                "SELECT id, project_id, title, content, tags, revision, created_at, updated_at
                  FROM notes WHERE project_id = ?1 AND id = ?2",
                 params![project_id.to_string(), note_id.to_string()],
                 note_from_row,
@@ -1907,19 +1919,21 @@ impl StateStore {
             project_id: input.project_id,
             title: input.title,
             content: input.content,
+            tags: input.tags,
             revision: 1,
             created_at: now,
             updated_at: now,
         };
         connection
             .execute(
-                "INSERT INTO notes(id, project_id, title, content, revision, created_at, updated_at)
-                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO notes(id, project_id, title, content, tags, revision, created_at, updated_at)
+                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
                     note.id.to_string(),
                     note.project_id.to_string(),
                     &note.title,
                     &note.content,
+                    encode_note_tags(&note.tags),
                     note.revision as i64,
                     note.created_at as i64,
                     note.updated_at as i64,
@@ -1936,8 +1950,23 @@ impl StateStore {
         // caller can never observe another writer's values mid-commit.
         let transaction = connection.transaction().map_err(to_io_error)?;
         let now = crate::model::unix_time();
-        let changed = transaction
-            .execute(
+        let changed = if let Some(tags) = input.tags.as_ref() {
+            transaction.execute(
+                "UPDATE notes
+                    SET title = ?1, content = ?2, tags = ?3, revision = revision + 1, updated_at = ?4
+                  WHERE project_id = ?5 AND id = ?6 AND revision = ?7",
+                params![
+                    input.title,
+                    input.content,
+                    encode_note_tags(tags),
+                    now as i64,
+                    input.project_id.to_string(),
+                    input.note_id.to_string(),
+                    input.expected_revision as i64,
+                ],
+            )
+        } else {
+            transaction.execute(
                 "UPDATE notes
                     SET title = ?1, content = ?2, revision = revision + 1, updated_at = ?3
                   WHERE project_id = ?4 AND id = ?5 AND revision = ?6",
@@ -1950,7 +1979,8 @@ impl StateStore {
                     input.expected_revision as i64,
                 ],
             )
-            .map_err(to_io_error)?;
+        }
+        .map_err(to_io_error)?;
         if changed == 0 {
             return Err(note_revision_error(
                 &transaction,
@@ -1961,7 +1991,7 @@ impl StateStore {
         }
         let note = transaction
             .query_row(
-                "SELECT id, project_id, title, content, revision, created_at, updated_at
+                "SELECT id, project_id, title, content, tags, revision, created_at, updated_at
                  FROM notes WHERE project_id = ?1 AND id = ?2",
                 params![input.project_id.to_string(), input.note_id.to_string()],
                 note_from_row,
@@ -3347,13 +3377,14 @@ mod tests {
                 project_id,
                 title: "Plan".into(),
                 content: "first\nsecond".into(),
+                tags: vec!["design".into(), "sprint 1".into()],
             })
             .unwrap();
         assert_eq!(note.revision, 1);
-        assert_eq!(
-            store.list_notes(project_id).unwrap()[0].preview,
-            "first second"
-        );
+        assert_eq!(note.tags, ["design", "sprint 1"]);
+        let listed = store.list_notes(project_id).unwrap();
+        assert_eq!(listed[0].preview, "first second");
+        assert_eq!(listed[0].tags, ["design", "sprint 1"]);
         assert_eq!(
             store.get_note(project_id, note.id).unwrap(),
             Some(note.clone())
@@ -3365,15 +3396,63 @@ mod tests {
                 note_id: note.id,
                 title: "Updated".into(),
                 content: "details".into(),
+                tags: Some(vec!["design".into()]),
                 expected_revision: 1,
             })
             .unwrap();
         assert_eq!(updated.revision, 2);
+        assert_eq!(updated.tags, ["design"]);
+        assert_eq!(
+            store.get_note(project_id, note.id).unwrap().unwrap().tags,
+            ["design"]
+        );
+
+        // Updating with tags: None (simulating an older client) preserves existing tags.
+        let preserved = store
+            .update_note(UpdateNote {
+                project_id,
+                note_id: note.id,
+                title: "Preserved tags".into(),
+                content: "new content".into(),
+                tags: None,
+                expected_revision: 2,
+            })
+            .unwrap();
+        assert_eq!(preserved.revision, 3);
+        assert_eq!(preserved.tags, ["design"]);
+        assert_eq!(
+            store.get_note(project_id, note.id).unwrap().unwrap().tags,
+            ["design"]
+        );
+
+        // Updating with tags: Some(vec![]) clears the tags.
+        let cleared = store
+            .update_note(UpdateNote {
+                project_id,
+                note_id: note.id,
+                title: "Cleared tags".into(),
+                content: "new content".into(),
+                tags: Some(vec![]),
+                expected_revision: 3,
+            })
+            .unwrap();
+        assert_eq!(cleared.revision, 4);
+        assert!(cleared.tags.is_empty());
+        assert!(
+            store
+                .get_note(project_id, note.id)
+                .unwrap()
+                .unwrap()
+                .tags
+                .is_empty()
+        );
+
         let conflict = store.update_note(UpdateNote {
             project_id,
             note_id: note.id,
             title: "stale".into(),
             content: "stale".into(),
+            tags: None,
             expected_revision: 1,
         });
         assert!(
@@ -3383,7 +3462,7 @@ mod tests {
                 .contains("revision conflict")
         );
         assert!(store.get_note(Uuid::new_v4(), note.id).unwrap().is_none());
-        assert_eq!(store.delete_note(project_id, note.id, 2).unwrap(), 2);
+        assert_eq!(store.delete_note(project_id, note.id, 4).unwrap(), 4);
         assert!(store.get_note(project_id, note.id).unwrap().is_none());
 
         fs::remove_dir_all(directory).ok();

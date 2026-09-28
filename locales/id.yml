@@ -580,6 +580,8 @@ notes.label: Catatan
 notes.untitled: Catatan Tanpa Judul
 notes.title_placeholder: Judul catatan
 notes.body_placeholder: Tulis dalam Markdown…
+notes.tags_placeholder: Tambah tag (pisahkan dengan koma)…
+notes.remove_tag: Hapus %{label}
 notes.add_to_note: Tambahkan ke Catatan
 notes.added_to_note: Ditambahkan ke catatan
 notes.add_failed: Tidak dapat menambahkan ke catatan

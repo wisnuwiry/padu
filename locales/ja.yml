@@ -596,6 +596,8 @@ notes.label: ノート
 notes.untitled: 無題のノート
 notes.title_placeholder: ノートのタイトル
 notes.body_placeholder: Markdown で記述…
+notes.tags_placeholder: タグを追加（カンマ区切り）…
+notes.remove_tag: "%{label}を削除"
 notes.add_to_note: ノートに追加
 notes.added_to_note: ノートに追加しました
 notes.add_failed: ノートに追加できませんでした

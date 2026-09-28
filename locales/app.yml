@@ -1310,6 +1310,10 @@ notes.title_placeholder:
   en: Note title
 notes.body_placeholder:
   en: Write in Markdown…
+notes.tags_placeholder:
+  en: Add tags (comma separated)…
+notes.remove_tag:
+  en: Remove %{label}
 notes.add_to_note:
   en: Add to Note
 notes.added_to_note:
