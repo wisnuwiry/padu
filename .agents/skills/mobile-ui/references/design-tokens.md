@@ -102,8 +102,8 @@ another `large`. A `pill` never contains a square-cornered surface.
 
 ## Type scale
 
-There is currently real drift — 18 distinct `fontSize` values are in use
-(`10.5` through `28`). New code must not add a 19th. Use this set:
+There is currently real drift — 17 distinct `fontSize` values are in use
+(`10.5` through `28`). New code must not add an 18th. Use this set:
 
 | Role | Size | Weight | Examples |
 | :--- | :--- | :--- | :--- |

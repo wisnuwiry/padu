@@ -1,9 +1,9 @@
 # Adaptive layout — phone, flip/fold, tablet
 
-The mobile tree currently reads **no width at all**: the only
-`useWindowDimensions()` calls take `height` for sheet sizing, and
-`MaxContentWidth` is exported but unused. Every rule below is therefore the
-contract to build toward, not a description of existing code.
+The mobile tree adapts layout using window-width breakpoints (`width >= 1024`
+opens side-by-side list + session views on wide windows via `useWindowDimensions()`).
+Sheet sizing adapts via `height`. Follow the rules below when creating or
+updating responsive components.
 
 ## One principle
 
@@ -103,8 +103,9 @@ naive layouts.
 
 - **No hinge API exists.** React Native and Expo expose no fold-angle or hinge
   geometry API. Do not add a dependency, device-model table, or build flag to
-  detect the hinge. Adapt by width; where a device reports hinge dead space it
-  arrives as a safe-area inset, which `useSafeAreaInsets()` already handles.
+  detect the hinge. Adapt by width; safe-area handling via `useSafeAreaInsets()`
+  covers edge insets only and does not guarantee avoidance of internal hinge or
+  fold geometry.
 - **Half-open is a short window, not a special case.** Never rely on a fixed
   content height. Sheets already size by fraction (`0.62`, `0.48` of window
   height) — keep that pattern; it survives a 480pt-tall window.
