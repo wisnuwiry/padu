@@ -71,6 +71,13 @@
       "when": 1790414802329,
       "tag": "0009_loud_catseye",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1790528712294,
+      "tag": "0010_hesitant_frog_thor",
+      "breakpoints": true
     }
   ]
 }

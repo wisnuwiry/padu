@@ -38,6 +38,8 @@ export const notes = sqliteTable(
     projectId: text("project_id").notNull(),
     title: text("title").notNull(),
     content: text("content").notNull(),
+    /** Free-form tags, JSON-serialized string array. */
+    tags: text("tags").notNull().default("[]"),
     revision: integer("revision").notNull(),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
