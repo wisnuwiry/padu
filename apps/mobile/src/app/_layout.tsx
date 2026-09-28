@@ -1,12 +1,15 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
+import * as SystemUI from "expo-system-ui";
 import { StatusBar } from "expo-status-bar";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { StyleSheet, useColorScheme } from "react-native";
+import { StyleSheet } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import { Colors } from "@/constants/theme";
+import { useColorScheme } from "@/hooks/use-color-scheme";
+import { AppearanceProvider } from "@/lib/appearance-context";
 import { DaemonProvider, useDaemon } from "@/lib/daemon-context";
 import { RuntimeProvider } from "@/lib/runtime-context";
 
@@ -23,8 +26,21 @@ const queryClient = new QueryClient({
 });
 
 export default function RootLayout() {
+  return (
+    <GestureHandlerRootView style={styles.root}>
+      <AppearanceProvider>
+        <AppShell />
+      </AppearanceProvider>
+    </GestureHandlerRootView>
+  );
+}
+
+/** Everything that renders theme colours sits below `AppearanceProvider`, so
+ * the user's System / Light / Dark choice reaches the navigation theme, the
+ * status bar, and every screen. */
+function AppShell() {
   const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme === "dark" ? "dark" : "light"];
+  const colors = Colors[colorScheme];
   const navigationTheme =
     colorScheme === "dark"
       ? {
@@ -43,26 +59,30 @@ export default function RootLayout() {
             card: colors.background,
           },
         };
+
+  // Screens are opaque, but the root view shows through while one animates in
+  // — and on Android, behind the keyboard.
+  useEffect(() => {
+    void SystemUI.setBackgroundColorAsync(colors.background).catch(() => {});
+  }, [colors.background]);
+
   return (
-    <GestureHandlerRootView style={styles.root}>
-      <QueryClientProvider client={queryClient}>
-        <DaemonProvider>
-          <RuntimeProvider>
-            <ThemeProvider value={navigationTheme}>
-              <AppNavigator />
-              <StatusBar style="auto" />
-            </ThemeProvider>
-          </RuntimeProvider>
-        </DaemonProvider>
-      </QueryClientProvider>
-    </GestureHandlerRootView>
+    <QueryClientProvider client={queryClient}>
+      <DaemonProvider>
+        <RuntimeProvider>
+          <ThemeProvider value={navigationTheme}>
+            <AppNavigator />
+            <StatusBar style={colorScheme === "dark" ? "light" : "dark"} />
+          </ThemeProvider>
+        </RuntimeProvider>
+      </DaemonProvider>
+    </QueryClientProvider>
   );
 }
 
 function AppNavigator() {
   const { phase } = useDaemon();
-  const colorScheme = useColorScheme();
-  const theme = Colors[colorScheme === "dark" ? "dark" : "light"];
+  const theme = Colors[useColorScheme()];
 
   useEffect(() => {
     if (phase !== "booting") void SplashScreen.hideAsync();
@@ -81,7 +101,7 @@ function AppNavigator() {
       <Stack.Screen name="index" options={{ headerShown: false, title: "Padu" }} />
       <Stack.Screen
         name="daemons"
-        options={{ headerLargeTitle: true, title: "Daemons" }}
+        options={{ headerShown: false, title: "Daemons" }}
       />
       <Stack.Screen name="new-task" options={{ headerShown: false }} />
       <Stack.Screen

@@ -33,13 +33,20 @@
         {
           "backgroundColor": "#1a1a1a",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 150
         }
       ],
       [
         "expo-secure-store",
         {
           "faceIDPermission": false
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Padu scans the QR code in Padu Desktop’s host dialog to add a daemon.",
+          "recordAudioAndroid": false
         }
       ],
       [

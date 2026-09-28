@@ -1,18 +1,10 @@
-import { BlurView } from "expo-blur";
 import { router } from "expo-router";
 import type { ReactNode } from "react";
-import {
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-  useColorScheme,
-} from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AppSymbol } from "./app-symbol";
-import { GlassSurface } from "./glass-surface";
-import { Radius } from "@/constants/theme";
+import { IconButton } from "./button";
+import { MaxContentWidth, Spacing } from "@/constants/theme";
 import { useTheme } from "@/hooks/use-theme";
 
 /** Pop when there is history; otherwise land on the task list. A screen
@@ -23,174 +15,103 @@ export function navigateBack() {
   else router.replace("/");
 }
 
-/** Content inset for screens whose scrolling content runs under the
- * floating glass header. */
-export function useScreenHeaderInset() {
-  const insets = useSafeAreaInsets();
-  return insets.top + 62;
-}
-
 /**
- * Floating chrome header: a glass back button, a glass title capsule with an
- * optional "project · daemon" subtitle, and an optional trailing accessory
- * cluster. Positioned absolutely so content scrolls beneath the glass.
+ * The screen title bar: an opaque bar carrying a custom back button, the title
+ * block, and an optional trailing action row. It sits in the layout above the
+ * content rather than floating translucent over it.
+ *
+ * Drawn in JavaScript on purpose. The chrome it replaces was a Liquid Glass
+ * material that only iOS 26 renders, so the title bar and its buttons looked
+ * different on Android — and the translucent fallback stopped being legible
+ * once content scrolled under it. Owning the bar keeps both platforms
+ * identical, and an opaque one keeps the title readable with no blur pass.
  */
 export function ScreenHeader({
   title,
   subtitle,
   right,
-  scrolled = false,
+  back = true,
+  leading,
 }: {
-  title: string;
+  title?: string;
   subtitle?: string | null;
   right?: ReactNode;
-  /** Content has scrolled under the header: show the translucent chrome
-   * backdrop with its hairline bottom edge, like a native navigation bar. */
-  scrolled?: boolean;
+  /** Off for a root screen, which has nothing to go back to. */
+  back?: boolean;
+  /** Replaces the title block — e.g. the daemon switcher on the task list. */
+  leading?: ReactNode;
 }) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const colorScheme = useColorScheme();
   return (
     <View
-      pointerEvents="box-none"
-      style={[styles.bar, { paddingTop: insets.top + 6 }]}
+      style={[
+        styles.header,
+        {
+          backgroundColor: theme.background,
+          borderBottomColor: theme.separator,
+          paddingTop: insets.top,
+        },
+      ]}
     >
-      {scrolled && (
-        <View
-          pointerEvents="none"
-          style={[
-            StyleSheet.absoluteFill,
-            styles.backdrop,
-            {
-              borderBottomColor: theme.borderStrong,
-              backgroundColor:
-                colorScheme === "dark" ? "#333333e3" : "#ffffffd6",
-            },
-          ]}
-        >
-          <BlurView intensity={6} style={StyleSheet.absoluteFill} />
-        </View>
-      )}
-      <GlassSurface interactive style={styles.roundButton}>
-        <Pressable
-          accessibilityLabel="Back"
-          accessibilityRole="button"
-          hitSlop={6}
-          onPress={navigateBack}
-          style={({ pressed }) => [
-            styles.roundButtonInner,
-            { opacity: pressed ? 0.55 : 1 },
-          ]}
-        >
-          <AppSymbol
-            name={{
-              ios: "chevron.left",
-              android: "arrow_back",
-              web: "arrow_back",
-            }}
-            size={17}
-            tintColor={theme.text}
+      <View style={styles.row}>
+        {back ? (
+          <IconButton
+            glyphSize={21}
+            icon="chevronLeft"
+            label="Back"
+            onPress={navigateBack}
           />
-        </Pressable>
-      </GlassSurface>
-      <View style={styles.titles}>
-        <Text numberOfLines={1} style={[styles.title, { color: theme.text }]}>
-          {title}
-        </Text>
-        {subtitle ? (
-          <Text
-            numberOfLines={1}
-            style={[styles.subtitle, { color: theme.textTertiary }]}
-          >
-            {subtitle}
-          </Text>
         ) : null}
+        <View style={styles.titles}>
+          {leading ?? (
+            <>
+              {title ? (
+                <Text
+                  numberOfLines={1}
+                  style={[styles.title, { color: theme.text }]}
+                >
+                  {title}
+                </Text>
+              ) : null}
+              {subtitle ? (
+                <Text
+                  numberOfLines={1}
+                  style={[styles.subtitle, { color: theme.textTertiary }]}
+                >
+                  {subtitle}
+                </Text>
+              ) : null}
+            </>
+          )}
+        </View>
+        {right ? <View style={styles.right}>{right}</View> : null}
       </View>
-      {right ?? <View style={styles.rightSpacer} />}
     </View>
   );
 }
 
-/** Pill grouping trailing header actions, like the reference's [compose | …]. */
-export function HeaderActionGroup({ children }: { children: ReactNode }) {
-  return (
-    <GlassSurface interactive style={styles.actionGroup}>
-      {children}
-    </GlassSurface>
-  );
-}
-
-export function HeaderAction({
-  icon,
-  label,
-  onPress,
-}: {
-  icon: Parameters<typeof AppSymbol>[0]["name"];
-  label: string;
-  onPress: () => void;
-}) {
-  const theme = useTheme();
-  return (
-    <Pressable
-      accessibilityLabel={label}
-      accessibilityRole="button"
-      hitSlop={4}
-      onPress={onPress}
-      style={({ pressed }) => [styles.action, { opacity: pressed ? 0.5 : 1 }]}
-    >
-      <AppSymbol name={icon} size={17} tintColor={theme.text} />
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
-  bar: {
+  header: { borderBottomWidth: StyleSheet.hairlineWidth },
+  // Header content is capped and centred like the reading column, so a tablet
+  // gets the same column as a phone with more margin.
+  row: {
     alignItems: "center",
+    alignSelf: "center",
     flexDirection: "row",
-    gap: 10,
-    left: 0,
-    paddingBottom: 10,
-    paddingHorizontal: 12,
-    position: "absolute",
-    right: 0,
-    top: 0,
-    zIndex: 20,
-  },
-  backdrop: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    overflow: "hidden",
-  },
-  roundButton: {
-    borderRadius: Radius.pill,
-    height: 44,
-    width: 44,
-  },
-  roundButtonInner: {
-    alignItems: "center",
-    flex: 1,
-    justifyContent: "center",
+    gap: Spacing.one,
+    maxWidth: MaxContentWidth,
+    paddingBottom: Spacing.one,
+    paddingHorizontal: Spacing.three,
+    paddingTop: Spacing.one,
+    width: "100%",
   },
   titles: {
     flex: 1,
     justifyContent: "center",
     minWidth: 0,
-    paddingHorizontal: 2,
   },
   title: { fontSize: 17, fontWeight: "700", letterSpacing: -0.3 },
   subtitle: { fontSize: 12.5, marginTop: 1 },
-  rightSpacer: { width: 44 },
-  actionGroup: {
-    alignItems: "center",
-    borderRadius: Radius.pill,
-    flexDirection: "row",
-    height: 44,
-    paddingHorizontal: 4,
-  },
-  action: {
-    alignItems: "center",
-    height: 44,
-    justifyContent: "center",
-    width: 42,
-  },
+  right: { alignItems: "center", flexDirection: "row", gap: Spacing.one },
 });

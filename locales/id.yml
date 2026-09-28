@@ -495,6 +495,7 @@ computer_use.grant_access: Berikan Akses
 computer_use.permission_check_failed: Tidak dapat memeriksa izin Penggunaan Komputer
 common.settings: Pengaturan
 common.copy: Salin
+common.open_link: Buka tautan
 common.remove: Hapus
 common.rename: Ganti nama
 session.new_task: Tugas baru
@@ -1554,7 +1555,9 @@ daemon.qr_need_port: Masukkan porta jarak jauh (1–65535).
 daemon.qr_direct_hint: Hanya satu Wi-Fi/LAN. Jaga exposure di jaringan tepercaya — kode ini ws:// polos dan membawa token akses penuh.
 daemon.qr_tailscale_hint: Kedua perangkat harus di tailnet yang sama dan exposure menyala. Isi MagicDNS (*.ts.net) atau IP 100.x.
 daemon.qr_cloudflare_hint: Butuh cloudflared di mesin ini. Tanpa jaringan bersama — tekan Mulai Tunnel, tunggu terhubung, lalu pindai. URL berubah setiap restart.
-daemon.qr_cloudflare_install: brew install cloudflared
+daemon.qr_cloudflare_install_label: Pasang cloudflared
+daemon.qr_cloudflare_guide_label: Panduan pemasangan
+daemon.exposure_port_conflict: Instance Padu lain memakai porta %{port}, jadi daemon ini berada di porta privat. Kode Direct dan Tailscale tidak bisa menjangkaunya — gunakan tunnel Cloudflare, atau tutup instance lain lalu jalankan ulang Padu.
 daemon.qr_title: Hubungkan perangkat lain
 daemon.qr_ssh_hint: Butuh relay SSH ke jump host milik Anda (GatewayPorts yes). Kode ini hanya menjelaskan wss://jump:port — jalankan relay dulu.
 daemon.qr_ssh_needs_relay: Jalankan relay SSH (Tambah Host → SSH) sebelum membagikan kode ini — kalau tidak, kode menunjuk ke porta tertutup.

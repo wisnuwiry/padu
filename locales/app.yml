@@ -684,8 +684,12 @@ daemon.qr_tailscale_hint:
   en: Both devices must be on the same tailnet and exposure must be on. Enter the MagicDNS (*.ts.net) or 100.x address.
 daemon.qr_cloudflare_hint:
   en: Requires cloudflared on this machine. No shared network needed — press Start Tunnel, wait for connected, then scan. The URL rotates on every restart.
-daemon.qr_cloudflare_install:
-  en: brew install cloudflared
+daemon.qr_cloudflare_install_label:
+  en: Install cloudflared
+daemon.qr_cloudflare_guide_label:
+  en: Installation guide
+daemon.exposure_port_conflict:
+  en: Another Padu instance owns port %{port}, so this daemon is on a private port. Direct and Tailscale codes cannot reach it — use the Cloudflare tunnel, or quit the other instance and restart Padu.
 daemon.qr_title:
   en: Connect another device
 daemon.qr_ssh_hint:
@@ -1123,6 +1127,8 @@ common.settings:
   en: Settings
 common.copy:
   en: Copy
+common.open_link:
+  en: Open link
 common.remove:
   en: Remove
 common.rename:

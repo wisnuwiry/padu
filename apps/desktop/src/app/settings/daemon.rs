@@ -915,6 +915,34 @@ impl Padu {
                                         .child(tr!("daemon.security_warning")),
                                 ),
                         )
+                        .when(self.daemon_exposed_port_is_taken(), |card| {
+                            card.child(
+                                div()
+                                    .mt(px(7.0))
+                                    .px(px(10.0))
+                                    .py(px(8.0))
+                                    .rounded(px(8.0))
+                                    .bg(theme.inset)
+                                    .w_full()
+                                    .min_w_0()
+                                    .flex()
+                                    .gap(px(8.0))
+                                    .child(icon("icons/alert.svg", 13.0, theme.warning))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .whitespace_normal()
+                                            .text_size(sp(12.5))
+                                            .line_height(sp(15.0))
+                                            .text_color(theme.text_secondary)
+                                            .child(tr!(
+                                                "daemon.exposure_port_conflict",
+                                                port = self.state.daemon_exposure.port
+                                            )),
+                                    ),
+                            )
+                        })
                         .child(self.render_daemon_qr_section(&token, &theme, cx))
                         .child(
                             div()
@@ -1001,7 +1029,7 @@ impl Padu {
         // Right column: what the other device needs for this transport.
         let header = div().mt(px(10.0)).child(header_tabs);
         let mut left = div().flex().flex_col().gap(px(10.0)).flex_1().min_w_0();
-        let right = qr_instruction_panel(self.daemon_qr_transport, theme);
+        let right = self.qr_instruction_panel(self.daemon_qr_transport, theme, cx);
 
         match self.daemon_qr_transport {
             HostKind::Direct => {
@@ -1414,9 +1442,223 @@ impl Padu {
         column
     }
 
+    /// Instruction panel on the right of the credential code: what the other
+    /// device needs for this transport. `tr!` needs a literal key, so the copy
+    /// is resolved through a match.
+    fn qr_instruction_panel(&self, kind: HostKind, theme: &Theme, cx: &mut Context<Self>) -> Div {
+        let (title, body) = match kind {
+            HostKind::Direct => (tr!("host.transport_direct"), tr!("daemon.qr_direct_hint")),
+            HostKind::Tailscale => (
+                tr!("host.transport_tailscale"),
+                tr!("daemon.qr_tailscale_hint"),
+            ),
+            HostKind::Cloudflare => (
+                tr!("host.transport_cloudflare"),
+                tr!("daemon.qr_cloudflare_hint"),
+            ),
+            HostKind::SshRelay => (tr!("host.transport_ssh"), tr!("daemon.qr_ssh_hint")),
+        };
+        let mut panel = div()
+            .flex_1()
+            .min_w_0()
+            .px(px(12.0))
+            .py(px(10.0))
+            .rounded(px(8.0))
+            .bg(theme.inset)
+            .flex()
+            .flex_col()
+            .gap(px(6.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(icon("icons/info.svg", 13.0, theme.text_tertiary))
+                    .child(
+                        div()
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(title),
+                    ),
+            )
+            .child(
+                div()
+                    .whitespace_normal()
+                    .text_size(sp(12.0))
+                    .line_height(sp(17.0))
+                    .text_color(theme.text_secondary)
+                    .child(body),
+            );
+        if kind == HostKind::Cloudflare {
+            // The one prerequisite that blocks everyone: no binary, no tunnel.
+            panel = panel.child(self.cloudflare_install_rows(theme, cx));
+        }
+        panel
+    }
+
+    /// Getting `cloudflared` installed means moving two exact strings off this
+    /// screen: the platform's install command into a terminal and Cloudflare's
+    /// guide into a browser. Both are copyable rows, and the guide is also
+    /// clickable — a user who is already blocked should not have to select a
+    /// URL by hand.
+    fn cloudflare_install_rows(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
+        use padu_client::transport::cloudflare::{CLOUDFLARED_INSTALL_GUIDE, install_command};
+
+        let mut rows = div().flex().flex_col().gap(px(5.0));
+        if let Some(command) = install_command() {
+            rows = rows.child(self.instruction_row(
+                "daemon-cloudflare-install-command",
+                tr!("daemon.qr_cloudflare_install_label"),
+                command,
+                None,
+                theme,
+                cx,
+            ));
+        }
+        rows.child(self.instruction_row(
+            "daemon-cloudflare-install-guide",
+            tr!("daemon.qr_cloudflare_guide_label"),
+            CLOUDFLARED_INSTALL_GUIDE,
+            Some(CLOUDFLARED_INSTALL_GUIDE),
+            theme,
+            cx,
+        ))
+    }
+
+    /// One labelled value with copy — and optionally open — affordances for
+    /// the instruction panel. Keyboard-operable so tab + enter matches the
+    /// mouse.
+    fn instruction_row(
+        &self,
+        id: &str,
+        label: String,
+        value: &str,
+        open_url: Option<&'static str>,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let copied = self.control_was_copied(id);
+        let copy_value = value.to_owned();
+        let copy_id = id.to_owned();
+        let copy_value_key = value.to_owned();
+        let copy_id_key = id.to_owned();
+        let copy_button = icon_button(
+            SharedString::from(id.to_owned()),
+            if copied {
+                "icons/check.svg"
+            } else {
+                "icons/copy.svg"
+            },
+            *theme,
+        )
+        .tab_index(0)
+        .focus_visible(|style| style.border_color(theme.accent))
+        .tooltip(Tooltip::text(if copied {
+            tr!("common.copied")
+        } else {
+            tr!("common.copy")
+        }))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string(copy_value.clone()));
+            this.show_control_copied(copy_id.clone(), cx);
+        }))
+        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+            if !event.keystroke.modifiers.modified()
+                && matches!(event.keystroke.key.as_str(), "enter" | "space")
+            {
+                cx.write_to_clipboard(ClipboardItem::new_string(copy_value_key.clone()));
+                this.show_control_copied(copy_id_key.clone(), cx);
+                cx.stop_propagation();
+            }
+        }));
+
+        let mut row = div()
+            .w_full()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(1.0))
+                    .child(
+                        div()
+                            .text_size(sp(11.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text_tertiary)
+                            .child(label),
+                    )
+                    .child(
+                        div()
+                            .font_family(crate::md::render::MONO_FAMILY)
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_secondary)
+                            .truncate()
+                            .child(SharedString::from(value.to_owned())),
+                    ),
+            )
+            .child(copy_button);
+        if let Some(url) = open_url {
+            row = row.child(
+                icon_button(
+                    SharedString::from(format!("{id}-open")),
+                    "icons/external-link.svg",
+                    *theme,
+                )
+                .tab_index(0)
+                .focus_visible(|style| style.border_color(theme.accent))
+                .tooltip(Tooltip::text(tr!("common.open_link")))
+                .on_click(cx.listener(move |_, _, _, cx| cx.open_url(url)))
+                .on_key_down(cx.listener(move |_, event: &KeyDownEvent, _, cx| {
+                    if !event.keystroke.modifiers.modified()
+                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                    {
+                        cx.open_url(url);
+                        cx.stop_propagation();
+                    }
+                })),
+            );
+        }
+        row
+    }
+
+    /// Port `cloudflared` must forward to: the daemon this desktop is actually
+    /// driving, not the port it asked for.
+    ///
+    /// `daemon_exposure.port` is a request. When another Padu instance already
+    /// owns it, the daemon binds an ephemeral loopback port instead — and
+    /// forwarding to the requested port then reaches *that other* instance's
+    /// daemon, whose token is different. The phone, holding the token from this
+    /// desktop's QR, is told "authentication failed" for a credential that is
+    /// perfectly valid on the daemon this desktop is connected to.
+    fn daemon_tunnel_port(&self) -> u16 {
+        self.daemon_local_port
+            .unwrap_or(self.state.daemon_exposure.port)
+    }
+
+    /// True when the daemon is *not* listening on the exposed port, which means
+    /// another process owns it and the LAN-facing codes cannot reach this
+    /// daemon.
+    fn daemon_exposed_port_is_taken(&self) -> bool {
+        self.state.daemon_exposure.enabled
+            && self
+                .daemon_local_port
+                .is_some_and(|port| port != self.state.daemon_exposure.port)
+    }
+
     /// Open (or reopen) the Cloudflare tunnel that fronts this daemon.
     fn start_daemon_qr_tunnel(&mut self, cx: &mut Context<Self>) {
-        let local_port = self.state.daemon_exposure.port;
+        // Re-read before aiming: the development watcher replaces the daemon on
+        // every rebuild, and the replacement can land on a different port than
+        // the cached one. `or` keeps the last known port while a replacement is
+        // being published and `local_port` momentarily reports nothing.
+        self.daemon_local_port = self.daemon.local_port().or(self.daemon_local_port);
+        let local_port = self.daemon_tunnel_port();
         let token = self.state.daemon_exposure.token.clone();
         if self.daemon_qr_tunnel_starting {
             return;
@@ -1633,6 +1875,9 @@ impl Padu {
                         }
                         this.daemon_origin_inputs
                             .truncate(applied.allowed_origins.len());
+                        // The reconfigured daemon may have bound a different
+                        // port, so the QR/tunnel target has to follow it.
+                        this.daemon_local_port = this.daemon.local_port();
                         this.save();
                         this.show_success_toast(tr!("daemon.settings_applied"));
                     }
@@ -1687,67 +1932,6 @@ fn strip_scheme(raw: &str) -> String {
         }
     }
     trimmed.trim_end_matches('/').to_owned()
-}
-
-/// Instruction panel on the right of the credential code: what the other
-/// device needs for this transport. `tr!` needs a literal key, so the copy
-/// is resolved through a match.
-fn qr_instruction_panel(kind: HostKind, theme: &Theme) -> Div {
-    let (title, body) = match kind {
-        HostKind::Direct => (tr!("host.transport_direct"), tr!("daemon.qr_direct_hint")),
-        HostKind::Tailscale => (
-            tr!("host.transport_tailscale"),
-            tr!("daemon.qr_tailscale_hint"),
-        ),
-        HostKind::Cloudflare => (
-            tr!("host.transport_cloudflare"),
-            tr!("daemon.qr_cloudflare_hint"),
-        ),
-        HostKind::SshRelay => (tr!("host.transport_ssh"), tr!("daemon.qr_ssh_hint")),
-    };
-    let mut panel = div()
-        .flex_1()
-        .min_w_0()
-        .px(px(12.0))
-        .py(px(10.0))
-        .rounded(px(8.0))
-        .bg(theme.inset)
-        .flex()
-        .flex_col()
-        .gap(px(6.0))
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap(px(6.0))
-                .child(icon("icons/info.svg", 13.0, theme.text_tertiary))
-                .child(
-                    div()
-                        .text_size(sp(12.5))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text)
-                        .child(title),
-                ),
-        )
-        .child(
-            div()
-                .whitespace_normal()
-                .text_size(sp(12.0))
-                .line_height(sp(17.0))
-                .text_color(theme.text_secondary)
-                .child(body),
-        );
-    if kind == HostKind::Cloudflare {
-        // The one prerequisite that blocks everyone: no binary, no tunnel.
-        panel = panel.child(
-            div()
-                .font_family(crate::md::render::MONO_FAMILY)
-                .text_size(sp(11.5))
-                .text_color(theme.text_tertiary)
-                .child(SharedString::from(tr!("daemon.qr_cloudflare_install"))),
-        );
-    }
-    panel
 }
 
 /// Centered wrapper for the credential QR: the code keeps its natural size

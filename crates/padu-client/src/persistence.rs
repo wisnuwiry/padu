@@ -74,22 +74,14 @@ impl ConversationBackgroundSettings {
 }
 
 /// How the desktop groups task history in the sidebar.
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SidebarGrouping {
-    #[default]
-    Project,
-    Updated,
-}
-
-/// Direction of task history inside the sidebar's current grouping.
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SidebarOrdering {
-    #[default]
-    Newest,
-    Oldest,
-}
+///
+/// Canonical definition lives in [`padu_protocol::sidebar`]: the daemon owns
+/// the sort & grouping engine and serves it through
+/// `Command::GetSidebarGroups`. This re-export keeps the desktop's persisted
+/// app state (`AppState`) on the exact same type the engine and RPC use, so
+/// no conversion can drift. Serialized form is unchanged (`project`,
+/// `updated`, `newest`, `oldest`).
+pub use padu_protocol::sidebar::{SidebarGrouping, SidebarOrdering};
 
 fn default_sidebar_visibility() -> bool {
     true
@@ -1340,6 +1332,49 @@ pub fn hydrate_session(
         ResponsePayload::Session { session } => Ok(session),
         _ => Err(io::Error::other(
             "Padu daemon returned an invalid session-hydration response",
+        )),
+    }
+}
+
+/// Fetches the daemon-owned sidebar sort & grouping view.
+///
+/// Sorting, date-bucket grouping, project grouping, and recent-window
+/// pagination all run on the daemon over its authoritative task state. The
+/// caller supplies its local calendar context (today + UTC offset) so a
+/// remote daemon computes the same buckets the client sees locally.
+#[allow(clippy::too_many_arguments)]
+pub fn sidebar_groups(
+    daemon: &DaemonSupervisor,
+    grouping: padu_protocol::sidebar::SidebarGrouping,
+    ordering: padu_protocol::sidebar::SidebarOrdering,
+    today_year: i32,
+    today_month: u32,
+    today_day: u32,
+    now_secs: u64,
+    local_utc_offset_secs: i32,
+    revealed_older: std::collections::HashMap<String, u32>,
+) -> io::Result<Vec<padu_protocol::sidebar::SidebarGroupView>> {
+    match daemon
+        .client()
+        .request(
+            Uuid::nil(),
+            Uuid::nil(),
+            Command::GetSidebarGroups {
+                grouping,
+                ordering,
+                today_year,
+                today_month,
+                today_day,
+                now_secs,
+                local_utc_offset_secs,
+                revealed_older,
+            },
+        )
+        .map_err(to_io_error)?
+    {
+        ResponsePayload::SidebarGroups { groups } => Ok(groups),
+        _ => Err(io::Error::other(
+            "Padu daemon returned an invalid sidebar-groups response",
         )),
     }
 }

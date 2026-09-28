@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::io::{BufRead as _, BufReader};
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command as ProcessCommand, Stdio};
 use std::sync::Arc;
@@ -179,6 +180,14 @@ pub fn parse_allowed_origins(text: &str) -> anyhow::Result<Vec<String>> {
 pub struct DaemonProcess {
     client: DaemonClient,
     child: Child,
+    /// The address the daemon reported *after* binding.
+    ///
+    /// The requested port is only a request: `bind_address` asks for it, but a
+    /// second Padu instance can already own it, and the daemon then lands on an
+    /// ephemeral loopback port instead. Callers that must reach *this* daemon —
+    /// a Cloudflare tunnel forwarding to it, for example — have to use the
+    /// bound address, or they reach whichever process owns the requested port.
+    address: String,
 }
 
 impl DaemonProcess {
@@ -282,11 +291,20 @@ impl DaemonProcess {
                 return Err(error);
             }
         };
-        Ok(Self { client, child })
+        Ok(Self {
+            client,
+            child,
+            address: ready.address,
+        })
     }
 
     pub fn client(&self) -> DaemonClient {
         self.client.clone()
+    }
+
+    /// Port this daemon is listening on, as reported by the daemon itself.
+    pub fn port(&self) -> Option<u16> {
+        address_port(&self.address)
     }
 
     fn has_exited(&mut self) -> bool {
@@ -312,6 +330,15 @@ impl Drop for DaemonProcess {
     fn drop(&mut self) {
         self.stop();
     }
+}
+
+/// Port from a daemon's advertised bind address. The address is a
+/// `SocketAddr` string, so IPv6 arrives bracketed (`[::]:34123`).
+fn address_port(address: &str) -> Option<u16> {
+    address
+        .parse::<SocketAddr>()
+        .ok()
+        .map(|parsed| parsed.port())
 }
 
 fn desktop_client_address(address: &str) -> anyhow::Result<String> {
@@ -488,6 +515,24 @@ impl DaemonSupervisor {
 
     pub fn is_remote(&self) -> bool {
         self.inner.executable.is_none()
+    }
+
+    /// Port the desktop-managed daemon is actually listening on, or `None` for
+    /// a remote daemon and while a replacement is being published.
+    ///
+    /// This is *not* `DaemonExposureSettings::port`: that value is the port the
+    /// desktop asked for, and the daemon falls back to an ephemeral loopback
+    /// port when another process already owns it. Anything that has to reach
+    /// this specific daemon — a tunnel, or a QR code describing where it can be
+    /// reached — must use the bound port.
+    ///
+    /// Takes the target lock, which is never held across process teardown, but
+    /// callers on a render path should read a cached value instead.
+    pub fn local_port(&self) -> Option<u16> {
+        match &*self.inner.target.lock() {
+            DaemonTarget::Local(process) => process.port(),
+            DaemonTarget::Restarting(_) | DaemonTarget::Remote { .. } => None,
+        }
     }
 
     pub fn settings(&self) -> DaemonSettings {
@@ -775,5 +820,17 @@ mod tests {
             "127.0.0.1:34123"
         );
         assert_eq!(desktop_client_address("[::]:34123").unwrap(), "[::1]:34123");
+    }
+
+    /// The bound port has to survive the round trip through the daemon's
+    /// advertised address, including IPv6, because callers reach the daemon
+    /// with `127.0.0.1:<port>` rather than the address the daemon printed.
+    #[test]
+    fn bound_port_is_readable_from_an_advertised_address() {
+        assert_eq!(address_port("0.0.0.0:34123"), Some(34123));
+        assert_eq!(address_port("127.0.0.1:49339"), Some(49339));
+        assert_eq!(address_port("[::]:34123"), Some(34123));
+        assert_eq!(address_port("[::1]:49339"), Some(49339));
+        assert_eq!(address_port("not-an-address"), None);
     }
 }

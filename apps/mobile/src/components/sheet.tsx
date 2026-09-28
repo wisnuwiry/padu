@@ -8,9 +8,8 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AppSymbol } from '@/components/app-symbol';
-import { liquidGlass } from '@/components/glass-surface';
-import { NativeTint, Radius, Spacing } from '@/constants/theme';
+import { PaduIcon } from '@/components/padu-icon';
+import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 /**
@@ -54,7 +53,7 @@ export function Sheet({
   return (
     <BottomSheetModal
       ref={sheet}
-      backgroundStyle={liquidGlass ? undefined : { backgroundColor: theme.surface }}
+      backgroundStyle={{ backgroundColor: theme.surface }}
       enablePanDownToClose
       onDismiss={onDismiss}>
       <BottomSheetView
@@ -120,10 +119,10 @@ export function SheetRow({
         ) : null}
       </View>
       {selected && (
-        <AppSymbol
-          name={{ ios: 'checkmark', android: 'check', web: 'check' }}
+        <PaduIcon
+          name="check"
           size={15}
-          tintColor={NativeTint}
+          tintColor={theme.accent}
         />
       )}
     </Pressable>

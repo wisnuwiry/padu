@@ -15,14 +15,14 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AppSymbol } from '@/components/app-symbol';
+import { PaduIcon, type PaduIconName } from '@/components/padu-icon';
 import {
   ComposerCard,
   ComposerIconButton,
   SendButton,
 } from '@/components/mobile-composer';
 import { RemoteProjectPicker } from '@/components/remote-project-picker';
-import { ScreenHeader, useScreenHeaderInset } from '@/components/screen-header';
+import { ScreenHeader } from '@/components/screen-header';
 import { AccessSheet, ModelPickerSheet } from '@/components/session-option-sheets';
 import { SessionView } from '@/components/session-view';
 import { Sheet, SheetRow } from '@/components/sheet';
@@ -50,7 +50,6 @@ type SheetKind = 'daemon' | 'project' | 'model' | 'workspace' | 'branch' | 'acce
 export default function NewTaskScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const headerInset = useScreenHeaderInset();
   const daemon = useDaemon();
   const runtime = useRuntime();
   const taskState = useTaskState();
@@ -260,40 +259,39 @@ export default function NewTaskScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={[styles.screen, { backgroundColor: theme.background }]}>
       <ScreenHeader title="New Task" />
-      <View style={{ height: headerInset }} />
       <View style={styles.spacer} />
 
       <View style={styles.rows}>
         <SelectorRow
-          icon={{ ios: 'laptopcomputer', android: 'laptop_mac', web: 'laptop_mac' }}
+          icon="laptop"
           label="Daemon"
           loading={daemon.phase === 'connecting' || daemon.phase === 'booting'}
           value={daemon.activeProfile?.name ?? 'Add a daemon'}
           onPress={() => setOpenSheet('daemon')}
         />
         <SelectorRow
-          icon={{ ios: 'folder', android: 'folder', web: 'folder' }}
+          icon="folder"
           label="Project"
           loading={taskState.isPending}
           value={selectedProject?.name ?? 'Choose a project'}
           onPress={() => setOpenSheet('project')}
         />
         <SelectorRow
-          icon={{ ios: 'sparkle', android: 'auto_awesome', web: 'auto_awesome' }}
+          icon="sparkle"
           label="Model"
           loading={catalog.isPending}
           value={modelLabel}
           onPress={() => setOpenSheet('model')}
         />
         <SelectorRow
-          icon={{ ios: 'laptopcomputer', android: 'laptop_mac', web: 'laptop_mac' }}
+          icon="laptop"
           label="Workspace"
           value={isolated ? 'Isolated worktree' : 'Work locally'}
           onPress={() => setOpenSheet('workspace')}
         />
         {isolated && (
           <SelectorRow
-            icon={{ ios: 'arrow.triangle.branch', android: 'account_tree', web: 'account_tree' }}
+            icon="gitBranch"
             label="Base branch"
             loading={branches.isPending && branches.fetchStatus !== 'idle'}
             value={branchLabel}
@@ -318,7 +316,7 @@ export default function NewTaskScreen() {
             <>
               <ComposerIconButton
                 active={runtimeMode !== 'fullAccess'}
-                icon={{ ios: 'hand.raised', android: 'front_hand', web: 'pan_tool' }}
+                icon="lock"
                 label="Agent access"
                 onPress={() => setOpenSheet('access')}
               />
@@ -351,8 +349,8 @@ export default function NewTaskScreen() {
         <SheetRow
           label="Manage daemons…"
           leading={(
-            <AppSymbol
-              name={{ ios: 'gearshape', android: 'settings', web: 'settings' }}
+            <PaduIcon
+              name="settings"
               size={16}
               tintColor={theme.textSecondary}
             />
@@ -378,8 +376,8 @@ export default function NewTaskScreen() {
           description="Pick any folder on the daemon host, or create an empty workspace"
           label="Browse daemon host…"
           leading={(
-            <AppSymbol
-              name={{ ios: 'externaldrive', android: 'hard_drive', web: 'hard_drive' }}
+            <PaduIcon
+              name="server"
               size={16}
               tintColor={theme.textSecondary}
             />
@@ -468,7 +466,7 @@ function SelectorRow({
   onPress,
   loading = false,
 }: {
-  icon: Parameters<typeof AppSymbol>[0]['name'];
+  icon: PaduIconName;
   label: string;
   value: string;
   onPress: () => void;
@@ -485,7 +483,7 @@ function SelectorRow({
         styles.row,
         { backgroundColor: pressed ? theme.overlay : 'transparent' },
       ]}>
-      <AppSymbol name={icon} size={19} tintColor={theme.textSecondary} />
+      <PaduIcon name={icon} size={19} tintColor={theme.textSecondary} />
       {loading ? (
         <ActivityIndicator color={theme.textTertiary} size="small" />
       ) : (
@@ -493,8 +491,8 @@ function SelectorRow({
           {value}
         </Text>
       )}
-      <AppSymbol
-        name={{ ios: 'chevron.up.chevron.down', android: 'unfold_more', web: 'unfold_more' }}
+      <PaduIcon
+        name="chevronsUpDown"
         size={13}
         tintColor={theme.textTertiary}
       />

@@ -29,6 +29,8 @@ import {
   persistSession,
   probeProvider,
   removeDaemonSession,
+  setSessionArchived,
+  setSessionPinned,
   type TaskState,
 } from './daemon-api';
 import { persistentStorageSync } from './composer-preferences-store';
@@ -80,6 +82,8 @@ interface RuntimeContextValue {
   ) => Promise<void>;
   updateSessionOptions: (sessionId: string, changes: SessionOptionChanges) => Promise<void>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
+  setSessionPinned: (sessionId: string, pinned: boolean) => Promise<void>;
+  setSessionArchived: (sessionId: string, archived: boolean) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   removeQueuedMessage: (sessionId: string, messageId: string) => Promise<void>;
   dismissError: (sessionId: string) => void;
@@ -574,6 +578,85 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     await persistOrdered(next);
   }, [cacheSession, loadFullSession, persistOrdered]);
 
+  /** Pin / archive flags are daemon-owned metadata. Optimistically flip the
+   * flag in both the task list and the hydrated session, then reconcile with
+   * the daemon response; roll back on failure. Archiving also clears a live
+   * runtime's pin, mirroring web. */
+  const updateSessionFlag = useCallback(async (
+    sessionId: string,
+    flag: 'pinned_at' | 'archived_at',
+    enabled: boolean,
+  ) => {
+    const client = daemon.client;
+    const profileId = daemon.activeProfile?.id;
+    if (!client || !profileId || daemon.phase !== 'connected') {
+      throw new Error('Padu daemon is disconnected');
+    }
+    const timestamp = enabled ? clock.nowSeconds() : null;
+    const applyFlag = (session: AgentSession): AgentSession => ({
+      ...session,
+      [flag]: timestamp,
+      ...(flag === 'archived_at' && enabled ? { pinned_at: null } : {}),
+    });
+    const previousState = queryClient.getQueryData<TaskState>(daemonKeys.taskState(profileId));
+    const previousSession = queryClient.getQueryData<AgentSession>(
+      daemonKeys.session(profileId, sessionId),
+    );
+    queryClient.setQueryData<TaskState>(daemonKeys.taskState(profileId), (current) => (
+      current
+        ? { ...current, sessions: current.sessions.map((item) => item.id === sessionId ? applyFlag(item) : item) }
+        : current
+    ));
+    if (previousSession) {
+      queryClient.setQueryData(
+        daemonKeys.session(profileId, sessionId),
+        applyFlag(previousSession),
+      );
+    }
+    try {
+      const updated = flag === 'pinned_at'
+        ? await setSessionPinned(client, sessionId, enabled)
+        : await setSessionArchived(client, sessionId, enabled);
+      queryClient.setQueryData<TaskState>(daemonKeys.taskState(profileId), (current) => (
+        current
+          ? {
+            ...current,
+            sessions: current.sessions.map((item) => item.id === sessionId
+              ? { ...item, pinned_at: updated.pinned_at, archived_at: updated.archived_at }
+              : item),
+          }
+          : current
+      ));
+      if (previousSession || queryClient.getQueryData<AgentSession>(daemonKeys.session(profileId, sessionId))) {
+        queryClient.setQueryData<AgentSession>(
+          daemonKeys.session(profileId, sessionId),
+          (current) => current
+            ? { ...current, pinned_at: updated.pinned_at, archived_at: updated.archived_at }
+            : current,
+        );
+      }
+      // The list renders daemon-owned sidebar groups, not the task state
+      // directly — without this the tabs never recompute and the mutation
+      // looks like a no-op.
+      void queryClient.invalidateQueries({ queryKey: daemonKeys.taskState(profileId) });
+      void queryClient.invalidateQueries({ queryKey: ['daemon', profileId, 'sidebar-groups'] });
+    } catch (cause) {
+      if (previousState) queryClient.setQueryData(daemonKeys.taskState(profileId), previousState);
+      if (previousSession) {
+        queryClient.setQueryData(daemonKeys.session(profileId, sessionId), previousSession);
+      }
+      throw cause;
+    }
+  }, [daemon.activeProfile?.id, daemon.client, daemon.phase, queryClient]);
+
+  const setPinned = useCallback(async (sessionId: string, pinned: boolean) => {
+    await updateSessionFlag(sessionId, 'pinned_at', pinned);
+  }, [updateSessionFlag]);
+
+  const setArchived = useCallback(async (sessionId: string, archived: boolean) => {
+    await updateSessionFlag(sessionId, 'archived_at', archived);
+  }, [updateSessionFlag]);
+
   const deleteSession = useCallback(async (sessionId: string) => {
     const client = daemon.client;
     const profileId = daemon.activeProfile?.id;
@@ -635,6 +718,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           return typeof sessionId === 'string' && !entries.current.has(sessionId);
         },
       });
+      // Pin / archive / delete from another client move sessions between
+      // sidebar groups — refetch the list inputs too, not just sessions.
+      void queryClient.invalidateQueries({ queryKey: daemonKeys.taskState(profileId) });
+      void queryClient.invalidateQueries({ queryKey: ['daemon', profileId, 'sidebar-groups'] });
     });
   }, [daemon.activeProfile?.id, daemon.client, queryClient]);
 
@@ -670,6 +757,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       respondUserInput,
       updateSessionOptions,
       renameSession,
+      setSessionPinned: setPinned,
+      setSessionArchived: setArchived,
       deleteSession,
       removeQueuedMessage,
       dismissError,

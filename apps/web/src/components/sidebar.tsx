@@ -1,6 +1,6 @@
-import type { AgentSession, Project } from '@padu/client'
+import type { AgentSession, PaduClient, Project } from '@padu/client'
 import { ContextMenu } from '@base-ui/react/context-menu'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Virtuoso } from 'react-virtuoso'
 import { Button } from '@/components/ui/button'
 import { ControlMenu, type ControlMenuItem } from '@/components/control-menu'
@@ -18,7 +18,8 @@ import { useDaemon } from '@/lib/daemon-context'
 import { useI18n } from '@/lib/i18n'
 import { usePrimaryShortcut } from '@/lib/platform'
 import {
-  groupSessions,
+  daemonGroupsToSessionGroups,
+  localUtcOffsetSecs,
   nextSidebarUpdateDelay,
   sessionTimeLabel,
   sidebarRows,
@@ -28,6 +29,8 @@ import {
   type SidebarGrouping,
   type SidebarOrdering,
 } from '@/lib/sidebar-presentation'
+import type { SidebarGroupView } from '@padu/client'
+import { fetchSidebarGroups } from '@/lib/daemon-api'
 import { cn } from '@/lib/utils'
 import paduAppIconUrl from '../../../landing/public/app-icon.png'
 
@@ -114,7 +117,7 @@ export function Sidebar({
   const [liveWidth, setLiveWidth] = useState(width)
   const [nowSeconds, setNowSeconds] = useState(() => Math.floor(Date.now() / 1_000))
   const [sessionToDelete, setSessionToDelete] = useState<{ id: string; title?: string } | null>(null)
-  const { hosts, activeHost, activeHostId, config, phase, switchHost, addHost } = useDaemon()
+  const { hosts, activeHost, activeHostId, config, phase, switchHost, addHost, client } = useDaemon()
   const [hostDialogOpen, setHostDialogOpen] = useState(false)
 
   const currentHostDisplayName = phase === 'connecting'
@@ -184,15 +187,15 @@ export function Sidebar({
     } catch {}
   }, [collapsed])
 
-  const groups = groupSessions(
-    taskState.projects,
-    taskState.sessions,
-    new Date(nowSeconds * 1_000),
-    t('sidebar.unknown_project'),
-    t('project.no_project_name'),
+  const groups = useDaemonSidebarGroups(
+    client,
+    taskState,
     grouping,
     ordering,
     revealedOlderCounts,
+    nowSeconds,
+    t('sidebar.unknown_project'),
+    t('project.no_project_name'),
   )
   const rows = sidebarRows(groups, collapsed)
 
@@ -1072,5 +1075,65 @@ function ConnectionDot() {
       )}
       role="img"
     />
+  )
+}
+
+/**
+ * Daemon-owned sidebar groups. Sort, date-bucket grouping, project grouping,
+ * and recent-window pagination run on the daemon through `getSidebarGroups`;
+ * this hook only fetches and maps the result to renderable groups. Refetches
+ * when the view inputs move — grouping, ordering, sessions, reveal counts,
+ * or the local calendar day — never on the per-second time-label tick.
+ */
+function useDaemonSidebarGroups(
+  client: PaduClient | null,
+  taskState: TaskState,
+  grouping: SidebarGrouping,
+  ordering: SidebarOrdering,
+  revealedOlderCounts: Record<string, number>,
+  nowSeconds: number,
+  unknownProject: string,
+  projectlessName: string,
+): SessionGroup[] {
+  const [daemonGroups, setDaemonGroups] = useState<SidebarGroupView[] | null>(null)
+  const dayKey = new Date(nowSeconds * 1_000).toDateString()
+  const { projects, sessions } = taskState
+
+  useEffect(() => {
+    if (!client) return
+    let cancelled = false
+    const now = new Date(nowSeconds * 1_000)
+    void fetchSidebarGroups(client, {
+      grouping,
+      ordering,
+      today: now,
+      nowSecs: nowSeconds,
+      localUtcOffsetSecs: localUtcOffsetSecs(now),
+      revealedOlder: revealedOlderCounts,
+    })
+      .then((groups) => {
+        if (!cancelled) setDaemonGroups(groups)
+      })
+      .catch(() => {
+        // Keep the last good groups; the next task-state change retries.
+      })
+    return () => {
+      cancelled = true
+    }
+    // nowSeconds intentionally enters only through dayKey + request params:
+    // time-label ticks must not refetch the grouping.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, grouping, ordering, projects, sessions, revealedOlderCounts, dayKey])
+
+  return useMemo(
+    () =>
+      daemonGroupsToSessionGroups(
+        daemonGroups ?? [],
+        new Map(sessions.map((session) => [session.id, session])),
+        projects,
+        unknownProject,
+        projectlessName,
+      ),
+    [daemonGroups, sessions, projects, unknownProject, projectlessName],
   )
 }

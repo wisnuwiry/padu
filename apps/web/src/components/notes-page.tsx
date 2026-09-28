@@ -37,7 +37,7 @@ import { useI18n } from '@/lib/i18n'
 import { formatNoteTimeAgo, noteExcerpt } from '@/lib/notes-utils'
 import { usePrimaryShortcut } from '@/lib/platform'
 import { projectDisplayName } from '@/lib/project-presentation'
-import { readSidebarGrouping, readSidebarOrdering, sidebarVisualSessions } from '@/lib/sidebar-presentation'
+import { fetchSidebarVisualSessions, readSidebarGrouping, readSidebarOrdering } from '@/lib/sidebar-presentation'
 
 const ALL_NOTES_PROJECT_ID = '00000000-0000-0000-0000-000000000000'
 const SAVE_DEBOUNCE_MS = 650
@@ -119,28 +119,29 @@ function NotesShell() {
 
   const selectAdjacentSession = useCallback((delta: number) => {
     const data = taskState.data
-    if (!data) return
-    const started = sidebarVisualSessions(
-      data.projects,
-      data.sessions,
-      readSidebarGrouping(),
-      readSidebarOrdering(),
-      t('sidebar.unknown_project'),
-      t('project.no_project_name'),
-    )
-    if (!started.length) return
-    const targetSession = window.sessionStorage.getItem('padu.note-target-session')
-    const currentId = targetSession && targetSession !== 'new' ? targetSession : undefined
-    const currentIndex = currentId ? started.findIndex((session) => session.id === currentId) : -1
-    const nextIndex = currentIndex >= 0
-      ? (delta > 0 ? Math.min(currentIndex + 1, started.length - 1) : Math.max(currentIndex - 1, 0))
-      : (delta > 0 ? 0 : started.length - 1)
-    const next = started[nextIndex]
-    if (next) {
-      window.sessionStorage.setItem('padu.note-target-session', next.id)
-      void navigate({ to: '/', search: { session: next.id } })
-    }
-  }, [navigate, t, taskState.data])
+    if (!data || !client) return
+    // Visual order comes from the daemon-owned sidebar engine so ↑/↓ follow
+    // the rendered sequence. One-shot keypress, so an async fetch is fine.
+    void fetchSidebarVisualSessions(client, data.sessions, {
+      grouping: readSidebarGrouping(),
+      ordering: readSidebarOrdering(),
+    })
+      .then((started) => {
+        if (!started.length) return
+        const targetSession = window.sessionStorage.getItem('padu.note-target-session')
+        const currentId = targetSession && targetSession !== 'new' ? targetSession : undefined
+        const currentIndex = currentId ? started.findIndex((session) => session.id === currentId) : -1
+        const nextIndex = currentIndex >= 0
+          ? (delta > 0 ? Math.min(currentIndex + 1, started.length - 1) : Math.max(currentIndex - 1, 0))
+          : (delta > 0 ? 0 : started.length - 1)
+        const next = started[nextIndex]
+        if (next) {
+          window.sessionStorage.setItem('padu.note-target-session', next.id)
+          void navigate({ to: '/', search: { session: next.id } })
+        }
+      })
+      .catch(() => {})
+  }, [client, navigate, taskState.data])
 
   // Global shortcuts that stay available on the notes page, mirroring
   // padu-app: ⌘B toggles the sidebar, ⌘⇧M returns to the conversation that

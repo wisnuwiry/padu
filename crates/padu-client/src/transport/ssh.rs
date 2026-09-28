@@ -19,6 +19,7 @@ use padu_protocol::persistence::HostKind;
 use parking_lot::Mutex;
 use smol::process::Command;
 
+use crate::transport::binary::find_binary;
 use crate::transport::{
     QrPayload, Transport, TransportContext, TransportError, TransportHandle, TransportStatus,
     terminate_process,
@@ -117,7 +118,7 @@ impl Transport for SshTransport {
             });
         }
         self.config.validate()?;
-        let binary = which::which("ssh").map_err(|_| TransportError::BinaryMissing {
+        let binary = find_binary("ssh").ok_or_else(|| TransportError::BinaryMissing {
             binary: "ssh".into(),
             why: "".into(),
         })?;

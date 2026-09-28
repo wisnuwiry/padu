@@ -1,27 +1,25 @@
 import { describe, expect, test } from 'bun:test'
-import type { AgentSession, Project } from '@padu/client'
+import type { AgentSession, Project, SidebarGroupView } from '@padu/client'
 import {
-  dateGroup,
+  daemonGroupsToSessionGroups,
+  daemonGroupsToVisualSessions,
   formatTimeAgo,
   formatWorkingElapsed,
-  groupSessions,
+  localUtcOffsetSecs,
   nextSidebarUpdateDelay,
   readSidebarShowProvider,
   sessionHasStarted,
   sessionTimeLabel,
   sidebarRows,
-  sortSidebarSessions,
 } from './sidebar-presentation'
 
-describe('desktop sidebar presentation', () => {
-  test('uses a Monday-based current week instead of a rolling seven days', () => {
-    const wednesday = new Date(2026, 7, 12, 12)
-    expect(dateGroup(atLocalNoon(2026, 7, 12), wednesday)).toBe('today')
-    expect(dateGroup(atLocalNoon(2026, 7, 11), wednesday)).toBe('yesterday')
-    expect(dateGroup(atLocalNoon(2026, 7, 10), wednesday)).toBe('week')
-    expect(dateGroup(atLocalNoon(2026, 7, 9), wednesday)).toBe('month')
-  })
+// Sort, date-bucket grouping, project grouping, and recent-window pagination
+// are owned by the daemon engine (`padu-protocol::sidebar`, served through
+// `getSidebarGroups`) and tested there. These tests cover what stays
+// client-side: mapping daemon groups to renderable rows, time labels, and
+// presentation helpers.
 
+describe('daemon sidebar presentation', () => {
   test('keeps Add Project in an empty history through the first group header', () => {
     expect(sidebarRows([], new Set())).toEqual([
       { kind: 'search', key: 'search' },
@@ -43,6 +41,50 @@ describe('desktop sidebar presentation', () => {
         first: true,
       },
     ])
+  })
+
+  test('maps daemon groups to renderable groups preserving order and reveal state', () => {
+    const project: Project = { id: 'p1', name: 'Alpha', path: '/home/alpha', created_at: 1 }
+    const pinned = session({ id: 'pinned', project_id: 'p1', created_at: 100, last_reply_at: 100, pinned_at: 1 })
+    const recent = session({ id: 'recent', project_id: 'p1', created_at: 300, last_reply_at: 300 })
+    const byId = new Map([pinned, recent].map((s) => [s.id, s]))
+    const views: SidebarGroupView[] = [
+      { id: 'pinned', kind: 'pinned', sessionIds: ['pinned'], hasMore: false },
+      { id: 'project:p1', kind: 'project', projectId: 'p1', sessionIds: ['recent'], hasMore: true },
+      { id: 'updated:today', kind: 'updated', dateGroup: 'today', sessionIds: ['missing'], hasMore: false },
+    ]
+    const groups = daemonGroupsToSessionGroups(views, byId, [project], 'Unknown', 'No project')
+    expect(groups.map((g) => g.id)).toEqual(['pinned', 'project:p1', 'updated:today'])
+    expect(groups[0]?.sessions.map((item) => item.session.id)).toEqual(['pinned'])
+    expect(groups[1]?.sessions.map((item) => item.session.id)).toEqual(['recent'])
+    expect(groups[1]?.hasMore).toBe(true)
+    expect(groups[1]?.label).toBe('Alpha')
+    // Unknown session ids are skipped, never rendered as holes.
+    expect(groups[2]?.sessions).toEqual([])
+    expect(groups[2]?.label).toBe('Today')
+
+    const visual = daemonGroupsToVisualSessions(views, byId)
+    expect(visual.map((s) => s.id)).toEqual(['pinned', 'recent'])
+  })
+
+  test('resolves projectless and unknown projects to display names', () => {
+    const projectless: Project = {
+      id: 'project',
+      name: 'No project',
+      path: '/home/me/.padu/projects/session',
+      created_at: 1,
+    }
+    const item = session({ created_at: 500, last_reply_at: 500 })
+    const groups = daemonGroupsToSessionGroups(
+      [{ id: 'projectless', kind: 'projectless', sessionIds: [item.id], hasMore: false }],
+      new Map([[item.id, item]]),
+      [projectless],
+      'Unknown project',
+      'プロジェクトなし',
+    )
+    expect(groups[0]?.sessions[0]?.projectName).toBe('プロジェクトなし')
+    expect(groups[0]?.label).toBe('プロジェクトなし')
+    expect(groups[0]?.sessions[0]?.timestamp).toBe(500)
   })
 
   test('matches desktop settled and live time labels', () => {
@@ -73,89 +115,6 @@ describe('desktop sidebar presentation', () => {
     expect(sessionTimeLabel(resumed, 1_000)).toBeNull()
   })
 
-  test('presents the projectless sentinel with the localized desktop name', () => {
-    const project: Project = {
-      id: 'project',
-      name: 'No project',
-      path: '/home/me/.padu/projects/session',
-      created_at: 1,
-    }
-    const now = new Date(2026, 7, 15, 12)
-    const nowSeconds = Math.floor(now.getTime() / 1000)
-    const groups = groupSessions(
-      [project],
-      [session({ created_at: nowSeconds, messages: [{ id: 'message' } as never] })],
-      now,
-      'Unknown project',
-      'プロジェクトなし',
-    )
-    expect(groups[0]?.sessions[0]?.projectName).toBe('プロジェクトなし')
-  })
-
-  test('sorts sessions by newest or oldest timestamp', () => {
-    const s1 = session({ id: 's1', created_at: 100, last_reply_at: 100, messages: [{ id: 'm1' } as never] })
-    const s2 = session({ id: 's2', created_at: 200, last_reply_at: 200, messages: [{ id: 'm2' } as never] })
-    const s3 = session({ id: 's3', created_at: 300, last_reply_at: 300, messages: [{ id: 'm3' } as never] })
-
-    const newest = sortSidebarSessions([s2, s1, s3], 'newest')
-    expect(newest.map((s) => s.id)).toEqual(['s3', 's2', 's1'])
-
-    const oldest = sortSidebarSessions([s2, s1, s3], 'oldest')
-    expect(oldest.map((s) => s.id)).toEqual(['s1', 's2', 's3'])
-  })
-
-  test('puts pinned sessions first and omits archived sessions', () => {
-    const pinned = session({ id: 'pinned', created_at: 100, last_reply_at: 100, pinned_at: 1, messages: [{ id: 'm' } as never] })
-    const normal = session({ id: 'normal', created_at: 300, last_reply_at: 300, messages: [{ id: 'm' } as never] })
-    const archived = session({ id: 'archived', created_at: 400, last_reply_at: 400, archived_at: 1, messages: [{ id: 'm' } as never] })
-
-    expect(sortSidebarSessions([normal, pinned], 'newest').map((item) => item.id)).toEqual(['pinned', 'normal'])
-    const groups = groupSessions([], [normal, pinned, archived], new Date(2026, 7, 15, 12), 'Unknown', 'No project', 'updated')
-    expect(groups.flatMap((group) => group.sessions.map((item) => item.session.id))).toEqual(['pinned', 'normal'])
-  })
-
-  test('groups sessions by project and applies 7-day recent cutoff with pagination', () => {
-    const now = new Date(2026, 7, 15, 12)
-    const nowSeconds = Math.floor(now.getTime() / 1000)
-    const eightDaysAgo = nowSeconds - 8 * 86_400
-    const oneDayAgo = nowSeconds - 1 * 86_400
-
-    const p1: Project = { id: 'p1', name: 'Project Alpha', path: '/home/alpha', created_at: 1 }
-    const p2: Project = { id: 'p2', name: 'Project Beta', path: '/home/beta', created_at: 1 }
-
-    const sRecentAlpha = session({ id: 's1', project_id: 'p1', created_at: oneDayAgo, last_reply_at: oneDayAgo, messages: [{ id: 'm1' } as never] })
-    const sOlderAlpha = session({ id: 's2', project_id: 'p1', created_at: eightDaysAgo, last_reply_at: eightDaysAgo, messages: [{ id: 'm2' } as never] })
-    const sRecentBeta = session({ id: 's3', project_id: 'p2', created_at: oneDayAgo, last_reply_at: oneDayAgo, messages: [{ id: 'm3' } as never] })
-
-    // Without revealing older sessions: Alpha has 1 visible and hasMore: true
-    const groups = groupSessions([p1, p2], [sRecentAlpha, sOlderAlpha, sRecentBeta], now, 'Unknown', 'No project', 'project', 'newest', {})
-    expect(groups.length).toBe(2)
-
-    const alphaGroup = groups.find((g) => g.projectId === 'p1')!
-    expect(alphaGroup.sessions.length).toBe(1)
-    expect(alphaGroup.sessions[0]?.session.id).toBe('s1')
-    expect(alphaGroup.hasMore).toBe(true)
-
-    // With reveal count >= 1 for Alpha: both sessions visible and hasMore: false
-    const groupsRevealed = groupSessions([p1, p2], [sRecentAlpha, sOlderAlpha, sRecentBeta], now, 'Unknown', 'No project', 'project', 'newest', { 'project:p1': 5 })
-    const alphaRevealed = groupsRevealed.find((g) => g.projectId === 'p1')!
-    expect(alphaRevealed.sessions.length).toBe(2)
-    expect(alphaRevealed.hasMore).toBe(false)
-  })
-
-  test('reverses date group order in updated grouping when oldest ordering is selected', () => {
-    const now = new Date(2026, 7, 15, 12)
-    const nowSeconds = Math.floor(now.getTime() / 1000)
-    const today = session({ id: 'today', created_at: nowSeconds, last_reply_at: nowSeconds, messages: [{ id: 'm' } as never] })
-    const month = session({ id: 'month', created_at: nowSeconds - 10 * 86_400, last_reply_at: nowSeconds - 10 * 86_400, messages: [{ id: 'm' } as never] })
-
-    const groupsNewest = groupSessions([], [today, month], now, 'Unknown', 'No project', 'updated', 'newest')
-    expect(groupsNewest.map((g) => g.dateGroup)).toEqual(['today', 'month'])
-
-    const groupsOldest = groupSessions([], [today, month], now, 'Unknown', 'No project', 'updated', 'oldest')
-    expect(groupsOldest.map((g) => g.dateGroup)).toEqual(['month', 'today'])
-  })
-
   test('handles time labels and elapsed counters across different time deltas', () => {
     expect(formatTimeAgo(30)).toBe('just now')
     expect(formatTimeAgo(90)).toBe('1m')
@@ -166,12 +125,19 @@ describe('desktop sidebar presentation', () => {
   })
 
   test('sidebarRows respects collapsed state and inserts spacers between groups', () => {
-    const now = new Date(2026, 7, 15, 12)
-    const nowSeconds = Math.floor(now.getTime() / 1000)
-    const s1 = session({ id: 's1', created_at: nowSeconds, last_reply_at: nowSeconds, messages: [{ id: 'm1' } as never] })
-    const s2 = session({ id: 's2', created_at: nowSeconds - 10 * 86_400, last_reply_at: nowSeconds - 10 * 86_400, messages: [{ id: 'm2' } as never] })
-
-    const groups = groupSessions([], [s1, s2], now, 'Unknown', 'No project', 'updated', 'newest')
+    const s1 = session({ id: 's1', created_at: 500, last_reply_at: 500 })
+    const s2 = session({ id: 's2', created_at: 400, last_reply_at: 400 })
+    const byId = new Map([s1, s2].map((s) => [s.id, s]))
+    const groups = daemonGroupsToSessionGroups(
+      [
+        { id: 'updated:today', kind: 'updated', dateGroup: 'today', sessionIds: ['s1'], hasMore: false },
+        { id: 'updated:month', kind: 'updated', dateGroup: 'month', sessionIds: ['s2'], hasMore: false },
+      ],
+      byId,
+      [],
+      'Unknown',
+      'No project',
+    )
     expect(groups.length).toBe(2)
 
     const uncollapsedRows = sidebarRows(groups, new Set())
@@ -215,8 +181,7 @@ describe('desktop sidebar presentation', () => {
   })
 
   test('group headers and session items support keyboard interaction invariants', () => {
-    const groups = groupSessions([], [], new Date(), 'Unknown', 'No project', 'project', 'newest')
-    const rows = sidebarRows(groups, new Set())
+    const rows = sidebarRows([], new Set())
     expect(rows[0]?.kind).toBe('search')
     expect(rows[0]?.key).toBe('search')
   })
@@ -227,11 +192,21 @@ describe('desktop sidebar presentation', () => {
     expect(readSidebarShowProvider({ getItem: () => 'false' })).toBe(false)
     expect(readSidebarShowProvider({ getItem: () => 'true' })).toBe(true)
   })
-})
 
-function atLocalNoon(year: number, month: number, day: number): number {
-  return Math.floor(new Date(year, month, day, 12).getTime() / 1_000)
-}
+  test('formatWorkingElapsed formats seconds, minutes, whole hours, and mixed hours', () => {
+    expect(formatWorkingElapsed(45)).toBe('45s')
+    expect(formatWorkingElapsed(60)).toBe('1m')
+    expect(formatWorkingElapsed(75)).toBe('1m 15s')
+    expect(formatWorkingElapsed(3600)).toBe('1h')
+    expect(formatWorkingElapsed(7200)).toBe('2h')
+    expect(formatWorkingElapsed(3665)).toBe('1h 1m')
+  })
+
+  test('localUtcOffsetSecs mirrors the date offset the daemon buckets against', () => {
+    const at = new Date(2026, 7, 15, 12)
+    expect(localUtcOffsetSecs(at)).toBe(-at.getTimezoneOffset() * 60)
+  })
+})
 
 function session(patch: Partial<AgentSession>): AgentSession {
   return {

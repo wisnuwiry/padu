@@ -2,12 +2,15 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   classifyConnection,
+  describeConnection,
   displayHost,
+  formatLastUsed,
   isPrivateDaemonAddress,
   normalizeDaemonAddress,
   normalizeDaemonProfile,
   parseDaemonProfiles,
   profileInitials,
+  transportLabel,
 } from './daemon-profile';
 
 describe('daemon profiles', () => {
@@ -147,5 +150,56 @@ describe('daemon profiles', () => {
     expect(classifyConnection('ws://10.0.0.5:34123')).toBe('private_ws');
     expect(classifyConnection('ws://app.example.com')).toBe('insecure_public_ws');
     expect(classifyConnection('ftp://nope')).toBe('invalid');
+  });
+
+  test('labels a transport for the host badge, leaving direct unbadged', () => {
+    expect(transportLabel('cloudflare')).toBe('Cloudflare');
+    expect(transportLabel('tailscale')).toBe('Tailscale');
+    expect(transportLabel('ssh_relay')).toBe('SSH');
+    // `direct` is the default, so the badge is omitted rather than labelled.
+    expect(transportLabel('direct')).toBe('');
+  });
+
+  test('describes a connection the same way for every surface', () => {
+    expect(describeConnection('cloudflare')).toEqual({
+      tone: 'secure',
+      text: 'Encrypted through Cloudflare.',
+    });
+    expect(describeConnection('tailscale').text).toBe(
+      'Encrypted over your tailnet.',
+    );
+    expect(describeConnection('ssh_relay').text).toBe(
+      'Encrypted through your SSH tunnel.',
+    );
+    expect(describeConnection('public_wss').tone).toBe('secure');
+    expect(describeConnection('private_ws').tone).toBe('warning');
+
+    // saveProfile refuses this one, so the copy has to say so.
+    const blocked = describeConnection('insecure_public_ws');
+    expect(blocked.tone).toBe('danger');
+    expect(blocked.text).toContain('blocked');
+
+    expect(describeConnection('invalid').tone).toBe('danger');
+  });
+
+  test('stays coarse about when a host was last used', () => {
+    const now = 1_000_000_000_000;
+    const ago = (elapsedMs: number) => formatLastUsed(now - elapsedMs, now);
+    const minute = 60_000;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+
+    expect(ago(0)).toBe('just now');
+    expect(ago(59_000)).toBe('just now');
+    expect(ago(minute)).toBe('1m ago');
+    expect(ago(59 * minute)).toBe('59m ago');
+    expect(ago(hour)).toBe('1h ago');
+    expect(ago(23 * hour)).toBe('23h ago');
+    expect(ago(day)).toBe('1d ago');
+    expect(ago(6 * day)).toBe('6d ago');
+    expect(ago(7 * day)).toBe('1w ago');
+
+    // A clock that jumped backwards must not read as a negative age.
+    expect(formatLastUsed(now + 5_000, now)).toBe('just now');
   });
 });

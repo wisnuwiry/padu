@@ -16,13 +16,21 @@ import {
   View,
   type TextInputProps,
 } from 'react-native';
+import { useQuery } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AppSymbol } from './app-symbol';
+import { PaduIcon, type PaduIconName } from './padu-icon';
+import { ContextGauge } from './context-gauge';
 import { AccessSheet, ModelSheet } from './session-option-sheets';
 import { MonoFont, NativeTint, Radius } from '@/constants/theme';
+import { useTaskState } from '@/hooks/use-daemon-data';
 import { useTheme } from '@/hooks/use-theme';
-import { applyComposerDraftChanges, loadComposerDrafts } from '@/lib/daemon-api';
+import {
+  applyComposerDraftChanges,
+  daemonKeys,
+  inspectBranches,
+  loadComposerDrafts,
+} from '@/lib/daemon-api';
 import { useDaemon } from '@/lib/daemon-context';
 import { sessionBusy } from '@/lib/mobile-runtime';
 import { useRuntime } from '@/lib/runtime-context';
@@ -66,7 +74,7 @@ export function ComposerIconButton({
   active = false,
   disabled = false,
 }: {
-  icon: Parameters<typeof AppSymbol>[0]['name'];
+  icon: PaduIconName;
   label: string;
   onPress: () => void;
   active?: boolean;
@@ -88,7 +96,7 @@ export function ComposerIconButton({
           opacity: disabled ? 0.35 : pressed ? 0.55 : 1,
         },
       ]}>
-      <AppSymbol name={icon} size={19} tintColor={active ? NativeTint : theme.textSecondary} />
+      <PaduIcon name={icon} size={19} tintColor={active ? theme.accent : theme.textSecondary} />
     </Pressable>
   );
 }
@@ -128,16 +136,195 @@ export function SendButton({
       {busy ? (
         <ActivityIndicator color={disabled ? theme.textTertiary : theme.onInverse} size="small" />
       ) : (
-        <AppSymbol
-          name={queueing
-            ? { ios: 'text.append', android: 'playlist_add', web: 'playlist_add' }
-            : { ios: 'arrow.up', android: 'arrow_upward', web: 'arrow_upward' }}
+        <PaduIcon
+          name="arrowUp"
           size={17}
           tintColor={disabled ? theme.textTertiary : steering ? '#ffffff' : theme.onInverse}
         />
       )}
     </Pressable>
   );
+}
+
+type QueuedMessage = NonNullable<AgentSession['queued_messages']>[number];
+
+/**
+ * Status card above the composer input: queued follow-ups (each with steer
+ * and delete actions) and the worktree/branch line. The location line hides
+ * when the project has no git — a local checkout without a resolvable
+ * branch renders nothing instead of a bare "Local" label. The whole card
+ * renders nothing while there is nothing to show. The context-window meter
+ * lives below the input instead, in ComposerContextRow.
+ */
+function ComposerStatusCard({
+  session,
+  queued,
+  canSteer,
+  onSteerMessage,
+  onRemoveMessage,
+}: {
+  session: AgentSession;
+  queued: QueuedMessage[];
+  canSteer: boolean;
+  onSteerMessage: (message: QueuedMessage) => void;
+  onRemoveMessage: (messageId: string) => void;
+}) {
+  const theme = useTheme();
+  const daemon = useDaemon();
+  const workspace = session.workspace;
+  const isWorktree = workspace?.kind === 'worktree';
+  const projectPath = useTaskState().data?.projects
+    .find((item) => item.id === session.project_id)?.path ?? null;
+  const workspaceBranch = workspace?.kind === 'worktree'
+    ? workspace.branch
+    : workspace?.kind === 'newWorktree'
+      ? workspace.baseBranch ?? null
+      : null;
+  // A local checkout carries no branch on the session itself, so resolve it
+  // from the daemon's branch snapshot for the session's project — the same
+  // source the new-task screen uses. Only queried while the workspace
+  // branch is unknown.
+  const branchQuery = useQuery({
+    queryKey: daemonKeys.branches(
+      daemon.activeProfile?.id ?? 'disconnected',
+      projectPath ?? 'missing',
+    ),
+    queryFn: () => inspectBranches(daemon.client!, projectPath!),
+    enabled: daemon.phase === 'connected'
+      && Boolean(daemon.client && projectPath)
+      && !workspaceBranch,
+    staleTime: 30_000,
+  });
+  const branch = workspaceBranch
+    ?? branchQuery.data?.current
+    ?? branchQuery.data?.detached_head
+    ?? null;
+  // No git, no line: keep the row while the snapshot is still resolving,
+  // hide it once it resolves without a branch on a local checkout.
+  const showLocation = isWorktree || Boolean(branch) || branchQuery.isLoading;
+
+  if (!queued.length && !showLocation) return null;
+
+  return (
+    <View style={[styles.statusCard, { backgroundColor: theme.composer, borderColor: theme.border }]}>
+      {queued.map((message, index) => (
+        <View key={message.id}>
+          <View style={styles.queuedItem}>
+            <PaduIcon
+              name="clock"
+              size={12}
+              tintColor={theme.textTertiary}
+            />
+            <Text numberOfLines={1} style={[styles.queuedText, { color: theme.textSecondary }]}>
+              {message.display_content ?? message.content}
+            </Text>
+            <View style={styles.queueActions}>
+              {canSteer && (
+                <Pressable
+                  accessibilityHint="Sends this queued message to the working agent now"
+                  accessibilityLabel="Steer working agent"
+                  accessibilityRole="button"
+                  hitSlop={4}
+                  onPress={() => onSteerMessage(message)}
+                  style={({ pressed }) => [styles.queueActionButton, { opacity: pressed ? 0.55 : 1 }]}>
+                  <PaduIcon
+                    name="cornerDownRight"
+                    size={13}
+                    tintColor={theme.textTertiary}
+                  />
+                  <Text style={[{ fontSize: 12, fontWeight: '700' }, { color: theme.textTertiary }]}>Steer</Text>
+                </Pressable>
+              )}
+              <Pressable
+                accessibilityLabel="Remove queued message"
+                accessibilityRole="button"
+                hitSlop={4}
+                onPress={() => onRemoveMessage(message.id)}
+                style={({ pressed }) => [styles.queueActionButton, { opacity: pressed ? 0.55 : 1 }]}>
+                <PaduIcon
+                  name="trash"
+                  size={13}
+                  tintColor={theme.textTertiary}
+                />
+              </Pressable>
+            </View>
+          </View>
+          <View style={[styles.queueSeparator, { backgroundColor: theme.border }]} />
+        </View>
+      ))}
+      {showLocation && (
+        <View
+          accessibilityLabel={[isWorktree ? 'worktree' : 'local', branch].filter(Boolean).join(', ')}
+          accessibilityRole="text"
+          style={styles.statusLine}>
+          {isWorktree ? (
+            <View style={styles.statusItem}>
+              <PaduIcon name="fork" size={12} tintColor={theme.textTertiary} />
+              <Text style={[styles.statusText, { color: theme.textSecondary }]}>Worktree</Text>
+            </View>
+          ) : (
+            <View style={styles.statusItem}>
+              <PaduIcon name="laptop" size={12} tintColor={theme.textTertiary} />
+              <Text style={[styles.statusText, { color: theme.textSecondary }]}>Local</Text>
+            </View>
+          )}
+          {branch && (
+            <View style={styles.statusItem}>
+              <PaduIcon name="gitBranch" size={12} tintColor={theme.textTertiary} />
+              <Text numberOfLines={1} style={[styles.statusText, { color: theme.textSecondary }]}>
+                {branch}
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
+    </View>
+  );
+}
+
+/**
+ * Read-only context-window meter below the composer card, shrunk to its
+ * content and hugging the right edge. Renders nothing until the daemon
+ * reports usage or a selected window.
+ */
+function ComposerContextRow({ session }: { session: AgentSession }) {
+  const theme = useTheme();
+  const usage = session.context_usage;
+  const percent = usage?.window ? Math.round(usage.tokens * 100 / usage.window) : null;
+  if (!usage && !session.context_window) return null;
+
+  const summary = percent != null
+    ? `context ${percent}%`
+    : usage
+      ? `${formatTokens(usage.tokens)} tokens`
+      : session.context_window;
+  return (
+    <View
+      accessibilityLabel={summary || 'Session context'}
+      accessibilityRole="text"
+      style={styles.contextRow}>
+      {percent != null && usage?.window ? (
+        <>
+          <Text style={[styles.statusText, { color: theme.textTertiary }]}>
+            {formatTokens(usage.tokens)} / {formatTokens(usage.window)}
+          </Text>
+          <ContextGauge percent={percent} />
+        </>
+      ) : (
+        <>
+          <PaduIcon name="gauge" size={12} tintColor={theme.textTertiary} />
+          <Text style={[styles.statusText, { color: theme.textTertiary }]}>
+            {usage ? formatTokens(usage.tokens) : session.context_window}
+          </Text>
+        </>
+      )}
+    </View>
+  );
+}
+
+function formatTokens(tokens: number) {
+  if (tokens >= 999_500) return `${(tokens / 1_000_000).toFixed(1)}M`;
+  return tokens >= 1_000 ? `${(tokens / 1_000).toFixed(1)}k` : `${tokens}`;
 }
 
 export function MobileComposer({ session }: { session: AgentSession }) {
@@ -205,8 +392,11 @@ export function MobileComposer({ session }: { session: AgentSession }) {
     setSubmitting(true);
     setLocalError(null);
     try {
-      if (canSteer) await runtime.steerPrompt(session, prompt);
-      else await runtime.sendPrompt(session, prompt);
+      // While the agent is busy, always queue — never steer directly from
+      // the composer. Steering is reserved for the steer action on existing
+      // queued messages. sendPrompt detects sessionBusy internally and calls
+      // queueSubmission, so the message lands at the bottom of the queue list.
+      await runtime.sendPrompt(session, prompt);
       setDraft('');
       if (draftTimer.current) clearTimeout(draftTimer.current);
       if (daemon.client) {
@@ -234,6 +424,25 @@ export function MobileComposer({ session }: { session: AgentSession }) {
     }
   }
 
+  async function steerQueued(message: QueuedMessage) {
+    setLocalError(null);
+    try {
+      await runtime.steerPrompt(session, message.display_content ?? message.content);
+      await runtime.removeQueuedMessage(session.id, message.id);
+      await Haptics.selectionAsync();
+    } catch (cause) {
+      setLocalError(cause instanceof Error ? cause.message : String(cause));
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    }
+  }
+
+  function removeQueued(messageId: string) {
+    void Haptics.selectionAsync();
+    void runtime.removeQueuedMessage(session.id, messageId).catch((cause) => {
+      setLocalError(cause instanceof Error ? cause.message : String(cause));
+    });
+  }
+
   function applyOptions(changes: Parameters<typeof runtime.updateSessionOptions>[1]) {
     runtime.updateSessionOptions(session.id, changes).catch((cause) => {
       setLocalError(cause instanceof Error ? cause.message : String(cause));
@@ -243,11 +452,9 @@ export function MobileComposer({ session }: { session: AgentSession }) {
   const disconnected = daemon.phase !== 'connected';
   const placeholder = disconnected
     ? 'Reconnect to message this agent'
-    : canSteer
-      ? 'Message the working agent…'
-      : busy
-        ? 'Queue a follow-up…'
-        : 'Message agent';
+    : busy
+      ? 'Queue a follow-up…'
+      : 'Message agent';
 
   return (
     <View style={[styles.shell, { paddingBottom: Math.max(insets.bottom, 10) }]}>
@@ -279,41 +486,21 @@ export function MobileComposer({ session }: { session: AgentSession }) {
               runtime.dismissError(session.id);
             }}
             style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
-            <AppSymbol
-              name={{ ios: 'xmark', android: 'close', web: 'close' }}
+            <PaduIcon
+              name="x"
               size={12}
               tintColor={theme.danger}
             />
           </Pressable>
         </View>
       )}
-      {queued.map((message) => (
-        <View
-          key={message.id}
-          style={[styles.queuedRow, { backgroundColor: theme.overlay, borderColor: theme.border }]}>
-          <AppSymbol
-            name={{ ios: 'clock', android: 'schedule', web: 'schedule' }}
-            size={12}
-            tintColor={theme.textTertiary}
-          />
-          <Text numberOfLines={1} style={[styles.queuedText, { color: theme.textSecondary }]}>
-            {message.display_content ?? message.content}
-          </Text>
-          <Pressable
-            accessibilityLabel="Remove queued message"
-            accessibilityRole="button"
-            hitSlop={8}
-            onPress={() => void runtime.removeQueuedMessage(session.id, message.id).catch(() => {})}
-            style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
-            <AppSymbol
-              name={{ ios: 'xmark', android: 'close', web: 'close' }}
-              size={11}
-              tintColor={theme.textTertiary}
-            />
-          </Pressable>
-        </View>
-      ))}
-
+      <ComposerStatusCard
+        canSteer={canSteer}
+        onRemoveMessage={removeQueued}
+        onSteerMessage={(message) => void steerQueued(message)}
+        queued={queued}
+        session={session}
+      />
       <ComposerCard
         accessibilityLabel="Message agent"
         editable={!disconnected && !submitting}
@@ -321,7 +508,7 @@ export function MobileComposer({ session }: { session: AgentSession }) {
           <>
             <ComposerIconButton
               active={session.runtime_mode !== 'fullAccess'}
-              icon={{ ios: 'hand.raised', android: 'front_hand', web: 'pan_tool' }}
+              icon="lock"
               label="Agent access"
               onPress={() => setAccessSheetOpen(true)}
             />
@@ -331,11 +518,19 @@ export function MobileComposer({ session }: { session: AgentSession }) {
         right={(
           <>
             <ComposerIconButton
-              icon={{ ios: 'speedometer', android: 'speed', web: 'speed' }}
+              icon="gauge"
               label="Model"
               onPress={() => setModelSheetOpen(true)}
             />
-            {busy && (
+            {busy && draft.trim() ? (
+              <SendButton
+                busy={submitting}
+                disabled={submitting || disconnected}
+                label="Queue message"
+                queueing
+                onPress={() => void submit()}
+              />
+            ) : busy ? (
               <Pressable
                 accessibilityLabel="Stop agent"
                 accessibilityRole="button"
@@ -345,26 +540,26 @@ export function MobileComposer({ session }: { session: AgentSession }) {
                   styles.sendButton,
                   { backgroundColor: theme.dangerSoft, opacity: pressed ? 0.55 : 1 },
                 ]}>
-                <AppSymbol
-                  name={{ ios: 'stop.fill', android: 'stop', web: 'stop' }}
+                <PaduIcon
+                  name="stopFilled"
                   size={14}
                   tintColor={theme.danger}
                 />
               </Pressable>
+            ) : (
+              <SendButton
+                busy={submitting}
+                disabled={!draft.trim() || submitting || disconnected}
+                label="Send message"
+                onPress={() => void submit()}
+              />
             )}
-            <SendButton
-              busy={submitting}
-              disabled={!draft.trim() || submitting || disconnected}
-              label={canSteer ? 'Send to working agent' : busy ? 'Queue message' : 'Send message'}
-              onPress={() => void submit()}
-              queueing={busy && !canSteer}
-              steering={canSteer}
-            />
           </>
         )}
         value={draft}
         onChangeText={setDraft}
       />
+      <ComposerContextRow session={session} />
 
       <ModelSheet
         model={session.model ?? null}
@@ -397,8 +592,8 @@ function PermissionPanel({
   return (
     <RequestPanel borderColor={theme.warning}>
       <View style={styles.requestHeading}>
-        <AppSymbol
-          name={{ ios: 'hand.raised.fill', android: 'front_hand', web: 'pan_tool' }}
+        <PaduIcon
+          name="bell"
           size={16}
           tintColor={theme.warning}
         />
@@ -557,10 +752,10 @@ function UserInputPanel({
                 )}
               </View>
               {checked && (
-                <AppSymbol
-                  name={{ ios: 'checkmark', android: 'check', web: 'check' }}
+                <PaduIcon
+                  name="check"
                   size={14}
-                  tintColor={NativeTint}
+                  tintColor={theme.accent}
                 />
               )}
             </Pressable>
@@ -627,7 +822,7 @@ function RequestPanel({ borderColor, children }: { borderColor: string; children
 const styles = StyleSheet.create({
   shell: { paddingHorizontal: 12, paddingTop: 4 },
   card: {
-    borderRadius: 26,
+    borderRadius: 20,
     borderWidth: StyleSheet.hairlineWidth,
     paddingBottom: 8,
     paddingHorizontal: 10,
@@ -644,6 +839,35 @@ const styles = StyleSheet.create({
   toolbar: { alignItems: 'center', flexDirection: 'row', marginTop: 2 },
   toolbarSpacer: { flex: 1 },
   cluster: { alignItems: 'center', flexDirection: 'row', gap: 2 },
+  statusCard: {
+    alignSelf: 'stretch',
+    borderTopStartRadius: Radius.medium,
+    borderTopEndRadius: Radius.medium,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 8,
+    marginBottom: 0,
+    marginHorizontal: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  statusLine: {
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    flexDirection: 'row',
+    gap: 8,
+    minHeight: 20,
+  },
+  contextRow: {
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 8,
+    minHeight: 20,
+    paddingHorizontal: 4,
+  },
+  statusItem: { alignItems: 'center', flexDirection: 'row', flexShrink: 1, gap: 4 },
+  statusText: { flexShrink: 1, fontSize: 11, fontVariant: ['tabular-nums'], fontWeight: '500' },
   iconButton: {
     alignItems: 'center',
     borderRadius: Radius.pill,
@@ -669,17 +893,31 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   errorText: { flex: 1, fontSize: 12, fontWeight: '600', lineHeight: 17 },
-  queuedRow: {
+  queuedItem: {
     alignItems: 'center',
-    borderRadius: Radius.small,
-    borderWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     gap: 8,
-    marginBottom: 6,
-    minHeight: 34,
-    paddingHorizontal: 10,
+    minHeight: 20,
+    paddingVertical: 2,
   },
   queuedText: { flex: 1, fontSize: 12.5 },
+  queueSeparator: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 0,
+  },
+  queueActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 2,
+  },
+  queueActionButton: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 3,
+    justifyContent: 'center',
+    minHeight: 28,
+    paddingHorizontal: 4,
+  },
   requestPanel: {
     borderRadius: Radius.large,
     borderWidth: 1,

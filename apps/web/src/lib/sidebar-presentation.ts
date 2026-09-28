@@ -1,10 +1,23 @@
-import type { AgentSession, Project } from '@padu/client'
-import { isProjectlessProject, projectDisplayName } from './project-presentation'
+import type {
+  AgentSession,
+  PaduClient,
+  Project,
+  SidebarDateGroup,
+  SidebarGroupView,
+  SidebarGrouping,
+  SidebarOrdering,
+} from '@padu/client'
+import { projectDisplayName } from './project-presentation'
+import { fetchSidebarGroups } from './daemon-api'
 
-export type SidebarGrouping = 'project' | 'updated'
-export type SidebarOrdering = 'newest' | 'oldest'
+export type { SidebarDateGroup, SidebarGroupView, SidebarGrouping, SidebarOrdering }
 
-export type DateGroup = 'today' | 'yesterday' | 'week' | 'month' | 'year' | 'more'
+/**
+ * Calendar bucket for `updated` grouping. Alias of the daemon's
+ * `SidebarDateGroup`: the daemon owns bucketing through
+ * `getSidebarGroups`, clients only render these values.
+ */
+export type DateGroup = SidebarDateGroup
 
 export interface SessionItem {
   session: AgentSession
@@ -41,11 +54,6 @@ export const GROUP_LABELS: Record<DateGroup, string> = {
   year: 'This Year',
   more: 'More',
 }
-
-export const GROUP_ORDER_NEWEST: DateGroup[] = ['today', 'yesterday', 'week', 'month', 'year', 'more']
-export const GROUP_ORDER_OLDEST: DateGroup[] = ['more', 'year', 'month', 'week', 'yesterday', 'today']
-
-export const SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS = 7 * 24 * 60 * 60 // 604_800 seconds (7 days)
 
 export function sidebarRows(
   groups: SessionGroup[],
@@ -103,19 +111,6 @@ export function sidebarRows(
   return rows
 }
 
-export function sortSidebarSessions(
-  sessions: AgentSession[],
-  ordering: SidebarOrdering = 'newest',
-): AgentSession[] {
-  return [...sessions].sort((left, right) => {
-    const pinnedOrder = Number(Boolean(right.pinned_at)) - Number(Boolean(left.pinned_at))
-    if (pinnedOrder) return pinnedOrder
-    const leftTime = sessionTimestamp(left)
-    const rightTime = sessionTimestamp(right)
-    return ordering === 'oldest' ? leftTime - rightTime : rightTime - leftTime
-  })
-}
-
 export function readSidebarGrouping(): SidebarGrouping {
   if (typeof window === 'undefined') return 'project'
   return window.localStorage.getItem('padu:sidebar_grouping') === 'updated'
@@ -138,160 +133,161 @@ export function readSidebarShowProvider(storage?: Pick<Storage, 'getItem'> | nul
 }
 
 /**
- * Sessions in the order the sidebar renders them: grouped (pinned, then
- * per-project or per-date groups) with the user's grouping/ordering applied.
- * Adjacent-session stepping must follow this sequence — a flat newest-first
- * list diverges from it whenever projects interleave by recency (or the user
- * picks oldest-first), making ↑/↓ land on visually wrong rows.
+ * Client-local UTC offset in seconds for `getSidebarGroups`. The daemon may
+ * run in another timezone, so the request carries the client's offset and
+ * today for correct date buckets.
  */
-export function sidebarVisualSessions(
-  projects: Project[],
-  sessions: AgentSession[],
-  grouping: SidebarGrouping,
-  ordering: SidebarOrdering,
-  unknownProject: string,
-  projectlessName: string,
-): AgentSession[] {
-  return groupSessions(projects, sessions, new Date(), unknownProject, projectlessName, grouping, ordering)
-    .flatMap((group) => group.sessions.map((item) => item.session))
+export function localUtcOffsetSecs(at = new Date()): number {
+  return -at.getTimezoneOffset() * 60
 }
 
-export function groupSessions(
+/**
+ * Turn daemon-owned sidebar groups into renderable session groups. Sort,
+ * bucketing, and pagination already happened on the daemon; this only
+ * resolves display names and recency timestamps from the local task snapshot.
+ */
+export function daemonGroupsToSessionGroups(
+  daemonGroups: SidebarGroupView[],
+  sessionsById: ReadonlyMap<string, AgentSession>,
   projects: Project[],
-  sessions: AgentSession[],
-  now = new Date(),
   unknownProject = 'Unknown project',
   projectlessName = 'No project',
-  grouping: SidebarGrouping = 'project',
-  ordering: SidebarOrdering = 'newest',
-  revealedOlderCounts: Record<string, number> = {},
 ): SessionGroup[] {
   const projectMap = new Map(projects.map((p) => [p.id, p]))
   const projectNames = new Map(projects.map((project) => [
     project.id,
     projectDisplayName(project, projectlessName),
   ]))
-  const started = sortSidebarSessions(
-    sessions.filter((session) => !session.archived_at && sessionHasStarted(session)),
-    ordering,
-  )
-
-  const pinned = started
-    .filter((session) => session.pinned_at)
-    .map((session) => ({
-        session,
-        projectName: projectNames.get(session.project_id) ?? unknownProject,
-        timestamp: sessionTimestamp(session),
-      }))
-
-  if (grouping === 'updated') {
-    const grouped = new Map<DateGroup, SessionItem[]>()
-    for (const session of started.filter((session) => !session.pinned_at)) {
-      const id = dateGroup(sessionTimestamp(session), now)
-      const items = grouped.get(id) ?? []
+  const groups: SessionGroup[] = []
+  for (const view of daemonGroups) {
+    const items: SessionItem[] = []
+    for (const sessionId of view.sessionIds) {
+      const session = sessionsById.get(sessionId)
+      if (!session) continue
       items.push({
         session,
         projectName: projectNames.get(session.project_id) ?? unknownProject,
         timestamp: sessionTimestamp(session),
       })
-      grouped.set(id, items)
     }
-    const order = ordering === 'oldest' ? GROUP_ORDER_OLDEST : GROUP_ORDER_NEWEST
-    return [
-      ...(pinned.length > 0
-        ? [{ id: 'pinned', kind: 'pinned' as const, label: 'Pinned', sessions: pinned }]
-        : []),
-      ...order
-      .filter((id) => grouped.has(id))
-      .map((id) => ({
-        id: `updated:${id}`,
-        kind: 'updated' as const,
-        dateGroup: id,
-        label: GROUP_LABELS[id],
-        sessions: grouped.get(id)!,
-      })),
-    ]
-  }
-
-  // grouping === 'project'
-  const nowSeconds = Math.floor(now.getTime() / 1000)
-  const recentCutoff = nowSeconds - SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS
-
-  const projectGroups: SessionGroup[] = []
-  const projectIndexMap = new Map<string, number>()
-  const projectlessSessions: SessionItem[] = []
-
-  for (const session of started.filter((session) => !session.pinned_at)) {
-    const project = projectMap.get(session.project_id)
-    const isProjectless = !project || isProjectlessProject(project)
-    const item: SessionItem = {
-      session,
-      projectName: projectNames.get(session.project_id) ?? unknownProject,
-      timestamp: sessionTimestamp(session),
-    }
-
-    if (isProjectless) {
-      projectlessSessions.push(item)
+    if (view.kind === 'pinned') {
+      groups.push({ id: view.id, kind: 'pinned', label: 'Pinned', sessions: items })
       continue
     }
-
-    let groupIndex = projectIndexMap.get(session.project_id)
-    if (groupIndex === undefined) {
-      groupIndex = projectGroups.length
-      projectIndexMap.set(session.project_id, groupIndex)
-      projectGroups.push({
-        id: `project:${session.project_id}`,
-        kind: 'project',
-        projectId: session.project_id,
-        project,
-        label: projectNames.get(session.project_id) ?? unknownProject,
-        sessions: [],
+    if (view.kind === 'updated') {
+      const dateGroup = view.dateGroup ?? 'today'
+      groups.push({
+        id: view.id,
+        kind: 'updated',
+        dateGroup,
+        label: GROUP_LABELS[dateGroup],
+        sessions: items,
       })
+      continue
     }
-    projectGroups[groupIndex]!.sessions.push(item)
-  }
-
-  if (projectlessSessions.length > 0) {
-    projectGroups.push({
-      id: 'projectless',
-      kind: 'projectless',
-      label: projectlessName,
-      sessions: projectlessSessions,
+    if (view.kind === 'projectless') {
+      groups.push({
+        id: view.id,
+        kind: 'projectless',
+        label: projectlessName,
+        sessions: items,
+        hasMore: view.hasMore || undefined,
+      })
+      continue
+    }
+    const project = view.projectId ? projectMap.get(view.projectId) : undefined
+    groups.push({
+      id: view.id,
+      kind: 'project',
+      projectId: view.projectId,
+      project,
+      label: project ? (projectNames.get(project.id) ?? unknownProject) : unknownProject,
+      sessions: items,
+      hasMore: view.hasMore || undefined,
     })
   }
+  return groups
+}
 
-  // Apply recent cutoff and pagination for each project group
-  const visibleProjectGroups = projectGroups.map((group) => {
-    const allSessions = group.sessions
-    const revealedOlder = revealedOlderCounts[group.id] ?? 0
-
-    const visible: SessionItem[] = []
-    let olderSeen = 0
-
-    for (const item of allSessions) {
-      const recent = item.session.pinned_at != null || item.timestamp >= recentCutoff
-      if (recent || olderSeen < revealedOlder) {
-        visible.push(item)
-      }
-      if (!recent) {
-        olderSeen++
-      }
+/**
+ * Flat visual session order from daemon groups for adjacent-session
+ * stepping. Matches the rendered sidebar sequence: pinned first, then each
+ * group in order.
+ */
+export function daemonGroupsToVisualSessions(
+  daemonGroups: SidebarGroupView[],
+  sessionsById: ReadonlyMap<string, AgentSession>,
+): AgentSession[] {
+  const ordered: AgentSession[] = []
+  for (const view of daemonGroups) {
+    for (const sessionId of view.sessionIds) {
+      const session = sessionsById.get(sessionId)
+      if (session) ordered.push(session)
     }
+  }
+  return ordered
+}
 
-    const hasMore = olderSeen > revealedOlder
+export interface SidebarViewQuery {
+  grouping: SidebarGrouping
+  ordering: SidebarOrdering
+  unknownProject: string
+  projectlessName: string
+  revealedOlderCounts?: Record<string, number>
+  now?: Date
+}
 
-    return {
-      ...group,
-      sessions: visible,
-      hasMore,
-    }
+/**
+ * Fetch the daemon-owned sidebar view and map it to renderable groups in one
+ * step. Used by adjacent-session stepping, which needs the same visual order
+ * the sidebar renders.
+ */
+export async function fetchSidebarSessionGroups(
+  client: PaduClient,
+  projects: Project[],
+  sessions: AgentSession[],
+  query: SidebarViewQuery,
+): Promise<SessionGroup[]> {
+  const now = query.now ?? new Date()
+  const daemonGroups = await fetchSidebarGroups(client, {
+    grouping: query.grouping,
+    ordering: query.ordering,
+    today: now,
+    nowSecs: Math.floor(now.getTime() / 1_000),
+    localUtcOffsetSecs: localUtcOffsetSecs(now),
+    revealedOlder: query.revealedOlderCounts ?? {},
   })
-  return [
-    ...(pinned.length > 0
-      ? [{ id: 'pinned', kind: 'pinned' as const, label: 'Pinned', sessions: pinned }]
-      : []),
-    ...visibleProjectGroups,
-  ]
+  return daemonGroupsToSessionGroups(
+    daemonGroups,
+    new Map(sessions.map((session) => [session.id, session])),
+    projects,
+    query.unknownProject,
+    query.projectlessName,
+  )
+}
+
+/**
+ * Fetch the daemon-owned flat visual session order for adjacent-session
+ * stepping (↑/↓ must follow the rendered sidebar sequence).
+ */
+export async function fetchSidebarVisualSessions(
+  client: PaduClient,
+  sessions: AgentSession[],
+  query: Omit<SidebarViewQuery, 'unknownProject' | 'projectlessName'>,
+): Promise<AgentSession[]> {
+  const now = query.now ?? new Date()
+  const daemonGroups = await fetchSidebarGroups(client, {
+    grouping: query.grouping,
+    ordering: query.ordering,
+    today: now,
+    nowSecs: Math.floor(now.getTime() / 1_000),
+    localUtcOffsetSecs: localUtcOffsetSecs(now),
+    revealedOlder: query.revealedOlderCounts ?? {},
+  })
+  return daemonGroupsToVisualSessions(
+    daemonGroups,
+    new Map(sessions.map((session) => [session.id, session])),
+  )
 }
 
 export function sessionHasStarted(session: AgentSession): boolean {
@@ -345,28 +341,6 @@ export function nextSidebarUpdateDelay(
   return next
 }
 
-export function dateGroup(timestamp: number, now = new Date()): DateGroup {
-  const date = new Date(timestamp * 1_000)
-  const today = localDateStart(now)
-  const sessionDay = localDateStart(date)
-  if (sessionDay >= today) return 'today'
-
-  const yesterday = new Date(today)
-  yesterday.setDate(yesterday.getDate() - 1)
-  if (sessionDay.getTime() === yesterday.getTime()) return 'yesterday'
-
-  const weekStart = new Date(today)
-  weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7))
-  if (sessionDay >= weekStart) return 'week'
-
-  if (
-    sessionDay.getFullYear() === today.getFullYear()
-      && sessionDay.getMonth() === today.getMonth()
-  ) return 'month'
-  if (sessionDay.getFullYear() === today.getFullYear()) return 'year'
-  return 'more'
-}
-
 export function formatTimeAgo(seconds: number): string {
   if (seconds < 60) return 'just now'
   if (seconds < 3_600) return `${Math.floor(seconds / 60)}m`
@@ -413,12 +387,12 @@ function formatWorkingElapsedLocalized(seconds: number, t: Translator): string {
 
 type Translator = (key: string, params?: Record<string, string | number>) => string
 
+/**
+ * Display recency for a session row. The daemon owns ordering/grouping off
+ * this same timestamp; rows only read it for display.
+ */
 function sessionTimestamp(session: AgentSession): number {
   return session.last_reply_at ?? session.created_at
-}
-
-function localDateStart(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
 }
 
 function secondsUntilLocalMidnight(nowSeconds: number): number {

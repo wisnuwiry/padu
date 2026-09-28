@@ -1,5 +1,5 @@
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ProviderKind } from '@padu/client';
+import type { ProviderKind, SidebarGrouping, SidebarOrdering } from '@padu/client';
 import {
   PROVIDER_PROBE_CACHE_STALE_TIME,
   readProviderProbeCache,
@@ -8,12 +8,20 @@ import {
 
 import {
   daemonKeys,
+  fetchSidebarGroups,
   hydrateSession,
   loadDaemonSettings,
   loadTaskState,
   probeProvider,
+  readDaemonBlob,
   type TaskState,
 } from '@/lib/daemon-api';
+import {
+  CONVERSATION_BACKGROUND_DEFAULTS,
+  daemonBackgroundImageUrl,
+  parseDaemonBackground,
+  type ConversationBackground,
+} from '@/lib/conversation-background';
 import { persistentStorageSync } from '@/lib/composer-preferences-store';
 import { useDaemon } from '@/lib/daemon-context';
 import { providerLabel } from '@/lib/session-presentation';
@@ -41,6 +49,79 @@ export function useTaskState() {
     enabled: phase === 'connected' && Boolean(activeProfile && client),
     staleTime: 1_000,
   });
+}
+
+/**
+ * Daemon-owned session sort and grouping for the task list. Ordering,
+ * grouping, and pagination run on the daemon through `getSidebarGroups`;
+ * the list only maps the result to sections. Refetches when the view inputs
+ * move — grouping, ordering, reveal counts, or the local calendar day.
+ */
+export function useSidebarGroups(
+  grouping: SidebarGrouping,
+  ordering: SidebarOrdering,
+  dayKey: string,
+  revealedOlder: Record<string, number>,
+) {
+  const { activeProfile, client, phase } = useDaemon();
+  return useQuery({
+    queryKey: daemonKeys.sidebarGroups(
+      activeProfile?.id ?? 'disconnected',
+      grouping,
+      ordering,
+      dayKey,
+      revealedOlder,
+    ),
+    queryFn: () => {
+      const now = new Date();
+      return fetchSidebarGroups(requireClient(client), {
+        grouping,
+        ordering,
+        today: now,
+        nowSecs: Math.floor(now.getTime() / 1_000),
+        localUtcOffsetSecs: -now.getTimezoneOffset() * 60,
+        revealedOlder,
+      });
+    },
+    enabled: phase === 'connected' && Boolean(activeProfile && client),
+    staleTime: 1_000,
+  });
+}
+
+/**
+ * Daemon-owned conversation background for the session screen. Reads the
+ * background ref + options out of daemon settings, then fetches the image
+ * bytes behind the `padu-blob:` reference — mobile renders only, it never
+ * uploads. Blob names are content hashes, so bytes cache indefinitely.
+ */
+export function useConversationBackground(): ConversationBackground {
+  const { activeProfile, client, phase } = useDaemon();
+  const settings = useDaemonSettings();
+  const background = parseDaemonBackground(settings.data);
+  const blob = useQuery({
+    queryKey: [
+      ...(activeProfile ? daemonKeys.settings(activeProfile.id) : ['daemon', 'disconnected']),
+      'background-blob',
+      background?.reference ?? 'none',
+    ],
+    queryFn: () => readDaemonBlob(requireClient(client), background!.reference),
+    enabled: phase === 'connected' && Boolean(activeProfile && client && background),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+  if (!background) {
+    return {
+      imageUrl: null,
+      opacity: CONVERSATION_BACKGROUND_DEFAULTS.opacity,
+      heightPercent: CONVERSATION_BACKGROUND_DEFAULTS.heightPercent,
+      loading: settings.isPending,
+    };
+  }
+  return {
+    imageUrl: blob.data ? daemonBackgroundImageUrl(background.mimeType, blob.data) : null,
+    opacity: background.opacity,
+    heightPercent: background.heightPercent,
+    loading: settings.isPending || blob.isPending,
+  };
 }
 
 export function useSession(sessionId: string | undefined) {

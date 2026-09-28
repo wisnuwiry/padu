@@ -85,7 +85,7 @@ impl Padu {
                     .h(px(32.0))
                     .px(px(14.0))
                     .rounded(px(8.0))
-                    .bg(theme.accent)
+                    .bg(theme.inverse)
                     .flex()
                     .items_center()
                     .cursor_pointer()
@@ -212,24 +212,32 @@ impl Padu {
                     .py(px(15.0))
                     .rounded(px(13.0))
                     .bg(theme.raised)
+                    .flex()
+                    .items_center()
+                    .gap(px(24.0))
                     .child(
                         div()
-                            .text_size(sp(13.5))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text)
-                            .child(tr!("notifications.system_permission")),
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(tr!("notifications.system_permission")),
+                            )
+                            .child(
+                                div()
+                                    .mt(px(4.0))
+                                    .text_size(sp(12.5))
+                                    .line_height(sp(18.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!("notifications.system_permission_desc")),
+                            ),
                     )
                     .child(
                         div()
-                            .mt(px(4.0))
-                            .text_size(sp(12.5))
-                            .line_height(sp(18.0))
-                            .text_color(theme.text_secondary)
-                            .child(tr!("notifications.system_permission_desc")),
-                    )
-                    .child(
-                        div()
-                            .mt(px(12.0))
+                            .flex_none()
                             .flex()
                             .items_center()
                             .gap(px(10.0))

@@ -5,7 +5,6 @@ import {
 } from '@padu/client/transcript-presentation';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
-import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -21,14 +20,17 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
+import { Defs, LinearGradient, Rect, Stop, Svg } from 'react-native-svg';
 
 import { ActivityGroup } from '@/components/activity-group';
-import { AppSymbol } from '@/components/app-symbol';
+import { PaduIcon } from '@/components/padu-icon';
+import { IconButton } from '@/components/button';
+import { ChromeSurface } from '@/components/chrome-surface';
+import { ConversationBackgroundLayer } from '@/components/conversation-background-layer';
 import { MarkdownMessage } from '@/components/markdown-message';
 import { MobileComposer } from '@/components/mobile-composer';
 import { RenameDialog } from '@/components/rename-dialog';
-import { GlassSurface } from '@/components/glass-surface';
-import { HeaderAction, HeaderActionGroup, navigateBack, ScreenHeader, useScreenHeaderInset } from '@/components/screen-header';
+import { navigateBack, ScreenHeader } from '@/components/screen-header';
 import { Sheet, SheetRow } from '@/components/sheet';
 import { MonoFont, Radius, Spacing } from '@/constants/theme';
 import { useSession, useTaskState } from '@/hooks/use-daemon-data';
@@ -42,7 +44,20 @@ import {
   type TranscriptRow,
 } from '@/lib/session-presentation';
 
-export function SessionView({ sessionId }: { sessionId: string | undefined }) {
+/**
+ * Transparent lead above the composer card inside the floating overlay.
+ * Kept in a constant because the transcript clearance math depends on it.
+ */
+const COMPOSER_FADE_LEAD = 44;
+
+export function SessionView({
+  sessionId,
+  showBack = true,
+}: {
+  sessionId: string | undefined;
+  /** False when embedded in the wide two-pane, which has no back stack. */
+  showBack?: boolean;
+}) {
   const theme = useTheme();
   const daemon = useDaemon();
   const runtime = useRuntime();
@@ -52,7 +67,12 @@ export function SessionView({ sessionId }: { sessionId: string | undefined }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [pinnedToBottom, setPinnedToBottom] = useState(true);
-  const [scrolledUnderHeader, setScrolledUnderHeader] = useState(false);
+  // Measured overlay height so the transcript ends halfway up the
+  // composer instead of running full height behind it.
+  const [composerHeight, setComposerHeight] = useState(0);
+  // Bottom edge of the transcript: half the composer height above the
+  // screen bottom, so only the fade lead overlaps the tail.
+  const listBottomInset = composerHeight / 2;
   const transcriptRows = useMemo(
     () => session ? buildTranscriptRows(session, expandedFolds) : [],
     [expandedFolds, session],
@@ -60,8 +80,41 @@ export function SessionView({ sessionId }: { sessionId: string | undefined }) {
   const running = Boolean(session && sessionBusy(session));
   const listRef = useRef<FlatList<TranscriptRow>>(null);
   const nearBottom = useRef(true);
-  const laidOut = useRef(false);
-  const viewportHeight = useRef(0);
+  const initialScrollPending = useRef(true);
+
+  useEffect(() => {
+    // A new task starts pinned to the tail: web remounts its transcript per
+    // session (`key={session.id}`) with `initialTopMostItemIndex` at the end,
+    // so mobile resets the same way instead of reusing the previous task's
+    // pin state and scroll offset.
+    nearBottom.current = true;
+    initialScrollPending.current = true;
+    setPinnedToBottom(true);
+  }, [sessionId]);
+
+  function scrollToBottom(animated: boolean) {
+    if (!transcriptRows.length) return;
+    listRef.current?.scrollToEnd({ animated });
+  }
+
+  function maybeAutoscroll() {
+    // Initial open always lands on the latest message; streaming follows
+    // only while the reader is still pinned to the bottom.
+    if (!transcriptRows.length) return;
+    if (initialScrollPending.current || nearBottom.current) {
+      scrollToBottom(false);
+      initialScrollPending.current = false;
+    }
+  }
+
+  // Content can arrive after layout (placeholder → hydrate, markdown measure),
+  // so retry the pending initial scroll when rows land, not only on size
+  // changes. `onContentSizeChange`/`onLayout` below cover the rest.
+  useEffect(() => {
+    if (initialScrollPending.current && transcriptRows.length > 0) {
+      listRef.current?.scrollToEnd({ animated: false });
+    }
+  }, [sessionId, transcriptRows.length]);
 
   useEffect(() => {
     if (!session || daemon.phase !== 'connected') return;
@@ -75,8 +128,6 @@ export function SessionView({ sessionId }: { sessionId: string | undefined }) {
     const pinned = contentSize.height - layoutMeasurement.height - contentOffset.y < 120;
     nearBottom.current = pinned;
     setPinnedToBottom((current) => current === pinned ? current : pinned);
-    const under = contentOffset.y > 4;
-    setScrolledUnderHeader((current) => current === under ? current : under);
   }
 
   function toggleFold(turnId: string) {
@@ -122,7 +173,6 @@ export function SessionView({ sessionId }: { sessionId: string | undefined }) {
     );
   }
 
-  const headerInset = useScreenHeaderInset();
   const projectName = useTaskState().data?.projects
     .find((project) => project.id === session?.project_id)?.name;
   const subtitleParts = [projectName, daemon.activeProfile?.name].filter(Boolean);
@@ -132,33 +182,36 @@ export function SessionView({ sessionId }: { sessionId: string | undefined }) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={[styles.screen, { backgroundColor: theme.background }]}>
       <ScreenHeader
-        scrolled={scrolledUnderHeader}
+        back={showBack}
         right={session ? (
-          <HeaderActionGroup>
-            <HeaderAction
-              icon={{ ios: 'square.and.pencil', android: 'edit_square', web: 'edit' }}
-              label="New task"
-              onPress={() => router.push('/new-task')}
-            />
-            <HeaderAction
-              icon={{ ios: 'ellipsis', android: 'more_horiz', web: 'more_horiz' }}
-              label="Task options"
-              onPress={() => setMenuOpen(true)}
-            />
-          </HeaderActionGroup>
+          <IconButton
+            accessibilityHint="Opens the task menu"
+            glyphSize={18}
+            icon="ellipsis"
+            label="Task options"
+            onPress={() => setMenuOpen(true)}
+          />
         ) : undefined}
         subtitle={subtitleParts.length ? subtitleParts.join(' · ') : null}
         title={session ? displaySessionTitle(session) : 'Task'}
       />
-      <View style={styles.listFrame}>
+      <View style={[styles.listFrame, { marginBottom: listBottomInset }]}>
+        <ConversationBackgroundLayer />
         <FlatList
           ref={listRef}
+          key={sessionId ?? 'missing'}
           data={transcriptRows}
           keyExtractor={(item) => item.key}
           contentContainerStyle={[
             styles.content,
-            { paddingTop: headerInset + 2 },
             !transcriptRows.length && styles.emptyContent,
+            // The frame already ends halfway up the composer; keep just
+            // enough clearance for the tail to sit below the opaque card.
+            {
+              paddingBottom: composerHeight > 0
+                ? Math.max(12, listBottomInset - COMPOSER_FADE_LEAD + 12)
+                : 40,
+            },
           ]}
           refreshControl={(
             <RefreshControl
@@ -167,51 +220,63 @@ export function SessionView({ sessionId }: { sessionId: string | undefined }) {
               onRefresh={() => void query.refetch()}
             />
           )}
-          ListHeaderComponent={daemon.phase === 'error' ? <OfflineBanner /> : null}
+          ListHeaderComponent={(
+            <>
+              {daemon.phase === 'error' ? <OfflineBanner /> : undefined}
+            </>
+          )}
           ListEmptyComponent={(
             <SessionEmpty loading={query.isPending} error={query.error} missing={query.data === null} />
           )}
-          ListFooterComponent={running && session ? <WorkingFooter session={session} /> : null}
+          ListFooterComponent={running && session ? <WorkingFooter session={session} /> : undefined}
           renderItem={({ item }) => <TranscriptRowView row={item} onToggleFold={toggleFold} />}
-          onContentSizeChange={(_, height) => {
-            if (!laidOut.current || nearBottom.current) {
-              listRef.current?.scrollToEnd({ animated: false });
-              laidOut.current = true;
-              // scrollToEnd fires no scroll event; content taller than the
-              // viewport means the top now sits under the header.
-              const under = height > viewportHeight.current + 8;
-              setScrolledUnderHeader((current) => current === under ? current : under);
-            }
-          }}
-          onLayout={(event) => {
-            viewportHeight.current = event.nativeEvent.layout.height;
-          }}
+          onContentSizeChange={maybeAutoscroll}
+          onLayout={maybeAutoscroll}
           onScroll={trackScroll}
           scrollEventThrottle={100}
           showsVerticalScrollIndicator={false}
         />
         {!pinnedToBottom && transcriptRows.length > 0 && (
-          <GlassSurface fallbackColor={theme.surface} interactive style={styles.jumpButton}>
+          <ChromeSurface style={styles.jumpButton}>
             <Pressable
               accessibilityLabel="Scroll to latest"
               accessibilityRole="button"
               onPress={() => listRef.current?.scrollToEnd({ animated: true })}
               style={({ pressed }) => [styles.jumpButtonInner, { opacity: pressed ? 0.6 : 1 }]}>
-              <AppSymbol
-                name={{ ios: 'arrow.down', android: 'arrow_downward', web: 'arrow_downward' }}
+              <PaduIcon
+                name="arrowDown"
                 size={15}
                 tintColor={theme.textSecondary}
               />
             </Pressable>
-          </GlassSurface>
+          </ChromeSurface>
         )}
       </View>
-      {session && <MobileComposer session={session} />}
+      {session && (
+        <View
+          onLayout={(event) => setComposerHeight(event.nativeEvent.layout.height)}
+          style={styles.composerOverlay}>
+          <View pointerEvents="none" style={styles.composerFade}>
+            <Svg height="100%" width="100%">
+              <Defs>
+                <LinearGradient id="composer-fade" x1="0" x2="0" y1="0" y2="1">
+                  <Stop offset="0" stopColor={theme.background} stopOpacity="0" />
+                  <Stop offset="0.5" stopColor={theme.background} stopOpacity="0.5" />
+                  <Stop offset="1" stopColor={theme.background} stopOpacity="1" />
+                </LinearGradient>
+              </Defs>
+              <Rect fill="url(#composer-fade)" height="100%" width="100%" x="0" y="0" />
+            </Svg>
+          </View>
+          <View style={styles.composerFadeSpacer} />
+          <MobileComposer session={session} />
+        </View>
+      )}
 
       <Sheet onDismiss={() => setMenuOpen(false)} visible={menuOpen}>
         <SheetRow
           label="Rename task"
-          leading={<AppSymbol name={{ ios: 'pencil', android: 'edit', web: 'edit' }} size={16} tintColor={theme.textSecondary} />}
+          leading={<PaduIcon name="pencil" size={16} tintColor={theme.textSecondary} />}
           onPress={() => {
             setMenuOpen(false);
             setRenaming(true);
@@ -219,7 +284,7 @@ export function SessionView({ sessionId }: { sessionId: string | undefined }) {
         />
         <SheetRow
           label="Copy last response"
-          leading={<AppSymbol name={{ ios: 'doc.on.doc', android: 'content_copy', web: 'content_copy' }} size={16} tintColor={theme.textSecondary} />}
+          leading={<PaduIcon name="copy" size={16} tintColor={theme.textSecondary} />}
           onPress={() => {
             setMenuOpen(false);
             void copyLastResponse();
@@ -228,7 +293,7 @@ export function SessionView({ sessionId }: { sessionId: string | undefined }) {
         <SheetRow
           destructive
           label="Delete task"
-          leading={<AppSymbol name={{ ios: 'trash', android: 'delete', web: 'delete' }} size={16} tintColor={theme.danger} />}
+          leading={<PaduIcon name="trash" size={16} tintColor={theme.danger} />}
           onPress={() => {
             setMenuOpen(false);
             confirmDelete();
@@ -251,8 +316,8 @@ function OfflineBanner() {
   const theme = useTheme();
   return (
     <View style={[styles.offlineBanner, { backgroundColor: theme.dangerSoft }]}>
-      <AppSymbol
-        name={{ ios: 'wifi.slash', android: 'wifi_off', web: 'wifi_off' }}
+      <PaduIcon
+        name="wifiOff"
         size={14}
         tintColor={theme.danger}
       />
@@ -311,10 +376,8 @@ function FoldRow({
       <Text numberOfLines={1} style={[styles.foldLabel, { color: theme.textTertiary }]}>
         {label}
       </Text>
-      <AppSymbol
-        name={expanded
-          ? { ios: 'chevron.down', android: 'keyboard_arrow_down', web: 'keyboard_arrow_down' }
-          : { ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
+      <PaduIcon
+        name={expanded ? 'chevronDown' : 'chevronRight'}
         size={10}
         tintColor={theme.textGhost}
       />
@@ -362,12 +425,8 @@ function MessageRow({
                 <View
                   key={`${attachment.path}:${attachment.name}`}
                   style={[styles.attachment, { backgroundColor: theme.overlayStrong }]}>
-                  <AppSymbol
-                    name={{
-                      ios: attachment.is_image ? 'photo' : 'doc',
-                      android: attachment.is_image ? 'image' : 'description',
-                      web: 'description',
-                    }}
+                  <PaduIcon
+                    name="file"
                     size={12}
                     tintColor={theme.textSecondary}
                   />
@@ -405,11 +464,11 @@ function ChangedFilesCard({ checkpoint }: { checkpoint: Checkpoint }) {
         accessibilityRole="button"
         onPress={() => setOpen((value) => !value)}
         style={({ pressed }) => [styles.changedHeader, { opacity: pressed ? 0.6 : 1 }]}>
-        <AppSymbol
-          name={{ ios: 'plusminus', android: 'difference', web: 'difference' }}
-          size={13}
-          tintColor={theme.textSecondary}
-        />
+          <PaduIcon
+            name="fileDiff"
+            size={13}
+            tintColor={theme.textSecondary}
+          />
         <Text style={[styles.changedTitle, { color: theme.textSecondary }]}>
           {checkpoint.files.length} file{checkpoint.files.length === 1 ? '' : 's'} changed
         </Text>
@@ -418,10 +477,8 @@ function ChangedFilesCard({ checkpoint }: { checkpoint: Checkpoint }) {
           <Text style={{ color: theme.textGhost }}> </Text>
           <Text style={{ color: theme.danger }}>−{checkpoint.deletions}</Text>
         </Text>
-        <AppSymbol
-          name={open
-            ? { ios: 'chevron.up', android: 'keyboard_arrow_up', web: 'keyboard_arrow_up' }
-            : { ios: 'chevron.down', android: 'keyboard_arrow_down', web: 'keyboard_arrow_down' }}
+        <PaduIcon
+          name={open ? 'chevronUp' : 'chevronDown'}
           size={11}
           tintColor={theme.textGhost}
         />
@@ -497,7 +554,12 @@ function SessionEmpty({
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   listFrame: { flex: 1 },
-  content: { paddingBottom: 40, paddingHorizontal: Spacing.three },
+  debugBackground: {
+    fontFamily: MonoFont,
+    fontSize: 10.5,
+    marginBottom: 8,
+  },
+  content: { paddingBottom: 40, paddingHorizontal: Spacing.three, paddingTop: Spacing.two },
   emptyContent: { flexGrow: 1, justifyContent: 'center' },
   offlineBanner: {
     alignItems: 'center',
@@ -576,13 +638,27 @@ const styles = StyleSheet.create({
   changedFilePath: { flex: 1, fontFamily: MonoFont, fontSize: 11 },
   jumpButton: {
     borderRadius: Radius.pill,
-    bottom: 12,
+    bottom: 80,
     height: 40,
     position: 'absolute',
     right: 14,
     width: 40,
   },
   jumpButtonInner: { alignItems: 'center', flex: 1, justifyContent: 'center' },
+  composerOverlay: {
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+  },
+  composerFade: {
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+  },
+  composerFadeSpacer: { height: COMPOSER_FADE_LEAD },
   workingFooter: { alignItems: 'center', flexDirection: 'row', gap: 8, paddingBottom: 8, paddingLeft: 2, paddingVertical: 10 },
   workingText: { fontSize: 12.5, fontVariant: ['tabular-nums'], fontWeight: '500' },
   empty: { alignItems: 'center', paddingHorizontal: 32 },

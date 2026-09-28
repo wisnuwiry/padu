@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { AppSymbol } from '@/components/app-symbol';
+import { PaduIcon } from '@/components/padu-icon';
 import { NativeTint, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useDaemon } from '@/lib/daemon-context';
@@ -15,8 +15,8 @@ export function ConnectionErrorCard() {
       accessibilityLiveRegion="polite"
       style={[styles.card, { backgroundColor: theme.dangerSoft }]}>
       <View style={styles.icon}>
-        <AppSymbol
-          name={{ ios: 'exclamationmark.triangle.fill', android: 'warning', web: 'warning' }}
+        <PaduIcon
+          name="alert"
           size={18}
           tintColor={theme.danger}
         />

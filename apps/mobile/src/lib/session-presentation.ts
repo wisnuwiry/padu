@@ -6,11 +6,14 @@ import type {
   Project,
   ProviderKind,
   RuntimeMode,
+  SidebarGroupView,
   TranscriptBlock,
 } from '@padu/client';
 import { turnAnswerStart, turnFoldLabel } from '@padu/client/transcript-presentation';
 
-export type SessionGroupId = 'today' | 'yesterday' | 'week' | 'older';
+export type SessionGroupId = 'pinned' | 'today' | 'yesterday' | 'week' | 'older';
+
+export type SessionGroupKind = 'pinned' | 'updated' | 'project' | 'projectless';
 
 export interface SessionListItem {
   session: AgentSession;
@@ -19,9 +22,12 @@ export interface SessionListItem {
 }
 
 export interface SessionGroup {
-  id: SessionGroupId;
+  /** Daemon group id: `pinned`, `updated:<bucket>`, `project:<uuid>`, `projectless`. */
+  id: string;
+  kind: SessionGroupKind;
   title: string;
   data: SessionListItem[];
+  hasMore: boolean;
 }
 
 export type TranscriptRow =
@@ -30,12 +36,23 @@ export type TranscriptRow =
   | { kind: 'fold'; key: string; turn: AgentTurn; label: string; expanded: boolean }
   | { kind: 'changed'; key: string; checkpoint: Checkpoint };
 
-const GROUPS: Array<{ id: SessionGroupId; title: string }> = [
-  { id: 'today', title: 'Today' },
-  { id: 'yesterday', title: 'Yesterday' },
-  { id: 'week', title: 'Previous 7 Days' },
-  { id: 'older', title: 'Earlier' },
-];
+const DATE_SECTION_TITLES: Record<SessionGroupId, string> = {
+  pinned: 'Pinned',
+  today: 'Today',
+  yesterday: 'Yesterday',
+  week: 'Previous 7 Days',
+  older: 'Earlier',
+};
+
+/** Daemon `updated` buckets beyond the last week fold into "Earlier". */
+const DAEMON_BUCKET_TO_SECTION: Record<string, SessionGroupId> = {
+  today: 'today',
+  yesterday: 'yesterday',
+  week: 'week',
+  month: 'older',
+  year: 'older',
+  more: 'older',
+};
 
 export function displaySessionTitle(session: AgentSession): string {
   if (session.title !== 'New task' && session.title.trim()) return session.title.trim();
@@ -49,43 +66,128 @@ export function sessionHasStarted(session: AgentSession): boolean {
 }
 
 export function sessionTimestamp(session: AgentSession): number {
-  return session.last_reply_at ?? session.updated_at ?? session.created_at;
+  return session.last_reply_at ?? session.created_at;
 }
 
-export function groupSessions(
+/**
+ * Turn daemon-owned sidebar groups into mobile sections. Sort and grouping
+ * run on the daemon through `getSidebarGroups` (updated grouping); this only
+ * resolves display names and folds daemon buckets into the mobile section
+ * set (`month`/`year`/`more` → "Earlier"). Section order follows the daemon
+ * response, so `oldest` ordering reverses date sections. Sessions missing
+ * from the snapshot (e.g. search-filtered) are skipped.
+ */
+export function daemonGroupsToSessionSections(
+  daemonGroups: SidebarGroupView[],
+  sessionsById: ReadonlyMap<string, AgentSession>,
   projects: Project[],
-  sessions: AgentSession[],
-  now = new Date(),
+  visibleSessionIds?: ReadonlySet<string>,
 ): SessionGroup[] {
   const projectNames = new Map(projects.map((project) => [project.id, project.name]));
-  const grouped = new Map<SessionGroupId, SessionListItem[]>();
-  for (const session of sessions.filter(sessionHasStarted).sort((a, b) => (
-    sessionTimestamp(b) - sessionTimestamp(a)
-  ))) {
-    const id = sessionDateGroup(sessionTimestamp(session), now);
-    const items = grouped.get(id) ?? [];
-    items.push({
-      session,
-      projectName: projectNames.get(session.project_id) || 'Unknown project',
-      timestamp: sessionTimestamp(session),
-    });
-    grouped.set(id, items);
-  }
-  return GROUPS.flatMap((group) => {
-    const data = grouped.get(group.id);
-    return data?.length ? [{ ...group, data }] : [];
+  const sections: SessionGroup[] = [];
+  const indexes = new Map<string, number>();
+  const itemFor = (session: AgentSession): SessionListItem => ({
+    session,
+    projectName: projectNames.get(session.project_id) || 'Unknown project',
+    timestamp: sessionTimestamp(session),
   });
+  for (const view of daemonGroups) {
+    const items: SessionListItem[] = [];
+    for (const sessionId of view.sessionIds) {
+      if (visibleSessionIds && !visibleSessionIds.has(sessionId)) continue;
+      const session = sessionsById.get(sessionId);
+      if (!session) continue;
+      items.push(itemFor(session));
+    }
+    if (view.kind === 'pinned') {
+      sections.push({
+        id: view.id,
+        kind: 'pinned',
+        title: DATE_SECTION_TITLES.pinned,
+        data: items,
+        hasMore: false,
+      });
+      continue;
+    }
+    const sectionId: SessionGroupId =
+      DAEMON_BUCKET_TO_SECTION[view.dateGroup ?? 'today'] ?? 'older';
+    const index = indexes.get(sectionId);
+    if (index === undefined) {
+      indexes.set(sectionId, sections.length);
+      sections.push({
+        id: view.id,
+        kind: 'updated',
+        title: DATE_SECTION_TITLES[sectionId],
+        data: items,
+        hasMore: false,
+      });
+    } else {
+      sections[index]!.data.push(...items);
+    }
+  }
+  return sections.filter((section) => section.data.length > 0);
 }
 
-export function sessionDateGroup(timestamp: number, now = new Date()): SessionGroupId {
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const day = new Date(timestamp * 1_000);
-  const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
-  const elapsedDays = Math.floor((start - dayStart) / 86_400_000);
-  if (elapsedDays <= 0) return 'today';
-  if (elapsedDays === 1) return 'yesterday';
-  if (elapsedDays <= 7) return 'week';
-  return 'older';
+/**
+ * Turn daemon-owned project groups into mobile sections, mirroring the
+ * desktop sidebar: pinned tasks first, then one collapsible section per
+ * project (projectless tasks trailing), each carrying the daemon's `hasMore`
+ * pager state for its "show more" row.
+ */
+export function daemonGroupsToProjectSections(
+  daemonGroups: SidebarGroupView[],
+  sessionsById: ReadonlyMap<string, AgentSession>,
+  projects: Project[],
+  visibleSessionIds?: ReadonlySet<string>,
+  projectlessName = 'No project',
+): SessionGroup[] {
+  const projectNames = new Map(projects.map((project) => [project.id, project.name]));
+  const itemFor = (session: AgentSession): SessionListItem => ({
+    session,
+    projectName: projectNames.get(session.project_id) || 'Unknown project',
+    timestamp: sessionTimestamp(session),
+  });
+  const sections: SessionGroup[] = [];
+  for (const view of daemonGroups) {
+    const items: SessionListItem[] = [];
+    for (const sessionId of view.sessionIds) {
+      if (visibleSessionIds && !visibleSessionIds.has(sessionId)) continue;
+      const session = sessionsById.get(sessionId);
+      if (!session) continue;
+      items.push(itemFor(session));
+    }
+    if (view.kind === 'pinned') {
+      sections.push({
+        id: view.id,
+        kind: 'pinned',
+        title: DATE_SECTION_TITLES.pinned,
+        data: items,
+        hasMore: false,
+      });
+      continue;
+    }
+    if (view.kind === 'projectless') {
+      if (items.length === 0 && !view.hasMore) continue;
+      sections.push({
+        id: view.id,
+        kind: 'projectless',
+        title: projectlessName,
+        data: items,
+        hasMore: view.hasMore,
+      });
+      continue;
+    }
+    if (view.kind !== 'project') continue;
+    if (items.length === 0 && !view.hasMore) continue;
+    sections.push({
+      id: view.id,
+      kind: 'project',
+      title: (view.projectId && projectNames.get(view.projectId)) || 'Unknown project',
+      data: items,
+      hasMore: view.hasMore,
+    });
+  }
+  return sections;
 }
 
 export function relativeSessionTime(timestamp: number, now = Date.now()): string {
