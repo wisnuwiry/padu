@@ -218,7 +218,7 @@ export function ModelPickerSheet({
   function pickEffort(id: string) {
     if (!activeProvider) return;
     setPendingEffort(id);
-    onApply({ provider: activeProvider, model: pendingModel, reasoningEffort: id });
+    onApply({ provider: activeProvider, model: selectedModel?.id ?? pendingModel, reasoningEffort: id });
   }
 
   return (

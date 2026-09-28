@@ -376,12 +376,12 @@ export default function TasksScreen() {
           showsHorizontalScrollIndicator={false}>
           {tabs.map((tab) => {
             const selected = tab.id === activeTab?.id;
-            const count = tab.data.length + (tab.hasMore ? 1 : 0);
+            const count = tab.data.length;
             const isPinnedTab = tab.kind === 'pinned';
             return (
               <Pressable
                 key={tab.id}
-                accessibilityLabel={`${tab.title}, ${tab.data.length} tasks`}
+                accessibilityLabel={`${tab.title}, ${count}${tab.hasMore ? ' or more' : ''} tasks`}
                 accessibilityRole="tab"
                 accessibilityState={{ selected }}
                 hitSlop={{ top: 6, bottom: 6, left: 2, right: 2 }}

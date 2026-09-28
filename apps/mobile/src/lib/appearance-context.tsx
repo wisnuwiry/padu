@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -40,6 +41,7 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
   const [preference, setPreferenceState] = useState<ThemeChoice>(
     () => cachedThemeChoice() ?? 'system',
   );
+  const userChose = useRef(false);
 
   // The stored choice is read once per launch; the splash screen covers the
   // window before it lands, so the default is not normally visible.
@@ -47,8 +49,8 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
     let active = true;
     void loadThemeChoice().then((stored) => {
       // A choice made before the read finished wins over the stored one.
-      if (active) {
-        setPreferenceState((current) => (current === 'system' ? stored : current));
+      if (active && !userChose.current) {
+        setPreferenceState(stored);
       }
     });
     return () => {
@@ -57,6 +59,7 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setPreference = useCallback((next: ThemeChoice) => {
+    userChose.current = true;
     setPreferenceState(next);
     void saveThemeChoice(next);
   }, []);

@@ -57,7 +57,13 @@ export default function DaemonImportScreen() {
   const canImport = ready && !busy;
 
   async function pasteLink() {
-    const text = (await Clipboard.getStringAsync()).trim();
+    let text: string;
+    try {
+      text = (await Clipboard.getStringAsync()).trim();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not read the clipboard.');
+      return;
+    }
     if (!text) {
       setError('There is nothing on the clipboard to paste.');
       return;

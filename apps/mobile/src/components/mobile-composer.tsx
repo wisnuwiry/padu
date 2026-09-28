@@ -427,8 +427,8 @@ export function MobileComposer({ session }: { session: AgentSession }) {
   async function steerQueued(message: QueuedMessage) {
     setLocalError(null);
     try {
-      await runtime.removeQueuedMessage(session.id, message.id);
       await runtime.steerPrompt(session, message.display_content ?? message.content);
+      await runtime.removeQueuedMessage(session.id, message.id);
       await Haptics.selectionAsync();
     } catch (cause) {
       setLocalError(cause instanceof Error ? cause.message : String(cause));
