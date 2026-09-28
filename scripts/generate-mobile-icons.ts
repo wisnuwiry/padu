@@ -50,7 +50,8 @@ function normalizeIcon(file: string): { key: string; viewBox: string; body: stri
     .join(" ");
   const tintify = (value: string): string => value
     .replace(/currentColor/gi, TINT)
-    .replace(/#000(?:000)?\b/gi, TINT);
+    .replace(/#000(?:000)?\b/gi, TINT)
+    .replace(/stroke="black"/gi, `stroke="${TINT}"`);
   const body = tintify(svg[2]!
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/<title>[\s\S]*?<\/title>/gi, "")
