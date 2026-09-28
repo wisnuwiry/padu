@@ -1,4 +1,6 @@
+use super::board::types::split_board_labels;
 use super::*;
+use crate::ui::TagInput;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum NotesLayout {
@@ -13,6 +15,7 @@ pub(super) struct Note {
     pub project_id: Uuid,
     pub title: String,
     pub body: String,
+    pub tags: Vec<String>,
     pub revision: u64,
     pub created_at: u64,
     pub updated_at: u64,
@@ -22,20 +25,25 @@ pub(super) struct Note {
 }
 
 impl Note {
-    fn search_key(title: &str, body: &str) -> String {
+    fn search_key(title: &str, body: &str, tags: &[String]) -> String {
         let mut key = title.to_lowercase();
         key.push('\0');
         key.push_str(&body.to_lowercase());
+        for tag in tags {
+            key.push('\0');
+            key.push_str(&tag.to_lowercase());
+        }
         key
     }
 
     fn from_protocol(note: padu_client::notes::Note) -> Self {
-        let search_key = Self::search_key(&note.title, &note.content);
+        let search_key = Self::search_key(&note.title, &note.content, &note.tags);
         Self {
             id: note.id,
             project_id: note.project_id,
             title: note.title,
             body: note.content,
+            tags: note.tags,
             revision: note.revision,
             created_at: note.created_at,
             updated_at: note.updated_at,
@@ -44,7 +52,7 @@ impl Note {
     }
 
     fn refresh_search_key(&mut self) {
-        self.search_key = Self::search_key(&self.title, &self.body);
+        self.search_key = Self::search_key(&self.title, &self.body, &self.tags);
     }
 }
 
@@ -132,7 +140,7 @@ impl Padu {
         .detach();
     }
 
-    pub(super) fn sync_note_editors(&self, cx: &mut Context<Self>) {
+    pub(super) fn sync_note_editors(&mut self, cx: &mut Context<Self>) {
         let Some(note) = self.notes.get(self.notes_selected) else {
             return;
         };
@@ -146,6 +154,60 @@ impl Padu {
                 input.set_content(note.body.clone(), cx);
             }
         });
+        // Runs only on selection/load, never while typing, so in-flight tag
+        // edits are never clobbered.
+        self.notes_tags_list = note.tags.clone();
+        self.notes_tags.update(cx, |input, cx| {
+            input.set_content(String::new(), cx);
+        });
+    }
+
+    /// Chips the pending tag input into the tag list, mirroring the board
+    /// drawer's label commit. Returns true when the list changed.
+    pub(super) fn commit_note_tag(&mut self, cx: &mut Context<Self>) -> bool {
+        let raw = self.notes_tags.read(cx).content();
+        let mut added = false;
+        for part in split_board_labels(&raw) {
+            if !self.notes_tags_list.contains(&part) {
+                self.notes_tags_list.push(part);
+                added = true;
+            }
+        }
+        self.notes_tags.update(cx, |input, cx| {
+            input.set_content(String::new(), cx);
+        });
+        if added {
+            // Tag chips bypass the title/body inputs, so schedule the same
+            // debounced daemon write those subscriptions trigger.
+            self.schedule_note_save(cx);
+        }
+        added
+    }
+
+    fn remove_note_tag(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index < self.notes_tags_list.len() {
+            self.notes_tags_list.remove(index);
+            self.schedule_note_save(cx);
+        }
+    }
+
+    /// Chips half-typed tag text into the tag list without scheduling a
+    /// save. Explicit save points call this before snapshotting tags.
+    fn flush_note_tag_input(&mut self, cx: &mut Context<Self>) {
+        let raw_tags = self.notes_tags.read(cx).content();
+        let mut flushed = false;
+        for part in split_board_labels(&raw_tags) {
+            if !self.notes_tags_list.contains(&part) {
+                self.notes_tags_list.push(part);
+                flushed = true;
+            }
+        }
+        if flushed || !raw_tags.is_empty() {
+            self.notes_tags.update(cx, |input, cx| {
+                input.set_content(String::new(), cx);
+            });
+            cx.notify();
+        }
     }
 
     fn select_note(&mut self, index: usize, cx: &mut Context<Self>) {
@@ -154,7 +216,6 @@ impl Padu {
         }
         self.save_note_edit(cx);
         self.notes_selected = index;
-        self.notes_layout = NotesLayout::Edit;
         self.sync_note_editors(cx);
         cx.notify();
     }
@@ -184,7 +245,7 @@ impl Padu {
 
     fn create_note(&mut self, cx: &mut Context<Self>) {
         self.save_note_edit(cx);
-        self.notes_layout = NotesLayout::Edit;
+        self.notes_layout = super::notes_utils::next_layout_on_create(self.notes_layout);
         let Some(project_id) = self.active_project().map(|project| project.id) else {
             return;
         };
@@ -201,6 +262,7 @@ impl Padu {
                                 project_id,
                                 title: tr!("notes.untitled"),
                                 content: String::new(),
+                                tags: Vec::new(),
                             },
                         },
                     )?;
@@ -234,7 +296,8 @@ impl Padu {
         } else {
             title
         };
-        if normalized_title == note.title && body == note.body {
+        if normalized_title == note.title && body == note.body && self.notes_tags_list == note.tags
+        {
             return;
         }
         cx.notify();
@@ -255,6 +318,11 @@ impl Padu {
 
     fn save_note_edit(&mut self, cx: &mut Context<Self>) {
         self.notes_save_generation = self.notes_save_generation.wrapping_add(1);
+        // An explicit save point (note switch, delete, create) flushes half-
+        // typed tag text into chips; the debounced path leaves it in the
+        // input so typing is never chipped mid-word.
+        self.flush_note_tag_input(cx);
+        let tags = self.notes_tags_list.clone();
         let Some(note) = self.notes.get_mut(self.notes_selected) else {
             return;
         };
@@ -265,11 +333,12 @@ impl Padu {
         } else {
             title
         };
-        if normalized_title == note.title && body == note.body {
+        if normalized_title == note.title && body == note.body && tags == note.tags {
             return;
         }
         note.title = normalized_title;
         note.body = body;
+        note.tags = tags;
         note.refresh_search_key();
         note.updated_at = unix_time();
         self.notes_data_generation = self.notes_data_generation.wrapping_add(1);
@@ -297,6 +366,7 @@ impl Padu {
                                 note_id: note_snapshot.id,
                                 title: note_snapshot.title,
                                 content: note_snapshot.body,
+                                tags: note_snapshot.tags,
                                 expected_revision: note_snapshot.revision,
                             },
                         },
@@ -314,6 +384,8 @@ impl Padu {
                     {
                         current.revision = note.revision;
                         current.updated_at = note.updated_at;
+                        current.tags = note.tags;
+                        current.refresh_search_key();
                     }
                     cx.notify();
                 }
@@ -433,6 +505,7 @@ impl Padu {
                                 project_id,
                                 title,
                                 content,
+                                tags: Vec::new(),
                             },
                         },
                     )?;
@@ -480,8 +553,10 @@ impl Padu {
         };
 
         self.notes_save_generation = self.notes_save_generation.wrapping_add(1);
+        self.flush_note_tag_input(cx);
         let title = self.notes_title.read(cx).content().trim().to_owned();
         let body = self.notes_body.read(cx).content().to_owned();
+        let tags = self.notes_tags_list.clone();
         let Some(note) = self.notes.get_mut(self.notes_selected) else {
             return false;
         };
@@ -491,6 +566,7 @@ impl Padu {
             title
         };
         note.body = body;
+        note.tags = tags;
         if !note.body.is_empty() {
             note.body.push_str("\n\n");
         }
@@ -514,6 +590,7 @@ impl Padu {
                                 note_id: note_snapshot.id,
                                 title: note_snapshot.title,
                                 content: note_snapshot.body,
+                                tags: note_snapshot.tags,
                                 expected_revision: note_snapshot.revision,
                             },
                         },
@@ -531,6 +608,8 @@ impl Padu {
                     {
                         current.revision = note.revision;
                         current.updated_at = note.updated_at;
+                        current.tags = note.tags;
+                        current.refresh_search_key();
                     }
                     this.show_success_toast(tr!("notes.added_to_note"));
                     cx.notify();
@@ -686,6 +765,7 @@ impl Padu {
             .unwrap_or_else(|| tr!("notes.no_project"));
         let created_ago =
             super::notes_utils::format_note_time_ago(unix_time().saturating_sub(note.created_at));
+        let meta = super::notes_utils::format_note_meta(&project_name, &created_ago, &note.tags);
         let note_id = note.id;
         let note_menu = self.menu_handle(SharedString::from(format!("note-menu-{note_id}")), cx);
         let weak = cx.entity().downgrade();
@@ -747,7 +827,7 @@ impl Padu {
                             .truncate()
                             .text_size(sp(10.0))
                             .text_color(theme.text_tertiary)
-                            .child(format!("{project_name} · {created_ago}")),
+                            .child(meta),
                     ),
             )
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -864,6 +944,14 @@ impl Padu {
             let updated_ago = super::notes_utils::format_note_time_ago(
                 unix_time().saturating_sub(note.updated_at),
             );
+            let tag_entity = cx.entity().clone();
+            let tag_input = TagInput::new("note-tags", self.notes_tags.clone())
+                .tags(self.notes_tags_list.clone())
+                .on_remove(move |idx, _window, cx| {
+                    tag_entity.update(cx, |this, cx| {
+                        this.remove_note_tag(idx, cx);
+                    });
+                });
             editor = editor
                 .child(
                     div()
@@ -875,6 +963,7 @@ impl Padu {
                         .font_weight(FontWeight::BOLD)
                         .child(self.notes_title.clone()),
                 )
+                .child(tag_input)
                 .child(
                     div()
                         .w_full()

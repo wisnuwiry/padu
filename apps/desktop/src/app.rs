@@ -1645,6 +1645,8 @@ pub struct Padu {
     notes_title: Entity<TextInput>,
     notes_body: Entity<TextInput>,
     notes_search: Entity<TextInput>,
+    notes_tags: Entity<TextInput>,
+    notes_tags_list: Vec<String>,
     notes_layout: notes::NotesLayout,
     notes_list_collapsed: bool,
     notes_split_ratio: f32,
@@ -2645,6 +2647,8 @@ impl Padu {
                 .clear_on_escape()
                 .placeholder(tr!("notes.search_placeholder"))
         });
+        let notes_tags =
+            cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("notes.tags_placeholder")));
         let board_search = cx.new(|cx| {
             TextInput::new(window, cx)
                 .clear_on_escape()
@@ -3325,6 +3329,28 @@ impl Padu {
             )
             .detach();
             cx.subscribe(
+                &notes_tags,
+                |this: &mut Self, input, event: &InputEvent, cx| match event {
+                    InputEvent::Submit(_) => {
+                        this.commit_note_tag(cx);
+                    }
+                    InputEvent::Edited => {
+                        let content = input.read(cx).content();
+                        if content.contains(',') || content.contains('，') || content.contains(';')
+                        {
+                            this.commit_note_tag(cx);
+                        }
+                    }
+                    InputEvent::BackspaceOnEmpty => {
+                        if this.notes_tags_list.pop().is_some() {
+                            this.schedule_note_save(cx);
+                        }
+                    }
+                    _ => {}
+                },
+            )
+            .detach();
+            cx.subscribe(
                 &notes_title,
                 |this: &mut Self, _, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Edited) {
@@ -3790,6 +3816,8 @@ impl Padu {
                 notes_title,
                 notes_body,
                 notes_search,
+                notes_tags,
+                notes_tags_list: Vec::new(),
                 notes_layout: notes::NotesLayout::Edit,
                 notes_list_collapsed: false,
                 notes_split_ratio: 0.5,
