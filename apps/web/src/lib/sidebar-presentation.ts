@@ -357,7 +357,7 @@ export function formatWorkingElapsed(seconds: number): string {
   }
   const hours = Math.floor(seconds / 3_600)
   const minutes = Math.floor((seconds % 3_600) / 60)
-  return minutes ? `${hours}h ${minutes}m` : `${minutes}h`
+  return minutes ? `${hours}h ${minutes}m` : `${hours}h`
 }
 
 function formatTimeAgoLocalized(seconds: number, t: Translator): string {

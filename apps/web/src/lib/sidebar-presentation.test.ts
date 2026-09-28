@@ -193,6 +193,15 @@ describe('daemon sidebar presentation', () => {
     expect(readSidebarShowProvider({ getItem: () => 'true' })).toBe(true)
   })
 
+  test('formatWorkingElapsed formats seconds, minutes, whole hours, and mixed hours', () => {
+    expect(formatWorkingElapsed(45)).toBe('45s')
+    expect(formatWorkingElapsed(60)).toBe('1m')
+    expect(formatWorkingElapsed(75)).toBe('1m 15s')
+    expect(formatWorkingElapsed(3600)).toBe('1h')
+    expect(formatWorkingElapsed(7200)).toBe('2h')
+    expect(formatWorkingElapsed(3665)).toBe('1h 1m')
+  })
+
   test('localUtcOffsetSecs mirrors the date offset the daemon buckets against', () => {
     const at = new Date(2026, 7, 15, 12)
     expect(localUtcOffsetSecs(at)).toBe(-at.getTimezoneOffset() * 60)

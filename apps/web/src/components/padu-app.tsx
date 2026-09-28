@@ -99,7 +99,12 @@ import {
   type RememberedNavigation,
 } from '@/lib/navigation-memory'
 import { transcriptLinkRoute } from '@/lib/transcript-links'
-import { fetchSidebarVisualSessions, readSidebarGrouping, readSidebarOrdering } from '@/lib/sidebar-presentation'
+import {
+  fetchSidebarVisualSessions,
+  readSidebarGrouping,
+  readSidebarOrdering,
+  sessionHasStarted,
+} from '@/lib/sidebar-presentation'
 import { shouldShowInitialDestination } from '@/lib/workspace-presentation'
 import { usePrimaryShortcut } from '@/lib/platform'
 import { agentPresetIdLabel } from '@/lib/agent-preset-presentation'
@@ -205,6 +210,8 @@ export function PaduApp() {
     ? readRememberedNavigation(browserNavigationStorage(), config.address)
     : null)
   const previousRouteSession = useRef(search.session)
+  const currentSessionIdRef = useRef(search.session)
+  currentSessionIdRef.current = search.session
   const pendingPaletteFocusSession = useRef<string | null>(null)
   const presentedWorkspaceFor = useRef<string | null>(null)
   const enteringNewTask = useRef(false)
@@ -915,18 +922,34 @@ export function PaduApp() {
     })
       .then((started) => {
         if (!started.length) return
-        const currentId = search.session
+        const currentId = currentSessionIdRef.current
         const currentIndex = currentId ? started.findIndex((s) => s.id === currentId) : -1
         let nextIndex: number
         if (currentIndex >= 0) {
           nextIndex = delta > 0
             ? Math.min(currentIndex + 1, started.length - 1)
             : Math.max(currentIndex - 1, 0)
+        } else if (currentId) {
+          const allStarted = data.sessions.filter(sessionHasStarted)
+          const fallbackIdx = allStarted.findIndex((s) => s.id === currentId)
+          if (fallbackIdx >= 0) {
+            const nextFallback = delta > 0
+              ? Math.min(fallbackIdx + 1, allStarted.length - 1)
+              : Math.max(fallbackIdx - 1, 0)
+            const fallbackSession = allStarted[nextFallback]
+            if (fallbackSession) {
+              currentSessionIdRef.current = fallbackSession.id
+              selectSession(fallbackSession.id)
+              return
+            }
+          }
+          nextIndex = delta > 0 ? 0 : started.length - 1
         } else {
           nextIndex = delta > 0 ? 0 : started.length - 1
         }
         const nextSession = started[nextIndex]
         if (nextSession) {
+          currentSessionIdRef.current = nextSession.id
           selectSession(nextSession.id)
         }
       })
