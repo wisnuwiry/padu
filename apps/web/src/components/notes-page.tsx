@@ -18,6 +18,7 @@ import { PaduIcon } from '@/components/padu-icon'
 import { Sidebar } from '@/components/sidebar'
 import { StartupScreen } from '@/components/startup-screen'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { TagInput } from '@/components/ui/tag-input'
 import { Tooltip } from '@/components/ui/tooltip'
 import { useTaskState } from '@/hooks/use-daemon-data'
 import {
@@ -34,7 +35,13 @@ import {
 } from '@/lib/daemon-api'
 import { useDaemon } from '@/lib/daemon-context'
 import { useI18n } from '@/lib/i18n'
-import { formatNoteTimeAgo, noteExcerpt } from '@/lib/notes-utils'
+import {
+  formatNoteMeta,
+  formatNoteTimeAgo,
+  nextLayoutOnCreate,
+  noteExcerpt,
+  type NotesLayout,
+} from '@/lib/notes-utils'
 import { usePrimaryShortcut } from '@/lib/platform'
 import { projectDisplayName } from '@/lib/project-presentation'
 import { fetchSidebarVisualSessions, readSidebarGrouping, readSidebarOrdering } from '@/lib/sidebar-presentation'
@@ -43,8 +50,6 @@ const ALL_NOTES_PROJECT_ID = '00000000-0000-0000-0000-000000000000'
 const SAVE_DEBOUNCE_MS = 650
 
 const CodeFileSurface = lazy(() => import('@/components/code-surfaces').then((module) => ({ default: module.CodeFileSurface })))
-
-type NotesLayout = 'edit' | 'split' | 'preview'
 
 export async function addContentToNewNote(
   client: PaduClient,
@@ -57,6 +62,7 @@ export async function addContentToNewNote(
     projectId,
     title: title?.trim() || 'Untitled note',
     content: content.trim(),
+    tags: [],
   })
 }
 
@@ -299,7 +305,7 @@ function NotesWorkspace({
   const listRef = useRef<VirtuosoHandle>(null)
   const autosaveKey = useRef<string | null>(null)
   const saveTimer = useRef<number | null>(null)
-  const pendingSave = useRef<{ id: string; title: string; content: string; revision: number; projectId: string } | null>(null)
+  const pendingSave = useRef<{ id: string; title: string; content: string; tags: string[]; revision: number; projectId: string } | null>(null)
   // Bumped per refresh; a completion from a superseded request is discarded so
   // it cannot replace newer notes or selections with stale data.
   const refreshGeneration = useRef(0)
@@ -363,8 +369,13 @@ function NotesWorkspace({
   const visibleNotes = useMemo(() => {
     const query = filter.trim().toLocaleLowerCase()
     if (!query) return notes
-    return notes.filter((note) => `${note.title} ${note.preview}`.toLocaleLowerCase().includes(query))
+    return notes.filter((note) => {
+      const tagsText = (note.tags ?? []).join(' ')
+      return `${note.title} ${note.preview} ${tagsText}`.toLocaleLowerCase().includes(query)
+    })
   }, [filter, notes])
+
+  const selectedTagsKey = (selected?.tags ?? []).join(',')
 
   useEffect(() => {
     if (!selected) return
@@ -373,14 +384,15 @@ function NotesWorkspace({
       id: selected.id,
       title: selected.title,
       content: selected.content,
+      tags: selected.tags ?? [],
       revision: selected.revision,
       projectId: selected.projectId,
     }
+    const key = `${selected.id}:${selected.title}:${selected.content}:${selectedTagsKey}`
     if (autosaveKey.current === null) {
-      autosaveKey.current = `${selected.id}:${selected.title}:${selected.content}`
+      autosaveKey.current = key
       return
     }
-    const key = `${selected.id}:${selected.title}:${selected.content}`
     if (autosaveKey.current === key) return
     autosaveKey.current = key
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current)
@@ -390,7 +402,7 @@ function NotesWorkspace({
     }, SAVE_DEBOUNCE_MS)
     // persistEdit reads pendingSave when the debounce fires.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected?.id, selected?.title, selected?.content])
+  }, [selected?.id, selected?.title, selected?.content, selectedTagsKey])
 
   useEffect(() => () => {
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current)
@@ -407,13 +419,14 @@ function NotesWorkspace({
         noteId: pending.id,
         title: normalizedTitle,
         content: pending.content,
+        tags: pending.tags,
         expectedRevision: pending.revision,
       })
-      pendingSave.current = { ...pending, title: saved.title, content: saved.content, revision: saved.revision }
-      autosaveKey.current = `${saved.id}:${saved.title}:${saved.content}`
+      pendingSave.current = { ...pending, title: saved.title, content: saved.content, tags: saved.tags, revision: saved.revision }
+      autosaveKey.current = `${saved.id}:${saved.title}:${saved.content}:${(saved.tags ?? []).join(',')}`
       setSelected((current) => current && current.id === saved.id ? saved : current)
       setNotes((current) => current.map((note) => note.id === saved.id
-        ? { ...note, title: saved.title, preview: noteExcerpt(saved.content), revision: saved.revision, updatedAt: saved.updatedAt }
+        ? { ...note, title: saved.title, preview: noteExcerpt(saved.content), tags: saved.tags, revision: saved.revision, updatedAt: saved.updatedAt }
         : note))
     } catch {
       // A revision conflict means the daemon accepted a different write.
@@ -445,13 +458,15 @@ function NotesWorkspace({
     }
     const pending = pendingSave.current
     if (!pending || !selected || pending.id !== selected.id) return
-    const key = `${selected.id}:${selected.title}:${selected.content}`
+    const tags = selected.tags ?? []
+    const key = `${selected.id}:${selected.title}:${selected.content}:${tags.join(',')}`
     if (autosaveKey.current === key) return
     autosaveKey.current = key
     pendingSave.current = {
       id: selected.id,
       title: selected.title,
       content: selected.content,
+      tags,
       revision: selected.revision,
       projectId: selected.projectId,
     }
@@ -461,8 +476,6 @@ function NotesWorkspace({
   async function selectNote(id: string) {
     if (!client || id === selectedId) return
     flushPendingSave()
-    // Selecting a note returns to the editor, matching desktop.
-    setLayout('edit')
     const summary = notes.find((note) => note.id === id)
     if (!summary) return
     setSelectedId(id)
@@ -490,11 +503,11 @@ function NotesWorkspace({
       return
     }
     flushPendingSave()
-    setLayout('edit')
+    setLayout(nextLayoutOnCreate)
     try {
-      const note = await createNote(client, { projectId: defaultProjectId, title: t('notes.untitled'), content: '' })
-      autosaveKey.current = `${note.id}:${note.title}:${note.content}`
-      pendingSave.current = { id: note.id, title: note.title, content: note.content, revision: note.revision, projectId: note.projectId }
+      const note = await createNote(client, { projectId: defaultProjectId, title: t('notes.untitled'), content: '', tags: [] })
+      autosaveKey.current = `${note.id}:${note.title}:${note.content}:${(note.tags ?? []).join(',')}`
+      pendingSave.current = { id: note.id, title: note.title, content: note.content, tags: note.tags ?? [], revision: note.revision, projectId: note.projectId }
       await refresh(note.id)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('notes.add_failed'))
@@ -701,6 +714,12 @@ function NotesWorkspace({
                 value={selected.title}
                 onChange={(event) => setSelected({ ...selected, title: event.target.value })}
               />
+              <TagInput
+                value={selected.tags ?? []}
+                onChange={(tags) => setSelected({ ...selected, tags })}
+                placeholder={t('notes.tags_placeholder')}
+                getRemoveLabel={(tag) => t('notes.remove_tag', { label: tag })}
+              />
               <div className="flex w-full shrink-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-[var(--text-tertiary)]">
                   <Tooltip content={t('files.add_to_chat')} shortcut={chatShortcut}>
@@ -860,6 +879,7 @@ function NoteRow({
   onDelete: () => void
 }) {
   const firstLine = noteExcerpt(note.preview).split('\n')[0]?.trim() ?? ''
+  const meta = formatNoteMeta(projectName, formatNoteTimeAgo(note.updatedAt, t), note.tags)
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger
@@ -881,7 +901,7 @@ function NoteRow({
           <span className="block truncate text-[12.5px]">{note.title || t('notes.untitled')}</span>
           {firstLine && <span className="block truncate text-[11px] text-[var(--text-tertiary)]">{firstLine}</span>}
           <span className="block truncate text-[10px] text-[var(--text-tertiary)]">
-            {projectName} · {formatNoteTimeAgo(note.updatedAt, t)}
+            {meta}
           </span>
         </span>
       </ContextMenu.Trigger>
