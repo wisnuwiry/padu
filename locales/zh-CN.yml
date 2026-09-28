@@ -581,6 +581,8 @@ notes.label: 笔记
 notes.untitled: 无标题笔记
 notes.title_placeholder: 笔记标题
 notes.body_placeholder: 用 Markdown 书写…
+notes.tags_placeholder: 添加标签（逗号分隔）…
+notes.remove_tag: 移除%{label}
 notes.add_to_note: 添加到笔记
 notes.added_to_note: 已添加到笔记
 notes.add_failed: 无法添加到笔记
