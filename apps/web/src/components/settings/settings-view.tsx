@@ -70,7 +70,7 @@ export function SettingsView({
   }, [])
 
   return (
-    <div className="flex h-dvh min-w-0 flex-1 bg-background">
+    <div className="flex h-dvh min-w-0 flex-1 bg-sidebar">
       <aside className="flex h-full w-[252px] shrink-0 flex-col bg-sidebar">
         <div className="flex h-12 flex-none items-center px-3">
           <button
@@ -122,20 +122,17 @@ export function SettingsView({
           ))}
         </nav>
       </aside>
-      <main className={cn(
-        'min-w-0 flex-1 border-l bg-background',
-        page === 'skills' ? 'overflow-hidden' : 'overflow-y-auto pb-12',
-      )}>
-        {page === 'skills' ? (
-          <SkillsSettings projects={projects} />
-        ) : (
-          <>
-            <div className="sticky top-0 z-10 flex h-12 items-center bg-background px-6 text-sm">
-              <span className="text-[var(--text-tertiary)]">{t('common.settings')}</span>
-              <span className="mx-1.5 text-[var(--text-ghost)]">/</span>
-              <span className="text-[var(--text-secondary)]">{activePage?.localizedLabel}</span>
-            </div>
-            <div className="px-8 pt-5">
+      <main className="relative flex min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground">
+        <div className="flex h-12 flex-none items-center px-6 text-sm">
+          <span className="text-[var(--text-tertiary)]">{t('common.settings')}</span>
+          <span className="mx-1.5 text-[var(--text-ghost)]">/</span>
+          <span className="text-[var(--text-secondary)]">{activePage?.localizedLabel}</span>
+        </div>
+        <div className="relative mb-2 ml-0.5 mr-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[10px] border border-border bg-background text-foreground">
+          {page === 'skills' ? (
+            <SkillsSettings projects={projects} />
+          ) : (
+            <div className="size-full overflow-y-auto px-8 pt-5 pb-12">
               <div className={cn('mx-auto w-full', page === 'usage' ? 'max-w-[1024px]' : 'max-w-[760px]')}>
                 <h1 className="text-[18px] font-medium">{activePage?.localizedLabel}</h1>
                 {page === 'general' && <GeneralSettings onOpenOnboarding={onOpenOnboarding} />}
@@ -149,8 +146,8 @@ export function SettingsView({
                 {page === 'about' && <AboutSettings onPageChange={onPageChange} />}
               </div>
             </div>
-          </>
-        )}
+          )}
+        </div>
       </main>
     </div>
   )
