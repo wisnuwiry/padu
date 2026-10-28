@@ -1408,7 +1408,7 @@ export function PaduApp() {
         />
       )}
 
-      <main className={panelTakesCenter ? 'hidden' : 'relative flex min-w-0 flex-1 flex-col'}>
+      <main className={panelTakesCenter ? 'hidden' : 'relative flex min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground'}>
         <TaskHeader
           activeTabId={activePanelSessionId ? panelTabsBySession[activePanelSessionId]?.activeId : null}
           fullscreen={panelFullscreen.expanded && panelExpandable}
@@ -1447,82 +1447,176 @@ export function PaduApp() {
           title={newTaskMode ? t('menu.new_task') : current ? displayTitle(current) : 'Padu'}
         />
 
-        {newTaskMode ? (
-          activeSession && activeProject ? (
-            <>
-              <NewTaskCanvas
-                project={activeProject}
-                projects={taskState.data.projects}
+        <div className="relative flex min-h-0 flex-1 flex-col ml-2 mr-2 mb-2 rounded-[10px] border border-border bg-background text-foreground overflow-hidden">
+          {newTaskMode ? (
+            activeSession && activeProject ? (
+              <>
+                <NewTaskCanvas
+                  project={activeProject}
+                  projects={taskState.data.projects}
+                  onAddProject={openProjectPicker}
+                  onProject={(project) => chooseProject(project)}
+                  onProjectless={() => void createProjectlessTask()}
+                  onOpenNotes={openNotesPage}
+                  onOpenTerminal={() => openPanel('terminal')}
+                />
+                <Composer
+                  draft
+                  focusSignal={focusComposerSignal}
+                  initialComposerDraft={composerDraftFor(composerDraftState.current, {
+                    type: 'newSession',
+                    projectId: activeProject.id,
+                  })}
+                  embeddedNote={composerEmbeddedNote?.sessionId === 'new' ? composerEmbeddedNote.note : undefined}
+                  onRemoveEmbeddedNote={(noteId) => setComposerEmbeddedNote((value) =>
+                    value?.sessionId === 'new' && value.note.id === noteId ? null : value)}
+                  key={composerDraftId({
+                    type: 'newSession',
+                    projectId: activeProject.id,
+                  })}
+                  modelPickerSignal={modelPickerSignal}
+                  attachmentSignal={composerAttachment?.sessionId === activeSession.id ? composerAttachment.signal : 0}
+                  pendingAttachmentPaths={composerAttachment?.sessionId === activeSession.id ? composerAttachment.paths : undefined}
+                  onAttachmentSignalHandled={() => setComposerAttachment((value) =>
+                    value?.sessionId === activeSession.id ? null : value)}
+                  mentionSignal={composerMention?.sessionId === activeSession.id ? composerMention : undefined}
+                  onMentionSignalHandled={() => setComposerMention((value) =>
+                    value?.sessionId === activeSession.id ? null : value)}
+                  onAddProject={openProjectPicker}
+                  onNoteCommand={(query) => openCommandPalette('notes', query)}
+                  onFocusSignalHandled={() => setFocusComposerSignal(0)}
+                  onModelPickerSignalHandled={() => setModelPickerSignal(0)}
+                  onProjectless={() => void createProjectlessTask()}
+                  onResume={() => openCommandPalette('resume')}
+                  onUsagePanelSignalHandled={() => setUsagePanelSignal(0)}
+                  project={activeProject}
+                  projects={selectableProjects(taskState.data.projects, activeProject)}
+                  session={activeSession}
+                  usagePanelSignal={usagePanelSignal}
+                  onComposerDraftChange={(nextDraft) => updateStoredComposerDraft(
+                    { type: 'newSession', projectId: activeProject.id },
+                    nextDraft,
+                  )}
+                  onComposerDraftSubmitted={() => {
+                    setComposerEmbeddedNote(null)
+                    removeStoredComposerDraft({
+                      type: 'newSession',
+                      projectId: activeProject.id,
+                    })
+                  }}
+                  onActivated={(session) => {
+                    setDisplayed(session)
+                    setNewTaskMode(false)
+                    setDraft(null)
+                    setDraftProject(null)
+                    rememberNavigation({ kind: 'session', sessionId: session.id })
+                    void navigate({ search: { session: session.id } })
+                  }}
+                  onDraftChange={(next) => {
+                    if (next.project_id !== activeProject.id) {
+                      moveStoredComposerDraft(
+                        { type: 'newSession', projectId: activeProject.id },
+                        { type: 'newSession', projectId: next.project_id },
+                      )
+                    }
+                    setDraft(next)
+                    const project = taskState.data?.projects.find((item) => item.id === next.project_id)
+                    if (project) setDraftProject(project)
+                  }}
+                />
+              </>
+            ) : (
+              <NoProjectState
+                projectlessPending={projectlessPending}
                 onAddProject={openProjectPicker}
-                onProject={(project) => chooseProject(project)}
                 onProjectless={() => void createProjectlessTask()}
                 onOpenNotes={openNotesPage}
                 onOpenTerminal={() => openPanel('terminal')}
               />
-              <Composer
-                draft
-                focusSignal={focusComposerSignal}
-                initialComposerDraft={composerDraftFor(composerDraftState.current, {
-                  type: 'newSession',
-                  projectId: activeProject.id,
-                })}
-                embeddedNote={composerEmbeddedNote?.sessionId === 'new' ? composerEmbeddedNote.note : undefined}
-                onRemoveEmbeddedNote={(noteId) => setComposerEmbeddedNote((value) =>
-                  value?.sessionId === 'new' && value.note.id === noteId ? null : value)}
-                key={composerDraftId({
-                  type: 'newSession',
-                  projectId: activeProject.id,
-                })}
-                modelPickerSignal={modelPickerSignal}
-                attachmentSignal={composerAttachment?.sessionId === activeSession.id ? composerAttachment.signal : 0}
-                pendingAttachmentPaths={composerAttachment?.sessionId === activeSession.id ? composerAttachment.paths : undefined}
-                onAttachmentSignalHandled={() => setComposerAttachment((value) =>
-                  value?.sessionId === activeSession.id ? null : value)}
-                mentionSignal={composerMention?.sessionId === activeSession.id ? composerMention : undefined}
-                onMentionSignalHandled={() => setComposerMention((value) =>
-                  value?.sessionId === activeSession.id ? null : value)}
-                onAddProject={openProjectPicker}
-                onNoteCommand={(query) => openCommandPalette('notes', query)}
-                onFocusSignalHandled={() => setFocusComposerSignal(0)}
-                onModelPickerSignalHandled={() => setModelPickerSignal(0)}
-                onProjectless={() => void createProjectlessTask()}
-                onResume={() => openCommandPalette('resume')}
-                onUsagePanelSignalHandled={() => setUsagePanelSignal(0)}
-                project={activeProject}
-                projects={selectableProjects(taskState.data.projects, activeProject)}
-                session={activeSession}
-                usagePanelSignal={usagePanelSignal}
-                onComposerDraftChange={(nextDraft) => updateStoredComposerDraft(
-                  { type: 'newSession', projectId: activeProject.id },
-                  nextDraft,
-                )}
-                onComposerDraftSubmitted={() => {
-                  setComposerEmbeddedNote(null)
-                  removeStoredComposerDraft({
-                    type: 'newSession',
-                    projectId: activeProject.id,
-                  })
-                }}
-                onActivated={(session) => {
-                  setDisplayed(session)
-                  setNewTaskMode(false)
-                  setDraft(null)
-                  setDraftProject(null)
-                  rememberNavigation({ kind: 'session', sessionId: session.id })
-                  void navigate({ search: { session: session.id } })
-                }}
-                onDraftChange={(next) => {
-                  if (next.project_id !== activeProject.id) {
-                    moveStoredComposerDraft(
-                      { type: 'newSession', projectId: activeProject.id },
-                      { type: 'newSession', projectId: next.project_id },
-                    )
+            )
+          ) : current ? (
+            <>
+              <Transcript
+                backgroundWork={backgroundWork[current.id] ?? []}
+                forkingTurnCount={responseForks[current.id]}
+                rewindingTurnCount={messageRewinds[current.id]}
+                rewindTurnCounts={sessionTurnRefs.data ?? []}
+                session={current}
+                onAddToNote={(text) => {
+                  if (!client) {
+                    toast.error('The daemon is not connected')
+                    return
                   }
-                  setDraft(next)
-                  const project = taskState.data?.projects.find((item) => item.id === next.project_id)
-                  if (project) setDraftProject(project)
+                  void addContentToNewNote(client, activeProject?.id, displayTitle(current), text)
+                    .then(() => toast.success('Added assistant response to note'))
+                    .catch((error) => toast.error(error instanceof Error ? error.message : 'Could not add response to note'))
                 }}
+                onCopyToComposer={(text) => setComposerPrefill((previous) => ({
+                  sessionId: current.id,
+                  text,
+                  signal: (previous?.signal ?? 0) + 1,
+                }))}
+                onOpenBackgroundWork={openBackgroundWork}
+                onOpenLink={openTranscriptLink}
+                onForkResponse={(turnCount) => void forkResponse(current, turnCount)}
+                onRewindMessage={(turnCount, prompt, attachments) =>
+                  rewindMessage(current, turnCount, prompt, attachments)}
+                onReviewChanges={(source) => openPanel('changes', source)}
               />
+              {currentProject && (
+                <div aria-busy={!selectedReady} className="shrink-0" inert={!selectedReady}>
+                  <Composer
+                    focusSignal={focusComposerSignal}
+                    initialComposerDraft={composerDraftFor(composerDraftState.current, {
+                      type: 'session',
+                      sessionId: current.id,
+                    })}
+                    embeddedNote={composerEmbeddedNote?.sessionId === current.id ? composerEmbeddedNote.note : undefined}
+                    onRemoveEmbeddedNote={(noteId) => setComposerEmbeddedNote((value) =>
+                      value?.sessionId === current.id && value.note.id === noteId ? null : value)}
+                    key={composerDraftId({ type: 'session', sessionId: current.id })}
+                    modelPickerSignal={modelPickerSignal}
+                    prefillSignal={composerPrefill?.sessionId === current.id ? composerPrefill.signal : 0}
+                    prefillText={composerPrefill?.sessionId === current.id ? composerPrefill.text : undefined}
+                    attachmentSignal={composerAttachment?.sessionId === current.id ? composerAttachment.signal : 0}
+                    pendingAttachmentPaths={composerAttachment?.sessionId === current.id ? composerAttachment.paths : undefined}
+                    onAttachmentSignalHandled={() => setComposerAttachment((value) =>
+                      value?.sessionId === current.id ? null : value)}
+                    mentionSignal={composerMention?.sessionId === current.id ? composerMention : undefined}
+                    onMentionSignalHandled={() => setComposerMention((value) =>
+                      value?.sessionId === current.id ? null : value)}
+                    onAddProject={openProjectPicker}
+                    onNoteCommand={(query) => openCommandPalette('notes', query)}
+                    onFocusSignalHandled={() => setFocusComposerSignal(0)}
+                    onModelPickerSignalHandled={() => setModelPickerSignal(0)}
+                    onPrefillSignalHandled={() => setComposerPrefill((value) =>
+                      value?.sessionId === current.id ? null : value)}
+                    onProjectless={() => void createProjectlessTask()}
+                    onResume={() => openCommandPalette('resume')}
+                    onUsagePanelSignalHandled={() => setUsagePanelSignal(0)}
+                    project={currentProject}
+                    projects={taskState.data.projects}
+                    session={current}
+                    usagePanelSignal={usagePanelSignal}
+                    onComposerDraftChange={(nextDraft) => updateStoredComposerDraft(
+                      { type: 'session', sessionId: current.id },
+                      nextDraft,
+                    )}
+                    onComposerDraftSubmitted={() => {
+                      setComposerEmbeddedNote(null)
+                      removeStoredComposerDraft({
+                        type: 'session',
+                        sessionId: current.id,
+                      })
+                    }}
+                  />
+                </div>
+              )}
+              {selected.error && selectedReady && (
+                <div role="alert" className="absolute left-1/2 top-4 z-20 -translate-x-1/2 rounded-lg bg-destructive px-3 py-2 text-xs text-white shadow-lg">
+                  {errorMessage(selected.error)}
+                </div>
+              )}
             </>
           ) : (
             <NoProjectState
@@ -1532,116 +1626,24 @@ export function PaduApp() {
               onOpenNotes={openNotesPage}
               onOpenTerminal={() => openPanel('terminal')}
             />
-          )
-        ) : current ? (
-          <>
-            <Transcript
-              backgroundWork={backgroundWork[current.id] ?? []}
-              forkingTurnCount={responseForks[current.id]}
-              rewindingTurnCount={messageRewinds[current.id]}
-              rewindTurnCounts={sessionTurnRefs.data ?? []}
-              session={current}
-              onAddToNote={(text) => {
-                if (!client) {
-                  toast.error('The daemon is not connected')
-                  return
-                }
-                void addContentToNewNote(client, activeProject?.id, displayTitle(current), text)
-                  .then(() => toast.success('Added assistant response to note'))
-                  .catch((error) => toast.error(error instanceof Error ? error.message : 'Could not add response to note'))
-              }}
-              onCopyToComposer={(text) => setComposerPrefill((previous) => ({
-                sessionId: current.id,
-                text,
-                signal: (previous?.signal ?? 0) + 1,
-              }))}
-              onOpenBackgroundWork={openBackgroundWork}
-              onOpenLink={openTranscriptLink}
-              onForkResponse={(turnCount) => void forkResponse(current, turnCount)}
-              onRewindMessage={(turnCount, prompt, attachments) =>
-                rewindMessage(current, turnCount, prompt, attachments)}
-              onReviewChanges={(source) => openPanel('changes', source)}
-            />
-            {currentProject && (
-              <div aria-busy={!selectedReady} className="shrink-0" inert={!selectedReady}>
-                <Composer
-                  focusSignal={focusComposerSignal}
-                  initialComposerDraft={composerDraftFor(composerDraftState.current, {
-                    type: 'session',
-                    sessionId: current.id,
-                  })}
-                  embeddedNote={composerEmbeddedNote?.sessionId === current.id ? composerEmbeddedNote.note : undefined}
-                  onRemoveEmbeddedNote={(noteId) => setComposerEmbeddedNote((value) =>
-                    value?.sessionId === current.id && value.note.id === noteId ? null : value)}
-                  key={composerDraftId({ type: 'session', sessionId: current.id })}
-                  modelPickerSignal={modelPickerSignal}
-                  prefillSignal={composerPrefill?.sessionId === current.id ? composerPrefill.signal : 0}
-                  prefillText={composerPrefill?.sessionId === current.id ? composerPrefill.text : undefined}
-                  attachmentSignal={composerAttachment?.sessionId === current.id ? composerAttachment.signal : 0}
-                  pendingAttachmentPaths={composerAttachment?.sessionId === current.id ? composerAttachment.paths : undefined}
-                  onAttachmentSignalHandled={() => setComposerAttachment((value) =>
-                    value?.sessionId === current.id ? null : value)}
-                  mentionSignal={composerMention?.sessionId === current.id ? composerMention : undefined}
-                  onMentionSignalHandled={() => setComposerMention((value) =>
-                    value?.sessionId === current.id ? null : value)}
-                  onAddProject={openProjectPicker}
-                  onNoteCommand={(query) => openCommandPalette('notes', query)}
-                  onFocusSignalHandled={() => setFocusComposerSignal(0)}
-                  onModelPickerSignalHandled={() => setModelPickerSignal(0)}
-                  onPrefillSignalHandled={() => setComposerPrefill((value) =>
-                    value?.sessionId === current.id ? null : value)}
-                  onProjectless={() => void createProjectlessTask()}
-                  onResume={() => openCommandPalette('resume')}
-                  onUsagePanelSignalHandled={() => setUsagePanelSignal(0)}
-                  project={currentProject}
-                  projects={taskState.data.projects}
-                  session={current}
-                  usagePanelSignal={usagePanelSignal}
-                  onComposerDraftChange={(nextDraft) => updateStoredComposerDraft(
-                    { type: 'session', sessionId: current.id },
-                    nextDraft,
-                  )}
-                  onComposerDraftSubmitted={() => {
-                    setComposerEmbeddedNote(null)
-                    removeStoredComposerDraft({
-                      type: 'session',
-                      sessionId: current.id,
-                    })
-                  }}
-                />
-              </div>
-            )}
-            {selected.error && selectedReady && (
-              <div role="alert" className="absolute left-1/2 top-14 z-20 -translate-x-1/2 rounded-lg bg-destructive px-3 py-2 text-xs text-white shadow-lg">
-                {errorMessage(selected.error)}
-              </div>
-            )}
-          </>
-        ) : (
-          <NoProjectState
-            projectlessPending={projectlessPending}
-            onAddProject={openProjectPicker}
-            onProjectless={() => void createProjectlessTask()}
-            onOpenNotes={openNotesPage}
-            onOpenTerminal={() => openPanel('terminal')}
-          />
-        )}
+          )}
 
-        {newTaskMode && search.session && selected.error && (
-          <div
-            className="absolute left-1/2 top-14 z-20 flex -translate-x-1/2 items-center gap-2 rounded-lg bg-destructive px-3 py-2 text-xs text-white shadow-lg"
-            role="alert"
-          >
-            <span>{errorMessage(selected.error)}</span>
-            <button
-              className="rounded px-1.5 py-0.5 font-medium hover:bg-white/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white"
-              type="button"
-              onClick={() => void selected.refetch()}
+          {newTaskMode && search.session && selected.error && (
+            <div
+              className="absolute left-1/2 top-4 z-20 flex -translate-x-1/2 items-center gap-2 rounded-lg bg-destructive px-3 py-2 text-xs text-white shadow-lg"
+              role="alert"
             >
-              {t('common.retry')}
-            </button>
-          </div>
-        )}
+              <span>{errorMessage(selected.error)}</span>
+              <button
+                className="rounded px-1.5 py-0.5 font-medium hover:bg-white/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white"
+                type="button"
+                onClick={() => void selected.refetch()}
+              >
+                {t('common.retry')}
+              </button>
+            </div>
+          )}
+        </div>
       </main>
 
       {panelSessionIds(activeSession, retainedPanelSessionIds).map((sessionId) => {
