@@ -609,12 +609,9 @@ pub fn hide_window(window: &mut Window) {
 
 #[cfg(target_os = "macos")]
 thread_local! {
-    static SIDEBAR_TINT_VIEW: std::cell::RefCell<Option<objc2::rc::Retained<objc2_app_kit::NSView>>> =
+    static WINDOW_TINT_VIEW: std::cell::RefCell<Option<objc2::rc::Retained<objc2_app_kit::NSView>>> =
         const { std::cell::RefCell::new(None) };
 }
-
-#[cfg(target_os = "macos")]
-const SIDEBAR_WIDTH: f64 = 252.0;
 
 pub fn start_window_move(window: &Window) {
     window.start_window_move();
@@ -638,6 +635,9 @@ pub fn titlebar_double_click(window: &Window) {
         window.zoom_window();
     }
 }
+
+#[cfg(target_os = "macos")]
+const FROSTED_TINT_ALPHA: f64 = 0.82;
 
 /// Match Cursor's macOS glass window stack without asking GPUI's transparent
 /// Metal target to blend two translucent quads. The semantic tint is a native
@@ -670,7 +670,7 @@ pub fn configure_sidebar_material(window: &Window, dark: bool) {
             return;
         };
         let background = if dark {
-            NSColor::colorWithSRGBRed_green_blue_alpha(0.0, 0.0, 0.0, 0.25)
+            NSColor::colorWithSRGBRed_green_blue_alpha(0.0, 0.0, 0.0, 0.20)
         } else {
             NSColor::colorWithSRGBRed_green_blue_alpha(1.0, 1.0, 1.0, 0.0)
         };
@@ -695,9 +695,14 @@ pub fn configure_sidebar_material(window: &Window, dark: bool) {
         }
 
         let channel = if dark { 0x18 } else { 0xF3 } as f64 / 255.0;
-        let tint = NSColor::colorWithSRGBRed_green_blue_alpha(channel, channel, channel, 0.92);
+        let tint = NSColor::colorWithSRGBRed_green_blue_alpha(
+            channel,
+            channel,
+            channel,
+            FROSTED_TINT_ALPHA,
+        );
 
-        SIDEBAR_TINT_VIEW.with_borrow_mut(|slot| {
+        WINDOW_TINT_VIEW.with_borrow_mut(|slot| {
             let needs_new_view = slot.as_ref().is_none_or(|tint_view| {
                 tint_view
                     .window()
@@ -705,10 +710,12 @@ pub fn configure_sidebar_material(window: &Window, dark: bool) {
                     .is_none_or(|window| !std::ptr::eq(window, native_window.as_ref()))
             });
             if needs_new_view {
-                let mut frame = content_view.bounds();
-                frame.size.width = SIDEBAR_WIDTH;
+                let frame = content_view.bounds();
                 let tint_view = NSView::initWithFrame(NSView::alloc(main_thread), frame);
-                tint_view.setAutoresizingMask(NSAutoresizingMaskOptions::ViewHeightSizable);
+                tint_view.setAutoresizingMask(
+                    NSAutoresizingMaskOptions::ViewWidthSizable
+                        | NSAutoresizingMaskOptions::ViewHeightSizable,
+                );
                 tint_view.setWantsLayer(true);
                 content_view.addSubview_positioned_relativeTo(
                     &tint_view,
@@ -728,45 +735,11 @@ pub fn configure_sidebar_material(window: &Window, dark: bool) {
 #[cfg(not(target_os = "macos"))]
 pub fn configure_sidebar_material(_: &Window, _: bool) {}
 
-#[cfg(target_os = "macos")]
-pub fn set_sidebar_material_width(window: &Window, width: f32) {
-    use objc2::MainThreadMarker;
-    use objc2_app_kit::NSView;
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
-    let Ok(handle) = HasWindowHandle::window_handle(window) else {
-        return;
-    };
-    let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
-        return;
-    };
-    let Some(_main_thread) = MainThreadMarker::new() else {
-        return;
-    };
-
-    unsafe {
-        let view = handle.ns_view.cast::<NSView>().as_ref();
-        let Some(native_window) = view.window() else {
-            return;
-        };
-        SIDEBAR_TINT_VIEW.with_borrow(|slot| {
-            let Some(tint_view) = slot.as_ref().filter(|tint_view| {
-                tint_view
-                    .window()
-                    .as_deref()
-                    .is_some_and(|window| std::ptr::eq(window, native_window.as_ref()))
-            }) else {
-                return;
-            };
-            let mut frame = tint_view.frame();
-            frame.size.width = width.into();
-            tint_view.setFrame(frame);
-        });
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
+/// Material views are full-window under GPUI; width setters remain for API stability.
+#[allow(dead_code)]
 pub fn set_sidebar_material_width(_: &Window, _: f32) {}
+#[allow(dead_code)]
+pub fn set_right_panel_material_width(_: &Window, _: f32) {}
 
 /// Follow macOS when `dark` is `None`, otherwise force the native titlebar,
 /// traffic lights, menus, and vibrancy to the selected appearance.
