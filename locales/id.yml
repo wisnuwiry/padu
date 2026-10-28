@@ -562,6 +562,8 @@ common.send: Kirim
 notes.new: Catatan Baru
 notes.save: Simpan
 notes.edit: Edit
+notes.rich_editor: Rich Editor
+notes.code: Kode
 notes.side_by_side: Berdampingan
 notes.preview: Pratinjau
 notes.delete: Hapus

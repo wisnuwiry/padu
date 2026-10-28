@@ -1274,6 +1274,10 @@ notes.save:
   en: Save
 notes.edit:
   en: Edit
+notes.rich_editor:
+  en: Rich Editor
+notes.code:
+  en: Code
 notes.side_by_side:
   en: Side by Side
 notes.preview:

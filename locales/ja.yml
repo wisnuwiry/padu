@@ -578,6 +578,8 @@ common.send: 送信
 notes.new: 新しいノート
 notes.save: 保存
 notes.edit: 編集
+notes.rich_editor: リッチエディタ
+notes.code: コード
 notes.side_by_side: 並べて表示
 notes.preview: プレビュー
 notes.delete: 削除
