@@ -44,6 +44,7 @@ fn native_override(preference: ThemePreference) -> Option<bool> {
 pub struct Theme {
     pub is_dark: bool,
     pub canvas: Hsla,
+    #[allow(dead_code)]
     pub sidebar: Hsla,
     /// Frosted glass background for sidebars, panels, and material surfaces.
     /// Evaluates to `transparent_black()` on macOS (revealing native window
@@ -62,6 +63,7 @@ pub struct Theme {
 
     pub border: Hsla,
     pub border_strong: Hsla,
+    #[allow(dead_code)]
     pub sidebar_border: Hsla,
 
     pub text: Hsla,
