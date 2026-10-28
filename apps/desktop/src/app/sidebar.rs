@@ -2863,6 +2863,7 @@ impl Padu {
                 self.conversation_background_image(),
                 &self.state.conversation_background,
                 &theme,
+                Some(self.conversation_card_corner_radius()),
             );
         let content = if self.selected_project().is_none() {
             div()

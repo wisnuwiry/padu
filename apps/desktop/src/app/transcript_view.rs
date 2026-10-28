@@ -341,6 +341,7 @@ impl Padu {
                 self.conversation_background_image(),
                 &self.state.conversation_background,
                 &Theme::current(cx),
+                Some(self.conversation_card_corner_radius()),
             );
         div()
             .flex_1()

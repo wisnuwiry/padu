@@ -7,6 +7,14 @@ pub(super) const MAX_BACKGROUND_IMAGE_BYTES: usize = 2 * 1024 * 1024;
 /// Loads and paints the conversation background without doing filesystem work
 /// from the transcript frame path.
 impl Padu {
+    pub(super) fn conversation_card_corner_radius(&self) -> Pixels {
+        if self.right_panel_fullscreen_active() && self.right_panel_fullscreen_conversation {
+            px(14.0)
+        } else {
+            px(10.0)
+        }
+    }
+
     pub(super) fn set_conversation_background_opacity(
         &mut self,
         value: f32,
@@ -141,8 +149,10 @@ pub(super) fn render_conversation_background(
     image: Option<Arc<gpui::Image>>,
     settings: &padu_client::persistence::ConversationBackgroundSettings,
     theme: &Theme,
+    corner_radius: Option<Pixels>,
 ) -> Option<AnyElement> {
     let image = image?;
+    let radius = corner_radius.unwrap_or(px(0.0));
     Some(
         div()
             .absolute()
@@ -150,12 +160,16 @@ pub(super) fn render_conversation_background(
             .right_0()
             .top_0()
             .h(gpui::relative(settings.height_percent / 100.0))
+            .rounded_t(radius)
+            .when(settings.height_percent >= 99.0, |d| d.rounded_b(radius))
             .overflow_hidden()
             .child(
                 img(image)
                     .size_full()
                     .object_fit(ObjectFit::Cover)
                     .opacity(settings.opacity)
+                    .rounded_t(radius)
+                    .when(settings.height_percent >= 99.0, |i| i.rounded_b(radius))
                     .flex_none(),
             )
             .child(
@@ -165,10 +179,11 @@ pub(super) fn render_conversation_background(
                     .right_0()
                     .bottom_0()
                     .h(gpui::relative(0.55))
+                    .when(settings.height_percent >= 99.0, |d| d.rounded_b(radius))
                     .bg(linear_gradient(
                         180.0,
-                        linear_color_stop(theme.canvas.opacity(0.0), 0.0),
-                        linear_color_stop(theme.canvas, 1.0),
+                        linear_color_stop(theme.surface.opacity(0.0), 0.0),
+                        linear_color_stop(theme.surface, 1.0),
                     )),
             )
             .into_any_element(),

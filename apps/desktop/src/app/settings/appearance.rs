@@ -66,6 +66,7 @@ fn render_background_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) 
                 image.clone(),
                 settings,
                 &theme,
+                Some(px(8.0)),
             ),
         )
         .child(
