@@ -2772,11 +2772,15 @@ impl Padu {
             // a sidebar sliding in shrinks the inset as it takes the lights
             // over, which is what keeps the title from passing under them.
             .pl(if self.sidebar_visible {
-                px(14.0 + (TRAFFIC_LIGHT_CLEARANCE - self.sidebar_rendered_width).max(0.0))
+                px(6.0 + (TRAFFIC_LIGHT_CLEARANCE - self.sidebar_rendered_width).max(0.0))
             } else {
                 px(0.0)
             })
-            .pr(px(14.0))
+            .pr(if self.right_panel_visible {
+                px(6.0)
+            } else {
+                px(14.0)
+            })
             .when(!self.sidebar_visible, |element| {
                 element
                     .child(

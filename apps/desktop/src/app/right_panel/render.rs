@@ -96,11 +96,7 @@ impl Padu {
         div()
             .id("right-panel")
             .when(!self.right_panel_fullscreen_active(), |element| {
-                element
-                    .w(px(width))
-                    .flex_none()
-                    .border_l_1()
-                    .border_color(theme.sidebar_border)
+                element.w(px(width)).flex_none()
             })
             .when(self.right_panel_fullscreen_active(), |element| {
                 element.flex_1().min_w_0()
@@ -484,6 +480,8 @@ impl Padu {
                 } else {
                     px(10.0)
                 }
+            } else if !fullscreen {
+                px(6.0)
             } else {
                 px(10.0)
             })

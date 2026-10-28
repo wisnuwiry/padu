@@ -34,6 +34,10 @@ impl Padu {
             | PanelResizeTarget::FileTree
             | PanelResizeTarget::NotesSplit => (-5.0, 10.0),
         };
+        let has_indicator = !matches!(
+            target,
+            PanelResizeTarget::Sidebar | PanelResizeTarget::RightPanel
+        );
         div()
             .id(id)
             .absolute()
@@ -43,22 +47,24 @@ impl Padu {
             .h_full()
             .group("panel-resize-handle")
             .cursor_col_resize()
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .left(px(5.0))
-                    .w(px(2.0))
-                    .h_full()
-                    .bg(if active {
-                        theme.resize_handle
-                    } else {
-                        gpui::transparent_black()
-                    })
-                    .group_hover("panel-resize-handle", |element| {
-                        element.bg(theme.resize_handle)
-                    }),
-            )
+            .when(has_indicator, |element| {
+                element.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left(px(5.0))
+                        .w(px(2.0))
+                        .h_full()
+                        .bg(if active {
+                            theme.resize_handle
+                        } else {
+                            gpui::transparent_black()
+                        })
+                        .group_hover("panel-resize-handle", |element| {
+                            element.bg(theme.resize_handle)
+                        }),
+                )
+            })
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event, window, cx| {
@@ -242,7 +248,6 @@ impl Padu {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
-        let sidebar = self.sidebar_rendered_width > 0.0;
         if !self.right_panel_fullscreen_conversation {
             let width = self.fullscreen_panel_width(window);
             return div()
@@ -252,9 +257,6 @@ impl Padu {
                 .flex()
                 .flex_col()
                 .bg(theme.frosted)
-                .when(sidebar, |element| {
-                    element.border_l_1().border_color(theme.sidebar_border)
-                })
                 .relative()
                 .child(self.render_right_panel(width, window, cx))
                 .when(self.sidebar_visible, |element| {
@@ -279,9 +281,6 @@ impl Padu {
             .flex()
             .flex_col()
             .bg(theme.frosted)
-            .when(sidebar, |element| {
-                element.border_l_1().border_color(theme.sidebar_border)
-            })
             .child(self.render_right_panel_header(window, cx))
             .child(
                 div()
@@ -290,6 +289,12 @@ impl Padu {
                     .min_h_0()
                     .flex()
                     .flex_col()
+                    .ml(if self.sidebar_visible {
+                        px(2.0)
+                    } else {
+                        px(8.0)
+                    })
+                    .mr(px(8.0))
                     .mb(px(8.0))
                     .rounded(px(14.0))
                     .bg(theme.surface)
@@ -495,9 +500,6 @@ impl Render for Padu {
                     .flex()
                     .flex_col()
                     .bg(theme.surface)
-                    .when(panels.sidebar > 0.0, |element| {
-                        element.border_l_1().border_color(theme.sidebar_border)
-                    })
                     .child(if notes_page {
                         self.notes_pane
                             .clone()
@@ -527,9 +529,6 @@ impl Render for Padu {
                     .flex()
                     .flex_col()
                     .bg(theme.frosted)
-                    .when(panels.sidebar > 0.0, |element| {
-                        element.border_l_1().border_color(theme.sidebar_border)
-                    })
                     .child(self.render_header(window, cx))
                     .child(
                         div()
@@ -538,8 +537,16 @@ impl Render for Padu {
                             .min_h_0()
                             .flex()
                             .flex_col()
-                            .ml(px(8.0))
-                            .mr(px(8.0))
+                            .ml(if self.sidebar_visible {
+                                px(2.0)
+                            } else {
+                                px(8.0)
+                            })
+                            .mr(if self.right_panel_visible {
+                                px(2.0)
+                            } else {
+                                px(8.0)
+                            })
                             .mb(px(8.0))
                             .rounded(px(10.0))
                             .border_1()
