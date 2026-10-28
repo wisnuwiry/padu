@@ -1448,6 +1448,7 @@ export function PaduApp() {
         />
 
         <div className="relative flex min-h-0 flex-1 flex-col ml-2 mr-2 mb-2 rounded-[10px] border border-border bg-background text-foreground overflow-hidden">
+          <ConversationBackgroundLayer />
           {newTaskMode ? (
             activeSession && activeProject ? (
               <>
@@ -2348,7 +2349,6 @@ function NewTaskCanvas({
   const projectless = isProjectlessProject(project)
   return (
     <div className="relative flex min-h-0 flex-1 items-center justify-center px-8 pb-12">
-      <ConversationBackgroundLayer />
       <div className="relative z-10 text-center">
         <PaduIcon
           className="mx-auto size-10 text-foreground dark:text-white sm:size-12 lg:size-14"
@@ -2425,7 +2425,6 @@ function NoProjectState({
   const terminalShortcut = usePrimaryShortcut('⌘T', 'Ctrl+T')
   return (
     <div className="relative flex min-h-0 flex-1 items-center justify-center px-8 pb-12">
-      <ConversationBackgroundLayer />
       <div className="relative z-10 max-w-sm text-center">
         <PaduIcon className="mx-auto size-10 text-ring sm:size-12 lg:size-14" name="logo" />
         <h2 className="mt-4 text-xl font-medium">{t('onboarding.open_project_to_begin')}</h2>

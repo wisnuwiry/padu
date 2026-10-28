@@ -105,15 +105,14 @@ export function ConversationBackgroundLayer() {
         )}
         draggable={false}
         src={background.imageUrl}
-        style={{ height: `${background.heightPercent}%`, opacity: background.opacity }}
+        style={{ height: isFullHeight ? '100%' : `${background.heightPercent}%`, opacity: background.opacity }}
       />
-      <div
-        className={cn(
-          'pointer-events-none absolute inset-x-0 top-0 z-0 bg-gradient-to-b from-transparent to-surface',
-          isFullHeight && 'rounded-b-[inherit]',
-        )}
-        style={{ height: `${background.heightPercent}%` }}
-      />
+      {!isFullHeight && (
+        <div
+          className="pointer-events-none absolute inset-x-0 top-0 z-0 bg-gradient-to-b from-transparent to-background"
+          style={{ height: `${background.heightPercent}%` }}
+        />
+      )}
     </>
   )
 }
@@ -246,7 +245,6 @@ export function Transcript({
   return (
     <TranscriptLinkContext.Provider value={onOpenLink ?? (() => false)}>
       <div className="relative min-h-0 flex-1" ref={root}>
-      <ConversationBackgroundLayer />
       <div className="relative z-[1] h-full min-h-0">
       {empty ? (
         <div className="absolute inset-0 grid place-items-center pb-8">

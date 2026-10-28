@@ -180,20 +180,19 @@ export function AppearanceSettings() {
             alt=""
             aria-hidden="true"
             className={cn(
-              'absolute inset-x-0 top-0 h-auto w-full object-cover object-top rounded-t-lg',
+              'absolute inset-x-0 top-0 w-full object-cover object-top rounded-t-lg',
               heightPercent >= 99 && 'rounded-b-lg',
             )}
             src={background.imageUrl}
-            style={{ height: `${heightPercent}%`, opacity: background.opacity }}
+            style={{ height: heightPercent >= 99 ? '100%' : `${heightPercent}%`, opacity: background.opacity }}
           />
         )}
-        <div
-          className={cn(
-            'absolute inset-x-0 top-0 z-[1] bg-gradient-to-b from-transparent to-background/95 rounded-t-lg',
-            heightPercent >= 99 && 'rounded-b-lg',
-          )}
-          style={{ height: `${heightPercent}%` }}
-        />
+        {heightPercent < 99 && (
+          <div
+            className="absolute inset-x-0 top-0 z-[1] bg-gradient-to-b from-transparent to-background/95 rounded-t-lg"
+            style={{ height: `${heightPercent}%` }}
+          />
+        )}
         <div className="relative z-[2] flex h-full flex-col justify-end gap-[clamp(4px,1cqw,12px)] p-[clamp(10px,4cqw,24px)] text-[clamp(9px,2cqw,14px)] leading-[clamp(13px,3cqw,20px)]">
           <div className="flex w-full justify-end">
             <div className="max-w-[82%] min-w-0 rounded-xl bg-[var(--raised)] px-[clamp(8px,2cqw,12px)] py-[clamp(6px,1.5cqw,8px)]">
