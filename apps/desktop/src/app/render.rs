@@ -295,6 +295,7 @@ impl Padu {
                     .bg(theme.surface)
                     .overflow_hidden()
                     .relative()
+                    .children(self.render_conversation_background(cx))
                     .child(if empty {
                         self.render_empty_state(cx).into_any_element()
                     } else {
@@ -546,6 +547,7 @@ impl Render for Padu {
                             .bg(theme.surface)
                             .overflow_hidden()
                             .relative()
+                            .children(self.render_conversation_background(cx))
                             .child(if empty {
                                 self.render_empty_state(cx).into_any_element()
                             } else {

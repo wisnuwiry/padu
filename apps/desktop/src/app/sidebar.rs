@@ -2858,13 +2858,6 @@ impl Padu {
 
     pub(super) fn render_empty_state(&self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
-        let conversation_background =
-            crate::app::conversation_background::render_conversation_background(
-                self.conversation_background_image(),
-                &self.state.conversation_background,
-                &theme,
-                Some(self.conversation_card_corner_radius()),
-            );
         let content = if self.selected_project().is_none() {
             div()
                 .size_full()
@@ -3116,13 +3109,7 @@ impl Padu {
                 )
         };
 
-        div()
-            .relative()
-            .flex_1()
-            .min_h_0()
-            .w_full()
-            .children(conversation_background)
-            .child(content)
+        div().relative().flex_1().min_h_0().w_full().child(content)
     }
 }
 

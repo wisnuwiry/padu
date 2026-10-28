@@ -7,6 +7,16 @@ pub(super) const MAX_BACKGROUND_IMAGE_BYTES: usize = 2 * 1024 * 1024;
 /// Loads and paints the conversation background without doing filesystem work
 /// from the transcript frame path.
 impl Padu {
+    pub(super) fn render_conversation_background(&self, cx: &App) -> Option<AnyElement> {
+        let theme = Theme::current(cx);
+        render_conversation_background(
+            self.conversation_background_image(),
+            &self.state.conversation_background,
+            &theme,
+            Some(self.conversation_card_corner_radius()),
+        )
+    }
+
     pub(super) fn conversation_card_corner_radius(&self) -> Pixels {
         if self.right_panel_fullscreen_active() && self.right_panel_fullscreen_conversation {
             px(14.0)
@@ -153,15 +163,20 @@ pub(super) fn render_conversation_background(
 ) -> Option<AnyElement> {
     let image = image?;
     let radius = corner_radius.unwrap_or(px(0.0));
+    let is_full_height = settings.height_percent >= 99.0;
     Some(
         div()
             .absolute()
             .left_0()
             .right_0()
             .top_0()
-            .h(gpui::relative(settings.height_percent / 100.0))
+            .h(if is_full_height {
+                gpui::relative(1.0)
+            } else {
+                gpui::relative(settings.height_percent / 100.0)
+            })
             .rounded_t(radius)
-            .when(settings.height_percent >= 99.0, |d| d.rounded_b(radius))
+            .when(is_full_height, |d| d.rounded_b(radius))
             .overflow_hidden()
             .child(
                 img(image)
@@ -169,23 +184,24 @@ pub(super) fn render_conversation_background(
                     .object_fit(ObjectFit::Cover)
                     .opacity(settings.opacity)
                     .rounded_t(radius)
-                    .when(settings.height_percent >= 99.0, |i| i.rounded_b(radius))
+                    .when(is_full_height, |i| i.rounded_b(radius))
                     .flex_none(),
             )
-            .child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .h(gpui::relative(0.55))
-                    .when(settings.height_percent >= 99.0, |d| d.rounded_b(radius))
-                    .bg(linear_gradient(
-                        180.0,
-                        linear_color_stop(theme.surface.opacity(0.0), 0.0),
-                        linear_color_stop(theme.surface, 1.0),
-                    )),
-            )
+            .when(!is_full_height, |d| {
+                d.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .bottom_0()
+                        .h(gpui::relative(0.55))
+                        .bg(linear_gradient(
+                            180.0,
+                            linear_color_stop(theme.surface.opacity(0.0), 0.0),
+                            linear_color_stop(theme.surface, 1.0),
+                        )),
+                )
+            })
             .into_any_element(),
     )
 }
