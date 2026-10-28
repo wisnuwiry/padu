@@ -117,10 +117,7 @@ impl RenderOnce for TagInput {
                     .gap(px(4.0))
             })
             .when(!is_small, |s| {
-                s.min_h(px(34.0))
-                    .p(px(6.0))
-                    .rounded(px(6.0))
-                    .gap(px(6.0))
+                s.min_h(px(34.0)).p(px(6.0)).rounded(px(6.0)).gap(px(6.0))
             })
             .bg(theme.inset)
             .when(bordered, |s| {

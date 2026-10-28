@@ -278,26 +278,39 @@ impl Padu {
             .min_w_0()
             .flex()
             .flex_col()
-            .bg(theme.surface)
+            .bg(theme.frosted)
             .when(sidebar, |element| {
                 element.border_l_1().border_color(theme.sidebar_border)
             })
             .child(self.render_right_panel_header(window, cx))
-            .child(if empty {
-                self.render_empty_state(cx).into_any_element()
-            } else {
-                self.transcript_pane
-                    .clone()
-                    .cached(StyleRefinement::default().flex_1().min_h(px(0.0)).w_full())
-                    .into_any_element()
-            })
-            .children(permission)
-            .when(self.selected_project().is_some(), |element| {
-                element
-                    .children(self.render_queued_messages(cx))
-                    .child(self.render_composer(window, cx))
-                    .child(self.render_workspace_footer(cx))
-            })
+            .child(
+                div()
+                    .id("fullscreen-conversation-card")
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .flex_col()
+                    .mb(px(8.0))
+                    .rounded(px(14.0))
+                    .bg(theme.surface)
+                    .overflow_hidden()
+                    .relative()
+                    .child(if empty {
+                        self.render_empty_state(cx).into_any_element()
+                    } else {
+                        self.transcript_pane
+                            .clone()
+                            .cached(StyleRefinement::default().flex_1().min_h(px(0.0)).w_full())
+                            .into_any_element()
+                    })
+                    .children(permission)
+                    .when(self.selected_project().is_some(), |element| {
+                        element
+                            .children(self.render_queued_messages(cx))
+                            .child(self.render_composer(window, cx))
+                            .child(self.render_workspace_footer(cx))
+                    }),
+            )
             .relative()
             .children(toast)
             .children(computer_use)
@@ -473,7 +486,7 @@ impl Render for Padu {
             })
             .child(if fullscreen {
                 self.fullscreen_center_content(window, cx)
-            } else {
+            } else if standalone_page {
                 div()
                     .flex_1()
                     .h_full()
@@ -484,36 +497,72 @@ impl Render for Padu {
                     .when(panels.sidebar > 0.0, |element| {
                         element.border_l_1().border_color(theme.sidebar_border)
                     })
-                    .when(!standalone_page, |element| {
-                        element.child(self.render_header(window, cx))
-                    })
                     .child(if notes_page {
                         self.notes_pane
                             .clone()
                             .cached(StyleRefinement::default().flex_1().min_h(px(0.0)).w_full())
                             .into_any_element()
-                    } else if board_page {
+                    } else {
                         self.board_pane
                             .clone()
                             .cached(StyleRefinement::default().flex_1().min_h(px(0.0)).w_full())
                             .into_any_element()
-                    } else if empty {
-                        self.render_empty_state(cx).into_any_element()
-                    } else {
-                        self.transcript_pane
-                            .clone()
-                            .cached(StyleRefinement::default().flex_1().min_h(px(0.0)).w_full())
-                            .into_any_element()
                     })
-                    .children(permission)
-                    .when(
-                        !standalone_page && self.selected_project().is_some(),
-                        |element| {
-                            element
-                                .children(self.render_queued_messages(cx))
-                                .child(self.render_composer(window, cx))
-                                .child(self.render_workspace_footer(cx))
-                        },
+                    .children(toast)
+                    .children(computer_use)
+                    .when(self.sidebar_visible, |element| {
+                        element.child(self.render_panel_resize_handle(
+                            "sidebar-resize-handle",
+                            PanelResizeTarget::Sidebar,
+                            cx,
+                        ))
+                    })
+                    .into_any_element()
+            } else {
+                div()
+                    .flex_1()
+                    .h_full()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .bg(theme.frosted)
+                    .when(panels.sidebar > 0.0, |element| {
+                        element.border_l_1().border_color(theme.sidebar_border)
+                    })
+                    .child(self.render_header(window, cx))
+                    .child(
+                        div()
+                            .id("conversation-card")
+                            .flex_1()
+                            .min_h_0()
+                            .flex()
+                            .flex_col()
+                            .ml(px(8.0))
+                            .mr(px(8.0))
+                            .mb(px(8.0))
+                            .rounded(px(10.0))
+                            .border_1()
+                            .border_color(theme.border)
+                            .bg(theme.surface)
+                            .overflow_hidden()
+                            .relative()
+                            .child(if empty {
+                                self.render_empty_state(cx).into_any_element()
+                            } else {
+                                self.transcript_pane
+                                    .clone()
+                                    .cached(
+                                        StyleRefinement::default().flex_1().min_h(px(0.0)).w_full(),
+                                    )
+                                    .into_any_element()
+                            })
+                            .children(permission)
+                            .when(self.selected_project().is_some(), |element| {
+                                element
+                                    .children(self.render_queued_messages(cx))
+                                    .child(self.render_composer(window, cx))
+                                    .child(self.render_workspace_footer(cx))
+                            }),
                     )
                     .relative()
                     .children(toast)

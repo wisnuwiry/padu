@@ -869,12 +869,8 @@ impl Padu {
                         )
                     })
                     .child({
-                        let mut meta_row = div()
-                            .flex()
-                            .items_center()
-                            .gap(px(4.0))
-                            .min_w_0()
-                            .child(
+                        let mut meta_row =
+                            div().flex().items_center().gap(px(4.0)).min_w_0().child(
                                 div()
                                     .truncate()
                                     .flex_shrink_1()

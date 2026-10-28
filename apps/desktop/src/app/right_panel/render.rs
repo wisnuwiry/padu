@@ -569,20 +569,12 @@ impl Padu {
                     .child(tab_scroll_fade(
                         self.right_panel_tabs_scroll_handle.clone(),
                         TabScrollFadeSide::Left,
-                        if showing_conversation {
-                            theme.surface
-                        } else {
-                            theme.sidebar_drag_background
-                        },
+                        theme.sidebar_drag_background,
                     ))
                     .child(tab_scroll_fade(
                         self.right_panel_tabs_scroll_handle.clone(),
                         TabScrollFadeSide::Right,
-                        if showing_conversation {
-                            theme.surface
-                        } else {
-                            theme.sidebar_drag_background
-                        },
+                        theme.sidebar_drag_background,
                     )),
             );
 
