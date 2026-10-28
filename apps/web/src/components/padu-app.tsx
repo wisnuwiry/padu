@@ -1447,7 +1447,13 @@ export function PaduApp() {
           title={newTaskMode ? t('menu.new_task') : current ? displayTitle(current) : 'Padu'}
         />
 
-        <div className="relative flex min-h-0 flex-1 flex-col ml-2 mr-2 mb-2 rounded-[10px] border border-border bg-background text-foreground overflow-hidden">
+        <div
+          className={cn(
+            'relative flex min-h-0 flex-1 flex-col mb-2 rounded-[10px] border border-border bg-background text-foreground overflow-hidden',
+            sidebarVisible ? 'ml-0.5' : 'ml-2',
+            rightPanelVisible ? 'mr-0.5' : 'mr-2',
+          )}
+        >
           <ConversationBackgroundLayer />
           {newTaskMode ? (
             activeSession && activeProject ? (
@@ -1864,7 +1870,13 @@ function TaskHeader({
   }
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-2 px-3 lg:px-3.5">
+    <header
+      className={cn(
+        'flex h-12 shrink-0 items-center gap-2',
+        sidebarVisible ? 'pl-1.5' : 'pl-3 lg:pl-3.5',
+        panelVisible ? 'pr-1.5' : 'pr-3 lg:pr-3.5',
+      )}
+    >
       <Tooltip content={t('sidebar.toggle')} shortcut={sidebarShortcut}>
         <Button
           aria-label={t('sidebar.open')}
