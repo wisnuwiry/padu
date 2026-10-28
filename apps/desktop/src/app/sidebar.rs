@@ -1559,9 +1559,6 @@ impl Padu {
     ) -> Div {
         let theme = Theme::current(cx);
         self.ensure_sidebar_branch_labels(cx);
-        let is_resizing = self
-            .panel_resize_drag
-            .is_some_and(|drag| drag.target == PanelResizeTarget::Sidebar);
 
         let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
         self.sync_sidebar_rows(&rows);
@@ -1597,11 +1594,7 @@ impl Padu {
             .flex_none()
             .flex()
             .flex_col()
-            .bg(if is_resizing {
-                theme.sidebar_drag_background
-            } else {
-                theme.sidebar
-            })
+            .bg(theme.frosted)
             .child(self.render_sidebar_titlebar(window, cx))
             .child(
                 div()

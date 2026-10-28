@@ -251,7 +251,7 @@ impl Padu {
                 .min_w_0()
                 .flex()
                 .flex_col()
-                .bg(theme.surface)
+                .bg(theme.frosted)
                 .when(sidebar, |element| {
                     element.border_l_1().border_color(theme.sidebar_border)
                 })
