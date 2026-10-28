@@ -36,7 +36,6 @@ import {
 import { useDaemon } from '@/lib/daemon-context'
 import { useI18n } from '@/lib/i18n'
 import {
-  formatNoteMeta,
   formatNoteTimeAgo,
   nextLayoutOnCreate,
   noteExcerpt,
@@ -720,6 +719,9 @@ function NotesWorkspace({
                 onChange={(tags) => setSelected({ ...selected, tags })}
                 placeholder={t('notes.tags_placeholder')}
                 getRemoveLabel={(tag) => t('notes.remove_tag', { label: tag })}
+                small
+                focusOutline={false}
+                accentChips
               />
               <div className="flex w-full shrink-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-[var(--text-tertiary)]">
@@ -880,7 +882,6 @@ function NoteRow({
   onDelete: () => void
 }) {
   const firstLine = noteExcerpt(note.preview).split('\n')[0]?.trim() ?? ''
-  const meta = formatNoteMeta(projectName, formatNoteTimeAgo(note.updatedAt, t), note.tags)
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger
@@ -901,8 +902,26 @@ function NoteRow({
         <span className="flex min-w-0 flex-1 flex-col gap-px">
           <span className="block truncate text-[12.5px]">{note.title || t('notes.untitled')}</span>
           {firstLine && <span className="block truncate text-[11px] text-[var(--text-tertiary)]">{firstLine}</span>}
-          <span className="block truncate text-[10px] text-[var(--text-tertiary)]">
-            {meta}
+          <span className="flex items-center gap-1 min-w-0 text-[10px] text-[var(--text-tertiary)]">
+            <span className="truncate flex-shrink">{projectName} · {formatNoteTimeAgo(note.updatedAt, t)}</span>
+            {note.tags && note.tags.length > 0 && (
+              <>
+                <span className="shrink-0">·</span>
+                {note.tags.slice(0, 3).map((tag) => (
+                  <span
+                    key={tag}
+                    className="shrink-0 font-medium text-primary"
+                  >
+                    #{tag}
+                  </span>
+                ))}
+                {note.tags.length > 3 && (
+                  <span className="shrink-0 text-[var(--text-tertiary)]">
+                    +{note.tags.length - 3}
+                  </span>
+                )}
+              </>
+            )}
           </span>
         </span>
       </ContextMenu.Trigger>
