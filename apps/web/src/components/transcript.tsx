@@ -93,18 +93,25 @@ type MessageEdit = {
 export function ConversationBackgroundLayer() {
   const background = useConversationBackground()
   if (!background.imageUrl || background.loading) return null
+  const isFullHeight = background.heightPercent >= 99
   return (
     <>
       <img
         alt=""
         aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-0 z-0 w-full object-cover object-top"
+        className={cn(
+          'pointer-events-none absolute inset-x-0 top-0 z-0 w-full object-cover object-top rounded-t-[inherit]',
+          isFullHeight && 'rounded-b-[inherit]',
+        )}
         draggable={false}
         src={background.imageUrl}
         style={{ height: `${background.heightPercent}%`, opacity: background.opacity }}
       />
       <div
-        className="pointer-events-none absolute inset-x-0 top-0 z-0 bg-gradient-to-b from-transparent to-background/95"
+        className={cn(
+          'pointer-events-none absolute inset-x-0 top-0 z-0 bg-gradient-to-b from-transparent to-surface',
+          isFullHeight && 'rounded-b-[inherit]',
+        )}
         style={{ height: `${background.heightPercent}%` }}
       />
     </>
