@@ -9,6 +9,7 @@ pub(super) fn format_note_time_ago(seconds: u64) -> String {
     }
 }
 
+#[allow(dead_code)]
 pub(super) fn format_note_meta(project_name: &str, time_ago: &str, tags: &[String]) -> String {
     let mut meta = format!("{project_name} · {time_ago}");
     if !tags.is_empty() {

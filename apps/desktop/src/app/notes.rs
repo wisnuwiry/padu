@@ -4,8 +4,13 @@ use crate::ui::TagInput;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum NotesLayout {
+    Rich,
+    Code,
+    #[doc(hidden)]
     Edit,
+    #[doc(hidden)]
     Split,
+    #[doc(hidden)]
     Preview,
 }
 
@@ -154,6 +159,11 @@ impl Padu {
                 input.set_content(note.body.clone(), cx);
             }
         });
+        self.notes_code_body.update(cx, |input, cx| {
+            if input.content() != note.body {
+                input.set_content(note.body.clone(), cx);
+            }
+        });
         // Runs only on selection/load, never while typing, so in-flight tag
         // edits are never clobbered.
         self.notes_tags_list = note.tags.clone();
@@ -285,12 +295,19 @@ impl Padu {
         .detach();
     }
 
+    fn current_note_body(&self, cx: &App) -> String {
+        match self.notes_layout {
+            NotesLayout::Code => self.notes_code_body.read(cx).content().to_owned(),
+            _ => self.notes_body.read(cx).content().to_owned(),
+        }
+    }
+
     pub(super) fn schedule_note_save(&mut self, cx: &mut Context<Self>) {
         let Some(note) = self.notes.get(self.notes_selected) else {
             return;
         };
         let title = self.notes_title.read(cx).content().trim().to_owned();
-        let body = self.notes_body.read(cx).content().to_owned();
+        let body = self.current_note_body(cx);
         let normalized_title = if title.is_empty() {
             tr!("notes.untitled")
         } else {
@@ -323,11 +340,27 @@ impl Padu {
         // input so typing is never chipped mid-word.
         self.flush_note_tag_input(cx);
         let tags = self.notes_tags_list.clone();
+        let title = self.notes_title.read(cx).content().trim().to_owned();
+        let body = self.current_note_body(cx);
+        match self.notes_layout {
+            NotesLayout::Code => {
+                self.notes_body.update(cx, |ed, cx| {
+                    if ed.content() != body {
+                        ed.set_content(&body, cx);
+                    }
+                });
+            }
+            _ => {
+                self.notes_code_body.update(cx, |input, cx| {
+                    if input.content() != body {
+                        input.set_content(body.clone(), cx);
+                    }
+                });
+            }
+        }
         let Some(note) = self.notes.get_mut(self.notes_selected) else {
             return;
         };
-        let title = self.notes_title.read(cx).content().trim().to_owned();
-        let body = self.notes_body.read(cx).content().to_owned();
         let normalized_title = if title.is_empty() {
             tr!("notes.untitled")
         } else {
@@ -555,7 +588,7 @@ impl Padu {
         self.notes_save_generation = self.notes_save_generation.wrapping_add(1);
         self.flush_note_tag_input(cx);
         let title = self.notes_title.read(cx).content().trim().to_owned();
-        let body = self.notes_body.read(cx).content().to_owned();
+        let body = self.current_note_body(cx);
         let tags = self.notes_tags_list.clone();
         let Some(note) = self.notes.get_mut(self.notes_selected) else {
             return false;
@@ -668,16 +701,29 @@ impl Padu {
             "up" if plain_primary => self.select_adjacent_note(-1, cx),
             "down" if plain_primary => self.select_adjacent_note(1, cx),
             "1" if plain_primary => {
-                self.notes_layout = NotesLayout::Edit;
-                cx.notify();
+                if self.notes_layout != NotesLayout::Rich {
+                    self.notes_layout = NotesLayout::Rich;
+                    let content = self.notes_code_body.read(cx).content().to_owned();
+                    self.notes_body.update(cx, |ed, cx| {
+                        if ed.content() != content {
+                            ed.set_content(&content, cx);
+                        }
+                        ed.set_mode(padu_editor::Mode::Blocks, cx);
+                    });
+                    cx.notify();
+                }
             }
             "2" if plain_primary => {
-                self.notes_layout = NotesLayout::Split;
-                cx.notify();
-            }
-            "3" if plain_primary => {
-                self.notes_layout = NotesLayout::Preview;
-                cx.notify();
+                if self.notes_layout != NotesLayout::Code {
+                    self.notes_layout = NotesLayout::Code;
+                    let content = self.notes_body.read(cx).content();
+                    self.notes_code_body.update(cx, |input, cx| {
+                        if input.content() != content {
+                            input.set_content(content, cx);
+                        }
+                    });
+                    cx.notify();
+                }
             }
             "backspace" if plain_primary => {
                 if let Some(note) = self.notes.get(self.notes_selected) {
@@ -765,7 +811,7 @@ impl Padu {
             .unwrap_or_else(|| tr!("notes.no_project"));
         let created_ago =
             super::notes_utils::format_note_time_ago(unix_time().saturating_sub(note.created_at));
-        let meta = super::notes_utils::format_note_meta(&project_name, &created_ago, &note.tags);
+        let meta_text = format!("{project_name} · {created_ago}");
         let note_id = note.id;
         let note_menu = self.menu_handle(SharedString::from(format!("note-menu-{note_id}")), cx);
         let weak = cx.entity().downgrade();
@@ -822,13 +868,52 @@ impl Padu {
                                 .child(preview),
                         )
                     })
-                    .child(
-                        div()
-                            .truncate()
-                            .text_size(sp(10.0))
-                            .text_color(theme.text_tertiary)
-                            .child(meta),
-                    ),
+                    .child({
+                        let mut meta_row = div()
+                            .flex()
+                            .items_center()
+                            .gap(px(4.0))
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .truncate()
+                                    .flex_shrink_1()
+                                    .text_size(sp(10.0))
+                                    .text_color(theme.text_tertiary)
+                                    .child(meta_text),
+                            );
+                        if !note.tags.is_empty() {
+                            meta_row = meta_row.child(
+                                div()
+                                    .text_size(sp(10.0))
+                                    .text_color(theme.text_tertiary)
+                                    .flex_none()
+                                    .child("·"),
+                            );
+                            const MAX_LIST_TAGS: usize = 3;
+                            for tag in note.tags.iter().take(MAX_LIST_TAGS) {
+                                meta_row = meta_row.child(
+                                    div()
+                                        .truncate()
+                                        .text_size(sp(10.0))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(theme.accent)
+                                        .flex_none()
+                                        .child(format!("#{tag}")),
+                                );
+                            }
+                            if note.tags.len() > MAX_LIST_TAGS {
+                                meta_row = meta_row.child(
+                                    div()
+                                        .text_size(sp(10.0))
+                                        .text_color(theme.text_tertiary)
+                                        .flex_none()
+                                        .child(format!("+{}", note.tags.len() - MAX_LIST_TAGS)),
+                                );
+                            }
+                        }
+                        meta_row
+                    }),
             )
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.select_note(index, cx);
@@ -947,6 +1032,10 @@ impl Padu {
             let tag_entity = cx.entity().clone();
             let tag_input = TagInput::new("note-tags", self.notes_tags.clone())
                 .tags(self.notes_tags_list.clone())
+                .small(true)
+                .bordered(false)
+                .focus_outline(false)
+                .accent_chips(true)
                 .on_remove(move |idx, _window, cx| {
                     tag_entity.update(cx, |this, cx| {
                         this.remove_note_tag(idx, cx);
@@ -1004,30 +1093,43 @@ impl Padu {
                                         .rounded(px(7.0))
                                         .bg(theme.overlay)
                                         .child(self.notes_button(
-                                            "note-toggle-preview",
-                                            tr!("notes.edit"),
+                                            "note-rich",
+                                            tr!("notes.rich_editor"),
                                             cx,
                                             |this, _, cx| {
-                                                this.notes_layout = NotesLayout::Edit;
-                                                cx.notify();
+                                                if this.notes_layout != NotesLayout::Rich {
+                                                    this.notes_layout = NotesLayout::Rich;
+                                                    let content = this
+                                                        .notes_code_body
+                                                        .read(cx)
+                                                        .content()
+                                                        .to_owned();
+                                                    this.notes_body.update(cx, |ed, cx| {
+                                                        if ed.content() != content {
+                                                            ed.set_content(&content, cx);
+                                                        }
+                                                        ed.set_mode(padu_editor::Mode::Blocks, cx);
+                                                    });
+                                                    cx.notify();
+                                                }
                                             },
                                         ))
                                         .child(self.notes_button(
-                                            "note-split",
-                                            tr!("notes.side_by_side"),
+                                            "note-code",
+                                            tr!("notes.code"),
                                             cx,
                                             |this, _, cx| {
-                                                this.notes_layout = NotesLayout::Split;
-                                                cx.notify();
-                                            },
-                                        ))
-                                        .child(self.notes_button(
-                                            "note-preview",
-                                            tr!("notes.preview"),
-                                            cx,
-                                            |this, _, cx| {
-                                                this.notes_layout = NotesLayout::Preview;
-                                                cx.notify();
+                                                if this.notes_layout != NotesLayout::Code {
+                                                    this.notes_layout = NotesLayout::Code;
+                                                    let content =
+                                                        this.notes_body.read(cx).content();
+                                                    this.notes_code_body.update(cx, |input, cx| {
+                                                        if input.content() != content {
+                                                            input.set_content(content, cx);
+                                                        }
+                                                    });
+                                                    cx.notify();
+                                                }
                                             },
                                         )),
                                 )
@@ -1056,7 +1158,7 @@ impl Padu {
                 // edits; MarkdownView only reparses when the content changes,
                 // while schedule_note_save keeps daemon writes debounced.
                 let live_body = self.notes_body.read(cx).content();
-                view.set_text(live_body, false);
+                view.set_text(&live_body, false);
                 let ctx = MarkdownCtx::new(
                     format!("note-preview-{}", note.id),
                     &palette,
@@ -1109,12 +1211,47 @@ impl Padu {
             } else {
                 None
             };
-            let edit_pane = if matches!(layout, NotesLayout::Edit | NotesLayout::Split) {
+            let edit_pane = if !matches!(layout, NotesLayout::Code) {
                 let notes_body = self.notes_body.clone();
+                let editor_focus = notes_body.read(cx).focus_handle();
+                Some(
+                    div()
+                        .id("note-editor-pane")
+                        .flex_1()
+                        .min_h_0()
+                        .min_w_0()
+                        .relative()
+                        .rounded(px(8.0))
+                        .bg(theme.inset)
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |_, _, window, cx| {
+                                window.focus(&editor_focus, cx);
+                            }),
+                        )
+                        .child(
+                            div()
+                                .id("note-editor-scroll")
+                                .size_full()
+                                .overflow_y_scroll()
+                                .track_scroll(&self.notes_editor_scroll_handle)
+                                .p(px(14.0))
+                                .child(notes_body),
+                        )
+                        .child(scrollbar::vertical(
+                            &self.notes_editor_scroll_handle,
+                            &self.notes_editor_scrollbar,
+                        )),
+                )
+            } else {
+                None
+            };
+            let code_pane = if matches!(layout, NotesLayout::Code | NotesLayout::Split) {
+                let notes_code_body = self.notes_code_body.clone();
                 Some(
                     self.render_file_editor_body(
                         "notes.md",
-                        &notes_body,
+                        &notes_code_body,
                         720.0,
                         true,
                         theme.inset,
@@ -1127,12 +1264,12 @@ impl Padu {
                 None
             };
             editor = match layout {
-                NotesLayout::Edit => editor.child(edit_pane.expect("editor pane is present")),
+                NotesLayout::Code => editor.child(code_pane.expect("code pane is present")),
                 NotesLayout::Preview => {
                     editor.child(preview_pane.expect("preview pane is present"))
                 }
                 NotesLayout::Split => {
-                    let edit_pane = edit_pane.expect("editor pane is present");
+                    let code_pane = code_pane.expect("code pane is present");
                     let preview_pane = preview_pane.expect("preview pane is present");
                     let split_ratio = self.notes_split_ratio;
                     editor.child(
@@ -1142,7 +1279,7 @@ impl Padu {
                             .flex()
                             .gap(px(6.0))
                             .child(
-                                edit_pane
+                                code_pane
                                     .w(px(0.0))
                                     .flex_grow(split_ratio)
                                     .flex_shrink(1.0)
@@ -1169,6 +1306,7 @@ impl Padu {
                             ),
                     )
                 }
+                _ => editor.child(edit_pane.expect("editor pane is present")),
             };
         }
 
@@ -1297,16 +1435,20 @@ impl Padu {
     ) -> Stateful<Div> {
         let theme = Theme::current(cx);
         let selected = match id {
-            "note-toggle-preview" => self.notes_layout == NotesLayout::Edit,
+            "note-rich" | "note-toggle-preview" => {
+                matches!(self.notes_layout, NotesLayout::Rich | NotesLayout::Edit)
+            }
+            "note-code" => matches!(self.notes_layout, NotesLayout::Code),
             "note-split" => self.notes_layout == NotesLayout::Split,
             "note-preview" => self.notes_layout == NotesLayout::Preview,
             _ => false,
         };
         let (icon_path, icon_only) = match id {
             "note-new" => ("icons/plus.svg", false),
-            "note-toggle-preview" => ("icons/pencil.svg", true),
+            "note-rich" | "note-toggle-preview" => ("icons/pencil.svg", true),
+            "note-code" => ("icons/code.svg", true),
             "note-split" => ("icons/split.svg", true),
-            "note-preview" => ("icons/eye.svg", true),
+            "note-preview" => ("icons/code.svg", true),
             "note-delete" => ("icons/trash.svg", true),
             "note-add-to-chat" => ("icons/add-to-chat.svg", false),
             "note-toggle-list" => (
@@ -1327,7 +1469,10 @@ impl Padu {
         let tooltip = label.clone();
         let shortcut = match id {
             "note-new" => crate::platform::primary_shortcut("⌘⌥N", "Ctrl+Alt+N"),
-            "note-toggle-preview" => crate::platform::primary_shortcut("⌘1", "Ctrl+1"),
+            "note-rich" | "note-toggle-preview" => {
+                crate::platform::primary_shortcut("⌘1", "Ctrl+1")
+            }
+            "note-code" => crate::platform::primary_shortcut("⌘2", "Ctrl+2"),
             "note-split" => crate::platform::primary_shortcut("⌘2", "Ctrl+2"),
             "note-preview" => crate::platform::primary_shortcut("⌘3", "Ctrl+3"),
             "note-delete" => crate::platform::primary_shortcut("⌘⌫", "Ctrl+Backspace"),
@@ -1370,7 +1515,8 @@ impl Padu {
                                 && event.keystroke.modifiers.alt
                                 && !event.keystroke.modifiers.shift
                         }
-                        "note-toggle-preview" => key == "1",
+                        "note-rich" | "note-toggle-preview" => key == "1",
+                        "note-code" => key == "2",
                         "note-split" => key == "2",
                         "note-preview" => key == "3",
                         "note-delete" => key == "backspace",
