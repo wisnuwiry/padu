@@ -338,7 +338,10 @@ export const RightPanel = forwardRef<RightPanelHandle, RightPanelProps>(function
   return (
     <aside
       className={cn(
-        'flex shrink-0 flex-col border-l bg-background',
+        'flex shrink-0 flex-col border-l',
+        fullscreen && showingConversation
+          ? 'bg-background border-border'
+          : 'bg-sidebar border-sidebar-border text-sidebar-foreground',
         (!open || (fullscreen && showingConversation)) && 'hidden',
         fullscreen && !showingConversation && 'relative z-30 min-w-0 flex-1 shadow-none',
         !fullscreen
