@@ -1,0 +1,24 @@
+[package]
+name = "padu-editor"
+version = "0.1.0"
+edition = "2024"
+description = "A Notion-style block editor for gpui — the editing surface over the markdown document model"
+license = "GPL-3.0-only"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+gpui = { git = "https://github.com/egoist/zed", branch = "waku-webview" }
+pulldown-cmark = { version = "0.13", default-features = false }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# The editing surface is the half that needs a window, so it is the half a pure
+# function cannot reach. `test-support` brings gpui's own harness — a window, a
+# dispatcher, and `simulate_keystrokes` — which is what lets a key press be
+# tested rather than described.
+[dev-dependencies]
+gpui = { git = "https://github.com/egoist/zed", branch = "waku-webview", features = [
+    "test-support",
+] }

@@ -5427,6 +5427,7 @@ dependencies = [
  "objc2-user-notifications",
  "objc2-web-kit",
  "padu-client",
+ "padu-editor",
  "padu-mermaid",
  "padu-protocol",
  "parking_lot",
@@ -5528,6 +5529,16 @@ dependencies = [
  "serde_json",
  "smol",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "padu-editor"
+version = "0.1.0"
+dependencies = [
+ "gpui",
+ "pulldown-cmark",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
