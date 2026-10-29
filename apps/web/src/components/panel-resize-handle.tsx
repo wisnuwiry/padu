@@ -8,6 +8,7 @@ export function PanelResizeHandle({
   max,
   label,
   className,
+  indicator = true,
   onChange,
   onCommit,
 }: {
@@ -17,6 +18,7 @@ export function PanelResizeHandle({
   max: number
   label: string
   className?: string
+  indicator?: boolean
   onChange: (value: number) => void
   onCommit?: (value: number) => void
 }) {
@@ -93,7 +95,9 @@ export function PanelResizeHandle({
         drag.current = null
       }}
     >
-      <span className="absolute inset-y-0 left-[3px] w-0.5 bg-transparent transition-colors motion-reduce:transition-none group-hover:bg-ring/70 group-focus-visible:bg-ring group-active:bg-ring" />
+      {indicator && (
+        <span className="absolute inset-y-0 left-[3px] w-0.5 bg-transparent transition-colors motion-reduce:transition-none group-hover:bg-ring/70 group-focus-visible:bg-ring group-active:bg-ring" />
+      )}
     </div>
   )
 }

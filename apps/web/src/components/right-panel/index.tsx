@@ -338,7 +338,10 @@ export const RightPanel = forwardRef<RightPanelHandle, RightPanelProps>(function
   return (
     <aside
       className={cn(
-        'flex shrink-0 flex-col border-l bg-background',
+        'flex shrink-0 flex-col',
+        fullscreen && showingConversation
+          ? 'bg-background'
+          : 'bg-sidebar text-sidebar-foreground',
         (!open || (fullscreen && showingConversation)) && 'hidden',
         fullscreen && !showingConversation && 'relative z-30 min-w-0 flex-1 shadow-none',
         !fullscreen
@@ -349,6 +352,7 @@ export const RightPanel = forwardRef<RightPanelHandle, RightPanelProps>(function
       {!fullscreen && (
         <PanelResizeHandle
           edge="left"
+          indicator={false}
           label={t('right_panel.resize')}
           max={maxPanelWidth}
           min={280}
@@ -356,7 +360,7 @@ export const RightPanel = forwardRef<RightPanelHandle, RightPanelProps>(function
           onChange={onPanelWidthChange}
         />
       )}
-      <header className="flex h-12 shrink-0 items-center gap-1.5 px-2.5 pr-3.5">
+      <header className="flex h-12 shrink-0 items-center gap-1.5 px-1.5 pr-3.5">
         {fullscreen && !sidebarVisible && onToggleSidebar && (
           <Tooltip content={t('menu.toggle_sidebar')} shortcut={toggleSidebarShortcut}>
             <Button

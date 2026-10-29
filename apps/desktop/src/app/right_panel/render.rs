@@ -96,11 +96,7 @@ impl Padu {
         div()
             .id("right-panel")
             .when(!self.right_panel_fullscreen_active(), |element| {
-                element
-                    .w(px(width))
-                    .flex_none()
-                    .border_l_1()
-                    .border_color(theme.border_strong)
+                element.w(px(width)).flex_none()
             })
             .when(self.right_panel_fullscreen_active(), |element| {
                 element.flex_1().min_w_0()
@@ -109,7 +105,7 @@ impl Padu {
             .flex()
             .flex_col()
             .min_w_0()
-            .bg(theme.surface)
+            .bg(theme.frosted)
             .relative()
             .child(self.render_right_panel_header(window, cx))
             .child(body)
@@ -484,6 +480,8 @@ impl Padu {
                 } else {
                     px(10.0)
                 }
+            } else if !fullscreen {
+                px(6.0)
             } else {
                 px(10.0)
             })
@@ -569,12 +567,12 @@ impl Padu {
                     .child(tab_scroll_fade(
                         self.right_panel_tabs_scroll_handle.clone(),
                         TabScrollFadeSide::Left,
-                        theme.surface,
+                        theme.sidebar_drag_background,
                     ))
                     .child(tab_scroll_fade(
                         self.right_panel_tabs_scroll_handle.clone(),
                         TabScrollFadeSide::Right,
-                        theme.surface,
+                        theme.sidebar_drag_background,
                     )),
             );
 

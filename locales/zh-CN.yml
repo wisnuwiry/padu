@@ -563,6 +563,8 @@ common.send: 发送
 notes.new: 新建笔记
 notes.save: 保存
 notes.edit: 编辑
+notes.rich_editor: 富文本编辑器
+notes.code: 代码
 notes.side_by_side: 并排
 notes.preview: 预览
 notes.delete: 删除

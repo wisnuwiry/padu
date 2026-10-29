@@ -44,7 +44,12 @@ fn native_override(preference: ThemePreference) -> Option<bool> {
 pub struct Theme {
     pub is_dark: bool,
     pub canvas: Hsla,
+    #[allow(dead_code)]
     pub sidebar: Hsla,
+    /// Frosted glass background for sidebars, panels, and material surfaces.
+    /// Evaluates to `transparent_black()` on macOS (revealing native window
+    /// vibrancy and tint) and falls back to a neutral surface on other platforms.
+    pub frosted: Hsla,
     pub sidebar_drag_background: Hsla,
     pub sidebar_item_background: Hsla,
     pub surface: Hsla,
@@ -58,6 +63,7 @@ pub struct Theme {
 
     pub border: Hsla,
     pub border_strong: Hsla,
+    #[allow(dead_code)]
     pub sidebar_border: Hsla,
 
     pub text: Hsla,
@@ -118,6 +124,11 @@ impl Theme {
             } else {
                 rgb(0x181818).into()
             },
+            frosted: if cfg!(target_os = "macos") {
+                transparent_black()
+            } else {
+                rgb(0x181818).into()
+            },
             sidebar_drag_background: rgb(0x181818).into(),
             sidebar_item_background: hsla(0.0, 0.0, 0.941, 0.06),
             surface: rgb(0x1A1A1A).into(),
@@ -162,6 +173,11 @@ impl Theme {
             is_dark: false,
             canvas: rgb(0xF6F5F6).into(),
             sidebar: if cfg!(target_os = "macos") {
+                transparent_black()
+            } else {
+                rgb(0xF3F3F3).into()
+            },
+            frosted: if cfg!(target_os = "macos") {
                 transparent_black()
             } else {
                 rgb(0xF3F3F3).into()

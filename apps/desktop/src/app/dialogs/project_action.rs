@@ -357,8 +357,8 @@ impl Padu {
             .child(
                 div()
                     .px(px(20.0))
-                    .pt(px(18.0))
-                    .pb(px(14.0))
+                    .pt(px(16.0))
+                    .pb(px(8.0))
                     .border_b_1()
                     .border_color(theme.border)
                     .rounded_tl(px(14.0))

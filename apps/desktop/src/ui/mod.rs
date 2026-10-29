@@ -6,6 +6,7 @@ use gpui::{
 };
 
 pub mod dialog;
+pub mod editor;
 pub mod menu;
 pub mod motion;
 pub mod scrollbar;
@@ -15,6 +16,8 @@ pub mod tag_input;
 pub mod text_field;
 pub mod tooltip;
 
+#[allow(unused_imports)]
+pub use editor::{EditorLoader, RichEditor, SharedEditor, configure_editor, editor_theme};
 pub use tag_input::TagInput;
 
 #[allow(unused_imports)]

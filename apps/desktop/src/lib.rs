@@ -219,6 +219,7 @@ pub fn run() {
             cx.set_app_identity(APP_ID, APP_NAME);
             crate::assets::register_fonts(cx).expect("failed to register bundled fonts");
             crate::input::init(cx);
+            padu_editor::init(cx);
             crate::ui::menu::init(cx);
             crate::app::init_composer_autocomplete(cx);
             crate::app::init_settings_keys(cx);

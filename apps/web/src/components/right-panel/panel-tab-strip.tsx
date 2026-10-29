@@ -131,14 +131,14 @@ export function PanelTabStrip({
       <span
         aria-hidden="true"
         className={cn(
-          'pointer-events-none absolute inset-y-0 left-0 w-4 bg-gradient-to-r from-background to-transparent transition-opacity motion-reduce:transition-none',
+          'pointer-events-none absolute inset-y-0 left-0 w-4 bg-gradient-to-r from-sidebar to-transparent transition-opacity motion-reduce:transition-none',
           tabOverflow.start ? 'opacity-100' : 'opacity-0',
         )}
       />
       <span
         aria-hidden="true"
         className={cn(
-          'pointer-events-none absolute inset-y-0 right-0 w-4 bg-gradient-to-l from-background to-transparent transition-opacity motion-reduce:transition-none',
+          'pointer-events-none absolute inset-y-0 right-0 w-4 bg-gradient-to-l from-sidebar to-transparent transition-opacity motion-reduce:transition-none',
           tabOverflow.end ? 'opacity-100' : 'opacity-0',
         )}
       />

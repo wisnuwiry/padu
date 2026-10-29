@@ -1579,6 +1579,8 @@ pub struct Padu {
     notes_preview_selection: TranscriptSelection,
     notes_preview_scroll_handle: ScrollHandle,
     notes_preview_scrollbar: Rc<ScrollbarState>,
+    notes_editor_scroll_handle: ScrollHandle,
+    notes_editor_scrollbar: Rc<ScrollbarState>,
     right_panel_pending_tab_reveal: Option<usize>,
     right_panel_pending_terminal_focus: Option<Uuid>,
     right_panel_expanded_paths: HashSet<PathBuf>,
@@ -1643,7 +1645,8 @@ pub struct Padu {
     notes: Vec<notes::Note>,
     notes_selected: usize,
     notes_title: Entity<TextInput>,
-    notes_body: Entity<TextInput>,
+    notes_body: Entity<padu_editor::Editor>,
+    notes_code_body: Entity<TextInput>,
     notes_search: Entity<TextInput>,
     notes_tags: Entity<TextInput>,
     notes_tags_list: Vec<String>,
@@ -2636,7 +2639,8 @@ impl Padu {
         });
         let notes_title =
             cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("notes.title_placeholder")));
-        let notes_body = cx.new(|cx| {
+        let notes_body = cx.new(|cx| padu_editor::Editor::new("", cx));
+        let notes_code_body = cx.new(|cx| {
             TextInput::new(window, cx)
                 .multi_line()
                 .syntax(Some("markdown"))
@@ -3359,11 +3363,23 @@ impl Padu {
                 },
             )
             .detach();
-            cx.subscribe(&notes_body, |this: &mut Self, _, event: &InputEvent, cx| {
-                if matches!(event, InputEvent::Edited) {
-                    this.schedule_note_save(cx);
-                }
-            })
+            cx.subscribe(
+                &notes_body,
+                |this: &mut Self, _, event: &padu_editor::EditorEvent, cx| {
+                    if matches!(event, padu_editor::EditorEvent::Changed) {
+                        this.schedule_note_save(cx);
+                    }
+                },
+            )
+            .detach();
+            cx.subscribe(
+                &notes_code_body,
+                |this: &mut Self, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Edited) {
+                        this.schedule_note_save(cx);
+                    }
+                },
+            )
             .detach();
             cx.subscribe(
                 &daemon_port_input,
@@ -3774,6 +3790,8 @@ impl Padu {
                 notes_preview_selection: TranscriptSelection::default(),
                 notes_preview_scroll_handle: ScrollHandle::new(),
                 notes_preview_scrollbar: ScrollbarState::new(),
+                notes_editor_scroll_handle: ScrollHandle::new(),
+                notes_editor_scrollbar: ScrollbarState::new(),
                 right_panel_pending_tab_reveal: None,
                 right_panel_pending_terminal_focus: None,
                 right_panel_expanded_paths: HashSet::new(),
@@ -3815,10 +3833,11 @@ impl Padu {
                 notes_selected: 0,
                 notes_title,
                 notes_body,
+                notes_code_body,
                 notes_search,
                 notes_tags,
                 notes_tags_list: Vec::new(),
-                notes_layout: notes::NotesLayout::Edit,
+                notes_layout: notes::NotesLayout::Rich,
                 notes_list_collapsed: false,
                 notes_split_ratio: 0.5,
                 notes_save_generation: 0,

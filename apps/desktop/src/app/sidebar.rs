@@ -1559,9 +1559,6 @@ impl Padu {
     ) -> Div {
         let theme = Theme::current(cx);
         self.ensure_sidebar_branch_labels(cx);
-        let is_resizing = self
-            .panel_resize_drag
-            .is_some_and(|drag| drag.target == PanelResizeTarget::Sidebar);
 
         let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
         self.sync_sidebar_rows(&rows);
@@ -1597,11 +1594,7 @@ impl Padu {
             .flex_none()
             .flex()
             .flex_col()
-            .bg(if is_resizing {
-                theme.sidebar_drag_background
-            } else {
-                theme.sidebar
-            })
+            .bg(theme.frosted)
             .child(self.render_sidebar_titlebar(window, cx))
             .child(
                 div()
@@ -2779,11 +2772,15 @@ impl Padu {
             // a sidebar sliding in shrinks the inset as it takes the lights
             // over, which is what keeps the title from passing under them.
             .pl(if self.sidebar_visible {
-                px(14.0 + (TRAFFIC_LIGHT_CLEARANCE - self.sidebar_rendered_width).max(0.0))
+                px(6.0 + (TRAFFIC_LIGHT_CLEARANCE - self.sidebar_rendered_width).max(0.0))
             } else {
                 px(0.0)
             })
-            .pr(px(14.0))
+            .pr(if self.right_panel_visible {
+                px(6.0)
+            } else {
+                px(14.0)
+            })
             .when(!self.sidebar_visible, |element| {
                 element
                     .child(
@@ -2865,12 +2862,6 @@ impl Padu {
 
     pub(super) fn render_empty_state(&self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
-        let conversation_background =
-            crate::app::conversation_background::render_conversation_background(
-                self.conversation_background_image(),
-                &self.state.conversation_background,
-                &theme,
-            );
         let content = if self.selected_project().is_none() {
             div()
                 .size_full()
@@ -3122,13 +3113,7 @@ impl Padu {
                 )
         };
 
-        div()
-            .relative()
-            .flex_1()
-            .min_h_0()
-            .w_full()
-            .children(conversation_background)
-            .child(content)
+        div().relative().flex_1().min_h_0().w_full().child(content)
     }
 }
 

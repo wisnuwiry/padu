@@ -93,20 +93,26 @@ type MessageEdit = {
 export function ConversationBackgroundLayer() {
   const background = useConversationBackground()
   if (!background.imageUrl || background.loading) return null
+  const isFullHeight = background.heightPercent >= 99
   return (
     <>
       <img
         alt=""
         aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-0 z-0 w-full object-cover object-top"
+        className={cn(
+          'pointer-events-none absolute inset-x-0 top-0 z-0 w-full object-cover object-top rounded-t-[inherit]',
+          isFullHeight && 'rounded-b-[inherit]',
+        )}
         draggable={false}
         src={background.imageUrl}
-        style={{ height: `${background.heightPercent}%`, opacity: background.opacity }}
+        style={{ height: isFullHeight ? '100%' : `${background.heightPercent}%`, opacity: background.opacity }}
       />
-      <div
-        className="pointer-events-none absolute inset-x-0 top-0 z-0 bg-gradient-to-b from-transparent to-background/95"
-        style={{ height: `${background.heightPercent}%` }}
-      />
+      {!isFullHeight && (
+        <div
+          className="pointer-events-none absolute inset-x-0 top-0 z-0 bg-gradient-to-b from-transparent to-background"
+          style={{ height: `${background.heightPercent}%` }}
+        />
+      )}
     </>
   )
 }
@@ -239,7 +245,6 @@ export function Transcript({
   return (
     <TranscriptLinkContext.Provider value={onOpenLink ?? (() => false)}>
       <div className="relative min-h-0 flex-1" ref={root}>
-      <ConversationBackgroundLayer />
       <div className="relative z-[1] h-full min-h-0">
       {empty ? (
         <div className="absolute inset-0 grid place-items-center pb-8">

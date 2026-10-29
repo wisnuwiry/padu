@@ -188,7 +188,7 @@ impl Padu {
             .capture_any_mouse_down(cx.listener(Self::navigation_mouse_down))
             .size_full()
             .flex()
-            .bg(theme.canvas)
+            .bg(theme.frosted)
             .text_color(theme.text)
             .font_family(".SystemUIFont")
             .child(self.render_settings_sidebar(window, cx))
@@ -257,7 +257,7 @@ impl Padu {
             .flex_none()
             .flex()
             .flex_col()
-            .bg(theme.sidebar)
+            .bg(theme.frosted)
             .child(self.render_settings_sidebar_titlebar(window, cx))
             .child(
                 div().px(px(12.0)).pt(px(8.0)).child(
@@ -403,34 +403,6 @@ impl Padu {
             window,
             cx,
         );
-        // The Skills page is a mail-style split that owns the whole content
-        // column — no page title, no titlebar strip, no width cap, no card.
-        // Window dragging stays with the sidebar's own titlebar region.
-        if page == SettingsPage::Skills {
-            return div()
-                .flex_1()
-                .h_full()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .key_context(SETTINGS_CONTENT_CONTEXT)
-                .border_l_1()
-                .border_color(theme.sidebar_border)
-                .bg(theme.surface)
-                .children(right_window_controls.map(|controls| {
-                    self.render_settings_drag_region("settings-skills-titlebar", cx)
-                        .flex()
-                        .items_center()
-                        .justify_end()
-                        .child(controls)
-                }))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_h_0()
-                        .child(self.render_skills_settings(cx)),
-                );
-        }
         // The Monthly and Projects list views own their own scrolling, so
         // their pages fill the viewport instead of riding the shared scroll
         // container.
@@ -439,54 +411,82 @@ impl Padu {
                 self.usage_view,
                 UsageViewMode::Monthly | UsageViewMode::Projects
             );
-        // The titlebar strip is transparent; once content slides under it, a
-        // hairline marks the boundary so the clip edge reads as a header
-        // rather than a glitch.
-        let content_scrolled = !fills_viewport && self.settings_scroll.offset().y < px(-1.0);
 
-        let inner = div()
-            .w_full()
-            .max_w(px(match page {
-                SettingsPage::Usage => SETTINGS_USAGE_MAX_WIDTH,
-                _ => SETTINGS_CONTENT_MAX_WIDTH,
-            }))
-            .mx_auto()
-            .when(fills_viewport, |element| {
-                element.h_full().min_h_0().flex().flex_col()
-            })
-            .child(
-                div()
-                    .flex_none()
-                    .text_size(sp(18.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.text)
-                    .child(match page {
-                        SettingsPage::General => tr!("settings.general"),
-                        SettingsPage::Appearance => tr!("settings.appearance"),
-                        SettingsPage::Keybindings => tr!("settings.keybindings"),
-                        SettingsPage::Notifications => tr!("settings.notifications"),
-                        SettingsPage::Providers => tr!("settings.providers"),
-                        SettingsPage::Skills => tr!("settings.skills"),
-                        SettingsPage::Usage => tr!("settings.usage"),
-                        SettingsPage::Daemon => tr!("settings.daemon"),
-                        SettingsPage::ComputerUse => tr!("settings.computer_use"),
-                        SettingsPage::Archived => tr!("settings.archived"),
-                        SettingsPage::About => tr!("settings.about"),
-                    }),
-            )
-            .child(match page {
-                SettingsPage::General => self.render_general_settings(cx),
-                SettingsPage::Appearance => self.render_appearance_settings(cx),
-                SettingsPage::Keybindings => self.render_keybindings_settings(cx),
-                SettingsPage::Notifications => self.render_notifications_settings(cx),
-                SettingsPage::Providers => self.render_providers_settings(cx),
-                SettingsPage::Skills => self.render_skills_settings(cx),
-                SettingsPage::Usage => self.render_usage_settings(cx),
-                SettingsPage::Daemon => self.render_daemon_settings(cx),
-                SettingsPage::ComputerUse => self.render_computer_use_settings(cx),
-                SettingsPage::Archived => self.render_archived_settings(cx).into_any_element(),
-                SettingsPage::About => self.render_about_settings(cx),
-            });
+        let card_content = if page == SettingsPage::Skills {
+            self.render_skills_settings(cx)
+        } else {
+            let inner = div()
+                .w_full()
+                .max_w(px(match page {
+                    SettingsPage::Usage => SETTINGS_USAGE_MAX_WIDTH,
+                    _ => SETTINGS_CONTENT_MAX_WIDTH,
+                }))
+                .mx_auto()
+                .pt(px(24.0))
+                .when(fills_viewport, |element| {
+                    element.h_full().min_h_0().flex().flex_col()
+                })
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(sp(18.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(match page {
+                            SettingsPage::General => tr!("settings.general"),
+                            SettingsPage::Appearance => tr!("settings.appearance"),
+                            SettingsPage::Keybindings => tr!("settings.keybindings"),
+                            SettingsPage::Notifications => tr!("settings.notifications"),
+                            SettingsPage::Providers => tr!("settings.providers"),
+                            SettingsPage::Skills => tr!("settings.skills"),
+                            SettingsPage::Usage => tr!("settings.usage"),
+                            SettingsPage::Daemon => tr!("settings.daemon"),
+                            SettingsPage::ComputerUse => tr!("settings.computer_use"),
+                            SettingsPage::Archived => tr!("settings.archived"),
+                            SettingsPage::About => tr!("settings.about"),
+                        }),
+                )
+                .child(match page {
+                    SettingsPage::General => self.render_general_settings(cx),
+                    SettingsPage::Appearance => self.render_appearance_settings(cx),
+                    SettingsPage::Keybindings => self.render_keybindings_settings(cx),
+                    SettingsPage::Notifications => self.render_notifications_settings(cx),
+                    SettingsPage::Providers => self.render_providers_settings(cx),
+                    SettingsPage::Skills => self.render_skills_settings(cx),
+                    SettingsPage::Usage => self.render_usage_settings(cx),
+                    SettingsPage::Daemon => self.render_daemon_settings(cx),
+                    SettingsPage::ComputerUse => self.render_computer_use_settings(cx),
+                    SettingsPage::Archived => self.render_archived_settings(cx).into_any_element(),
+                    SettingsPage::About => self.render_about_settings(cx),
+                });
+
+            div()
+                .size_full()
+                .relative()
+                .child(
+                    div()
+                        .id("settings-content-scroll")
+                        .size_full()
+                        .when(!fills_viewport, |element| {
+                            element
+                                .overflow_y_scroll()
+                                .track_scroll(&self.settings_scroll)
+                                .pb(px(48.0))
+                        })
+                        .when(fills_viewport, |element| {
+                            element.min_h_0().flex().flex_col()
+                        })
+                        .px(px(32.0))
+                        .child(inner),
+                )
+                .when(!fills_viewport, |element| {
+                    element.child(scrollbar::vertical(
+                        &self.settings_scroll,
+                        &self.settings_scrollbar,
+                    ))
+                })
+                .into_any_element()
+        };
 
         div()
             .flex_1()
@@ -495,18 +495,13 @@ impl Padu {
             .flex()
             .flex_col()
             .key_context(SETTINGS_CONTENT_CONTEXT)
-            .border_l_1()
-            .border_color(theme.sidebar_border)
-            .bg(theme.surface)
+            .bg(theme.frosted)
             .child(
                 div()
                     .h(px(48.0))
                     .flex_none()
                     .flex()
                     .items_center()
-                    .when(content_scrolled, |element| {
-                        element.border_b_1().border_color(theme.border)
-                    })
                     .child(
                         div()
                             .pl(px(16.0))
@@ -544,31 +539,18 @@ impl Padu {
             )
             .child(
                 div()
+                    .id("settings-content-card")
                     .flex_1()
                     .min_h_0()
-                    .relative()
-                    .child(
-                        div()
-                            .id("settings-content-scroll")
-                            .size_full()
-                            .when(!fills_viewport, |element| {
-                                element
-                                    .overflow_y_scroll()
-                                    .track_scroll(&self.settings_scroll)
-                                    .pb(px(48.0))
-                            })
-                            .when(fills_viewport, |element| {
-                                element.min_h_0().flex().flex_col()
-                            })
-                            .px(px(32.0))
-                            .child(inner),
-                    )
-                    .when(!fills_viewport, |element| {
-                        element.child(scrollbar::vertical(
-                            &self.settings_scroll,
-                            &self.settings_scrollbar,
-                        ))
-                    }),
+                    .ml(px(2.0))
+                    .mr(px(8.0))
+                    .mb(px(8.0))
+                    .rounded(px(10.0))
+                    .border_1()
+                    .border_color(theme.border)
+                    .bg(theme.surface)
+                    .overflow_hidden()
+                    .child(card_content),
             )
     }
 

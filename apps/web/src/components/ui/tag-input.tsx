@@ -8,6 +8,9 @@ export interface TagInputProps extends Omit<React.HTMLAttributes<HTMLDivElement>
   placeholder?: string
   disabled?: boolean
   className?: string
+  small?: boolean
+  focusOutline?: boolean
+  accentChips?: boolean
   /** Localized accessible name for a tag's remove button. Defaults to English. */
   getRemoveLabel?: (tag: string) => string
 }
@@ -18,6 +21,9 @@ export function TagInput({
   placeholder,
   disabled = false,
   className,
+  small = false,
+  focusOutline = true,
+  accentChips = false,
   getRemoveLabel,
   ...props
 }: TagInputProps) {
@@ -47,7 +53,12 @@ export function TagInput({
   return (
     <div
       className={cn(
-        'flex flex-wrap items-center gap-1.5 min-h-[36px] p-1.5 rounded-md bg-muted/40 cursor-text focus-within:ring-1 focus-within:ring-ring border border-input transition-colors',
+        'flex flex-wrap items-center cursor-text transition-colors',
+        small
+          ? 'gap-1 min-h-[24px] py-0.5 px-1.5 rounded text-[10.5px] bg-muted/30'
+          : 'gap-1.5 min-h-[36px] p-1.5 rounded-md bg-muted/40',
+        focusOutline && 'focus-within:ring-1 focus-within:ring-ring border border-input',
+        !focusOutline && 'border-0 outline-none focus-within:ring-0',
         disabled && 'opacity-50 cursor-not-allowed',
         className,
       )}
@@ -58,7 +69,11 @@ export function TagInput({
         <Badge
           key={`${tag}-${idx}`}
           variant="secondary"
-          className="gap-1 text-xs px-2 py-0.5"
+          className={cn(
+            'gap-1',
+            small ? 'text-[9.5px] px-1.5 py-0' : 'text-xs px-2 py-0.5',
+            accentChips && 'border border-primary/45 bg-primary/10 text-primary hover:bg-primary/15',
+          )}
         >
           <span>{tag}</span>
           {!disabled && (
@@ -68,7 +83,10 @@ export function TagInput({
                 e.stopPropagation()
                 removeTag(idx)
               }}
-              className="hover:text-destructive text-muted-foreground ml-0.5 cursor-pointer leading-none"
+              className={cn(
+                'ml-0.5 cursor-pointer leading-none hover:text-destructive',
+                accentChips ? 'text-primary/70' : 'text-muted-foreground',
+              )}
               aria-label={getRemoveLabel ? getRemoveLabel(tag) : `Remove tag ${tag}`}
             >
               <span aria-hidden="true">×</span>
@@ -102,7 +120,10 @@ export function TagInput({
           }
         }}
         placeholder={value.length === 0 ? placeholder : ''}
-        className="bg-transparent border-0 outline-none text-xs flex-1 min-w-[80px] h-6 px-1 text-foreground placeholder:text-muted-foreground focus:ring-0 shadow-none"
+        className={cn(
+          'bg-transparent border-0 outline-none flex-1 px-1 text-foreground placeholder:text-muted-foreground focus:ring-0 shadow-none',
+          small ? 'text-[10.5px] min-w-[60px] h-[18px]' : 'text-xs min-w-[80px] h-6',
+        )}
       />
     </div>
   )
