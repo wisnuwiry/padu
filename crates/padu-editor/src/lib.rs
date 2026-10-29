@@ -13,10 +13,12 @@ pub mod link;
 pub mod model;
 pub mod slash;
 pub mod text_size;
+pub mod theme;
 
 pub use anchor::{Anchor, AnchorId, Delta};
 pub use editor::{
-    CONTEXT, Chrome, Editor, EditorEvent, Formatting, HIGHLIGHT_MARK, Mode,
+    BlockPreviewMode, CONTEXT, Chrome, CustomBlockRenderer, Editor, EditorEvent, Formatting,
+    HIGHLIGHT_MARK, Mode,
     image::{ImageStore, Source, set_image_store},
     init, keys,
     menu::{BLOCK_HANDLE, BLOCK_MENU, SLASH_MENU},
@@ -33,6 +35,7 @@ pub use slash::{Slash, items, label};
 pub use text_size::{
     TextSize, adjust_text_size, reset_text_size, set_text_size, text_size_adjustment,
 };
+pub use theme::EditorTheme;
 
 #[cfg(test)]
 mod tests {
@@ -409,6 +412,115 @@ mod tests {
                 // Unmark
                 ed.unmark_text(window, cx);
                 assert_eq!(ed.marked_text_range(window, cx), None);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn test_mermaid_and_latex_slash_items(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let mut slash = Slash::open(Cursor::default());
+            slash.refilter("mermaid");
+            assert!(!slash.rows.is_empty());
+            let choice = slash.choice();
+            assert!(matches!(
+                choice,
+                Some(BlockKind::Code {
+                    language: Some(ref l),
+                    ..
+                }) if l == "mermaid"
+            ));
+
+            slash.refilter("latex");
+            assert!(!slash.rows.is_empty());
+            let choice = slash.choice();
+            assert!(matches!(
+                choice,
+                Some(BlockKind::Code {
+                    language: Some(ref l),
+                    ..
+                }) if l == "latex"
+            ));
+        });
+    }
+
+    #[gpui::test]
+    fn test_code_block_preview_mode_and_custom_renderer(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let editor = cx.new(|cx| {
+                Editor::new(
+                    "```mermaid\ngraph TD\n  A-->B\n```\n\n```rust\nfn main() {}\n```",
+                    cx,
+                )
+            });
+
+            editor.update(cx, |ed, cx| {
+                // Block 0 is mermaid, should default to Preview
+                assert_eq!(ed.block_preview_mode(0), BlockPreviewMode::Preview);
+                // Block 1 is rust, should default to Code
+                assert_eq!(ed.block_preview_mode(1), BlockPreviewMode::Code);
+
+                // Switch block 0 to Split
+                ed.set_block_preview_mode(0, BlockPreviewMode::Split, cx);
+                assert_eq!(ed.block_preview_mode(0), BlockPreviewMode::Split);
+
+                // Theme configuration
+                let custom_theme = EditorTheme {
+                    is_dark: true,
+                    ..Default::default()
+                };
+                ed.set_theme(custom_theme, cx);
+                assert_eq!(ed.theme().is_dark, true);
+
+                assert!(!ed.has_custom_preview_renderer());
+                ed.set_custom_preview_renderer(Some(std::rc::Rc::new(|_, _, _, _, _| None)), cx);
+                assert!(ed.has_custom_preview_renderer());
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn test_editor_focus_end(cx: &mut TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|_window, cx| {
+            Editor::new("First paragraph\n\n```rust\nfn main() {}\n```", cx)
+        });
+
+        cx.update(|window, cx| {
+            editor.update(cx, |ed, cx| {
+                assert!(!ed.has_custom_preview_renderer());
+                // Calling focus_end when last block is Code should append a paragraph for Notion-like behavior
+                ed.focus_end(window, cx);
+                assert_eq!(ed.doc().blocks.len(), 3);
+                assert_eq!(ed.cursor(), Cursor::new(2, Part::Body, 0));
+
+                // If document ends with text, focus_end puts cursor at the end
+                ed.insert_text("Trailing text", cx);
+                ed.focus_end(window, cx);
+                assert_eq!(ed.cursor(), Cursor::new(2, Part::Body, 13));
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn test_code_multiline_editing_and_navigation(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let editor = cx.new(|cx| Editor::new("```rust\nlet a = 1;\nlet b = 2;\n```", cx));
+
+            editor.update(cx, |ed, cx| {
+                // Put caret at offset 10 in Part::Code
+                ed.set_selection(Selection::at(Cursor::new(0, Part::Code, 10)), cx);
+                // Pressing Enter in Part::Code should insert newline, not split into paragraph
+                ed.split_block(cx);
+                assert_eq!(ed.doc().blocks.len(), 1);
+                assert!(ed.content().contains("let a = 1;\n\nlet b = 2;"));
+
+                // Reset content for clean vertical line navigation test
+                ed.set_content("```rust\nlet a = 1;\nlet b = 2;\n```", cx);
+                ed.set_selection(Selection::at(Cursor::new(0, Part::Code, 4)), cx); // on line 1 ("let a = 1;")
+                ed.move_down(cx);
+                assert_eq!(ed.selection().head.offset, 15); // moved to line 2 col 4 ("let b = 2;")
+                ed.move_up(cx);
+                assert_eq!(ed.selection().head.offset, 4); // moved back up to line 1 col 4
             });
         });
     }

@@ -95,6 +95,20 @@ pub fn items() -> Vec<(SharedString, BlockKind)> {
             },
         ),
         (
+            "Mermaid Diagram".into(),
+            BlockKind::Code {
+                language: Some("mermaid".into()),
+                code: text(),
+            },
+        ),
+        (
+            "Math / LaTeX".into(),
+            BlockKind::Code {
+                language: Some("latex".into()),
+                code: text(),
+            },
+        ),
+        (
             "Table".into(),
             BlockKind::Table {
                 align: vec![Align::Left; 2],
@@ -126,6 +140,15 @@ fn same(row: &BlockKind, kind: &BlockKind) -> bool {
     match (row, kind) {
         (BlockKind::Heading { level: a, .. }, BlockKind::Heading { level: b, .. }) => a == b,
         (BlockKind::Quote { kind: a, .. }, BlockKind::Quote { kind: b, .. }) => a == b,
+        (BlockKind::Code { language: a, .. }, BlockKind::Code { language: b, .. }) => {
+            match (a.as_deref(), b.as_deref()) {
+                (Some("mermaid"), Some("mermaid")) => true,
+                (Some("latex" | "math" | "tex"), Some("latex" | "math" | "tex")) => true,
+                (Some("mermaid") | Some("latex" | "math" | "tex"), _) => false,
+                (_, Some("mermaid") | Some("latex" | "math" | "tex")) => false,
+                _ => true,
+            }
+        }
         (row, kind) => std::mem::discriminant(row) == std::mem::discriminant(kind),
     }
 }

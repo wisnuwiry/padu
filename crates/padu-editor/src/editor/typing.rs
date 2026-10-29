@@ -136,6 +136,11 @@ impl Editor {
             return;
         }
 
+        if self.selection.head.part == Part::Code {
+            self.insert_text("\n", cx);
+            return;
+        }
+
         self.history.record(
             EditKind::Structure,
             &self.doc,
@@ -221,9 +226,38 @@ impl Editor {
         self.set_selection(Selection::at(next), cx);
     }
 
-    /// Move cursor up one block.
+    /// Move cursor up one block (or line within code block).
     pub fn move_up(&mut self, cx: &mut Context<Self>) {
+        if let Some(slash) = &mut self.slash {
+            slash.step(-1);
+            cx.notify();
+            return;
+        }
+
         let head = self.selection.head;
+        if head.part == Part::Code {
+            if let Some(block) = self.doc.blocks.get(head.block)
+                && let Some(text) = block.text_at(Part::Code)
+            {
+                let offset = head.offset.min(text.len());
+                let before = &text.text[..offset];
+                if let Some(prev_nl) = before.rfind('\n') {
+                    let line_start = prev_nl + 1;
+                    let col = offset - line_start;
+                    let line_above_end = prev_nl;
+                    let line_above_start = text.text[..line_above_end]
+                        .rfind('\n')
+                        .map(|idx| idx + 1)
+                        .unwrap_or(0);
+                    let line_above_len = line_above_end - line_above_start;
+                    let target_offset = line_above_start + col.min(line_above_len);
+                    let target = Cursor::new(head.block, head.part, target_offset).clamp(&self.doc);
+                    self.set_selection(Selection::at(target), cx);
+                    return;
+                }
+            }
+        }
+
         if head.block > 0 {
             let prev_block = head.block - 1;
             let target = Cursor::new(prev_block, head.part, head.offset).clamp(&self.doc);
@@ -231,9 +265,38 @@ impl Editor {
         }
     }
 
-    /// Move cursor down one block.
+    /// Move cursor down one block (or line within code block).
     pub fn move_down(&mut self, cx: &mut Context<Self>) {
+        if let Some(slash) = &mut self.slash {
+            slash.step(1);
+            cx.notify();
+            return;
+        }
+
         let head = self.selection.head;
+        if head.part == Part::Code {
+            if let Some(block) = self.doc.blocks.get(head.block)
+                && let Some(text) = block.text_at(Part::Code)
+            {
+                let offset = head.offset.min(text.len());
+                let after = &text.text[offset..];
+                if let Some(rel_nl) = after.find('\n') {
+                    let next_line_start = offset + rel_nl + 1;
+                    let prev_nl = text.text[..offset]
+                        .rfind('\n')
+                        .map(|idx| idx + 1)
+                        .unwrap_or(0);
+                    let col = offset - prev_nl;
+                    let next_line_rest = &text.text[next_line_start..];
+                    let next_line_len = next_line_rest.find('\n').unwrap_or(next_line_rest.len());
+                    let target_offset = next_line_start + col.min(next_line_len);
+                    let target = Cursor::new(head.block, head.part, target_offset).clamp(&self.doc);
+                    self.set_selection(Selection::at(target), cx);
+                    return;
+                }
+            }
+        }
+
         if head.block + 1 < self.doc.blocks.len() {
             let next_block = head.block + 1;
             let target = Cursor::new(next_block, head.part, head.offset).clamp(&self.doc);
