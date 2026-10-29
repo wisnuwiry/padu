@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use super::board::types::split_board_labels;
 use super::*;
 use crate::ui::TagInput;
@@ -71,7 +73,12 @@ impl Padu {
             .or(self.state.selected_project)
     }
 
+    pub(super) fn ensure_notes_editor_configured(&mut self, cx: &mut Context<Self>) {
+        crate::ui::editor::configure_editor(&self.notes_body, cx);
+    }
+
     pub(super) fn open_notes(&mut self, cx: &mut Context<Self>) {
+        self.ensure_notes_editor_configured(cx);
         self.navigate_workspace_page(WorkspacePage::Notes, cx);
         self.ensure_notes_loaded(cx);
     }
@@ -170,6 +177,7 @@ impl Padu {
         self.notes_tags.update(cx, |input, cx| {
             input.set_content(String::new(), cx);
         });
+        self.ensure_notes_editor_configured(cx);
     }
 
     /// Chips the pending tag input into the tag list, mirroring the board
@@ -1106,6 +1114,7 @@ impl Padu {
                                                         }
                                                         ed.set_mode(padu_editor::Mode::Blocks, cx);
                                                     });
+                                                    this.ensure_notes_editor_configured(cx);
                                                     cx.notify();
                                                 }
                                             },
@@ -1124,6 +1133,17 @@ impl Padu {
                                                             input.set_content(content, cx);
                                                         }
                                                     });
+                                                    cx.notify();
+                                                }
+                                            },
+                                        ))
+                                        .child(self.notes_button(
+                                            "note-preview",
+                                            tr!("notes.preview"),
+                                            cx,
+                                            |this, _, cx| {
+                                                if this.notes_layout != NotesLayout::Preview {
+                                                    this.notes_layout = NotesLayout::Preview;
                                                     cx.notify();
                                                 }
                                             },
@@ -1208,36 +1228,10 @@ impl Padu {
                 None
             };
             let edit_pane = if !matches!(layout, NotesLayout::Code) {
-                let notes_body = self.notes_body.clone();
-                let editor_focus = notes_body.read(cx).focus_handle();
                 Some(
-                    div()
-                        .id("note-editor-pane")
-                        .flex_1()
-                        .min_h_0()
-                        .min_w_0()
-                        .relative()
-                        .rounded(px(8.0))
-                        .bg(theme.inset)
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |_, _, window, cx| {
-                                window.focus(&editor_focus, cx);
-                            }),
-                        )
-                        .child(
-                            div()
-                                .id("note-editor-scroll")
-                                .size_full()
-                                .overflow_y_scroll()
-                                .track_scroll(&self.notes_editor_scroll_handle)
-                                .p(px(14.0))
-                                .child(notes_body),
-                        )
-                        .child(scrollbar::vertical(
-                            &self.notes_editor_scroll_handle,
-                            &self.notes_editor_scrollbar,
-                        )),
+                    crate::ui::editor::RichEditor::new("note-editor-pane", self.notes_body.clone())
+                        .track_scroll(&self.notes_editor_scroll_handle)
+                        .scrollbar(&self.notes_editor_scrollbar),
                 )
             } else {
                 None
