@@ -332,6 +332,7 @@ enum PanelResizeTarget {
     Sidebar,
     RightPanel,
     FileTree,
+    #[allow(dead_code)]
     NotesSplit,
 }
 
@@ -1574,12 +1575,6 @@ pub struct Padu {
     file_preview_selection: TranscriptSelection,
     file_preview_scroll_handle: ScrollHandle,
     file_preview_scrollbar: Rc<ScrollbarState>,
-    /// Markdown preview state for the Notes page. This must stay separate from
-    /// the right-panel file preview because both surfaces can be visible at once.
-    notes_preview_markdown: RefCell<Option<(String, MarkdownView)>>,
-    notes_preview_selection: TranscriptSelection,
-    notes_preview_scroll_handle: ScrollHandle,
-    notes_preview_scrollbar: Rc<ScrollbarState>,
     notes_editor_scroll_handle: ScrollHandle,
     notes_editor_scrollbar: Rc<ScrollbarState>,
     right_panel_pending_tab_reveal: Option<usize>,
@@ -3782,10 +3777,6 @@ impl Padu {
                 file_preview_selection: TranscriptSelection::default(),
                 file_preview_scroll_handle: ScrollHandle::new(),
                 file_preview_scrollbar: ScrollbarState::new(),
-                notes_preview_markdown: RefCell::new(None),
-                notes_preview_selection: TranscriptSelection::default(),
-                notes_preview_scroll_handle: ScrollHandle::new(),
-                notes_preview_scrollbar: ScrollbarState::new(),
                 notes_editor_scroll_handle: ScrollHandle::new(),
                 notes_editor_scrollbar: ScrollbarState::new(),
                 right_panel_pending_tab_reveal: None,

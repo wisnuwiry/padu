@@ -32,8 +32,8 @@ pub(super) fn next_layout_on_create(
     current: super::notes::NotesLayout,
 ) -> super::notes::NotesLayout {
     match current {
-        super::notes::NotesLayout::Preview => super::notes::NotesLayout::Edit,
-        other => other,
+        super::notes::NotesLayout::Code => super::notes::NotesLayout::Code,
+        _ => super::notes::NotesLayout::Rich,
     }
 }
 
@@ -71,15 +71,15 @@ mod tests {
     }
 
     #[test]
-    fn next_layout_on_create_changes_preview_to_edit_only() {
+    fn next_layout_on_create_changes_preview_to_rich_only() {
         assert_eq!(
             next_layout_on_create(NotesLayout::Preview),
-            NotesLayout::Edit
+            NotesLayout::Rich
         );
         assert_eq!(
-            next_layout_on_create(NotesLayout::Split),
-            NotesLayout::Split
+            next_layout_on_create(NotesLayout::Code),
+            NotesLayout::Code
         );
-        assert_eq!(next_layout_on_create(NotesLayout::Edit), NotesLayout::Edit);
+        assert_eq!(next_layout_on_create(NotesLayout::Rich), NotesLayout::Rich);
     }
 }

@@ -10,10 +10,7 @@ pub(super) enum NotesLayout {
     Rich,
     Code,
     #[doc(hidden)]
-    Edit,
-    #[doc(hidden)]
-    Split,
-    #[doc(hidden)]
+    #[allow(dead_code)]
     Preview,
 }
 
@@ -1137,17 +1134,6 @@ impl Padu {
                                                     cx.notify();
                                                 }
                                             },
-                                        ))
-                                        .child(self.notes_button(
-                                            "note-preview",
-                                            tr!("notes.preview"),
-                                            cx,
-                                            |this, _, cx| {
-                                                if this.notes_layout != NotesLayout::Preview {
-                                                    this.notes_layout = NotesLayout::Preview;
-                                                    cx.notify();
-                                                }
-                                            },
                                         )),
                                 )
                                 .child(self.notes_button(
@@ -1162,72 +1148,6 @@ impl Padu {
                                 )),
                         ),
                 );
-            let preview_pane = if matches!(layout, NotesLayout::Preview | NotesLayout::Split) {
-                let palette = MarkdownPalette::from_theme(&theme);
-                let cache_key = format!("note:{}", note.id);
-                let mut cache = self.notes_preview_markdown.borrow_mut();
-                if !matches!(cache.as_ref(), Some((key, _)) if key == &cache_key) {
-                    *cache = Some((cache_key.clone(), MarkdownView::new()));
-                }
-                let (_, view) = cache.as_mut().expect("note preview cache entry ensured");
-                // Render the live editor draft, not the last persisted snapshot.
-                // The body editor subscription already notifies this view on
-                // edits; MarkdownView only reparses when the content changes,
-                // while schedule_note_save keeps daemon writes debounced.
-                let live_body = self.notes_body.read(cx).content();
-                view.set_text(&live_body, false);
-                let ctx = MarkdownCtx::new(
-                    format!("note-preview-{}", note.id),
-                    &palette,
-                    self.scaled_markdown_metrics(MarkdownMetrics::BODY),
-                    self.notes_preview_selection.clone(),
-                );
-                let document = md::render::markdown(view, &ctx);
-                drop(cache);
-                let selection_input = canvas(|_, _, _| (), {
-                    let selection = self.notes_preview_selection.clone();
-                    move |_, _, window, _| md::render::install_selection_input(window, &selection)
-                })
-                .absolute()
-                .w(px(0.0))
-                .h(px(0.0));
-                Some(
-                    div()
-                        .id("note-preview-pane")
-                        .flex_1()
-                        .min_h_0()
-                        .min_w_0()
-                        .relative()
-                        .rounded(px(8.0))
-                        .bg(theme.inset)
-                        .child(
-                            div()
-                                .id("note-preview-scroll")
-                                .size_full()
-                                .overflow_y_scroll()
-                                .track_scroll(&self.notes_preview_scroll_handle)
-                                .p(px(14.0))
-                                .child(md::render::frame_reset(
-                                    self.notes_preview_selection.clone(),
-                                ))
-                                .child(
-                                    div()
-                                        .w_full()
-                                        .min_w_0()
-                                        .overflow_hidden()
-                                        .whitespace_normal()
-                                        .children(document),
-                                )
-                                .child(selection_input),
-                        )
-                        .child(scrollbar::vertical(
-                            &self.notes_preview_scroll_handle,
-                            &self.notes_preview_scrollbar,
-                        )),
-                )
-            } else {
-                None
-            };
             let edit_pane = if !matches!(layout, NotesLayout::Code) {
                 Some(
                     crate::ui::editor::RichEditor::new("note-editor-pane", self.notes_body.clone())
@@ -1237,7 +1157,7 @@ impl Padu {
             } else {
                 None
             };
-            let code_pane = if matches!(layout, NotesLayout::Code | NotesLayout::Split) {
+            let code_pane = if matches!(layout, NotesLayout::Code) {
                 let notes_code_body = self.notes_code_body.clone();
                 Some(
                     self.render_file_editor_body(
@@ -1256,47 +1176,6 @@ impl Padu {
             };
             editor = match layout {
                 NotesLayout::Code => editor.child(code_pane.expect("code pane is present")),
-                NotesLayout::Preview => {
-                    editor.child(preview_pane.expect("preview pane is present"))
-                }
-                NotesLayout::Split => {
-                    let code_pane = code_pane.expect("code pane is present");
-                    let preview_pane = preview_pane.expect("preview pane is present");
-                    let split_ratio = self.notes_split_ratio;
-                    editor.child(
-                        div()
-                            .flex_1()
-                            .min_h_0()
-                            .flex()
-                            .gap(px(6.0))
-                            .child(
-                                code_pane
-                                    .w(px(0.0))
-                                    .flex_grow(split_ratio)
-                                    .flex_shrink(1.0)
-                                    .min_w_0(),
-                            )
-                            .child(
-                                div()
-                                    .relative()
-                                    .flex()
-                                    .flex_col()
-                                    .min_h_0()
-                                    .ml(px(4.0))
-                                    .pl(px(8.0))
-                                    .w(px(0.0))
-                                    .flex_grow(1.0 - split_ratio)
-                                    .flex_shrink(1.0)
-                                    .min_w_0()
-                                    .child(self.render_panel_resize_handle(
-                                        "notes-split-resize-handle",
-                                        PanelResizeTarget::NotesSplit,
-                                        cx,
-                                    ))
-                                    .child(preview_pane),
-                            ),
-                    )
-                }
                 _ => editor.child(edit_pane.expect("editor pane is present")),
             };
         }
@@ -1426,20 +1305,14 @@ impl Padu {
     ) -> Stateful<Div> {
         let theme = Theme::current(cx);
         let selected = match id {
-            "note-rich" | "note-toggle-preview" => {
-                matches!(self.notes_layout, NotesLayout::Rich | NotesLayout::Edit)
-            }
+            "note-rich" | "note-toggle-preview" => matches!(self.notes_layout, NotesLayout::Rich),
             "note-code" => matches!(self.notes_layout, NotesLayout::Code),
-            "note-split" => self.notes_layout == NotesLayout::Split,
-            "note-preview" => self.notes_layout == NotesLayout::Preview,
             _ => false,
         };
         let (icon_path, icon_only) = match id {
             "note-new" => ("icons/plus.svg", false),
             "note-rich" | "note-toggle-preview" => ("icons/pencil.svg", true),
             "note-code" => ("icons/code.svg", true),
-            "note-split" => ("icons/split.svg", true),
-            "note-preview" => ("icons/code.svg", true),
             "note-delete" => ("icons/trash.svg", true),
             "note-add-to-chat" => ("icons/add-to-chat.svg", false),
             "note-toggle-list" => (
@@ -1464,8 +1337,6 @@ impl Padu {
                 crate::platform::primary_shortcut("⌘1", "Ctrl+1")
             }
             "note-code" => crate::platform::primary_shortcut("⌘2", "Ctrl+2"),
-            "note-split" => crate::platform::primary_shortcut("⌘2", "Ctrl+2"),
-            "note-preview" => crate::platform::primary_shortcut("⌘3", "Ctrl+3"),
             "note-delete" => crate::platform::primary_shortcut("⌘⌫", "Ctrl+Backspace"),
             "note-add-to-chat" => crate::platform::primary_shortcut("⌘↵", "Ctrl+Enter"),
             "note-toggle-list" => crate::platform::primary_shortcut("⌘⇧L", "Ctrl+Shift+L"),
@@ -1508,8 +1379,6 @@ impl Padu {
                         }
                         "note-rich" | "note-toggle-preview" => key == "1",
                         "note-code" => key == "2",
-                        "note-split" => key == "2",
-                        "note-preview" => key == "3",
                         "note-delete" => key == "backspace",
                         "note-add-to-chat" => key == "enter",
                         "note-toggle-list" => {
