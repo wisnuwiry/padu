@@ -253,7 +253,7 @@ pub struct WorkerRequest {
     /// Native Mermaid theme, present only for [`RichKind::Mermaid`]. Carried
     /// alongside (rather than re-derived from hex) so the worker sees the full
     /// palette fidelity without a lossy hex round-trip.
-    pub mermaid_theme: Option<padu_mermaid::MermaidTheme>,
+    pub mermaid_theme: Option<bezel_mermaid::Options>,
 }
 
 pub struct RichRenderer {
@@ -288,7 +288,7 @@ impl RichRenderer {
         kind: RichKind,
         source: String,
         theme: RenderTheme,
-        mermaid_theme: Option<padu_mermaid::MermaidTheme>,
+        mermaid_theme: Option<bezel_mermaid::Options>,
     ) -> RenderOutcome {
         {
             let mut inner = self.cache.inner.lock();
@@ -412,7 +412,7 @@ pub fn mermaid_image_source(
     hash: u64,
     source: String,
     theme: RenderTheme,
-    mermaid_theme: padu_mermaid::MermaidTheme,
+    mermaid_theme: bezel_mermaid::Options,
 ) -> impl Fn(&mut Window, &mut App) -> Option<Result<Arc<RenderImage>, ImageCacheError>> + 'static {
     let cache: Arc<RichRenderer> = RICH.get_or_init(RichRenderer::spawn).clone();
     move |window, cx| match cache.ensure(
@@ -454,7 +454,7 @@ pub fn mermaid_image_source_value(
     hash: u64,
     source: String,
     theme: RenderTheme,
-    mermaid_theme: padu_mermaid::MermaidTheme,
+    mermaid_theme: bezel_mermaid::Options,
 ) -> ImageSource {
     ImageSource::Custom(Arc::new(mermaid_image_source(
         hash,
@@ -476,8 +476,9 @@ fn worker_loop(receiver: Receiver<WorkerRequest>, cache: Arc<RichCache>) {
                     // Native headless render: no isolate needed, and a broken
                     // isolate must not fail diagrams.
                     RichKind::Mermaid => {
-                        let theme = request.mermaid_theme.unwrap_or_default();
-                        padu_mermaid::render_to_svg(&request.source, &theme)
+                        let options = request.mermaid_theme.unwrap_or_default();
+                        bezel_mermaid::render(&request.source, &options, &bezel_mermaid::Metrics)
+                            .map(|drawing| drawing.svg)
                             .map_err(|error| error.to_string())
                     }
                     RichKind::Math { .. } => match &mut isolate {
@@ -637,12 +638,17 @@ mod tests {
     }
 
     fn render_mermaid(source: &str) -> Result<String, String> {
-        padu_mermaid::render_to_svg(source, &padu_mermaid::MermaidTheme::default())
-            .map_err(|error| error.to_string())
+        bezel_mermaid::render(
+            source,
+            &bezel_mermaid::Options::default(),
+            &bezel_mermaid::Metrics,
+        )
+        .map(|drawing| drawing.svg)
+        .map_err(|error| error.to_string())
     }
 
-    fn mermaid_theme() -> padu_mermaid::MermaidTheme {
-        padu_mermaid::MermaidTheme::default()
+    fn mermaid_theme() -> bezel_mermaid::Options {
+        bezel_mermaid::Options::default()
     }
 
     #[test]

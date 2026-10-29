@@ -232,8 +232,27 @@ fn set_active_theme(theme: Theme, cx: &mut App) {
     cx.set_global(ActivePaduTheme(theme));
 }
 
+use bezel::theme::AppExt as _;
+use bezel::theme::{Brand, Tint};
+
+pub fn sync_bezel_brand(preference: ThemePreference, cx: &mut App) {
+    let mode = match preference {
+        ThemePreference::System => bezel::theme::appearance::AppearanceMode::System,
+        ThemePreference::Light => bezel::theme::appearance::AppearanceMode::Light,
+        ThemePreference::Dark => bezel::theme::appearance::AppearanceMode::Dark,
+    };
+    cx.set_appearance_mode(mode);
+    let mut brand = Brand::default();
+    brand.accent = Tint::new(276.935, 0.182);
+    brand.radius = 8.0;
+    cx.set_brand(brand);
+}
+
 /// Resolve and publish the startup palette, before any window exists.
 pub fn init(cx: &mut App) {
+    bezel::theme::appearance::init(bezel::theme::appearance::AppearanceMode::System, cx);
+    sync_bezel_brand(ThemePreference::System, cx);
+
     let system_appearance = cx.window_appearance();
     let theme = if resolves_to_dark(ThemePreference::System, system_appearance) {
         Theme::dark()
@@ -244,6 +263,7 @@ pub fn init(cx: &mut App) {
 }
 
 pub fn apply_theme_preference(preference: ThemePreference, window: &mut Window, cx: &mut App) {
+    sync_bezel_brand(preference, cx);
     crate::platform::set_window_appearance(window, native_override(preference));
     let is_dark = resolves_to_dark(preference, cx.window_appearance());
     set_active_theme(

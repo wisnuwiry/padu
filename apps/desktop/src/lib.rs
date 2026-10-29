@@ -218,8 +218,9 @@ pub fn run() {
             // process identity.
             cx.set_app_identity(APP_ID, APP_NAME);
             crate::assets::register_fonts(cx).expect("failed to register bundled fonts");
+            let _ = bezel::ui::register_fonts(cx);
             crate::input::init(cx);
-            padu_editor::init(cx);
+            bezel_editor::init(cx);
             crate::ui::menu::init(cx);
             crate::app::init_composer_autocomplete(cx);
             crate::app::init_settings_keys(cx);
@@ -396,6 +397,7 @@ pub fn run() {
                         ..Default::default()
                     },
                     move |window, cx| {
+                        bezel::theme::appearance::observe_window(window, cx).detach();
                         crate::platform::configure_main_window_close_behavior(window, cx);
                         let padu = Padu::new(window, cx, daemon);
                         let composer_focus = padu.read(cx).composer_focus(cx);

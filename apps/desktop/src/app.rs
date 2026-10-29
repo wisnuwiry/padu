@@ -66,6 +66,7 @@ use crate::ui::{
     contain_scroll, file_icon, icon, icon_button, motion, provider_color, provider_icon,
     status_color, toggle_switch,
 };
+pub(crate) use crate::ui::RestrictScrollExt;
 use crate::{
     CancelTaskSwitch, CancelTurn, CloseFind, CloseWindow, ConfirmTaskSwitch, CopySelection,
     FindNext, FindPrevious, FocusComposer, NavigateBack, NavigateForward, NewProject, NewSession,
@@ -1645,7 +1646,7 @@ pub struct Padu {
     notes: Vec<notes::Note>,
     notes_selected: usize,
     notes_title: Entity<TextInput>,
-    notes_body: Entity<padu_editor::Editor>,
+    notes_body: Entity<bezel_editor::Editor>,
     notes_code_body: Entity<TextInput>,
     notes_search: Entity<TextInput>,
     notes_tags: Entity<TextInput>,
@@ -2639,7 +2640,7 @@ impl Padu {
         });
         let notes_title =
             cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("notes.title_placeholder")));
-        let notes_body = cx.new(|cx| padu_editor::Editor::new("", cx));
+        let notes_body = cx.new(|cx| bezel_editor::Editor::new("", cx));
         let notes_code_body = cx.new(|cx| {
             TextInput::new(window, cx)
                 .multi_line()
@@ -2979,13 +2980,8 @@ impl Padu {
         // tooltips, popovers) composite above native content — without it the
         // browser surface would cover them.
         //
-        // Both backends of the pinned fork implement it, and both browser
-        // hosts render somewhere it can reach: a sibling NSView below GPUI's
-        // overlay layer on macOS, a DirectComposition visual between GPUI's
-        // base and overlay planes on Windows. When it is unavailable the
-        // surface falls back to freezing the page to a bitmap while an
-        // overlay is open.
-        let scene_overlay_enabled = window.enable_scene_overlay().is_ok();
+        // Browser native surface is decoupled; overlay plane is not required.
+        let scene_overlay_enabled = false;
         let (updater_status, updater_events) = cx
             .try_global::<crate::updater::UpdaterState>()
             .and_then(|state| state.0.as_ref())
@@ -3365,8 +3361,8 @@ impl Padu {
             .detach();
             cx.subscribe(
                 &notes_body,
-                |this: &mut Self, _, event: &padu_editor::EditorEvent, cx| {
-                    if matches!(event, padu_editor::EditorEvent::Changed) {
+                |this: &mut Self, _, event: &bezel_editor::EditorEvent, cx| {
+                    if matches!(event, bezel_editor::EditorEvent::Changed) {
                         this.schedule_note_save(cx);
                     }
                 },

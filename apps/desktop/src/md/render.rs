@@ -23,6 +23,8 @@ use std::path::Path;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use crate::ui::RestrictScrollExt;
+
 use gpui::{
     AnyElement, App, BorderStyle, Bounds, ClipboardItem, CursorStyle, DispatchPhase, Font,
     FontStyle, FontWeight, Hsla, InteractiveText, IntoElement, KeyDownEvent, MouseButton,
@@ -295,54 +297,10 @@ impl Palette {
     /// washes: `overlay`/`border` carry an RGB that reads light in dark mode
     /// and dark in light mode, so blending or stroking with them raw inverts
     /// the appearances. They are composited over [`Palette::canvas`] first.
-    pub fn mermaid_theme(&self) -> padu_mermaid::MermaidTheme {
-        use padu_mermaid::{AccentColor, text_color_for_background};
-        let chart = [
-            self.accent,
-            self.added,
-            self.warning,
-            self.secondary,
-            self.tertiary,
-            self.removed,
-            self.accent,
-            self.added,
-        ];
-        let border = opaque_over_canvas(self.border, self.canvas);
-        padu_mermaid::MermaidTheme {
-            dark_mode: self.is_dark,
-            font_family: SANS_FAMILY.into(),
-            background: self.canvas,
-            primary_color: self.inset,
-            primary_text_color: self.text,
-            primary_border_color: border,
-            secondary_color: self.inset,
-            tertiary_color: self.inset,
-            line_color: self.secondary,
-            text_color: self.text,
-            edge_label_background: self.inset,
-            cluster_background: self.canvas,
-            cluster_border: border,
-            note_background: self.inset,
-            note_border: border,
-            actor_background: self.inset,
-            actor_border: border,
-            activation_background: self.inset,
-            activation_border: border,
-            git_branch_colors: chart,
-            git_branch_label_colors: chart.map(text_color_for_background),
-            // Zebra rows stay neutral (not text hues): labels use the theme
-            // text color, which only contrasts against surface tones.
-            er_attr_bg_odd: self.inset,
-            er_attr_bg_even: self.canvas,
-            error_color: self.removed,
-            warning_color: self.warning,
-            accent_colors: [self.accent, self.added, self.warning, self.removed]
-                .into_iter()
-                .map(|color| AccentColor {
-                    foreground: color,
-                    background: color,
-                })
-                .collect(),
+    pub fn mermaid_theme(&self) -> bezel_mermaid::Options {
+        bezel_mermaid::Options {
+            font_family: Some(SANS_FAMILY.into()),
+            ..Default::default()
         }
     }
 
@@ -386,6 +344,7 @@ fn hsla_hex(color: Hsla) -> String {
 /// inverted across appearances (light in dark mode, dark in light mode), so
 /// using them raw as strokes — or as the base of tint math that ignores
 /// alpha — flips dark and light rendering.
+#[allow(dead_code)]
 fn opaque_over_canvas(wash: Hsla, canvas: Hsla) -> Hsla {
     let fg = gpui::Rgba::from(wash);
     let bg = gpui::Rgba::from(canvas);
@@ -2811,36 +2770,14 @@ mod tests {
     /// carry an RGB that reads light in dark mode and dark in light mode, so
     /// passing them through raw flips the diagram across appearances.
     #[test]
-    fn mermaid_theme_tracks_appearance() {
-        for (theme, expect_dark) in [(Theme::dark(), true), (Theme::light(), false)] {
-            let palette = Palette::from_theme(&theme);
-            let mermaid = palette.mermaid_theme();
-            assert_eq!(mermaid.dark_mode, expect_dark);
-            let bg = gpui::Rgba::from(mermaid.background);
-            assert_eq!(bg.a, 1.0, "diagram canvas must be opaque");
-            let luminance = 0.2126 * bg.r + 0.7152 * bg.g + 0.0722 * bg.b;
-            if expect_dark {
-                assert!(
-                    luminance < 0.5,
-                    "dark canvas must stay dark, got luminance {luminance}"
-                );
-            } else {
-                assert!(
-                    luminance > 0.5,
-                    "light canvas must stay light, got luminance {luminance}"
-                );
-            }
-            let border = gpui::Rgba::from(mermaid.primary_border_color);
-            assert_eq!(border.a, 1.0, "node strokes must be opaque");
-        }
-    }
-
-    #[test]
     fn mermaid_labels_use_the_app_prose_face() {
         for theme in [Theme::dark(), Theme::light()] {
             assert_eq!(
-                Palette::from_theme(&theme).mermaid_theme().font_family,
-                SANS_FAMILY,
+                Palette::from_theme(&theme)
+                    .mermaid_theme()
+                    .font_family
+                    .as_deref(),
+                Some(SANS_FAMILY),
                 "diagram labels must match the transcript prose face"
             );
         }

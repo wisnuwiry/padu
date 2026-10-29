@@ -3,6 +3,7 @@ use std::rc::Rc;
 use super::board::types::split_board_labels;
 use super::*;
 use crate::ui::TagInput;
+use crate::ui::editor::EditorExt as _;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum NotesLayout {
@@ -716,7 +717,7 @@ impl Padu {
                         if ed.content() != content {
                             ed.set_content(&content, cx);
                         }
-                        ed.set_mode(padu_editor::Mode::Blocks, cx);
+                        ed.set_mode(bezel_editor::Mode::Blocks, cx);
                     });
                     cx.notify();
                 }
@@ -1112,7 +1113,7 @@ impl Padu {
                                                         if ed.content() != content {
                                                             ed.set_content(&content, cx);
                                                         }
-                                                        ed.set_mode(padu_editor::Mode::Blocks, cx);
+                                                        ed.set_mode(bezel_editor::Mode::Blocks, cx);
                                                     });
                                                     this.ensure_notes_editor_configured(cx);
                                                     cx.notify();

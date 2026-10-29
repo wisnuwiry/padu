@@ -13,15 +13,13 @@ blake3 = "1.8"
 chrono = "0.4"
 crossbeam-channel = "0.5"
 dirs = "7.0"
-# The egoist/zed fork is upstream main plus PR #61945 (layered scene
-# rendering), which lets GPUI composite menus and tooltips above native child
-# views — the browser surface's WKWebView. Drop back to upstream once the PR
-# merges.
-gpui = { git = "https://github.com/egoist/zed", branch = "waku-webview" }
-gpui_platform = { git = "https://github.com/egoist/zed", branch = "waku-webview", features = [
+bezel = "0.2.22"
+gpui = { package = "bezel-gpui", version = "0.3.21" }
+gpui_platform = { package = "bezel-gpui-platform", version = "0.3.21", features = [
     "font-kit",
     "wayland",
     "x11",
+    "runtime_shaders",
 ] }
 parking_lot = "0.12"
 rquickjs = "0.13.0"
@@ -33,9 +31,9 @@ unicode-segmentation = "1.12"
 url = "2"
 uuid = { version = "1.18", features = ["v4", "serde"] }
 padu-client = { path = "../../crates/padu-client" }
-padu-editor = { path = "../../crates/padu-editor" }
-padu-mermaid = { path = "../../crates/padu-mermaid" }
 padu-protocol = { path = "../../crates/padu-protocol" }
+bezel_editor = { package = "bezel-editor", version = "0.2.22" }
+bezel_mermaid = { package = "bezel-mermaid", version = "0.2.22" }
 pulldown-cmark = "0.13"
 regex = "1"
 rust-i18n = "4"
@@ -53,7 +51,7 @@ tokio = { version = "1", features = ["rt"] }
 # happens instead of coalescing into the display link's next one — a panel
 # resize drew once per mouse-move event rather than once per displayed frame.
 [dev-dependencies]
-gpui = { git = "https://github.com/egoist/zed", branch = "waku-webview", features = [
+gpui = { package = "bezel-gpui", version = "0.3.21", features = [
     "test-support",
 ] }
 
@@ -61,7 +59,6 @@ gpui = { git = "https://github.com/egoist/zed", branch = "waku-webview", feature
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-wry = { version = "0.57", features = ["devtools"] }
 block2 = "0.6"
 # Matches the version GPUI itself renders with, so RenderImage frames are the
 # same `image` types.
@@ -69,13 +66,6 @@ image = "0.25"
 objc2-core-graphics = { version = "0.3", default-features = false, features = [
     "std",
     "CGImage",
-] }
-objc2-web-kit = { version = "0.3.2", default-features = false, features = [
-    "std",
-    "block2",
-    "objc2-app-kit",
-    "WKWebView",
-    "WKSnapshotConfiguration",
 ] }
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = [

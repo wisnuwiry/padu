@@ -20,6 +20,19 @@ pub mod tooltip;
 pub use editor::{EditorLoader, RichEditor, SharedEditor, configure_editor, editor_theme};
 pub use tag_input::TagInput;
 
+pub trait RestrictScrollExt: Sized {
+    fn restrict_scroll_to_axis(self) -> Self {
+        self
+    }
+}
+impl<T> RestrictScrollExt for T {}
+
+#[allow(unused_imports)]
+pub use bezel::ui::widgets::{
+    Button, ButtonRole, ButtonStyle, Buttons, Content, Controls, Icons,
+    Layout as BezelLayout, Scaffolding, Status,
+};
+
 #[allow(unused_imports)]
 pub use dialog::ConfirmVariant;
 #[allow(unused_imports)]

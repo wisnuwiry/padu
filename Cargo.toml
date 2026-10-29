@@ -4,8 +4,6 @@ members = [
     "crates/padu-client",
     "crates/padu-core",
     "crates/padu-daemon",
-    "crates/padu-editor",
-    "crates/padu-mermaid",
     "crates/padu-protocol",
 ]
 default-members = [
@@ -13,7 +11,6 @@ default-members = [
     "crates/padu-client",
     "crates/padu-core",
     "crates/padu-daemon",
-    "crates/padu-editor",
     "crates/padu-protocol",
 ]
 resolver = "2"
