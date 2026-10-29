@@ -980,6 +980,75 @@ pub fn tokenize_line(lang: Lang, line: &str, carry: Carry) -> (Vec<Token>, Carry
     (tokens, carry)
 }
 
+/// Supported code block languages offered by editor language pickers.
+pub const HIGHLIGHT_LANGUAGES: &[&str] = &[
+    "rust",
+    "typescript",
+    "javascript",
+    "python",
+    "go",
+    "c",
+    "cpp",
+    "csharp",
+    "java",
+    "kotlin",
+    "ruby",
+    "swift",
+    "json",
+    "yaml",
+    "toml",
+    "bash",
+    "shell",
+    "sql",
+    "html",
+    "css",
+    "markdown",
+    "diff",
+];
+
+/// Convert `TokenClass` into `bezel::theme::HighlightKind`.
+pub fn map_token_class(class: TokenClass) -> bezel::theme::HighlightKind {
+    match class {
+        TokenClass::Keyword => bezel::theme::HighlightKind::Keyword,
+        TokenClass::Literal => bezel::theme::HighlightKind::Constant,
+        TokenClass::String => bezel::theme::HighlightKind::String,
+        TokenClass::Comment => bezel::theme::HighlightKind::Comment,
+        TokenClass::Number => bezel::theme::HighlightKind::Number,
+        TokenClass::Type => bezel::theme::HighlightKind::TypeName,
+        TokenClass::Function => bezel::theme::HighlightKind::Function,
+        TokenClass::Meta => bezel::theme::HighlightKind::Attribute,
+        TokenClass::Mention => bezel::theme::HighlightKind::VariableSpecial,
+        TokenClass::Added => bezel::theme::HighlightKind::Property,
+        TokenClass::Removed => bezel::theme::HighlightKind::Invalid,
+    }
+}
+
+/// Syntax highlighter callback for `bezel-markdown` fenced code blocks.
+pub fn highlight_code(
+    language: &str,
+    code: &str,
+) -> Option<Vec<(Range<usize>, bezel::theme::HighlightKind)>> {
+    let lang = lang_for_tag(language)?;
+    let mut spans = Vec::new();
+    let mut carry = Carry::None;
+    let mut line_start = 0usize;
+
+    for line in code.split('\n') {
+        let (tokens, next_carry) = tokenize_line(lang, line, carry);
+        carry = next_carry;
+        for token in tokens {
+            let start = line_start + token.range.start;
+            let end = line_start + token.range.end;
+            if start < end {
+                spans.push((start..end, map_token_class(token.class)));
+            }
+        }
+        line_start += line.len() + 1;
+    }
+
+    Some(spans)
+}
+
 /// Tokenize a whole block, one entry per line, threading the carry.
 pub fn tokenize(lang: Lang, code: &str) -> Vec<Vec<Token>> {
     let mut carry = Carry::None;
@@ -1815,5 +1884,32 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn highlight_languages_all_map_to_supported_lang() {
+        for lang_name in HIGHLIGHT_LANGUAGES {
+            assert!(
+                lang_for_tag(lang_name).is_some(),
+                "language {lang_name} must be supported by lang_for_tag"
+            );
+        }
+    }
+
+    #[test]
+    fn highlight_code_produces_monotonic_valid_spans() {
+        let code = "fn main() {\n    let val = 42;\n    println!(\"{val}\");\n}\n";
+        let spans = highlight_code("rust", code).expect("rust should be recognized");
+        assert!(!spans.is_empty());
+        let mut prev_end = 0;
+        for (range, _) in &spans {
+            assert!(range.start >= prev_end);
+            assert!(range.end <= code.len());
+            assert!(code.is_char_boundary(range.start));
+            assert!(code.is_char_boundary(range.end));
+            prev_end = range.end;
+        }
+
+        assert!(highlight_code("unknown-xyz", code).is_none());
     }
 }

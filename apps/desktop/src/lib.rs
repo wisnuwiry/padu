@@ -220,6 +220,7 @@ pub fn run() {
             crate::assets::register_fonts(cx).expect("failed to register bundled fonts");
             let _ = bezel::ui::register_fonts(cx);
             crate::input::init(cx);
+            crate::md::init(cx);
             bezel_editor::init(cx);
             crate::ui::menu::init(cx);
             crate::app::init_composer_autocomplete(cx);
