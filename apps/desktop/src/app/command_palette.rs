@@ -2537,7 +2537,7 @@ impl Padu {
             .max_w(px(640.0))
             .h(px(card_height))
             .overflow_hidden()
-            .rounded(px(12.0))
+            .rounded(px(bezel::theme::Theme::panel_radius()))
             .bg(theme.raised)
             .shadow_xl()
             .relative()
@@ -2687,7 +2687,10 @@ impl Padu {
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.close_command_palette(window, cx)),
             )
-            .child(card);
+            .child(bezel::motion::dialog_in(
+                "command-palette-motion",
+                div().occlude().child(card),
+            ));
         Some(gpui::deferred(layer).with_priority(3).into_any_element())
     }
 }

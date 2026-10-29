@@ -30,6 +30,8 @@ pub fn dialog_backdrop<V: 'static>(
     on_dismiss: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
     card: impl IntoElement,
 ) -> AnyElement {
+    let id = id.into();
+    let motion_id = ElementId::Name(format!("{}-in", id).into());
     let layer = div()
         .id(id)
         .absolute()
@@ -46,7 +48,7 @@ pub fn dialog_backdrop<V: 'static>(
                 on_dismiss(view, window, cx);
             }),
         )
-        .child(card);
+        .child(bezel::motion::dialog_in(motion_id, div().occlude().child(card)));
 
     gpui::deferred(layer).with_priority(5).into_any_element()
 }
@@ -57,7 +59,7 @@ pub fn dialog_card(id: impl Into<ElementId>, theme: &Theme, width: Pixels) -> St
         .id(id)
         .tab_group()
         .w(width)
-        .rounded(px(14.0))
+        .rounded(px(bezel::theme::Theme::panel_radius()))
         .bg(theme.surface)
         .border_1()
         .border_color(theme.border_strong)
@@ -88,7 +90,7 @@ pub fn dialog_cancel_button<V: 'static>(
         .tab_index(0)
         .h(px(32.0))
         .px(px(14.0))
-        .rounded(px(7.0))
+        .rounded(px(bezel::theme::Theme::button_radius()))
         .border_1()
         .border_color(theme.border_strong)
         .flex()
@@ -141,7 +143,7 @@ pub fn dialog_confirm_button<V: 'static>(
         .tab_index(0)
         .h(px(32.0))
         .px(px(14.0))
-        .rounded(px(7.0))
+        .rounded(px(bezel::theme::Theme::button_radius()))
         .flex()
         .items_center()
         .justify_center()

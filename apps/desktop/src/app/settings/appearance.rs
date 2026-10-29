@@ -1,4 +1,5 @@
 use super::*;
+use bezel::ui::widgets::Controls;
 use crate::ui::slider::slider;
 
 /// Sizes offered by the font-size dropdowns. A hand-edited `app.json` may
@@ -283,80 +284,57 @@ fn render_theme_section(
     theme: Theme,
     selected_theme: ThemePreference,
     weak: gpui::WeakEntity<Padu>,
+    cx: &mut Context<Padu>,
 ) -> AnyElement {
-    let theme_cards = ThemePreference::ALL
-        .into_iter()
-        .map(|preference| {
-            let selected = preference == selected_theme;
-            let weak = weak.clone();
-            let preference_id = match preference {
-                ThemePreference::System => "system",
-                ThemePreference::Light => "light",
-                ThemePreference::Dark => "dark",
-            };
-            let preview_path = match preference {
-                ThemePreference::System => "themes/system.svg",
-                ThemePreference::Light => "themes/light.svg",
-                ThemePreference::Dark => "themes/dark.svg",
-            };
-            let preview = div()
-                .w_full()
-                .aspect_ratio(188.0 / 142.0)
-                .rounded(px(6.0))
-                .overflow_hidden()
-                .border_1()
-                .border_color(theme.border)
-                .bg(theme.surface)
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    img(preview_path)
-                        .size_full()
-                        .rounded(px(6.0))
-                        .object_fit(ObjectFit::Contain),
-                );
+    let bezel_theme = bezel::theme::Theme::of(cx);
+    let selected_ix = match selected_theme {
+        ThemePreference::System => 0,
+        ThemePreference::Light => 1,
+        ThemePreference::Dark => 2,
+    };
+    let tiles = ThemePreference::ALL.into_iter().map(|pref| {
+        let preview_path = match pref {
+            ThemePreference::System => "themes/system.svg",
+            ThemePreference::Light => "themes/light.svg",
+            ThemePreference::Dark => "themes/dark.svg",
+        };
+        let preview = div()
+            .w(px(130.0))
+            .aspect_ratio(188.0 / 142.0)
+            .rounded(px(6.0))
+            .overflow_hidden()
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.surface)
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                img(preview_path)
+                    .size_full()
+                    .rounded(px(6.0))
+                    .object_fit(ObjectFit::Contain),
+            )
+            .into_any_element();
+        (preview, SharedString::from(pref.label()))
+    });
 
-            div()
-                .id(SharedString::from(format!("theme-card-{preference_id}")))
-                .tab_index(0)
-                .flex_1()
-                .max_w(px(140.0))
-                .min_w(px(0.0))
-                .p(px(7.0))
-                .rounded(px(10.0))
-                .border_1()
-                .border_color(if selected { theme.accent } else { theme.border })
-                .bg(if selected {
-                    theme.accent.opacity(0.08)
-                } else {
-                    theme.surface
-                })
-                .cursor_pointer()
-                .focus_visible(|style| style.border_1().border_color(theme.accent))
-                .hover(|el| el.bg(theme.overlay))
-                .on_click(move |_, window, cx| {
-                    let _ = weak.update(cx, |this, cx| {
-                        this.set_theme_preference(preference, window, cx);
-                    });
-                })
-                .child(preview)
-                .child(
-                    div()
-                        .mt(px(7.0))
-                        .text_size(sp(12.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text)
-                        .child(preference.label()),
-                )
-        })
-        .collect::<Vec<_>>();
-    let theme_selector = div()
-        .flex()
-        .w_full()
-        .justify_end()
-        .gap(px(8.0))
-        .children(theme_cards);
+    let weak_picker = weak.clone();
+    let theme_selector = bezel_theme.picture_picker(
+        "theme-preference-picker",
+        tiles,
+        selected_ix,
+        move |ix, window, cx| {
+            let pref = match ix {
+                0 => ThemePreference::System,
+                1 => ThemePreference::Light,
+                _ => ThemePreference::Dark,
+            };
+            let _ = weak_picker.update(cx, |this, cx| {
+                this.set_theme_preference(pref, window, cx);
+            });
+        },
+    );
 
     div()
         .w_full()
@@ -655,7 +633,7 @@ impl Padu {
             .rounded(px(13.0))
             .overflow_hidden()
             .bg(theme.raised)
-            .child(render_theme_section(theme, selected_theme, theme_weak))
+            .child(render_theme_section(theme, selected_theme, theme_weak, cx))
             .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
             .child(
                 div()
