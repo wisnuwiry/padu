@@ -1042,6 +1042,7 @@ checksum = "d34ea1f499c603b329f1f0fb5d4e71fadffa553b65dbeea269654244fe330ae8"
 dependencies = [
  "bezel-gpui",
  "bezel-gpui-shared-string",
+ "bezel-mermaid",
  "bezel-theme",
  "bezel-ui",
  "image 0.25.10",

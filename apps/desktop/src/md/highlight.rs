@@ -138,8 +138,8 @@ pub fn lang_for_tag(tag: &str) -> Option<Lang> {
         "c" | "h" | "cc" | "cpp" | "c++" | "cxx" | "hpp" | "objc" | "objective-c" | "m" | "mm"
         | "php" | "proto" | "protobuf" => Lang::C,
         "java" | "kt" | "kotlin" | "scala" | "cs" | "csharp" | "c#" => Lang::Java,
-        "rb" | "ruby" | "gemfile" | "rake" | "ex" | "exs" | "elixir" | "erl" | "erlang"
-        | "clj" | "clojure" | "lua" => Lang::Ruby,
+        "rb" | "ruby" | "gemfile" | "rake" | "ex" | "exs" | "elixir" | "erl" | "erlang" | "clj"
+        | "clojure" | "lua" => Lang::Ruby,
         "swift" => Lang::Swift,
         "json" | "jsonc" | "json5" | "gql" | "graphql" => Lang::Json,
         "yaml" | "yml" => Lang::Yaml,
@@ -149,7 +149,8 @@ pub fn lang_for_tag(tag: &str) -> Option<Lang> {
         "css" | "scss" | "sass" | "less" => Lang::Css,
         "html" | "htm" | "xml" | "svg" | "vue" | "svelte" | "astro" => Lang::Html,
         "sql" | "postgres" | "postgresql" | "mysql" | "sqlite" => Lang::Sql,
-        "md" | "markdown" | "mdx" | "mdown" | "tex" | "latex" => Lang::Markdown,
+        "md" | "markdown" | "mdx" | "mdown" | "tex" | "latex" | "math" | "katex" => Lang::Markdown,
+        "mermaid" => Lang::Markdown,
         "diff" | "patch" => Lang::Diff,
         _ => return None,
     })
@@ -1011,6 +1012,8 @@ pub const HIGHLIGHT_LANGUAGES: &[&str] = &[
     "lua",
     "makefile",
     "markdown",
+    "math",
+    "mermaid",
     "nix",
     "ocaml",
     "php",

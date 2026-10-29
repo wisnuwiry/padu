@@ -48,7 +48,10 @@ pub fn dialog_backdrop<V: 'static>(
                 on_dismiss(view, window, cx);
             }),
         )
-        .child(bezel::motion::dialog_in(motion_id, div().occlude().child(card)));
+        .child(bezel::motion::dialog_in(
+            motion_id,
+            div().occlude().child(card),
+        ));
 
     gpui::deferred(layer).with_priority(5).into_any_element()
 }

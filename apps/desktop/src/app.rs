@@ -60,13 +60,13 @@ use crate::query::{Query, QueryCache};
 use crate::review_diff::{Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};
 use crate::terminal::TerminalView;
 use crate::theme::{Theme, ThemePreference, sp};
+pub(crate) use crate::ui::RestrictScrollExt;
 use crate::ui::text_field::TextField;
 use crate::ui::{
     MenuChip, ProjectNameSelector, activity_icon, activity_noun, contain_horizontal_scroll,
     contain_scroll, file_icon, icon, icon_button, motion, provider_color, provider_icon,
     status_color, toggle_switch,
 };
-pub(crate) use crate::ui::RestrictScrollExt;
 use crate::{
     CancelTaskSwitch, CancelTurn, CloseFind, CloseWindow, ConfirmTaskSwitch, CopySelection,
     FindNext, FindPrevious, FocusComposer, NavigateBack, NavigateForward, NewProject, NewSession,

@@ -2153,6 +2153,97 @@ fn render_math_block(source: &str, display: bool, ctx: &Ctx) -> AnyElement {
     }
 }
 
+/// Custom block renderer for bezel markdown / editor fences.
+///
+/// Math / LaTeX blocks are rendered using the KaTeX isolate and cached as SVGs.
+/// Mermaid diagram blocks return `None` so they fall through to bezel-markdown's
+/// built-in interactive mermaid renderer (with pan/zoom controls).
+pub fn render_fence_block(
+    fence: &bezel_markdown::Fence<'_>,
+    _window: &mut Window,
+    cx: &mut App,
+) -> Option<AnyElement> {
+    let lang = fence.language.trim().to_ascii_lowercase();
+    match lang.as_str() {
+        "math" | "latex" | "tex" | "katex" => {
+            let code = fence.code.trim();
+            if code.is_empty() {
+                return None;
+            }
+
+            let padu_theme = crate::theme::Theme::current(cx);
+            let palette = Palette::from_theme(&padu_theme);
+            let rich_theme = palette.rich_theme(16.0);
+            let kind = RichKind::Math { display: true };
+            let hash = rich::hash(kind, code, &rich_theme);
+            let image_source =
+                rich::rich_image_source_value(hash, kind, code.to_string(), rich_theme);
+
+            let latex_fallback = code.to_string();
+            let danger_color = palette.removed;
+            let image = img(image_source)
+                .max_w(relative(1.0))
+                .object_fit(gpui::ObjectFit::ScaleDown)
+                .with_loading(|| div().h(px(28.0)).into_any_element())
+                .with_fallback(move || {
+                    div()
+                        .text_size(px(13.0))
+                        .text_color(danger_color)
+                        .child(latex_fallback.clone())
+                        .into_any_element()
+                });
+
+            let bezel_theme = bezel::theme::Theme::of(cx);
+            let band_label = if lang == "latex" || lang == "tex" {
+                "LaTeX"
+            } else {
+                "Math"
+            };
+
+            let copy_code = code.to_string();
+            let copy_btn = div()
+                .id(SharedString::from(format!("math-copy-{hash:x}")))
+                .cursor_pointer()
+                .text_size(px(12.0))
+                .text_color(bezel_theme.text_muted)
+                .hover(|el| el.text_color(bezel_theme.text))
+                .child("Copy")
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    cx.write_to_clipboard(ClipboardItem::new_string(copy_code.clone()));
+                });
+
+            let panel = bezel_markdown::fence::fence_panel(bezel_theme)
+                .w_full()
+                .flex()
+                .flex_col()
+                .when_some(fence.height, |el, h| el.h(px(h as f32)))
+                .child(
+                    bezel_markdown::fence::fence_band(bezel_theme)
+                        .flex_none()
+                        .justify_between()
+                        .text_color(bezel_theme.text_muted)
+                        .child(band_label)
+                        .child(copy_btn),
+                )
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .flex()
+                        .justify_center()
+                        .items_center()
+                        .py(px(16.0))
+                        .px(px(12.0))
+                        .child(image),
+                );
+
+            Some(panel.into_any_element())
+        }
+        _ => None,
+    }
+}
+
 /// A ` ```mermaid ` fenced block, rendered as a bordered diagram card.
 fn render_mermaid_block(source: &str, ctx: &Ctx) -> AnyElement {
     let key = ctx.next_key();
@@ -3219,5 +3310,60 @@ mod tests {
         // An empty table falls back to even columns.
         let even = column_widths(&[], &[], 3);
         assert!(even.iter().all(|width| (width - 1.0 / 3.0).abs() < 1e-6));
+    }
+
+    #[gpui::test]
+    fn render_fence_block_handles_math_and_delegates_mermaid(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            bezel::theme::Theme::install(bezel::theme::Appearance::Dark, cx);
+        });
+        struct WindowHarness;
+        impl gpui::Render for WindowHarness {
+            fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+                div()
+            }
+        }
+        let (_, visual) = cx.add_window_view(|_, _| WindowHarness);
+        visual.update(|window, cx| {
+            let math_fence = bezel_markdown::Fence {
+                language: "math",
+                code: "E = mc^2",
+                height: None,
+                rewrite: None,
+            };
+            assert!(render_fence_block(&math_fence, window, cx).is_some());
+
+            let latex_fence = bezel_markdown::Fence {
+                language: "latex",
+                code: "\\frac{a}{b}",
+                height: None,
+                rewrite: None,
+            };
+            assert!(render_fence_block(&latex_fence, window, cx).is_some());
+
+            let empty_math = bezel_markdown::Fence {
+                language: "math",
+                code: "   ",
+                height: None,
+                rewrite: None,
+            };
+            assert!(render_fence_block(&empty_math, window, cx).is_none());
+
+            let mermaid_fence = bezel_markdown::Fence {
+                language: "mermaid",
+                code: "graph TD\n  A --> B",
+                height: None,
+                rewrite: None,
+            };
+            assert!(render_fence_block(&mermaid_fence, window, cx).is_none());
+
+            let rust_fence = bezel_markdown::Fence {
+                language: "rust",
+                code: "fn main() {}",
+                height: None,
+                rewrite: None,
+            };
+            assert!(render_fence_block(&rust_fence, window, cx).is_none());
+        });
     }
 }

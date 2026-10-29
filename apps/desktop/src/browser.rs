@@ -4,8 +4,8 @@
 use std::rc::Rc;
 
 use gpui::{
-    App, Context, Div, ElementId, Entity, FocusHandle, Focusable, IntoElement,
-    Render, Stateful, Subscription, Window, div, prelude::*, px,
+    App, Context, Div, ElementId, Entity, FocusHandle, Focusable, IntoElement, Render, Stateful,
+    Subscription, Window, div, prelude::*, px,
 };
 
 use crate::input::{InputEvent, TextInput};

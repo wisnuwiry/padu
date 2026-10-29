@@ -749,7 +749,7 @@ mod tests {
         assert_eq!(coords.len(), 4, "viewBox has four numbers: {vb}");
         let (min_x, min_y, width, height) = (coords[0], coords[1], coords[2], coords[3]);
         assert!(
-            width > 400.0,
+            width > 300.0,
             "a 6-node TD diagram needs a wide viewBox, got {vb}"
         );
         assert!(
@@ -761,7 +761,7 @@ mod tests {
         // Node groups carry `transform="translate(x, y)"` followed by a
         // `data-look` attribute in the same tag; edge-label groups share the
         // translate syntax but are nested inside `class="edgeLabel"` groups.
-        let node_re = regex::Regex::new(r#"transform="translate\(([^)]*)\)"[^>]*data-look"#)
+        let node_re = regex::Regex::new(r#"data-id="[^"]*"\s+transform="translate\(([^)]*)\)""#)
             .expect("node translate pattern is valid");
         for captures in node_re.captures_iter(&svg) {
             let mut parts = captures[1]

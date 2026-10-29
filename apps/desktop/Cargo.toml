@@ -33,7 +33,7 @@ uuid = { version = "1.18", features = ["v4", "serde"] }
 padu-client = { path = "../../crates/padu-client" }
 padu-protocol = { path = "../../crates/padu-protocol" }
 bezel_editor = { package = "bezel-editor", version = "0.2.22" }
-bezel_markdown = { package = "bezel-markdown", version = "0.2.22" }
+bezel_markdown = { package = "bezel-markdown", version = "0.2.22", features = ["mermaid"] }
 bezel_mermaid = { package = "bezel-mermaid", version = "0.2.22" }
 pulldown-cmark = "0.13"
 regex = "1"

@@ -76,10 +76,7 @@ mod tests {
             next_layout_on_create(NotesLayout::Preview),
             NotesLayout::Rich
         );
-        assert_eq!(
-            next_layout_on_create(NotesLayout::Code),
-            NotesLayout::Code
-        );
+        assert_eq!(next_layout_on_create(NotesLayout::Code), NotesLayout::Code);
         assert_eq!(next_layout_on_create(NotesLayout::Rich), NotesLayout::Rich);
     }
 }

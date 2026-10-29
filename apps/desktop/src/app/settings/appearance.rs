@@ -1,6 +1,6 @@
 use super::*;
-use bezel::ui::widgets::Controls;
 use crate::ui::slider::slider;
+use bezel::ui::widgets::Controls;
 
 /// Sizes offered by the font-size dropdowns. A hand-edited `app.json` may
 /// hold values outside this list; they render as-is and simply select

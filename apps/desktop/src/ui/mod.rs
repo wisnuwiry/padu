@@ -29,8 +29,8 @@ impl<T> RestrictScrollExt for T {}
 
 #[allow(unused_imports)]
 pub use bezel::ui::widgets::{
-    Button, ButtonRole, ButtonStyle, Buttons, Content, Controls, Icons,
-    Layout as BezelLayout, Scaffolding, Status,
+    Button, ButtonRole, ButtonStyle, Buttons, Content, Controls, Icons, Layout as BezelLayout,
+    Scaffolding, Status,
 };
 
 #[allow(unused_imports)]
