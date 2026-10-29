@@ -68,7 +68,7 @@ export async function addContentToNewNote(
 function readNotesLayout(): NotesLayout {
   if (typeof window === 'undefined') return 'edit'
   const saved = window.localStorage.getItem('padu.notesLayout')
-  return saved === 'split' || saved === 'preview' ? saved : 'edit'
+  return saved === 'split' ? saved : 'edit'
 }
 
 function readListCollapsed(): boolean {
@@ -285,7 +285,6 @@ function NotesWorkspace({
   const newShortcut = usePrimaryShortcut('⌘⌥N', 'Ctrl+Alt+N')
   const editShortcut = usePrimaryShortcut('⌘1', 'Ctrl+1')
   const splitShortcut = usePrimaryShortcut('⌘2', 'Ctrl+2')
-  const previewShortcut = usePrimaryShortcut('⌘3', 'Ctrl+3')
   const deleteShortcut = usePrimaryShortcut('⌘⌫', 'Ctrl+Backspace')
   const chatShortcut = usePrimaryShortcut('⌘↵', 'Ctrl+Enter')
   const listShortcut = usePrimaryShortcut('⌘⇧L', 'Ctrl+Shift+L')
@@ -567,9 +566,6 @@ function NotesWorkspace({
       } else if (key === '2' && !event.shiftKey) {
         event.preventDefault()
         setLayout('split')
-      } else if (key === '3' && !event.shiftKey) {
-        event.preventDefault()
-        setLayout('preview')
       } else if (key === 'enter' && !event.shiftKey) {
         if (typing) return
         event.preventDefault()
@@ -755,13 +751,6 @@ function NotesWorkspace({
                       shortcut={splitShortcut}
                       onClick={() => setLayout('split')}
                     />
-                    <LayoutButton
-                      active={layout === 'preview'}
-                      icon="eye"
-                      label={t('notes.preview')}
-                      shortcut={previewShortcut}
-                      onClick={() => setLayout('preview')}
-                    />
                   </div>
                   <Tooltip content={t('notes.delete')} shortcut={deleteShortcut}>
                     <button
@@ -791,12 +780,6 @@ function NotesWorkspace({
                     />
                   </Suspense>
                 </div>
-              )}
-              {layout === 'preview' && (
-                <MarkdownView
-                  className="min-h-0 flex-1 overflow-y-auto rounded-lg bg-muted/60 p-3.5 text-[14px] leading-7 break-words"
-                  text={selected.content}
-                />
               )}
               {layout === 'split' && (
                 <SplitEditor

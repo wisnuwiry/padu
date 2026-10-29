@@ -31,8 +31,8 @@ export function formatNoteMeta(
   return meta
 }
 
-export type NotesLayout = 'edit' | 'split' | 'preview'
+export type NotesLayout = 'edit' | 'split'
 
 export function nextLayoutOnCreate(current: NotesLayout): NotesLayout {
-  return current === 'preview' ? 'edit' : current
+  return current
 }
