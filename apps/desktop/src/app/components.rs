@@ -50,7 +50,7 @@ pub(super) fn working_wave_dots(color: Hsla) -> AnyElement {
     .into_any_element()
 }
 
-pub(crate) use crate::ui::{kbd_badge, kbd_badge_icon};
+pub(crate) use crate::ui::kbd_badge;
 
 pub(super) fn format_message_time(created_at: u64) -> String {
     format_message_time_at(created_at, Local::now())

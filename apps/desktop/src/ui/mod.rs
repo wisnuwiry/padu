@@ -78,6 +78,7 @@ pub fn kbd_badge(label: impl Into<SharedString>, theme: &Theme) -> AnyElement {
     )
 }
 
+#[allow(dead_code)]
 pub fn kbd_badge_icon(
     icon_path: &'static str,
     bg: Hsla,

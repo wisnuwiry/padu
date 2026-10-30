@@ -1683,6 +1683,7 @@ pub struct Padu {
     board_new_task_description: Entity<TextInput>,
     board_new_task_agent: Option<ProviderKind>,
     board_new_task_model: Option<String>,
+    #[allow(dead_code)]
     board_new_task_cancel_focus: FocusHandle,
     board_new_task_preview: bool,
     board_edit_title: Entity<TextInput>,

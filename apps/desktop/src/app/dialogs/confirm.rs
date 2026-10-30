@@ -60,7 +60,9 @@ pub(crate) struct ConfirmDialogState {
     pub variant: ConfirmVariant,
     pub icon_name: Option<&'static str>,
     pub action: ConfirmAction,
+    #[allow(dead_code)]
     pub cancel_focus: FocusHandle,
+    #[allow(dead_code)]
     pub confirm_focus: FocusHandle,
     pub previous_focus: Option<FocusHandle>,
 }
@@ -414,8 +416,6 @@ impl Padu {
             dialog.cancel_label.clone(),
             dialog.variant,
             dialog.icon_name,
-            &dialog.cancel_focus,
-            &dialog.confirm_focus,
             &theme,
             cx,
             |padu, window, cx| padu.execute_confirm_dialog(window, cx),
