@@ -104,13 +104,13 @@ export function SettingsView({
             <Kbd className="group-focus-within:hidden" size="xs">/</Kbd>
           </label>
         </div>
-        <nav aria-label={t('common.settings')} className="mt-3 flex flex-1 flex-col gap-[3px] overflow-y-auto px-3 pb-4">
+        <nav aria-label={t('common.settings')} className="mt-2 flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 pb-3">
           {SETTINGS_GROUPS.map((group, groupIndex) => {
             const groupPages = pages.filter((candidate) => candidate.group === group.id)
             if (!groupPages.length) return null
             return (
-              <div key={group.id} className={cn('flex flex-col gap-[3px]', groupIndex > 0 && 'mt-3')}>
-                <div className="px-2 pb-1 pt-1 text-[11px] font-semibold text-[var(--text-tertiary)]">
+              <div key={group.id} className={cn('flex flex-col gap-0.5', groupIndex > 0 && 'mt-2')}>
+                <div className="px-2 pb-0.5 pt-0.5 text-[11px] font-semibold text-[var(--text-tertiary)]">
                   {t(group.labelKey)}
                 </div>
                 {groupPages.map((candidate) => (

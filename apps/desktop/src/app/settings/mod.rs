@@ -238,7 +238,7 @@ impl Padu {
         let theme = Theme::current(cx);
         let current_page = self.settings_page.unwrap_or(SettingsPage::General);
         let query = self.settings_search_query(cx);
-        let mut navigation = div().flex().flex_col().gap(px(3.0));
+        let mut navigation = div().flex().flex_col().gap(px(2.0));
         let mut current_group: Option<SettingsGroup> = None;
         let mut is_first_group = true;
 
@@ -251,8 +251,8 @@ impl Padu {
                             "settings-group-{}",
                             group.id_str()
                         )))
-                        .pt(if is_first_group { px(0.0) } else { px(12.0) })
-                        .pb(px(4.0))
+                        .pt(if is_first_group { px(0.0) } else { px(8.0) })
+                        .pb(px(2.0))
                         .px(px(10.0))
                         .text_size(sp(11.0))
                         .font_weight(FontWeight::SEMIBOLD)
@@ -331,8 +331,8 @@ impl Padu {
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
-                    .pt(px(14.0))
-                    .pb(px(16.0))
+                    .pt(px(10.0))
+                    .pb(px(14.0))
                     .px(px(12.0))
                     .child(navigation),
             )
