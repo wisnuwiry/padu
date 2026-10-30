@@ -1174,6 +1174,7 @@ pub struct Padu {
     settings_search: Entity<TextInput>,
     archived_search: Entity<TextInput>,
     keybindings_search: Entity<TextInput>,
+    language_combobox: Entity<bezel::ui::combobox::Combobox>,
     daemon_port_input: Entity<TextInput>,
     daemon_origin_inputs: Vec<Entity<TextInput>>,
     daemon_reconfigure_pending: bool,
@@ -3007,6 +3008,7 @@ impl Padu {
         });
 
         let entity = cx.new(|cx| {
+            let language_combobox = Self::create_language_combobox(state.language, cx);
             let settings_focus = cx.focus_handle();
             let onboarding_add_project_focus = cx.focus_handle();
             let onboarding_projectless_focus = cx.focus_handle();
@@ -3578,6 +3580,7 @@ impl Padu {
                 settings_search,
                 archived_search,
                 keybindings_search,
+                language_combobox,
                 daemon_port_input,
                 daemon_origin_inputs,
                 daemon_reconfigure_pending: false,

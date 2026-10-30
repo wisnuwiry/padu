@@ -1,10 +1,11 @@
 use std::cell::Cell;
 
 use super::*;
-use crate::ui::button::{Button, ButtonRole, ButtonStyle};
 use crate::ui::Switch;
-use bezel::ui::widgets::{slider_fraction, Controls, SliderDrag};
-use gpui::{canvas, Bounds, DragMoveEvent, ElementId, MouseButton, MouseDownEvent};
+use crate::ui::button::{Button, ButtonRole, ButtonStyle};
+use bezel::ui::combobox::{Combobox, ComboboxEvent};
+use bezel::ui::widgets::{Controls, SliderDrag, slider_fraction};
+use gpui::{Bounds, DragMoveEvent, ElementId, MouseButton, MouseDownEvent, SharedString, canvas};
 
 fn font_size_label(size: f32) -> String {
     if size.fract() == 0.0 {
@@ -651,7 +652,6 @@ impl Padu {
         let theme = Theme::current(cx);
         let bezel_theme = bezel::theme::Theme::of(cx);
         let selected_theme = self.state.theme;
-        let selected_language = self.state.language;
         let weak = cx.entity().downgrade();
         let theme_weak = weak.clone();
 
@@ -668,34 +668,6 @@ impl Padu {
                 let _ = weak_ui_font.update(cx, |this, cx| {
                     this.set_ui_font_size(size, window, cx);
                 });
-            },
-        );
-
-        let weak = cx.entity().downgrade();
-        let language_handle = self.menu_handle("language-selector", cx);
-        let language_selector = dropdown_menu(
-            MenuChip::new("language-selector")
-                .label(selected_language.label())
-                .outlined()
-                .selected(language_handle.is_open())
-                .w(px(150.0))
-                .justify_between(),
-            "language-selector-menu",
-            &language_handle,
-            MenuAlign::BelowRight,
-            move |_| {
-                crate::i18n::AppLanguage::ALL
-                    .into_iter()
-                    .map(|language| {
-                        let weak = weak.clone();
-                        MenuItem::new(language.label(), move |window, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.set_language(language, window, cx);
-                            });
-                        })
-                        .selected(language == selected_language)
-                    })
-                    .collect()
             },
         );
 
@@ -738,7 +710,12 @@ impl Padu {
                                     .child(tr!("language.description")),
                             ),
                     )
-                    .child(language_selector),
+                    .child(
+                        div()
+                            .w(px(180.0))
+                            .flex_none()
+                            .child(self.language_combobox.clone()),
+                    ),
             )
             .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
             .child(
@@ -868,10 +845,44 @@ impl Padu {
         cx.notify();
     }
 
-    fn set_language(
+    pub(crate) fn create_language_combobox(
+        language: padu_protocol::i18n::AppLanguage,
+        cx: &mut Context<Self>,
+    ) -> Entity<Combobox> {
+        let items = padu_protocol::i18n::AppLanguage::ALL
+            .into_iter()
+            .map(|lang| SharedString::from(lang.label()))
+            .collect::<Vec<_>>();
+        let selected_index = padu_protocol::i18n::AppLanguage::ALL
+            .into_iter()
+            .position(|lang| lang == language);
+        let combobox = cx.new(|cx| {
+            let mut combo = Combobox::new(items, tr!("language.title"), cx);
+            if let Some(index) = selected_index {
+                combo = combo.with_selection(index);
+            }
+            combo
+        });
+
+        cx.subscribe(
+            &combobox,
+            |this: &mut Self, _, event: &ComboboxEvent, cx| match event {
+                ComboboxEvent::Selected(index) => {
+                    if let Some(&language) = padu_protocol::i18n::AppLanguage::ALL.get(*index) {
+                        this.set_language(language, None, cx);
+                    }
+                }
+            },
+        )
+        .detach();
+
+        combobox
+    }
+
+    pub(crate) fn set_language(
         &mut self,
         language: crate::i18n::AppLanguage,
-        window: &mut Window,
+        window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) {
         if self.state.language == language {
@@ -880,6 +891,7 @@ impl Padu {
 
         self.state.language = language;
         crate::i18n::set_language(language);
+        self.language_combobox = Self::create_language_combobox(language, cx);
 
         self.composer.update(cx, |input, cx| {
             input.set_placeholder(tr!("input.do_anything"), cx)
@@ -929,7 +941,9 @@ impl Padu {
             .is_some();
         crate::set_app_menus(cx, updater_available);
         self.save();
-        window.refresh();
+        if let Some(window) = window {
+            window.refresh();
+        }
         cx.notify();
     }
 }
