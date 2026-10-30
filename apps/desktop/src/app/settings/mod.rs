@@ -3,6 +3,7 @@ use gpui::actions;
 use super::composer::next_picker_highlight;
 use super::*;
 use crate::ui::button::{Button, ButtonStyle};
+use bezel::ui::widgets::Content;
 
 actions!(padu_settings, [FocusSettingsSearch]);
 
@@ -373,6 +374,19 @@ impl Padu {
             window,
             cx,
         );
+        let page_title = match page {
+            SettingsPage::General => tr!("settings.general"),
+            SettingsPage::Appearance => tr!("settings.appearance"),
+            SettingsPage::Keybindings => tr!("settings.keybindings"),
+            SettingsPage::Notifications => tr!("settings.notifications"),
+            SettingsPage::Providers => tr!("settings.providers"),
+            SettingsPage::Skills => tr!("settings.skills"),
+            SettingsPage::Usage => tr!("settings.usage"),
+            SettingsPage::Daemon => tr!("settings.daemon"),
+            SettingsPage::ComputerUse => tr!("settings.computer_use"),
+            SettingsPage::Archived => tr!("settings.archived"),
+            SettingsPage::About => tr!("settings.about"),
+        };
         // The Monthly and Projects list views own their own scrolling, so
         // their pages fill the viewport instead of riding the shared scroll
         // container.
@@ -402,19 +416,7 @@ impl Padu {
                         .text_size(sp(18.0))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(theme.text)
-                        .child(match page {
-                            SettingsPage::General => tr!("settings.general"),
-                            SettingsPage::Appearance => tr!("settings.appearance"),
-                            SettingsPage::Keybindings => tr!("settings.keybindings"),
-                            SettingsPage::Notifications => tr!("settings.notifications"),
-                            SettingsPage::Providers => tr!("settings.providers"),
-                            SettingsPage::Skills => tr!("settings.skills"),
-                            SettingsPage::Usage => tr!("settings.usage"),
-                            SettingsPage::Daemon => tr!("settings.daemon"),
-                            SettingsPage::ComputerUse => tr!("settings.computer_use"),
-                            SettingsPage::Archived => tr!("settings.archived"),
-                            SettingsPage::About => tr!("settings.about"),
-                        }),
+                        .child(page_title.clone()),
                 )
                 .child(match page {
                     SettingsPage::General => self.render_general_settings(cx),
@@ -458,6 +460,26 @@ impl Padu {
                 .into_any_element()
         };
 
+        let bezel_theme = bezel::theme::Theme::of(cx);
+        let breadcrumb = bezel_theme
+            .breadcrumb()
+            .id("settings-breadcrumb")
+            .self_center()
+            .pl(px(16.0))
+            .pr(px(32.0))
+            .flex_none()
+            .child(
+                bezel_theme
+                    .breadcrumb_item(tr!("common.settings"), false)
+                    .id("settings-breadcrumb-root")
+                    .hover(|element| element.text_color(bezel_theme.text))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.open_settings_page(SettingsPage::General, cx);
+                    })),
+            )
+            .child(bezel_theme.breadcrumb_separator())
+            .child(bezel_theme.breadcrumb_item(page_title, true));
+
         div()
             .flex_1()
             .h_full()
@@ -472,35 +494,7 @@ impl Padu {
                     .flex_none()
                     .flex()
                     .items_center()
-                    .child(
-                        div()
-                            .pl(px(16.0))
-                            .pr(px(32.0))
-                            .flex_none()
-                            .flex()
-                            .items_center()
-                            .gap(px(5.0))
-                            .text_size(sp(12.0))
-                            .child(
-                                div()
-                                    .text_color(theme.text_tertiary)
-                                    .child(tr!("common.settings")),
-                            )
-                            .child(div().text_color(theme.text_ghost).child("/"))
-                            .child(div().text_color(theme.text_secondary).child(match page {
-                                SettingsPage::General => tr!("settings.general"),
-                                SettingsPage::Appearance => tr!("settings.appearance"),
-                                SettingsPage::Keybindings => tr!("settings.keybindings"),
-                                SettingsPage::Notifications => tr!("settings.notifications"),
-                                SettingsPage::Providers => tr!("settings.providers"),
-                                SettingsPage::Skills => tr!("settings.skills"),
-                                SettingsPage::Usage => tr!("settings.usage"),
-                                SettingsPage::Daemon => tr!("settings.daemon"),
-                                SettingsPage::ComputerUse => tr!("settings.computer_use"),
-                                SettingsPage::Archived => tr!("settings.archived"),
-                                SettingsPage::About => tr!("settings.about"),
-                            })),
-                    )
+                    .child(breadcrumb)
                     .child(
                         self.render_settings_drag_region("settings-content-titlebar", cx)
                             .flex_1(),
