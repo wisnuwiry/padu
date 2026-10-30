@@ -784,7 +784,7 @@ impl Padu {
                     ),
             )
             // Transport selector
-            .child(self.render_transport_selector(tab, &theme, cx))
+            .child(self.render_transport_selector(tab, cx))
             // One column: what to connect to, then an optional code a phone
             // can scan. Collapsed by default so editing a host stays short.
             .child(
@@ -846,12 +846,7 @@ impl Padu {
         ))
     }
 
-    fn render_transport_selector(
-        &self,
-        active: HostTab,
-        _theme: &Theme,
-        cx: &mut Context<Self>,
-    ) -> Div {
+    fn render_transport_selector(&self, active: HostTab, cx: &mut Context<Self>) -> Div {
         let bezel_theme = bezel::theme::Theme::of(cx);
         let mut row = bezel_theme.control_group();
         for tab in TRANSPORT_OPTIONS {
