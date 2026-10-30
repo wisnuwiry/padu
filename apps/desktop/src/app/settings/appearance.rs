@@ -1,15 +1,10 @@
 use std::cell::Cell;
 
 use super::*;
-use crate::ui::Switch;
 use crate::ui::button::{Button, ButtonRole, ButtonStyle};
-use bezel::ui::widgets::{Controls, SliderDrag, slider_fraction};
-use gpui::{Bounds, DragMoveEvent, ElementId, MouseButton, MouseDownEvent, canvas};
-
-/// Sizes offered by the font-size dropdowns. A hand-edited `app.json` may
-/// hold values outside this list; they render as-is and simply select
-/// nothing here.
-const FONT_SIZES: [f32; 8] = [11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 18.0, 20.0];
+use crate::ui::Switch;
+use bezel::ui::widgets::{slider_fraction, Controls, SliderDrag};
+use gpui::{canvas, Bounds, DragMoveEvent, ElementId, MouseButton, MouseDownEvent};
 
 fn font_size_label(size: f32) -> String {
     if size.fract() == 0.0 {
@@ -173,6 +168,108 @@ fn render_background_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) 
                         )),
                 )
                 .child(div().flex_1().min_w_0().child(preview)),
+        )
+        .into_any_element()
+}
+
+fn font_size_slider(
+    id_prefix: &'static str,
+    value: f32,
+    min: f32,
+    max: f32,
+    theme: Theme,
+    bezel_theme: &bezel::theme::Theme,
+    on_change: impl Fn(f32, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    let value = value.clamp(min, max);
+    let fraction = if max > min {
+        (value - min) / (max - min)
+    } else {
+        0.0
+    };
+    let on_change: Rc<dyn Fn(f32, &mut Window, &mut App)> = Rc::new(on_change);
+    let slider_id = format!("{id_prefix}-slider");
+    let control_id = format!("{id_prefix}-control");
+    let slider_on_change = on_change.clone();
+    let bounds_cell = Rc::new(Cell::new(None));
+
+    let bounds_ref = bounds_cell.clone();
+    let bounds_recorder = canvas(
+        move |bounds: Bounds<Pixels>, _, _| bounds_ref.set(Some(bounds)),
+        |_, _, _, _| (),
+    )
+    .absolute()
+    .inset_0();
+
+    let drag_id: ElementId = control_id.clone().into();
+    let drag_move_on_change = on_change.clone();
+    let mouse_down_on_change = on_change.clone();
+
+    let slider_control = bezel_theme
+        .slider(fraction)
+        .child(bounds_recorder)
+        .id(control_id)
+        .on_drag(SliderDrag(drag_id.clone()), |_, _, _, cx| {
+            cx.new(|_| gpui::Empty)
+        })
+        .on_drag_move(move |event: &DragMoveEvent<SliderDrag>, window, cx| {
+            if let Some(fraction) = slider_fraction(event, drag_id.clone(), cx) {
+                let next = (min + fraction * (max - min)).round().clamp(min, max);
+                drag_move_on_change(next, window, cx);
+            }
+        })
+        .on_mouse_down(
+            MouseButton::Left,
+            move |event: &MouseDownEvent, window, cx| {
+                if let Some(bounds) = bounds_cell.get() {
+                    if bounds.size.width > px(0.0) {
+                        let fraction = ((event.position.x - bounds.left()) / bounds.size.width)
+                            .clamp(0.0, 1.0);
+                        let next = (min + fraction * (max - min)).round().clamp(min, max);
+                        mouse_down_on_change(next, window, cx);
+                    }
+                }
+            },
+        );
+
+    div()
+        .w(px(180.0))
+        .flex_none()
+        .flex()
+        .flex_col()
+        .gap(px(6.0))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_end()
+                .text_size(sp(12.0))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text)
+                .child(font_size_label(value)),
+        )
+        .child(
+            div()
+                .id(slider_id)
+                .w_full()
+                .tab_index(0)
+                .cursor_pointer()
+                .rounded(px(4.0))
+                .focus_visible(|style| style.bg(theme.overlay))
+                .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                    let next = match event.keystroke.key.as_str() {
+                        "left" | "down" => Some((value - 1.0).max(min)),
+                        "right" | "up" => Some((value + 1.0).min(max)),
+                        "home" => Some(min),
+                        "end" => Some(max),
+                        _ => None,
+                    };
+                    if let Some(next) = next {
+                        slider_on_change(next, window, cx);
+                        cx.stop_propagation();
+                    }
+                })
+                .child(slider_control),
         )
         .into_any_element()
 }
@@ -412,32 +509,20 @@ fn code_setting_row(title: String, description: String, control: AnyElement, the
 /// Code surfaces: text size and soft wrapping, shared by the file editor,
 /// diffs, and code blocks.
 fn render_code_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) -> AnyElement {
+    let bezel_theme = bezel::theme::Theme::of(cx);
     let selected_code_font_size = padu.state.code_font_size;
-    let weak = cx.entity().downgrade();
-    let code_font_size_handle = padu.menu_handle("code-font-size-selector", cx);
-    let code_font_size_selector = dropdown_menu(
-        MenuChip::new("code-font-size-selector")
-            .label(font_size_label(selected_code_font_size))
-            .outlined()
-            .selected(code_font_size_handle.is_open())
-            .w(px(116.0))
-            .justify_between(),
-        "code-font-size-selector-menu",
-        &code_font_size_handle,
-        MenuAlign::BelowRight,
-        move |_| {
-            FONT_SIZES
-                .into_iter()
-                .map(|size| {
-                    let weak = weak.clone();
-                    MenuItem::new(font_size_label(size), move |_, cx| {
-                        let _ = weak.update(cx, |this, cx| {
-                            this.set_code_font_size(size, cx);
-                        });
-                    })
-                    .selected(size == selected_code_font_size)
-                })
-                .collect()
+    let weak_code_font = cx.entity().downgrade();
+    let code_font_size_slider = font_size_slider(
+        "code-font-size",
+        selected_code_font_size,
+        11.0,
+        20.0,
+        theme,
+        bezel_theme,
+        move |size, _, cx| {
+            let _ = weak_code_font.update(cx, |this, cx| {
+                this.set_code_font_size(size, cx);
+            });
         },
     );
 
@@ -478,7 +563,7 @@ fn render_code_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) -> Any
         .child(code_setting_row(
             tr!("settings.code_font_size"),
             tr!("settings.code_font_size_description"),
-            code_font_size_selector,
+            code_font_size_slider,
             theme,
         ))
         .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
@@ -564,37 +649,25 @@ fn render_sidebar_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) -> 
 impl Padu {
     pub(super) fn render_appearance_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx);
         let selected_theme = self.state.theme;
         let selected_language = self.state.language;
         let weak = cx.entity().downgrade();
         let theme_weak = weak.clone();
 
         let selected_ui_font_size = self.state.ui_font_size;
-        let weak = cx.entity().downgrade();
-        let ui_font_size_handle = self.menu_handle("ui-font-size-selector", cx);
-        let ui_font_size_selector = dropdown_menu(
-            MenuChip::new("ui-font-size-selector")
-                .label(font_size_label(selected_ui_font_size))
-                .outlined()
-                .selected(ui_font_size_handle.is_open())
-                .w(px(116.0))
-                .justify_between(),
-            "ui-font-size-selector-menu",
-            &ui_font_size_handle,
-            MenuAlign::BelowRight,
-            move |_| {
-                FONT_SIZES
-                    .into_iter()
-                    .map(|size| {
-                        let weak = weak.clone();
-                        MenuItem::new(font_size_label(size), move |window, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.set_ui_font_size(size, window, cx);
-                            });
-                        })
-                        .selected(size == selected_ui_font_size)
-                    })
-                    .collect()
+        let weak_ui_font = cx.entity().downgrade();
+        let ui_font_size_slider = font_size_slider(
+            "ui-font-size",
+            selected_ui_font_size,
+            11.0,
+            20.0,
+            theme,
+            bezel_theme,
+            move |size, window, cx| {
+                let _ = weak_ui_font.update(cx, |this, cx| {
+                    this.set_ui_font_size(size, window, cx);
+                });
             },
         );
 
@@ -697,7 +770,7 @@ impl Padu {
                                     .child(tr!("settings.ui_font_size_description")),
                             ),
                     )
-                    .child(ui_font_size_selector),
+                    .child(ui_font_size_slider),
             )
             .into_any_element();
 
