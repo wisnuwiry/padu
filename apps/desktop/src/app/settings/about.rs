@@ -10,28 +10,6 @@ impl Padu {
         let is_updating = status == crate::updater::UpdateStatus::Updating;
         let is_loading = is_checking || is_updating;
 
-        let (host_name, host_address, is_remote) = if self.daemon.is_remote() {
-            let active_host = self
-                .state
-                .active_host_id
-                .as_ref()
-                .and_then(|id| self.state.hosts.iter().find(|h| &h.id == id));
-            let name = active_host
-                .map(|h| h.display_name().to_string())
-                .unwrap_or_else(|| self.daemon_hostname.clone());
-            let address = active_host
-                .map(|h| h.address.clone())
-                .unwrap_or_else(|| "Remote".to_string());
-            (name, address, true)
-        } else {
-            let name = tr!("about.local_daemon").to_string();
-            let address = format!(
-                "ws://{}:{}",
-                self.daemon_hostname, self.state.daemon_exposure.port
-            );
-            (name, address, false)
-        };
-
         div()
             .flex()
             .flex_col()
@@ -119,100 +97,28 @@ impl Padu {
                             .gap(px(4.0))
                             .flex_none()
                             .child(if status == crate::updater::UpdateStatus::Available {
-                                div()
-                                    .id("install-update-btn")
-                                    .tab_index(0)
-                                    .cursor_pointer()
-                                    .focus_visible(|style| {
-                                        style.border_1().border_color(theme.accent)
-                                    })
-                                    .h(px(30.0))
-                                    .px(px(13.0))
-                                    .rounded(px(7.0))
-                                    .bg(theme.inverse)
-                                    .text_size(sp(12.0))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.on_inverse)
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .gap(px(6.0))
-                                    .child(icon("icons/cloud-upload.svg", 13.0, theme.on_inverse))
-                                    .child(tr!("about.install_update"))
-                                    .on_click(cx.listener(|this, _, _, cx| {
+                                Button::new("install-update-btn", tr!("about.install_update"))
+                                    .button_style(ButtonStyle::Prominent)
+                                    .icon("icons/cloud-upload.svg")
+                                    .on_press(cx.listener(|this, _, _, cx| {
                                         this.start_available_update(cx);
                                     }))
-                                    .on_key_down(cx.listener(
-                                        |this, event: &KeyDownEvent, _, cx| {
-                                            if matches!(
-                                                event.keystroke.key.as_str(),
-                                                "enter" | "space"
-                                            ) {
-                                                this.start_available_update(cx);
-                                                cx.stop_propagation();
-                                            }
-                                        },
-                                    ))
                             } else if is_loading {
-                                div()
-                                    .id("updating-btn")
-                                    .cursor_default()
-                                    .h(px(30.0))
-                                    .px(px(13.0))
-                                    .rounded(px(7.0))
-                                    .border_1()
-                                    .border_color(theme.border_strong)
-                                    .text_size(sp(12.0))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text_secondary)
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .gap(px(6.0))
-                                    .child(motion::spin_slow(icon(
+                                Button::new("updating-btn", tr!("about.checking_for_updates"))
+                                    .button_style(ButtonStyle::Ghost)
+                                    .leading(motion::spin_slow(icon(
                                         "icons/loader-circle.svg",
                                         13.0,
                                         theme.text_secondary,
                                     )))
-                                    .child(tr!("about.checking_for_updates"))
+                                    .enabled(false)
                             } else {
-                                div()
-                                    .id("check-for-updates-btn")
-                                    .tab_index(0)
-                                    .cursor_pointer()
-                                    .focus_visible(|style| {
-                                        style.border_1().border_color(theme.accent)
-                                    })
-                                    .h(px(30.0))
-                                    .px(px(13.0))
-                                    .rounded(px(7.0))
-                                    .border_1()
-                                    .border_color(theme.border_strong)
-                                    .hover(|element| element.bg(theme.overlay))
-                                    .active(|element| element.bg(theme.overlay_strong))
-                                    .text_size(sp(12.0))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .gap(px(6.0))
-                                    .child(icon("icons/rotate-cw.svg", 12.0, theme.text_secondary))
-                                    .child(tr!("about.check_for_updates"))
-                                    .on_click(cx.listener(|this, _, _, cx| {
+                                Button::new("check-for-updates-btn", tr!("about.check_for_updates"))
+                                    .button_style(ButtonStyle::Ghost)
+                                    .icon("icons/rotate-cw.svg")
+                                    .on_press(cx.listener(|this, _, _, cx| {
                                         this.check_for_updates(cx);
                                     }))
-                                    .on_key_down(cx.listener(
-                                        |this, event: &KeyDownEvent, _, cx| {
-                                            if matches!(
-                                                event.keystroke.key.as_str(),
-                                                "enter" | "space"
-                                            ) {
-                                                this.check_for_updates(cx);
-                                                cx.stop_propagation();
-                                            }
-                                        },
-                                    ))
                             })
                             .child(
                                 div()
@@ -240,114 +146,6 @@ impl Padu {
                                         }
                                     }),
                             ),
-                    ),
-            )
-            // Connected Host Card
-            .child(
-                div()
-                    .w_full()
-                    .min_h(px(60.0))
-                    .px(px(20.0))
-                    .py(px(14.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap(px(16.0))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(12.0))
-                            .min_w_0()
-                            .flex_1()
-                            .child(
-                                div()
-                                    .w(px(36.0))
-                                    .h(px(36.0))
-                                    .rounded(px(8.0))
-                                    .bg(theme.surface)
-                                    .border_1()
-                                    .border_color(theme.border)
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(icon("icons/server.svg", 16.0, theme.accent)),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(8.0))
-                                            .child(
-                                                div()
-                                                    .text_size(sp(13.5))
-                                                    .font_weight(FontWeight::MEDIUM)
-                                                    .text_color(theme.text)
-                                                    .child(host_name),
-                                            )
-                                            .child(
-                                                div()
-                                                    .px(px(6.0))
-                                                    .py(px(1.5))
-                                                    .rounded(px(4.0))
-                                                    .bg(theme.success.opacity(0.15))
-                                                    .text_size(sp(11.0))
-                                                    .font_weight(FontWeight::MEDIUM)
-                                                    .text_color(theme.success)
-                                                    .child(if is_remote {
-                                                        tr!("about.remote_host")
-                                                    } else {
-                                                        tr!("about.local_daemon")
-                                                    }),
-                                            ),
-                                    )
-                                    .child(
-                                        div()
-                                            .mt(px(3.0))
-                                            .font_family(".SystemUIFontMonospaced")
-                                            .text_size(sp(12.0))
-                                            .text_color(theme.text_secondary)
-                                            .child(host_address),
-                                    ),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .id("about-manage-hosts-btn")
-                            .tab_index(0)
-                            .cursor_pointer()
-                            .focus_visible(|style| style.border_1().border_color(theme.accent))
-                            .h(px(30.0))
-                            .px(px(13.0))
-                            .rounded(px(7.0))
-                            .border_1()
-                            .border_color(theme.border_strong)
-                            .hover(|element| element.bg(theme.overlay))
-                            .active(|element| element.bg(theme.overlay_strong))
-                            .text_size(sp(12.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .gap(px(6.0))
-                            .child(tr!("about.manage_hosts"))
-                            .child(icon("icons/arrow-right.svg", 12.0, theme.text_secondary))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_settings_page(SettingsPage::Daemon, cx);
-                            }))
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                    this.open_settings_page(SettingsPage::Daemon, cx);
-                                    cx.stop_propagation();
-                                }
-                            })),
                     ),
             )
             // Website, GitHub, Changelog & Sponsor single row of plain buttons, aligned center
