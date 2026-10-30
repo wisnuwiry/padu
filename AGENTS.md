@@ -81,6 +81,42 @@
   models remain consistent across both surfaces, while respecting native GPUI
   idioms in `apps/desktop/` and modern web patterns in `apps/web/`.
 
+## Desktop UI (bezel & GPUI)
+
+- Use `bezel` as the primary component library and design system for `apps/desktop/`
+  (`bezel`, `bezel-gpui`, `bezel-editor`, `bezel-markdown`, `bezel-mermaid`).
+  Prefer bezel catalog widgets and containers (`group_box`, `breadcrumb`, `tag`,
+  `button`, `switch`, `slider`, `control_group`) over hand-rolled `div()`
+  wrappers with bespoke borders and radiuses.
+- **Environment-based styling**: Bezel components read `Theme::of(cx)` at paint
+  time. Do not add color, font, or size parameters to component constructors —
+  style flows through the theme environment. Apply deviations or overrides by
+  chaining GPUI modifiers on the returned element.
+- **Catalog traits on Theme**: Import catalog traits to access builder methods
+  on `theme`: `use bezel::ui::widgets::{Buttons, Content, Controls, Icons, Layout as BezelLayout, Scaffolding, Status};`
+  (e.g. `bezel_theme.group_box()`, `bezel_theme.breadcrumb()`, `bezel_theme.tag()`).
+  Stateful controls (`bezel_editor::Editor`, `TextField`) are entities held by
+  views.
+- **Semantic radii and spacing**: Rely on bezel radius tokens
+  (`Theme::control_radius()`, `Theme::surface_radius()`, `Theme::panel_radius()`,
+  `Theme::inset_radius(...)`) rather than arbitrary pixel literals. Use `sp()`
+  for font-scaled chrome text and layout offsets so chrome tracks the UI font
+  size setting.
+- **Caller-owned interactions & accessibility**: Bezel widgets return standard
+  GPUI elements; attach `.id(...)`, `.on_click(...)`, `.on_key_down(...)`, and
+  `.focus_visible(...)` at call sites. Use `bezel::ui::focus::pressable` and
+  `bezel::ui::focus::traversal` for focusable controls to guarantee keyboard
+  operability.
+- **Catalog motion**: Use motion specs from `bezel::motion` (e.g.
+  `bezel::motion::dialog_in(...)`); do not invent inline durations or
+  cubic-beziers. Always gate decorative motion on `cx.reduce_motion()`.
+- **Dependency integrity**: GPUI dependencies in `apps/desktop/Cargo.toml` must
+  always use the `bezel-gpui` and `bezel-gpui-platform` packages pinned to match
+  the `bezel` version. Never introduce an unaliased `gpui` dependency to prevent
+  duplicate type universes and broken text rendering.
+- Reference documentation and component slugs: `.agents/skills/bezel/SKILL.md`
+  or fetch markdown docs from `https://bezel.gallery/docs/<slug>.md`.
+
 ## Mobile UI
 
 - Treat `apps/mobile/` as the third surface of the same product. A mobile screen
@@ -125,10 +161,12 @@
   precedent. Zed is the canonical GPUI codebase; read its crates rather than
   `gpui-component`, and read the gpui revision pinned in `apps/desktop/Cargo.toml` so the
   APIs match what Padu builds against.
-- Split the two references by concern: T3 Code answers what a coding-agent
-  client should do, Zed answers how a polished GPUI app implements it. The
-  same restraint applies to both — no reference spelunking for localized
-  fixes or changes the user has already specified.
+- Split the references by concern: T3 Code answers what a coding-agent
+  client should do, bezel (`.agents/skills/bezel/SKILL.md`) provides the
+  desktop component library and UI design system, and Zed answers how
+  lower-level GPUI platform behavior, window chrome, and virtualized lists are
+  implemented. The same restraint applies to all — no reference spelunking for
+  localized fixes or changes the user has already specified.
 - Use the reference as behavioral and design evidence, not as an instruction to
   reproduce web-specific interaction patterns or known bugs. Padu should keep
   native macOS conventions.
@@ -158,6 +196,9 @@
 ## Workspace skills & workflows
 
 Use the specialized skills in `.agents/skills/` for core tasks:
+- **`bezel`** (`.agents/skills/bezel/SKILL.md`):
+  Build native desktop UI with the bezel component library (`bezel`, `bezel-gpui`,
+  `bezel-editor`, `bezel-markdown`, `bezel-mermaid`, `bezel-theme`, `bezel-motion`).
 - **`protocol-parity-sync`** (`.agents/skills/protocol-parity-sync/SKILL.md`):
   Sync wire protocol types, codegen, `@padu/client` reducers, and UI parity.
 - **`gpui-perf-audit`** (`.agents/skills/gpui-perf-audit/SKILL.md`):
