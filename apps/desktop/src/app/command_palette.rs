@@ -1395,12 +1395,25 @@ impl Padu {
                 } else {
                     note.title.clone()
                 },
-                detail: Some(note.body.lines().next().unwrap_or_default().to_owned()),
+                detail: Some(if note.body.is_empty() {
+                    note.preview.clone()
+                } else {
+                    note.body.lines().next().unwrap_or_default().to_owned()
+                }),
                 icon: PaletteIcon::Asset("icons/note.svg"),
                 shortcut: None,
                 action: PaletteAction::EmbedNote(note.clone()),
                 content_match: None,
-                search_text: format!("{} {} {}", note.title, note.body, note.id),
+                search_text: format!(
+                    "{} {} {}",
+                    note.title,
+                    if note.body.is_empty() {
+                        &note.preview
+                    } else {
+                        &note.body
+                    },
+                    note.id
+                ),
                 order,
                 recency: note.updated_at,
             })
@@ -1981,18 +1994,8 @@ impl Padu {
                 return;
             }
             PaletteAction::EmbedNote(note) => {
-                self.composer_embedded_notes
-                    .push(padu_protocol::notes::EmbeddedNote {
-                        id: note.id,
-                        title: note.title,
-                        content: note.body,
-                        revision: note.revision,
-                    });
                 self.close_command_palette(window, cx);
-                let focus = self.composer_focus(cx);
-                window.focus(&focus, cx);
-                self.schedule_composer_draft_save(cx);
-                cx.notify();
+                self.add_note_to_chat(note.id, window, cx);
                 return;
             }
             _ => {}

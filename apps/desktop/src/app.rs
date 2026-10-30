@@ -1662,6 +1662,10 @@ pub struct Padu {
     notes_filtered: RefCell<Vec<usize>>,
     notes_filtered_query: String,
     notes_filtered_generation: u64,
+    notes_visible_limit: usize,
+    notes_filtered_total: usize,
+    notes_loading_more: bool,
+    notes_body_load_generation: u64,
     /// Virtualized Notes list and its scrollbar, mirroring the sidebar pattern
     /// so frame work stays proportional to the visible rows.
     notes_list_state: ListState,
@@ -3836,6 +3840,10 @@ impl Padu {
                 notes_filtered: RefCell::new(Vec::new()),
                 notes_filtered_query: String::new(),
                 notes_filtered_generation: 0,
+                notes_visible_limit: notes::NOTES_PAGE_SIZE,
+                notes_filtered_total: 0,
+                notes_loading_more: false,
+                notes_body_load_generation: 0,
                 notes_list_state: ListState::new(0, ListAlignment::Top, px(480.0)),
                 notes_scrollbar: ScrollbarState::new(),
                 board_tasks: Vec::new(),
