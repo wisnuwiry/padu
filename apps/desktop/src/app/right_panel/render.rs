@@ -1,3 +1,5 @@
+use bezel::ui::widgets::Scaffolding;
+
 use super::*;
 
 impl Padu {
@@ -93,6 +95,22 @@ impl Padu {
             }
         };
 
+        let bezel_theme = bezel::theme::Theme::of(cx);
+        let card = bezel_theme
+            .group_box()
+            .id("right-panel-content-card")
+            .flex_1()
+            .min_h_0()
+            .ml(if self.right_panel_fullscreen_active() && !self.sidebar_visible {
+                px(8.0)
+            } else {
+                px(2.0)
+            })
+            .mr(px(8.0))
+            .mb(px(8.0))
+            .bg(theme.surface)
+            .child(body);
+
         div()
             .id("right-panel")
             .when(!self.right_panel_fullscreen_active(), |element| {
@@ -108,7 +126,7 @@ impl Padu {
             .bg(theme.frosted)
             .relative()
             .child(self.render_right_panel_header(window, cx))
-            .child(body)
+            .child(card)
             .when(!self.right_panel_fullscreen_active(), |element| {
                 element.child(self.render_panel_resize_handle(
                     "right-panel-resize-handle",
