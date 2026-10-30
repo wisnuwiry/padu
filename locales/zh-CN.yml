@@ -96,6 +96,9 @@ command_palette.resume_failed: "无法恢复会话：%{error}"
 language.title: 语言
 language.system: 跟随系统
 language.description: 选择 Padu 的界面语言
+settings.group_preferences: 偏好设置
+settings.group_agents: 智能体
+settings.group_system: 系统
 settings.general: 通用
 settings.appearance: 外观
 settings.keybindings: 快捷键
@@ -1290,6 +1293,7 @@ browser.stop_loading: 停止加载（Esc）
 browser.reload: 重新加载（%{shortcut}）
 browser.open_external: 在默认浏览器中打开
 browser.browse_web: 浏览网页
+browser.browse_web_hint: 在上方的地址栏输入网址或搜索内容即可开始浏览
 browser.start_hint: 在上方输入网址或搜索内容 — 按 %{shortcut} 聚焦地址栏
 browser.unavailable: 浏览器不可用
 browser.unavailable_on_platform: 浏览器面板尚不支持当前平台

@@ -14,7 +14,7 @@ import { ArchivedSettings } from './archived-settings'
 import { DaemonSettings } from './daemon-settings'
 import { GeneralSettings } from './general-settings'
 import { ProvidersSettings } from './providers-settings'
-import { SETTINGS_PAGES, type SettingsPageId } from './types'
+import { SETTINGS_GROUPS, SETTINGS_PAGES, type SettingsPageId } from './types'
 
 export function SettingsView({
   page,
@@ -104,22 +104,33 @@ export function SettingsView({
             <Kbd className="group-focus-within:hidden" size="xs">/</Kbd>
           </label>
         </div>
-        <nav aria-label={t('common.settings')} className="mt-[18px] flex flex-col gap-[3px] px-3">
-          {pages.map((candidate) => (
-            <button
-              aria-current={page === candidate.id ? 'page' : undefined}
-              className={cn(
-                'flex h-9 items-center gap-2.5 rounded-lg px-[11px] text-[13px] text-[var(--text-secondary)] outline-none hover:bg-sidebar-accent focus-visible:ring-1 focus-visible:ring-ring',
-                page === candidate.id && 'bg-sidebar-accent text-foreground',
-              )}
-              key={candidate.id}
-              type="button"
-              onClick={() => onPageChange(candidate.id)}
-            >
-              <PaduIcon className="size-[15px] text-[var(--text-tertiary)]" name={candidate.icon} />
-              {candidate.localizedLabel}
-            </button>
-          ))}
+        <nav aria-label={t('common.settings')} className="mt-3 flex flex-1 flex-col gap-[3px] overflow-y-auto px-3 pb-4">
+          {SETTINGS_GROUPS.map((group, groupIndex) => {
+            const groupPages = pages.filter((candidate) => candidate.group === group.id)
+            if (!groupPages.length) return null
+            return (
+              <div key={group.id} className={cn('flex flex-col gap-[3px]', groupIndex > 0 && 'mt-3')}>
+                <div className="px-2 pb-1 pt-1 text-[11px] font-semibold text-[var(--text-tertiary)]">
+                  {t(group.labelKey)}
+                </div>
+                {groupPages.map((candidate) => (
+                  <button
+                    aria-current={page === candidate.id ? 'page' : undefined}
+                    className={cn(
+                      'flex h-9 items-center gap-2.5 rounded-lg px-[11px] text-[13px] text-[var(--text-secondary)] outline-none hover:bg-sidebar-accent focus-visible:ring-1 focus-visible:ring-ring',
+                      page === candidate.id && 'bg-sidebar-accent text-foreground',
+                    )}
+                    key={candidate.id}
+                    type="button"
+                    onClick={() => onPageChange(candidate.id)}
+                  >
+                    <PaduIcon className="size-[15px] text-[var(--text-tertiary)]" name={candidate.icon} />
+                    {candidate.localizedLabel}
+                  </button>
+                ))}
+              </div>
+            )
+          })}
         </nav>
       </aside>
       <main className="relative flex min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground">

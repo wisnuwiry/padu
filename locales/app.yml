@@ -196,6 +196,13 @@ language.system:
 language.description:
   en: Choose the language used throughout Padu
 
+settings.group_preferences:
+  en: Preferences
+settings.group_agents:
+  en: Agents
+settings.group_system:
+  en: System
+
 settings.general:
   en: General
 settings.appearance:
@@ -2770,6 +2777,8 @@ browser.open_external:
   en: Open in default browser
 browser.browse_web:
   en: Browse the web
+browser.browse_web_hint:
+  en: Enter a URL or search in the address bar above to get started
 browser.start_hint:
   en: Enter a URL or search above — %{shortcut} focuses the address bar
 browser.unavailable:

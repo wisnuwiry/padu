@@ -95,6 +95,9 @@ command_palette.resume_failed: "Tidak dapat melanjutkan sesi: %{error}"
 language.title: Bahasa
 language.system: Sistem
 language.description: Pilih bahasa yang digunakan di seluruh Padu
+settings.group_preferences: Preferensi
+settings.group_agents: Agen
+settings.group_system: Sistem
 settings.general: Umum
 settings.appearance: Tampilan
 settings.keybindings: Pintasan Tombol
@@ -1289,6 +1292,7 @@ browser.stop_loading: Hentikan pemuatan (Esc)
 browser.reload: Muat ulang (%{shortcut})
 browser.open_external: Buka di browser default
 browser.browse_web: Jelajahi web
+browser.browse_web_hint: Masukkan URL atau cari di bilah alamat di atas untuk memulai
 browser.start_hint: Masukkan URL atau cari di atas — %{shortcut} memfokuskan bilah alamat
 browser.unavailable: Browser tidak tersedia
 browser.unavailable_on_platform: Tampilan browser belum tersedia di platform ini

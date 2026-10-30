@@ -1883,7 +1883,7 @@ fn settings_search_filters_pages_for_arrow_cycling() {
 
     let pages = |query: &str| {
         visible_settings_pages(query)
-            .map(|(page, ..)| page)
+            .map(|(_, page, ..)| page)
             .collect::<Vec<_>>()
     };
 
@@ -1897,11 +1897,11 @@ fn settings_search_filters_pages_for_arrow_cycling() {
         SettingsPage::Providers,
         SettingsPage::Skills,
         SettingsPage::Usage,
-        SettingsPage::Daemon,
     ];
     if cfg!(all(debug_assertions, target_os = "macos")) {
         all_pages.push(SettingsPage::ComputerUse);
     }
+    all_pages.push(SettingsPage::Daemon);
     all_pages.push(SettingsPage::Archived);
     all_pages.push(SettingsPage::About);
     assert_eq!(pages(""), all_pages);

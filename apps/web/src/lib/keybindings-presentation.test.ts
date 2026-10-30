@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { SETTINGS_PAGES } from '@/components/settings-view'
+import { SETTINGS_GROUPS, SETTINGS_PAGES } from '@/components/settings-view'
 import { KEYBINDING_SECTIONS } from '@/components/keybindings-settings'
 import { parseRustI18nCatalog } from './i18n-core'
 import englishSource from '../../../../locales/app.yml?raw'
@@ -28,6 +28,23 @@ describe('keybindings settings parity', () => {
     expect(keybindingsPage?.labelKey).toBe('settings.keybindings')
     expect(keybindingsPage?.keywordsKey).toBe('settings.keybindings_keywords')
     expect(en[keybindingsPage!.labelKey]).toBe('Keybindings')
+  })
+
+  test('declares valid settings groups with translation keys and associated pages', () => {
+    expect(SETTINGS_GROUPS.map((group) => group.id)).toEqual(['preferences', 'agents', 'system'])
+    for (const group of SETTINGS_GROUPS) {
+      expect(en[group.labelKey]).toBeDefined()
+    }
+
+    for (const page of SETTINGS_PAGES) {
+      if (['general', 'appearance', 'keybindings', 'notifications'].includes(page.id)) {
+        expect(page.group).toBe('preferences')
+      } else if (['providers', 'skills', 'usage'].includes(page.id)) {
+        expect(page.group).toBe('agents')
+      } else if (['daemon', 'archived', 'about'].includes(page.id)) {
+        expect(page.group).toBe('system')
+      }
+    }
   })
 
   test('every keybinding item and section has valid English translations', () => {

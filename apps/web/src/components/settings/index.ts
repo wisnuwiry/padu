@@ -16,4 +16,11 @@ export {
   useStoredBoolean,
   type Translator,
 } from './shared'
-export { SETTINGS_PAGES, isSettingsPageId, type SettingsPageId } from './types'
+export {
+  SETTINGS_GROUPS,
+  SETTINGS_PAGES,
+  isSettingsPageId,
+  type SettingsGroup,
+  type SettingsGroupId,
+  type SettingsPageId,
+} from './types'
