@@ -12,7 +12,8 @@ use gpui::{
 
 pub use bezel::ui::widgets::{ButtonRole, ButtonStyle};
 
-use super::{icon, kbd_badge_icon, kbd_badge_styled};
+use super::icon;
+use crate::theme::sp;
 
 #[allow(dead_code)]
 #[derive(Clone)]
@@ -140,7 +141,7 @@ impl RenderOnce for Button {
             self.role == Some(ButtonRole::Destructive) || self.style == ButtonStyle::Destructive;
 
         let pad_y = if self.kbd.is_some() {
-            px(((self.size.height() - 20.0 - 2.0) / 2.0).max(0.0))
+            px(((self.size.height() - 16.0 - 2.0) / 2.0).max(0.0))
         } else {
             px((self.size.pad_y() - 1.0).max(0.0))
         };
@@ -211,10 +212,10 @@ impl RenderOnce for Button {
             };
             match kbd {
                 ButtonKbd::Label(kbd_label) => {
-                    kbd_badge_styled(kbd_label, bg, text_color, border_color)
+                    button_kbd_badge(kbd_label, bg, text_color, border_color)
                 }
                 ButtonKbd::Icon(icon_path) => {
-                    kbd_badge_icon(icon_path, bg, text_color, border_color)
+                    button_kbd_icon(icon_path, bg, text_color, border_color)
                 }
             }
         });
@@ -248,4 +249,51 @@ impl RenderOnce for Button {
             },
         )
     }
+}
+
+fn button_kbd_badge(
+    label: SharedString,
+    bg: gpui::Hsla,
+    text_color: gpui::Hsla,
+    border_color: gpui::Hsla,
+) -> AnyElement {
+    div()
+        .h(px(16.0))
+        .min_w(px(16.0))
+        .px(px(4.0))
+        .rounded(px(3.5))
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(bg)
+        .border_1()
+        .border_color(border_color)
+        .text_size(sp(9.5))
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_color(text_color)
+        .child(label)
+        .into_any_element()
+}
+
+fn button_kbd_icon(
+    icon_path: &'static str,
+    bg: gpui::Hsla,
+    icon_color: gpui::Hsla,
+    border_color: gpui::Hsla,
+) -> AnyElement {
+    div()
+        .h(px(16.0))
+        .min_w(px(16.0))
+        .px(px(3.5))
+        .rounded(px(3.5))
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(bg)
+        .border_1()
+        .border_color(border_color)
+        .child(icon(icon_path, 8.5, icon_color))
+        .into_any_element()
 }
