@@ -267,9 +267,11 @@ impl Padu {
             .get(&terminal_id)
             .is_some_and(|terminal| terminal.read(cx).working_directory() == working_directory);
         if !matches_project {
+            let terminal = cx.new(|cx| TerminalView::new(working_directory.clone(), cx));
+            cx.observe(&terminal, |_, _, cx| cx.notify()).detach();
             self.right_panel_terminals.insert(
                 terminal_id,
-                cx.new(|cx| TerminalView::new(working_directory.clone(), cx)),
+                terminal,
             );
         }
     }
@@ -369,6 +371,12 @@ impl Padu {
                     .right_panel_browsers
                     .get(browser_id)
                     .and_then(|browser| browser.read(cx).tab_label())
+                    .unwrap_or_else(|| surface.label()),
+                RightPanelSurface::Terminal(terminal_id) => self
+                    .right_panel_terminals
+                    .get(terminal_id)
+                    .map(|terminal| terminal.read(cx).title().to_owned())
+                    .filter(|title| !title.trim().is_empty())
                     .unwrap_or_else(|| surface.label()),
                 _ => {
                     right_panel_tab_label(&surface, self.right_panel_files_selected_path.as_deref())

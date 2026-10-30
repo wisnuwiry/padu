@@ -132,7 +132,7 @@ export const BASE_TOKENS: { light: BaseTokens; dark: BaseTokens } = {
     "raised": "#232323",
     "inset": "#151515",
     "composer": "#212121",
-    "terminal": "#151515",
+    "terminal": "#1a1a1a",
     "sidebar": "#181818",
     "backgroundElement": "#232323",
     "backgroundSelected": "#303030",

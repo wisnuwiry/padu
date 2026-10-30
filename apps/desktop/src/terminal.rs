@@ -25,7 +25,7 @@ use gpui::{
     FontStyle, FontWeight, Hsla, InteractiveElement, IntoElement, KeyDownEvent, Keystroke,
     Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent,
     MouseUpEvent, ParentElement, Pixels, Point, Render, ScrollDelta, ScrollWheelEvent,
-    SharedString, StrikethroughStyle, Styled, StyledText, Subscription, Task, TextRun,
+    StrikethroughStyle, Styled, StyledText, Subscription, Task, TextRun,
     UnderlineStyle, Window, canvas, div, font, px, rgb,
 };
 use parking_lot::Mutex;
@@ -55,7 +55,6 @@ fn terminal_clipboard_modifier_pressed(modifiers: &Modifiers) -> bool {
 }
 const TERMINAL_PADDING_X: f32 = 10.0;
 const TERMINAL_PADDING_Y: f32 = 8.0;
-const TERMINAL_TOOLBAR_HEIGHT: f32 = 34.0;
 const TERMINAL_MIN_COLUMNS: usize = 20;
 const TERMINAL_MIN_ROWS: usize = 8;
 const TERMINAL_SCROLLBACK_LINES: usize = 10_000;
@@ -378,7 +377,7 @@ impl TerminalSession {
                 && column == cursor_column
             {
                 background = theme.text;
-                foreground = theme.terminal;
+                foreground = theme.surface;
             }
 
             cells[row as usize * columns + column] = TerminalCell {
@@ -486,7 +485,7 @@ impl TerminalCell {
         Self {
             text: " ".into(),
             foreground: theme.text,
-            background: theme.terminal,
+            background: theme.surface,
             bold: false,
             italic: false,
             underline: false,
@@ -728,6 +727,10 @@ impl TerminalView {
 
     pub fn set_panel_width(&mut self, width: f32) {
         self.panel_width = width;
+    }
+
+    pub fn title(&self) -> &str {
+        &self.title
     }
 
     pub fn refresh_localized_text(&mut self, cx: &mut Context<Self>) {
@@ -1082,7 +1085,7 @@ impl Render for TerminalView {
         let selection_color = theme.selection;
         let viewport = window.viewport_size();
         let panel_width = self.panel_width;
-        let body_height = (f32::from(viewport.height) - 48.0 - TERMINAL_TOOLBAR_HEIGHT).max(120.0);
+        let body_height = (f32::from(viewport.height) - 56.0).max(120.0);
         // The rows are laid out by `StyledText` at the font's own advance, so
         // the grid must be sized from that same measured advance or the text
         // wraps short of (or past) the panel edge.
@@ -1119,17 +1122,6 @@ impl Render for TerminalView {
             .session
             .as_ref()
             .map(|session| session.snapshot(theme, selection_color, cursor_style, hovered_link));
-        let title = if self.title.trim().is_empty() {
-            tr!("right_panel.terminal")
-        } else {
-            self.title.clone()
-        };
-        let directory = self
-            .working_directory
-            .file_name()
-            .and_then(|name| name.to_str())
-            .map(str::to_owned)
-            .unwrap_or_else(|| tr!("workspace.workspace"));
 
         let mut screen = div()
             .flex_1()
@@ -1149,6 +1141,24 @@ impl Render for TerminalView {
 
         if self.hovered_link.is_some() {
             screen = screen.cursor_pointer();
+        }
+
+        if self.exited {
+            screen = screen.child(
+                div()
+                    .absolute()
+                    .bottom(px(8.0))
+                    .right(px(14.0))
+                    .px(px(8.0))
+                    .py(px(4.0))
+                    .rounded(px(4.0))
+                    .bg(theme.raised)
+                    .border_1()
+                    .border_color(theme.border)
+                    .text_size(sp(11.0))
+                    .text_color(theme.danger)
+                    .child(tr!("terminal.process_exited")),
+            );
         }
 
         if let Some(snapshot) = snapshot {
@@ -1295,7 +1305,7 @@ impl Render for TerminalView {
             .min_w_0()
             .px(px(TERMINAL_PADDING_X))
             .py(px(TERMINAL_PADDING_Y))
-            .bg(theme.terminal)
+            .bg(theme.surface)
             .overflow_hidden()
             .flex()
             .flex_col()
@@ -1312,46 +1322,7 @@ impl Render for TerminalView {
             .min_w_0()
             .flex()
             .flex_col()
-            .bg(theme.terminal)
-            .child(
-                div()
-                    .h(px(TERMINAL_TOOLBAR_HEIGHT))
-                    .flex_none()
-                    .px(px(10.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(7.0))
-                    .border_b_1()
-                    .border_color(theme.border)
-                    .bg(theme.surface)
-                    .child(
-                        div()
-                            .w(px(6.0))
-                            .h(px(6.0))
-                            .rounded_full()
-                            .bg(if self.exited {
-                                theme.danger
-                            } else {
-                                theme.accent
-                            }),
-                    )
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .truncate()
-                            .text_size(sp(12.5))
-                            .text_color(theme.text_secondary)
-                            .child(SharedString::from(title.to_owned())),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_size(sp(12.5))
-                            .text_color(theme.text_tertiary)
-                            .child(directory),
-                    ),
-            )
+            .bg(theme.surface)
             .child(grid)
             .on_key_down(cx.listener(Self::on_key_down))
             .on_scroll_wheel(cx.listener(Self::on_scroll_wheel))
@@ -1703,7 +1674,7 @@ fn resolve_color(
             colors[index as usize].or_else(|| Some(terminal_rgb(index as usize, theme.is_dark)))
         }
         Color::Named(NamedColor::Foreground | NamedColor::BrightForeground) => None,
-        Color::Named(NamedColor::Background) => return theme.terminal,
+        Color::Named(NamedColor::Background) => return theme.surface,
         Color::Named(NamedColor::Cursor) => return theme.text,
         Color::Named(named) => {
             colors[named as usize].or_else(|| Some(terminal_rgb(named as usize, theme.is_dark)))
@@ -1712,7 +1683,7 @@ fn resolve_color(
     rgb.map(rgb_to_hsla).unwrap_or(if foreground {
         theme.text
     } else {
-        theme.terminal
+        theme.surface
     })
 }
 

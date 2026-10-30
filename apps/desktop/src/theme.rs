@@ -55,7 +55,7 @@ pub struct Theme {
     pub raised: Hsla,
     pub composer: Hsla,
     pub inset: Hsla,
-    /// Terminal screen surface: paper-white in light mode, near-black in dark.
+    /// Terminal screen surface: matches normal surface background.
     pub terminal: Hsla,
     pub overlay: Hsla,
     pub overlay_strong: Hsla,
@@ -126,7 +126,7 @@ impl Theme {
             raised: rgb(0x232323).into(),
             composer: rgb(0x212121).into(),
             inset: rgb(0x151515).into(),
-            terminal: rgb(0x151515).into(),
+            terminal: rgb(0x1A1A1A).into(),
             overlay: hsla(220.0 / 360.0, 0.10, 0.90, 0.05),
             overlay_strong: hsla(220.0 / 360.0, 0.10, 0.90, 0.09),
 
@@ -171,7 +171,7 @@ impl Theme {
             raised: rgb(0xECECEC).into(),
             composer: rgb(0xFFFFFF).into(),
             inset: rgb(0xE6E6E6).into(),
-            terminal: rgb(0xFFFFFF).into(),
+            terminal: rgb(0xF6F5F6).into(),
             overlay: hsla(220.0 / 360.0, 0.10, 0.12, 0.05),
             overlay_strong: hsla(220.0 / 360.0, 0.10, 0.12, 0.09),
 
