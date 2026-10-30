@@ -680,7 +680,6 @@ pub fn configure_sidebar_material(window: &Window, dark: bool) {
             return;
         };
 
-        let mut configured_effect = false;
         for subview in content_view.subviews().iter() {
             let Some(effect_view) = subview.downcast_ref::<NSVisualEffectView>() else {
                 continue;
@@ -688,10 +687,6 @@ pub fn configure_sidebar_material(window: &Window, dark: bool) {
             effect_view.setMaterial(NSVisualEffectMaterial::Sidebar);
             effect_view.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
             effect_view.setState(NSVisualEffectState::Active);
-            configured_effect = true;
-        }
-        if !configured_effect {
-            return;
         }
 
         let channel = if dark { 0x18 } else { 0xF3 } as f64 / 255.0;
@@ -725,8 +720,11 @@ pub fn configure_sidebar_material(window: &Window, dark: bool) {
                 *slot = Some(tint_view);
             }
 
-            if let Some(layer) = slot.as_ref().and_then(|tint_view| tint_view.layer()) {
-                layer.setBackgroundColor(Some(&tint.CGColor()));
+            if let Some(tint_view) = slot.as_ref() {
+                if let Some(layer) = tint_view.layer() {
+                    layer.setBackgroundColor(Some(&tint.CGColor()));
+                }
+                tint_view.setNeedsDisplay(true);
             }
         });
     }

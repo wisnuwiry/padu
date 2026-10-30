@@ -1,4 +1,4 @@
-use gpui::{App, Global, Hsla, Rems, Window, WindowAppearance, hsla, rems, rgb, transparent_black};
+use gpui::{App, Global, Hsla, Rems, Window, WindowAppearance, hsla, rems, rgb};
 
 pub use crate::theme_palette::ColorScheme;
 pub use padu_client::theme::ThemePreference;
@@ -47,8 +47,7 @@ pub struct Theme {
     #[allow(dead_code)]
     pub sidebar: Hsla,
     /// Frosted glass background for sidebars, panels, and material surfaces.
-    /// Evaluates to `transparent_black()` on macOS (revealing native window
-    /// vibrancy and tint) and falls back to a neutral surface on other platforms.
+    /// Follows the active theme palette: `#181818` in dark mode and `#F3F3F3` in light mode.
     pub frosted: Hsla,
     pub sidebar_drag_background: Hsla,
     pub sidebar_item_background: Hsla,
@@ -119,16 +118,8 @@ impl Theme {
         Self {
             is_dark: true,
             canvas: rgb(0x1A1A1A).into(),
-            sidebar: if cfg!(target_os = "macos") {
-                transparent_black()
-            } else {
-                rgb(0x181818).into()
-            },
-            frosted: if cfg!(target_os = "macos") {
-                transparent_black()
-            } else {
-                rgb(0x181818).into()
-            },
+            sidebar: rgb(0x181818).into(),
+            frosted: rgb(0x181818).into(),
             sidebar_drag_background: rgb(0x181818).into(),
             sidebar_item_background: hsla(0.0, 0.0, 0.941, 0.06),
             surface: rgb(0x1A1A1A).into(),
@@ -172,16 +163,8 @@ impl Theme {
         Self {
             is_dark: false,
             canvas: rgb(0xF6F5F6).into(),
-            sidebar: if cfg!(target_os = "macos") {
-                transparent_black()
-            } else {
-                rgb(0xF3F3F3).into()
-            },
-            frosted: if cfg!(target_os = "macos") {
-                transparent_black()
-            } else {
-                rgb(0xF3F3F3).into()
-            },
+            sidebar: rgb(0xF3F3F3).into(),
+            frosted: rgb(0xF3F3F3).into(),
             sidebar_drag_background: rgb(0xF3F3F3).into(),
             sidebar_item_background: hsla(0.0, 0.0, 0.078, 0.06),
             surface: rgb(0xF6F5F6).into(),
