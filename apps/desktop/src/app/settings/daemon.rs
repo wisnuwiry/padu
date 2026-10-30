@@ -8,6 +8,7 @@ use padu_client::transport::{
 
 use super::*;
 use crate::ui::button::{Button, ButtonStyle};
+use bezel::ui::widgets::Buttons;
 
 /// Edge length, in pixels, of the credentials card's QR code.
 const DAEMON_QR_PX: u32 = 180;
@@ -817,61 +818,32 @@ impl Padu {
         // section title with a notes view-mode style segmented transport
         // picker, then the body splits into code (left) and instructions
         // (right).
-        let mut header_tabs = div()
-            .flex()
-            .items_center()
-            .gap(px(1.0))
-            .p(px(2.0))
-            .rounded(px(7.0))
-            .bg(theme.overlay);
+        let bezel_theme = bezel::theme::Theme::of(cx);
+        let mut header_tabs = bezel_theme.control_group();
         for kind in DAEMON_QR_TRANSPORTS {
             let active = kind == self.daemon_qr_transport;
             header_tabs = header_tabs.child(
-                div()
-                    .id(SharedString::from(format!("daemon-qr-tab-{kind:?}")))
-                    .tab_index(0)
-                    .h(px(28.0))
-                    .px(px(10.0))
-                    .rounded(px(6.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .cursor_pointer()
-                    .text_size(sp(12.5))
-                    .text_color(if active {
-                        theme.text
-                    } else {
-                        theme.text_secondary
-                    })
-                    .when(active, |el| el.bg(theme.overlay_strong))
-                    .hover(|el| el.bg(theme.overlay_strong))
-                    .focus_visible(|style| style.border_color(theme.accent))
-                    .child(host_transport_label(kind))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if this.daemon_qr_transport != kind {
-                            this.daemon_qr_transport = kind;
-                            // Addresses differ per transport, so the previous
-                            // one must not linger as a stale value.
-                            this.daemon_qr_field_input
-                                .update(cx, |input, cx| input.set_content("", cx));
-                            this.daemon_qr_cache.replace(None);
-                            this.daemon_qr_tunnel_error = None;
-                            cx.notify();
-                        }
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                        if !event.keystroke.modifiers.modified()
-                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                        {
-                            this.daemon_qr_transport = kind;
-                            this.daemon_qr_field_input
-                                .update(cx, |input, cx| input.set_content("", cx));
-                            this.daemon_qr_cache.replace(None);
-                            this.daemon_qr_tunnel_error = None;
-                            cx.notify();
-                            cx.stop_propagation();
-                        }
-                    })),
+                Button::new(
+                    SharedString::from(format!("daemon-qr-tab-{kind:?}")),
+                    host_transport_label(kind),
+                )
+                .button_style(if active {
+                    ButtonStyle::Prominent
+                } else {
+                    ButtonStyle::Ghost
+                })
+                .on_press(cx.listener(move |this, _, _, cx| {
+                    if this.daemon_qr_transport != kind {
+                        this.daemon_qr_transport = kind;
+                        // Addresses differ per transport, so the previous
+                        // one must not linger as a stale value.
+                        this.daemon_qr_field_input
+                            .update(cx, |input, cx| input.set_content("", cx));
+                        this.daemon_qr_cache.replace(None);
+                        this.daemon_qr_tunnel_error = None;
+                        cx.notify();
+                    }
+                })),
             );
         }
         // Left column: transport inputs, tunnel action, address, and code.
