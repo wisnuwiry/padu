@@ -1290,19 +1290,17 @@ impl Padu {
             .gap(px(10.0));
         if let Some(note) = selected_note {
             let note_id = note.id;
-            let created_ago = super::notes_utils::format_note_time_ago(
-                unix_time().saturating_sub(note.created_at),
-            );
             let updated_ago = super::notes_utils::format_note_time_ago(
                 unix_time().saturating_sub(note.updated_at),
             );
             let tag_entity = cx.entity().clone();
             let tag_input = TagInput::new("note-tags", self.notes_tags.clone())
+                .prefix("Tags")
+                .transparent(true)
                 .tags(self.notes_tags_list.clone())
                 .small(true)
                 .bordered(false)
                 .focus_outline(false)
-                .accent_chips(true)
                 .on_remove(move |idx, _window, cx| {
                     tag_entity.update(cx, |this, cx| {
                         this.remove_note_tag(idx, cx);
@@ -1311,13 +1309,25 @@ impl Padu {
             editor = editor
                 .child(
                     div()
-                        .w_full()
-                        .h(px(38.0))
                         .flex()
-                        .items_center()
-                        .text_size(sp(22.0))
-                        .font_weight(FontWeight::BOLD)
-                        .child(self.notes_title.clone()),
+                        .flex_col()
+                        .gap(px(2.0))
+                        .child(
+                            div()
+                                .w_full()
+                                .h(px(32.0))
+                                .flex()
+                                .items_center()
+                                .text_size(sp(18.0))
+                                .font_weight(FontWeight::BOLD)
+                                .child(self.notes_title.clone()),
+                        )
+                        .child(
+                            div()
+                                .text_size(sp(11.0))
+                                .text_color(theme.text_tertiary)
+                                .child(tr!("notes.updated", time = updated_ago)),
+                        ),
                 )
                 .child(tag_input)
                 .child(
@@ -1330,114 +1340,22 @@ impl Padu {
                         .gap(px(8.0))
                         .child(
                             div()
-                                .min_w_0()
                                 .flex()
                                 .items_center()
                                 .gap(px(6.0))
-                                .text_size(sp(11.0))
-                                .text_color(theme.text_tertiary)
                                 .child(
                                     Button::new("note-add-to-chat", tr!("files.add_to_chat"))
                                         .button_style(ButtonStyle::Prominent)
-                                        .icon("icons/add-to-chat.svg")
                                         .kbd(crate::platform::primary_shortcut("⌘↵", "Ctrl+Enter"))
                                         .on_press(cx.listener(move |this, _, window, cx| {
                                             this.add_note_to_chat(note_id, window, cx);
                                         })),
-                                )
-                                .child(tr!("notes.created", time = created_ago))
-                                .child(tr!("notes.updated", time = updated_ago)),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(6.0))
-                                .child(
-                                    bezel_theme
-                                        .toggle_group()
-                                        .id("notes-view-mode-toggle")
-                                        .child(
-                                            bezel_theme
-                                                .toggle_group_item(
-                                                    tr!("notes.rich_editor"),
-                                                    matches!(self.notes_layout, NotesLayout::Rich),
-                                                )
-                                                .id("note-rich")
-                                                .tab_index(0)
-                                                .focus_visible(|style| {
-                                                    style.border_color(theme.accent)
-                                                })
-                                                .tooltip(Tooltip::with_shortcut(
-                                                    tr!("notes.rich_editor"),
-                                                    crate::platform::primary_shortcut(
-                                                        "⌘1", "Ctrl+1",
-                                                    ),
-                                                ))
-                                                .on_click(cx.listener(|this, _, _, cx| {
-                                                    this.set_notes_layout(NotesLayout::Rich, cx);
-                                                }))
-                                                .on_key_down(cx.listener(
-                                                    |this, event: &KeyDownEvent, _, cx| {
-                                                        if !event.keystroke.modifiers.modified()
-                                                            && matches!(
-                                                                event.keystroke.key.as_str(),
-                                                                "enter" | "space"
-                                                            )
-                                                        {
-                                                            this.set_notes_layout(
-                                                                NotesLayout::Rich,
-                                                                cx,
-                                                            );
-                                                            cx.stop_propagation();
-                                                        }
-                                                    },
-                                                )),
-                                        )
-                                        .child(
-                                            bezel_theme
-                                                .toggle_group_item(
-                                                    tr!("notes.code"),
-                                                    matches!(self.notes_layout, NotesLayout::Code),
-                                                )
-                                                .id("note-code")
-                                                .tab_index(0)
-                                                .focus_visible(|style| {
-                                                    style.border_color(theme.accent)
-                                                })
-                                                .tooltip(Tooltip::with_shortcut(
-                                                    tr!("notes.code"),
-                                                    crate::platform::primary_shortcut(
-                                                        "⌘2", "Ctrl+2",
-                                                    ),
-                                                ))
-                                                .on_click(cx.listener(|this, _, _, cx| {
-                                                    this.set_notes_layout(NotesLayout::Code, cx);
-                                                }))
-                                                .on_key_down(cx.listener(
-                                                    |this, event: &KeyDownEvent, _, cx| {
-                                                        if !event.keystroke.modifiers.modified()
-                                                            && matches!(
-                                                                event.keystroke.key.as_str(),
-                                                                "enter" | "space"
-                                                            )
-                                                        {
-                                                            this.set_notes_layout(
-                                                                NotesLayout::Code,
-                                                                cx,
-                                                            );
-                                                            cx.stop_propagation();
-                                                        }
-                                                    },
-                                                )),
-                                        ),
                                 )
                                 .child(
                                     Button::new("note-delete", tr!("notes.delete"))
                                         .button_style(ButtonStyle::Ghost)
                                         .role(ButtonRole::Destructive)
                                         .icon("icons/trash.svg")
-                                        .label_hidden()
                                         .tooltip(Tooltip::with_shortcut(
                                             tr!("notes.delete"),
                                             crate::platform::primary_shortcut(
@@ -1452,6 +1370,85 @@ impl Padu {
                                                 this.confirm_delete_note(note.id, window, cx);
                                             }
                                         })),
+                                ),
+                        )
+                        .child(
+                            bezel_theme
+                                .toggle_group()
+                                .id("notes-view-mode-toggle")
+                                .child(
+                                    bezel_theme
+                                        .toggle_group_item(
+                                            tr!("notes.rich_editor"),
+                                            matches!(self.notes_layout, NotesLayout::Rich),
+                                        )
+                                        .id("note-rich")
+                                        .tab_index(0)
+                                        .focus_visible(|style| {
+                                            style.border_color(theme.accent)
+                                        })
+                                        .tooltip(Tooltip::with_shortcut(
+                                            tr!("notes.rich_editor"),
+                                            crate::platform::primary_shortcut(
+                                                "⌘1", "Ctrl+1",
+                                            ),
+                                        ))
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.set_notes_layout(NotesLayout::Rich, cx);
+                                        }))
+                                        .on_key_down(cx.listener(
+                                            |this, event: &KeyDownEvent, _, cx| {
+                                                if !event.keystroke.modifiers.modified()
+                                                    && matches!(
+                                                        event.keystroke.key.as_str(),
+                                                        "enter" | "space"
+                                                    )
+                                                {
+                                                    this.set_notes_layout(
+                                                        NotesLayout::Rich,
+                                                        cx,
+                                                    );
+                                                    cx.stop_propagation();
+                                                }
+                                            },
+                                        )),
+                                )
+                                .child(
+                                    bezel_theme
+                                        .toggle_group_item(
+                                            tr!("notes.code"),
+                                            matches!(self.notes_layout, NotesLayout::Code),
+                                        )
+                                        .id("note-code")
+                                        .tab_index(0)
+                                        .focus_visible(|style| {
+                                            style.border_color(theme.accent)
+                                        })
+                                        .tooltip(Tooltip::with_shortcut(
+                                            tr!("notes.code"),
+                                            crate::platform::primary_shortcut(
+                                                "⌘2", "Ctrl+2",
+                                            ),
+                                        ))
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.set_notes_layout(NotesLayout::Code, cx);
+                                        }))
+                                        .on_key_down(cx.listener(
+                                            |this, event: &KeyDownEvent, _, cx| {
+                                                if !event.keystroke.modifiers.modified()
+                                                    && matches!(
+                                                        event.keystroke.key.as_str(),
+                                                        "enter" | "space"
+                                                    )
+                                                {
+                                                    this.set_notes_layout(
+                                                        NotesLayout::Code,
+                                                        cx,
+                                                    );
+                                                    cx.stop_propagation();
+                                                }
+                                            },
+                                        )),
                                 ),
                         ),
                 );

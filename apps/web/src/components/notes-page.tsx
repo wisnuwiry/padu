@@ -708,60 +708,44 @@ function NotesWorkspace({
         <section aria-label={t('notes.label')} className="flex min-h-0 min-w-0 flex-1 flex-col gap-2.5">
           {selected ? (
             <>
-              <label className="sr-only" htmlFor="note-title">{t('notes.title_placeholder')}</label>
-              <input
-                id="note-title"
-                className="h-[38px] w-full shrink-0 rounded-lg px-1 text-[22px] font-bold outline-none placeholder:text-[var(--text-ghost)] focus-visible:ring-2 focus-visible:ring-ring"
-                placeholder={t('notes.title_placeholder')}
-                value={selected.title}
-                onChange={(event) => setSelected({ ...selected, title: event.target.value })}
-              />
+              <div className="flex flex-col gap-0.5">
+                <label className="sr-only" htmlFor="note-title">{t('notes.title_placeholder')}</label>
+                <input
+                  id="note-title"
+                  className="h-[32px] w-full shrink-0 rounded-lg px-1 text-[18px] font-bold outline-none placeholder:text-[var(--text-ghost)] focus-visible:ring-2 focus-visible:ring-ring"
+                  placeholder={t('notes.title_placeholder')}
+                  value={selected.title}
+                  onChange={(event) => setSelected({ ...selected, title: event.target.value })}
+                />
+                <span className="px-1 text-[11px] text-[var(--text-tertiary)]">
+                  {t('notes.updated', { time: formatNoteTimeAgo(selected.updatedAt, t) })}
+                </span>
+              </div>
               <TagInput
+                prefix="Tags"
+                transparent
+                small
                 value={selected.tags ?? []}
                 onChange={(tags) => setSelected({ ...selected, tags })}
                 placeholder={t('notes.tags_placeholder')}
                 getRemoveLabel={(tag) => t('notes.remove_tag', { label: tag })}
-                small
                 focusOutline={false}
-                accentChips
               />
               <div className="flex w-full shrink-0 items-center justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-[var(--text-tertiary)]">
+                <div className="flex items-center gap-1.5">
                   <Tooltip content={t('files.add_to_chat')} shortcut={chatShortcut}>
                     <button
-                      className="flex h-7 cursor-pointer items-center gap-1.5 rounded-md bg-foreground px-2.5 text-[12px] font-medium text-background outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring"
+                      className="flex h-7 cursor-pointer items-center rounded-md bg-foreground px-2.5 text-[12px] font-medium text-background outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring"
                       type="button"
                       onClick={() => addNoteToChat(selected)}
                     >
-                      <PaduIcon name="addToChat" className="size-3.5" />
                       {t('files.add_to_chat')}
                     </button>
                   </Tooltip>
-                  <span className="hidden min-w-0 truncate xl:inline">
-                    {t('notes.created', { time: formatNoteTimeAgo(selected.createdAt, t) })} · {t('notes.updated', { time: formatNoteTimeAgo(selected.updatedAt, t) })}
-                  </span>
-                </div>
-                <div className="flex shrink-0 items-center gap-0.5">
-                  <div className="flex items-center gap-px rounded-[7px] bg-muted p-0.5" role="group" aria-label={t('notes.details')}>
-                    <LayoutButton
-                      active={layout === 'edit'}
-                      icon="pencil"
-                      label={t('notes.edit')}
-                      shortcut={editShortcut}
-                      onClick={() => setLayout('edit')}
-                    />
-                    <LayoutButton
-                      active={layout === 'split'}
-                      icon="split"
-                      label={t('notes.side_by_side')}
-                      shortcut={splitShortcut}
-                      onClick={() => setLayout('split')}
-                    />
-                  </div>
                   <Tooltip content={t('notes.delete')} shortcut={deleteShortcut}>
                     <button
                       aria-label={t('notes.delete')}
-                      className="grid size-7 cursor-pointer place-items-center rounded-md text-[var(--text-tertiary)] outline-none hover:bg-accent hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring"
+                      className="flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium text-destructive outline-none hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-ring"
                       type="button"
                       onClick={() => {
                         const summary = notes.find((note) => note.id === selected.id)
@@ -769,8 +753,25 @@ function NotesWorkspace({
                       }}
                     >
                       <PaduIcon name="trash" className="size-3.5" />
+                      {t('notes.delete')}
                     </button>
                   </Tooltip>
+                </div>
+                <div className="flex items-center gap-px rounded-[7px] bg-muted p-0.5" role="group" aria-label={t('notes.details')}>
+                  <LayoutButton
+                    active={layout === 'edit'}
+                    icon="pencil"
+                    label={t('notes.edit')}
+                    shortcut={editShortcut}
+                    onClick={() => setLayout('edit')}
+                  />
+                  <LayoutButton
+                    active={layout === 'split'}
+                    icon="split"
+                    label={t('notes.side_by_side')}
+                    shortcut={splitShortcut}
+                    onClick={() => setLayout('split')}
+                  />
                 </div>
               </div>
 
