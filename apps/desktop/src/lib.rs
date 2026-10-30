@@ -222,6 +222,7 @@ pub fn run() {
             crate::input::init(cx);
             crate::md::init(cx);
             bezel_editor::init(cx);
+            bezel::ui::focus::init(cx);
             bezel::ui::menu::init(cx);
             crate::ui::menu::init(cx);
             crate::app::init_composer_autocomplete(cx);
