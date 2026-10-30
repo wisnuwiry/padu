@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::button::{Button, ButtonStyle};
 
 impl Padu {
     pub(super) fn render_about_settings(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -358,131 +359,39 @@ impl Padu {
                     .gap(px(8.0))
                     .pt(px(2.0))
                     .child(
-                        div()
-                            .id("about-changelog-btn")
-                            .tab_index(0)
-                            .cursor_pointer()
-                            .focus_visible(|style| style.border_1().border_color(theme.accent))
-                            .h(px(30.0))
-                            .px(px(12.0))
-                            .rounded(px(7.0))
-                            .border_1()
-                            .border_color(theme.border_strong)
-                            .hover(|element| element.bg(theme.overlay).text_color(theme.text))
-                            .active(|element| element.bg(theme.overlay_strong))
-                            .text_size(sp(12.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text_secondary)
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .child(icon("icons/sparkle.svg", 14.0, theme.text_secondary))
-                            .child(tr!("about.view_changelog"))
-                            .on_click(cx.listener(|this, _, window, cx| {
+                        Button::new("about-changelog-btn", tr!("about.view_changelog"))
+                            .button_style(ButtonStyle::Ghost)
+                            .icon("icons/sparkle.svg")
+                            .on_press(cx.listener(|this, _, window, cx| {
                                 this.open_whats_new(window, cx);
-                            }))
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                    this.open_whats_new(window, cx);
-                                    cx.stop_propagation();
-                                }
                             })),
                     )
                     .child(
-                        div()
-                            .id("about-website-btn")
-                            .tab_index(0)
-                            .cursor_pointer()
-                            .focus_visible(|style| style.border_1().border_color(theme.accent))
-                            .h(px(30.0))
-                            .px(px(12.0))
-                            .rounded(px(7.0))
-                            .border_1()
-                            .border_color(theme.border_strong)
-                            .hover(|element| element.bg(theme.overlay).text_color(theme.text))
-                            .active(|element| element.bg(theme.overlay_strong))
-                            .text_size(sp(12.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text_secondary)
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .child(icon("icons/globe.svg", 14.0, theme.text_secondary))
-                            .child(tr!("about.website"))
-                            .child(icon("icons/arrow-up-right.svg", 11.0, theme.text_tertiary))
-                            .on_click(cx.listener(|_, _, _, cx| {
+                        Button::new("about-website-btn", tr!("about.website"))
+                            .button_style(ButtonStyle::Ghost)
+                            .icon("icons/globe.svg")
+                            .trailing(icon("icons/arrow-up-right.svg", 11.0, theme.text_tertiary))
+                            .on_press(|_, _, cx| {
                                 cx.open_url("https://padu.dev");
-                            }))
-                            .on_key_down(cx.listener(|_, event: &KeyDownEvent, _, cx| {
-                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                    cx.open_url("https://padu.dev");
-                                    cx.stop_propagation();
-                                }
-                            })),
+                            }),
                     )
                     .child(
-                        div()
-                            .id("about-github-btn")
-                            .tab_index(0)
-                            .cursor_pointer()
-                            .focus_visible(|style| style.border_1().border_color(theme.accent))
-                            .h(px(30.0))
-                            .px(px(12.0))
-                            .rounded(px(7.0))
-                            .border_1()
-                            .border_color(theme.border_strong)
-                            .hover(|element| element.bg(theme.overlay).text_color(theme.text))
-                            .active(|element| element.bg(theme.overlay_strong))
-                            .text_size(sp(12.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text_secondary)
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .child(icon("icons/github.svg", 14.0, theme.text_secondary))
-                            .child("GitHub")
-                            .child(icon("icons/arrow-up-right.svg", 11.0, theme.text_tertiary))
-                            .on_click(cx.listener(|_, _, _, cx| {
+                        Button::new("about-github-btn", "GitHub")
+                            .button_style(ButtonStyle::Ghost)
+                            .icon("icons/github.svg")
+                            .trailing(icon("icons/arrow-up-right.svg", 11.0, theme.text_tertiary))
+                            .on_press(|_, _, cx| {
                                 cx.open_url("https://github.com/wisnuwiry/padu");
-                            }))
-                            .on_key_down(cx.listener(|_, event: &KeyDownEvent, _, cx| {
-                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                    cx.open_url("https://github.com/wisnuwiry/padu");
-                                    cx.stop_propagation();
-                                }
-                            })),
+                            }),
                     )
                     .child(
-                        div()
-                            .id("about-sponsor-btn")
-                            .tab_index(0)
-                            .cursor_pointer()
-                            .focus_visible(|style| style.border_1().border_color(theme.accent))
-                            .h(px(30.0))
-                            .px(px(12.0))
-                            .rounded(px(7.0))
-                            .border_1()
-                            .border_color(theme.border_strong)
-                            .hover(|element| element.bg(theme.overlay).text_color(theme.text))
-                            .active(|element| element.bg(theme.overlay_strong))
-                            .text_size(sp(12.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text_secondary)
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .child(icon("icons/heart.svg", 14.0, theme.danger))
-                            .child("Sponsor")
-                            .child(icon("icons/arrow-up-right.svg", 11.0, theme.text_tertiary))
-                            .on_click(cx.listener(|_, _, _, cx| {
+                        Button::new("about-sponsor-btn", "Sponsor")
+                            .button_style(ButtonStyle::Ghost)
+                            .leading(icon("icons/heart.svg", 14.0, theme.danger))
+                            .trailing(icon("icons/arrow-up-right.svg", 11.0, theme.text_tertiary))
+                            .on_press(|_, _, cx| {
                                 cx.open_url("https://github.com/sponsors/wisnuwiry");
-                            }))
-                            .on_key_down(cx.listener(|_, event: &KeyDownEvent, _, cx| {
-                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                    cx.open_url("https://github.com/sponsors/wisnuwiry");
-                                    cx.stop_propagation();
-                                }
-                            })),
+                            }),
                     ),
             )
             .into_any_element()

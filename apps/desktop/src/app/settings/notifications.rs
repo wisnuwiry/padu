@@ -1,5 +1,6 @@
 use super::*;
 use crate::platform::NotificationPermissionStatus;
+use crate::ui::button::{Button, ButtonStyle};
 
 impl Padu {
     pub(super) fn render_notifications_settings(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -141,61 +142,19 @@ impl Padu {
             move |this, _, cx| this.set_notification_sound_enabled(!sound_enabled, cx),
         );
 
-        let preview_button = div()
-            .id("preview-notification-sound")
-            .tab_index(0)
-            .h(px(32.0))
-            .px(px(14.0))
-            .rounded(px(8.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .items_center()
-            .cursor_pointer()
-            .text_size(sp(12.5))
-            .font_weight(FontWeight::MEDIUM)
-            .text_color(theme.text_secondary)
-            .hover(|el| el.bg(theme.overlay))
-            .focus_visible(|style| style.border_color(theme.accent))
-            .child(tr!("notifications.preview_sound"))
-            .on_click(cx.listener(|_, _, _, _| {
-                crate::platform::play_notification_sound();
-            }))
-            .on_key_down(cx.listener(|_, event: &KeyDownEvent, _, _| {
-                if !event.keystroke.modifiers.modified()
-                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                {
-                    crate::platform::play_notification_sound();
-                }
-            }));
+        let preview_button = Button::new(
+            "preview-notification-sound",
+            tr!("notifications.preview_sound"),
+        )
+        .button_style(ButtonStyle::Ghost)
+        .on_press(|_, _, _| {
+            crate::platform::play_notification_sound();
+        });
 
-        let test_button = div()
-            .id("send-test-notification")
-            .tab_index(0)
-            .h(px(32.0))
-            .px(px(14.0))
-            .rounded(px(8.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .items_center()
-            .cursor_pointer()
-            .text_size(sp(12.5))
-            .font_weight(FontWeight::MEDIUM)
-            .text_color(theme.text)
-            .hover(|el| el.bg(theme.overlay))
-            .focus_visible(|style| style.border_color(theme.accent))
-            .child(tr!("notifications.send_test"))
-            .on_click(cx.listener(|this, _, _, cx| {
+        let test_button = Button::new("send-test-notification", tr!("notifications.send_test"))
+            .button_style(ButtonStyle::Ghost)
+            .on_press(cx.listener(|this, _, _, cx| {
                 this.send_test_notification(cx);
-            }))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                if !event.keystroke.modifiers.modified()
-                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                {
-                    this.send_test_notification(cx);
-                    cx.stop_propagation();
-                }
             }));
 
         div()

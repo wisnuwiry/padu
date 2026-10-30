@@ -17,6 +17,7 @@ use super::composer::next_picker_highlight;
 use crate::skills::{SkillEntry, SkillSource, SkillsCatalog};
 
 use super::*;
+use crate::ui::button::{Button, ButtonRole, ButtonStyle};
 
 /// Key context the left pane declares around its search field.
 const SKILLS_PANE_CONTEXT: &str = "SkillsPane";
@@ -959,34 +960,13 @@ impl Padu {
             info = info.child(skill_info_row(theme, label, value, index + 1 == info_count));
         }
 
-        let action_button = |id: SharedString, icon_path: &'static str, label: String| {
-            div()
-                .id(id)
-                .tab_index(0)
-                .focus_visible(|style| style.border_color(theme.accent))
-                .h(px(26.0))
-                .px(px(10.0))
-                .rounded(px(6.0))
-                .border_1()
-                .border_color(theme.border_strong)
-                .flex()
-                .flex_none()
-                .items_center()
-                .gap(px(5.0))
-                .cursor_pointer()
-                .text_size(sp(12.5))
-                .text_color(theme.text_secondary)
-                .hover(|element| element.bg(theme.overlay))
-                .child(icon(icon_path, 11.0, theme.text_tertiary))
-                .child(SharedString::from(label))
-        };
-
-        let open_button = action_button(
+        let open_button = Button::new(
             SharedString::from(format!("skill-open-{}", skill.row_key)),
-            "icons/pencil.svg",
             tr!("skills.open_file"),
         )
-        .on_click(cx.listener({
+        .button_style(ButtonStyle::Ghost)
+        .icon("icons/pencil.svg")
+        .on_press(cx.listener({
             let skill_file = skill_file.clone();
             move |this, _, _, cx| {
                 if this.daemon.is_remote() {
@@ -998,12 +978,13 @@ impl Padu {
             }
         }));
 
-        let reveal_button = action_button(
+        let reveal_button = Button::new(
             SharedString::from(format!("skill-reveal-{}", skill.row_key)),
-            "icons/folder.svg",
             tr!("skills.reveal"),
         )
-        .on_click(cx.listener({
+        .button_style(ButtonStyle::Ghost)
+        .icon("icons/folder.svg")
+        .on_press(cx.listener({
             let skill_file = skill_file.clone();
             move |this, _, _, cx| {
                 if this.daemon.is_remote() {
@@ -1017,20 +998,21 @@ impl Padu {
 
         let copy_feedback_id = format!("skill-copy-{}", skill.row_key);
         let copied = self.control_was_copied(&copy_feedback_id);
-        let copy_button = action_button(
+        let copy_button = Button::new(
             SharedString::from(copy_feedback_id.clone()),
-            if copied {
-                "icons/check.svg"
-            } else {
-                "icons/copy.svg"
-            },
             if copied {
                 tr!("common.copied")
             } else {
                 tr!("skills.copy_path")
             },
         )
-        .on_click(cx.listener({
+        .button_style(ButtonStyle::Ghost)
+        .icon(if copied {
+            "icons/check.svg"
+        } else {
+            "icons/copy.svg"
+        })
+        .on_press(cx.listener({
             let dir = dir.clone();
             let copy_feedback_id = copy_feedback_id.clone();
             move |this, _, _, cx| {
@@ -1039,65 +1021,32 @@ impl Padu {
             }
         }));
 
-        let delete_button = div()
-            .id(SharedString::from(format!(
-                "skill-delete-{}",
-                skill.row_key
-            )))
-            .tab_index(0)
-            .focus_visible(|style| style.border_color(theme.accent))
-            .h(px(26.0))
-            .px(px(10.0))
-            .rounded(px(6.0))
-            .border_1()
-            .border_color(if armed {
-                theme.danger
-            } else {
-                theme.border_strong
-            })
-            .when(armed, |element| element.bg(theme.danger.opacity(0.12)))
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap(px(5.0))
-            .cursor_pointer()
-            .text_size(sp(12.5))
-            .text_color(if armed {
-                theme.danger
-            } else {
-                theme.text_secondary
-            })
-            .hover(|element| element.bg(theme.overlay).text_color(theme.danger))
-            .child(icon(
-                "icons/trash.svg",
-                11.0,
-                if armed {
-                    theme.danger
-                } else {
-                    theme.text_tertiary
-                },
-            ))
-            .child(if armed {
+        let delete_button = Button::new(
+            SharedString::from(format!("skill-delete-{}", skill.row_key)),
+            if armed {
                 tr!("skills.confirm_delete")
             } else {
                 tr!("skills.delete")
-            })
-            .on_click(cx.listener({
-                let dir = dir.clone();
-                move |this, _, _, cx| {
-                    if this.skills_delete_arming.as_ref() == Some(&dir) {
-                        this.delete_skill(dir.clone(), cx);
-                    } else {
-                        this.skills_delete_arming = Some(dir.clone());
-                        cx.notify();
-                    }
-                }
-            }))
-            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                if this.skills_delete_arming.take().is_some() {
+            },
+        )
+        .button_style(if armed {
+            ButtonStyle::Destructive
+        } else {
+            ButtonStyle::Ghost
+        })
+        .role(ButtonRole::Destructive)
+        .icon("icons/trash.svg")
+        .on_press(cx.listener({
+            let dir = dir.clone();
+            move |this, _, _, cx| {
+                if this.skills_delete_arming.as_ref() == Some(&dir) {
+                    this.delete_skill(dir.clone(), cx);
+                } else {
+                    this.skills_delete_arming = Some(dir.clone());
                     cx.notify();
                 }
-            }));
+            }
+        }));
 
         // The skill's document, rendered with the transcript's own markdown
         // engine. The parse is cached per selected skill; re-rendering an

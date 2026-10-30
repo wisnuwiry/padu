@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::button::{Button, ButtonRole, ButtonStyle};
 use crate::ui::slider::slider;
 use bezel::ui::widgets::Controls;
 
@@ -19,37 +20,18 @@ fn render_background_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) 
     let settings = &padu.state.conversation_background;
     let image = padu.conversation_background_image();
     let weak = cx.entity().downgrade();
-    let choose = div()
-        .id("conversation-background-choose")
-        .tab_index(0)
-        .px(px(10.0))
-        .py(px(6.0))
-        .rounded(px(6.0))
-        .border_1()
-        .border_color(theme.border)
-        .text_size(sp(12.0))
-        .cursor_pointer()
-        .focus_visible(|style| style.border_color(theme.accent))
-        .hover(|style| style.bg(theme.overlay))
-        .flex()
-        .items_center()
-        .gap(px(6.0))
-        .child(icon("icons/folder-open.svg", 13.0, theme.text_secondary))
-        .child(tr!("settings.background_choose"))
-        .on_click({
-            let weak = weak.clone();
-            move |_, _, cx| {
-                let _ = weak.update(cx, |this, cx| this.choose_conversation_background(cx));
-            }
-        })
-        .on_key_down({
-            let weak = weak.clone();
-            move |event: &KeyDownEvent, _, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    let _ = weak.update(cx, |this, cx| this.choose_conversation_background(cx));
-                }
-            }
-        });
+    let choose = Button::new(
+        "conversation-background-choose",
+        tr!("settings.background_choose"),
+    )
+    .button_style(ButtonStyle::Ghost)
+    .icon("icons/folder-open.svg")
+    .on_press({
+        let weak = weak.clone();
+        move |_, _, cx| {
+            let _ = weak.update(cx, |this, cx| this.choose_conversation_background(cx));
+        }
+    });
     let opacity = (settings.opacity * 100.0).round() as i32;
     let height = settings.height_percent.round() as i32;
     let preview = div()
@@ -92,32 +74,17 @@ fn render_background_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) 
         );
     let remove = settings.image_path.as_ref().map(|_| {
         let weak = cx.entity().downgrade();
-        div()
-            .id("conversation-background-remove")
-            .tab_index(0)
-            .px(px(8.0))
-            .py(px(6.0))
-            .text_size(sp(12.0))
-            .text_color(theme.text_secondary)
-            .cursor_pointer()
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .child(icon("icons/trash.svg", 13.0, theme.danger))
-            .child(tr!("settings.background_remove"))
-            .on_click({
-                let weak = weak.clone();
-                move |_, _, cx| {
-                    let _ = weak.update(cx, |this, cx| this.clear_conversation_background(cx));
-                }
-            })
-            .on_key_down(move |event: &KeyDownEvent, _, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    let _ = weak.update(cx, |this, cx| this.clear_conversation_background(cx));
-                }
-            })
-            .into_any_element()
+        Button::new(
+            "conversation-background-remove",
+            tr!("settings.background_remove"),
+        )
+        .button_style(ButtonStyle::Ghost)
+        .role(ButtonRole::Destructive)
+        .icon("icons/trash.svg")
+        .on_press(move |_, _, cx| {
+            let _ = weak.update(cx, |this, cx| this.clear_conversation_background(cx));
+        })
+        .into_any_element()
     });
     div()
         .mt(px(15.0))

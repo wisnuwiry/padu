@@ -7,6 +7,7 @@ use padu_client::transport::{
 };
 
 use super::*;
+use crate::ui::button::{Button, ButtonStyle};
 
 /// Edge length, in pixels, of the credentials card's QR code.
 const DAEMON_QR_PX: u32 = 180;
@@ -556,74 +557,27 @@ impl Padu {
         );
 
         let apply_disabled = pending || !fields_dirty;
-        let apply_button = div()
-            .id("apply-daemon-settings")
-            .tab_index(0)
-            .h(px(29.0))
-            .px(px(11.0))
-            .rounded(px(7.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_pointer()
-            .text_size(sp(12.5))
-            .text_color(theme.text_secondary)
-            .opacity(if apply_disabled { 0.55 } else { 1.0 })
-            .focus_visible(|style| style.border_color(theme.accent))
-            .when(!apply_disabled, |element| {
-                element
-                    .hover(|element| element.bg(theme.overlay))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.apply_daemon_exposure_fields(cx);
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                        if !event.keystroke.modifiers.modified()
-                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                        {
-                            this.apply_daemon_exposure_fields(cx);
-                            cx.stop_propagation();
-                        }
-                    }))
-            })
-            .child(if pending {
+        let apply_button = Button::new(
+            "apply-daemon-settings",
+            if pending {
                 tr!("daemon.restarting")
             } else {
                 tr!("daemon.apply")
-            });
+            },
+        )
+        .button_style(ButtonStyle::Ghost)
+        .enabled(!apply_disabled)
+        .on_press(cx.listener(|this, _, _, cx| {
+            this.apply_daemon_exposure_fields(cx);
+        }));
 
-        let regenerate_button = div()
-            .id("regenerate-daemon-token")
-            .tab_index(0)
-            .h(px(27.0))
-            .px(px(9.0))
-            .rounded(px(6.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .items_center()
-            .cursor_pointer()
-            .text_size(sp(12.5))
-            .text_color(theme.text_secondary)
-            .opacity(if pending { 0.55 } else { 1.0 })
-            .focus_visible(|style| style.border_color(theme.accent))
-            .when(!pending, |element| {
-                element
-                    .hover(|element| element.bg(theme.overlay))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.regenerate_daemon_token(cx);
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                        if !event.keystroke.modifiers.modified()
-                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                        {
-                            this.regenerate_daemon_token(cx);
-                            cx.stop_propagation();
-                        }
-                    }))
-            })
-            .child(tr!("daemon.regenerate_token"));
+        let regenerate_button =
+            Button::new("regenerate-daemon-token", tr!("daemon.regenerate_token"))
+                .button_style(ButtonStyle::Ghost)
+                .enabled(!pending)
+                .on_press(cx.listener(|this, _, _, cx| {
+                    this.regenerate_daemon_token(cx);
+                }));
 
         div()
             .mt(px(15.0))
@@ -1389,46 +1343,20 @@ impl Padu {
         }
     }
 
-    fn render_daemon_qr_tunnel_button(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
+    fn render_daemon_qr_tunnel_button(&self, _theme: &Theme, cx: &mut Context<Self>) -> Div {
         let starting = self.daemon_qr_tunnel_starting;
         let started = self.host_transports.get(DAEMON_QR_TUNNEL_KEY).is_some();
-        let button = div()
-            .id("daemon-qr-tunnel-button")
-            .tab_index(0)
-            .h(px(28.0))
-            .px(px(12.0))
-            .rounded(px(6.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .items_center()
-            .justify_center()
-            .gap(px(6.0))
-            .cursor_pointer()
-            .text_size(sp(12.5))
-            .text_color(theme.text_secondary)
-            .opacity(if starting { 0.55 } else { 1.0 })
-            .focus_visible(|style| style.border_color(theme.accent))
-            .when(!starting, |element| {
-                element
-                    .hover(|e| e.bg(theme.overlay))
-                    .on_click(cx.listener(|this, _, _, cx| this.start_daemon_qr_tunnel(cx)))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                        if !event.keystroke.modifiers.modified()
-                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                        {
-                            this.start_daemon_qr_tunnel(cx);
-                            cx.stop_propagation();
-                        }
-                    }))
-            })
-            .child(if starting {
-                tr!("daemon.qr_tunnel_starting")
-            } else if started {
-                tr!("daemon.qr_restart_tunnel")
-            } else {
-                tr!("daemon.qr_start_tunnel")
-            });
+        let label = if starting {
+            tr!("daemon.qr_tunnel_starting")
+        } else if started {
+            tr!("daemon.qr_restart_tunnel")
+        } else {
+            tr!("daemon.qr_start_tunnel")
+        };
+        let button = Button::new("daemon-qr-tunnel-button", label)
+            .button_style(ButtonStyle::Ghost)
+            .enabled(!starting)
+            .on_press(cx.listener(|this, _, _, cx| this.start_daemon_qr_tunnel(cx)));
         let mut column = div().flex().flex_col().gap(px(6.0)).child(button);
         if let Some(error) = self.daemon_qr_tunnel_error.clone() {
             column = column.child(

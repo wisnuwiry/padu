@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::button::{Button, ButtonRole, ButtonStyle};
 
 impl Padu {
     pub(super) fn render_computer_use_settings(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -61,23 +62,17 @@ impl Padu {
                                 ),
                         )
                         .child(
-                            div()
-                                .id(SharedString::from(format!("revoke-computer-app-{key}")))
-                                .h(px(25.0))
-                                .px(px(9.0))
-                                .rounded(px(6.0))
-                                .border_1()
-                                .border_color(theme.border_strong)
-                                .flex()
-                                .items_center()
-                                .cursor_pointer()
-                                .text_size(sp(12.5))
-                                .text_color(theme.text_secondary)
-                                .hover(|element| element.bg(theme.overlay).text_color(theme.danger))
-                                .child(tr!("common.revoke"))
-                                .on_click(cx.listener(move |this, _, _, cx| {
+                            Button::new(
+                                SharedString::from(format!("revoke-computer-app-{key}")),
+                                tr!("common.revoke"),
+                            )
+                            .button_style(ButtonStyle::Ghost)
+                            .role(ButtonRole::Destructive)
+                            .on_press(cx.listener(
+                                move |this, _, _, cx| {
                                     this.revoke_computer_app(&key, cx);
-                                })),
+                                },
+                            )),
                         ),
                 );
             }
@@ -168,27 +163,19 @@ impl Padu {
                     ))
                     .child(
                         div().mt(px(11.0)).flex().items_center().gap(px(8.0)).child(
-                            div()
-                                .id("recheck-computer-permissions")
-                                .h(px(28.0))
-                                .px(px(11.0))
-                                .rounded(px(7.0))
-                                .border_1()
-                                .border_color(theme.border_strong)
-                                .text_color(theme.text_secondary)
-                                .flex()
-                                .items_center()
-                                .cursor_pointer()
-                                .text_size(sp(12.5))
-                                .opacity(if pending { 0.6 } else { 1.0 })
-                                .child(if pending {
+                            Button::new(
+                                "recheck-computer-permissions",
+                                if pending {
                                     tr!("common.checking")
                                 } else {
                                     tr!("common.recheck")
-                                })
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.request_computer_permissions(false, cx);
-                                })),
+                                },
+                            )
+                            .button_style(ButtonStyle::Ghost)
+                            .enabled(!pending)
+                            .on_press(cx.listener(|this, _, _, cx| {
+                                this.request_computer_permissions(false, cx);
+                            })),
                         ),
                     ),
             )
@@ -311,7 +298,7 @@ fn permission_status_row(
     theme: Theme,
     cx: &mut Context<Padu>,
 ) -> Div {
-    let status = if granted {
+    let status: AnyElement = if granted {
         div()
             .id(id)
             .h(px(25.0))
@@ -325,24 +312,14 @@ fn permission_status_row(
             .text_color(theme.success)
             .child(icon("icons/check.svg", 12.0, theme.success))
             .child(tr!("computer_use.access_granted"))
+            .into_any_element()
     } else {
-        div()
-            .id(id)
-            .h(px(25.0))
-            .px(px(9.0))
-            .rounded(px(6.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .items_center()
-            .cursor_pointer()
-            .text_size(sp(12.5))
-            .text_color(theme.text_secondary)
-            .hover(|element| element.bg(theme.overlay).text_color(theme.text))
-            .child(tr!("computer_use.grant_access"))
-            .on_click(cx.listener(move |this, _, _, cx| {
+        Button::new(id, tr!("computer_use.grant_access"))
+            .button_style(ButtonStyle::Ghost)
+            .on_press(cx.listener(move |this, _, _, cx| {
                 this.request_computer_permissions(true, cx);
             }))
+            .into_any_element()
     };
 
     div()

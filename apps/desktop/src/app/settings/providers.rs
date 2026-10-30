@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::button::{Button, ButtonRole, ButtonStyle};
 
 impl Padu {
     pub(super) fn render_providers_settings(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -9,34 +10,22 @@ impl Padu {
             .filter(|_| !checking)
             .map(|checked_at| detection_checked_label(checked_at.elapsed()));
 
-        let refresh = div()
-            .id("refresh-providers")
-            .tab_index(0)
-            .focus_visible(|style| style.border_color(theme.accent))
-            .h(px(28.0))
-            .px(px(11.0))
-            .rounded(px(7.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .cursor_pointer()
-            .text_size(sp(12.5))
-            .text_color(theme.text_secondary)
-            .opacity(if checking { 0.6 } else { 1.0 })
-            .hover(|element| element.bg(theme.overlay))
-            .child(icon("icons/rotate-cw.svg", 11.0, theme.text_tertiary))
-            .child(if checking {
+        let refresh = Button::new(
+            "refresh-providers",
+            if checking {
                 tr!("common.checking")
             } else {
                 tr!("common.refresh")
-            })
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.refresh_provider_detection(None, cx);
-                this.ensure_agent_profiles(true, cx);
-                cx.notify();
-            }));
+            },
+        )
+        .button_style(ButtonStyle::Ghost)
+        .icon("icons/rotate-cw.svg")
+        .enabled(!checking)
+        .on_press(cx.listener(|this, _, _, cx| {
+            this.refresh_provider_detection(None, cx);
+            this.ensure_agent_profiles(true, cx);
+            cx.notify();
+        }));
 
         let mut rows = div().mt(px(4.0)).flex().flex_col();
         let order = self.profile_row_order();
@@ -730,31 +719,16 @@ impl Padu {
             (None, None) => tr!("providers.searches_path", command = kind.command()),
         };
 
-        let reset = div()
-            .id(SharedString::from(format!(
-                "provider-path-reset-{}",
-                kind.id()
-            )))
-            .tab_index(0)
-            .focus_visible(|style| style.border_color(theme.accent))
-            .h(px(29.0))
-            .px(px(10.0))
-            .rounded(px(7.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .flex_none()
-            .items_center()
-            .cursor_pointer()
-            .text_size(sp(12.5))
-            .text_color(theme.text_secondary)
-            .hover(|element| element.bg(theme.overlay))
-            .child(tr!("common.reset"))
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.provider_path_input
-                    .update(cx, |input, cx| input.clear(cx));
-                this.apply_provider_path_override(cx);
-            }));
+        let reset = Button::new(
+            SharedString::from(format!("provider-path-reset-{}", kind.id())),
+            tr!("common.reset"),
+        )
+        .button_style(ButtonStyle::Ghost)
+        .on_press(cx.listener(|this, _, _, cx| {
+            this.provider_path_input
+                .update(cx, |input, cx| input.clear(cx));
+            this.apply_provider_path_override(cx);
+        }));
 
         div()
             .mt(px(10.0))
@@ -848,47 +822,28 @@ impl Padu {
         theme: &Theme,
         cx: &mut Context<Self>,
         on_action: impl Fn(&mut Padu, &mut Window, &mut Context<Padu>) + 'static + Copy,
-    ) -> Stateful<Div> {
-        div()
-            .id(id.into())
-            .tab_index(0)
-            .focus_visible(|style| style.border_color(theme.accent))
-            .h(px(29.0))
-            .px(px(9.0))
-            .rounded(px(7.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .cursor(if disabled {
-                gpui::CursorStyle::Arrow
-            } else {
-                gpui::CursorStyle::PointingHand
-            })
-            .opacity(if disabled { 0.65 } else { 1.0 })
-            .text_size(sp(12.5))
-            .text_color(text_color)
-            .when(!disabled, |element| {
-                element.hover(|el| el.bg(theme.overlay))
-            })
-            .children(leading_icon)
-            .child(label.into())
-            .children(trailing_icon)
-            .on_click(cx.listener(move |this, _, window, cx| {
-                if !disabled {
-                    on_action(this, window, cx);
-                }
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if !disabled && matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    on_action(this, window, cx);
-                    cx.stop_propagation();
-                }
-            }))
+    ) -> Button {
+        let is_destructive = text_color == theme.warning;
+        let mut button = Button::new(id, label)
+            .button_style(ButtonStyle::Ghost)
+            .enabled(!disabled);
+        if is_destructive {
+            button = button.role(ButtonRole::Destructive);
+        }
+        if let Some(leading) = leading_icon {
+            button = button.leading(leading);
+        }
+        if let Some(trailing) = trailing_icon {
+            button = button.trailing(trailing);
+        }
+        button.on_press(cx.listener(move |this, _, window, cx| {
+            if !disabled {
+                on_action(this, window, cx);
+            }
+        }))
     }
 
-    fn render_agy_install_control(&self, theme: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn render_agy_install_control(&self, theme: &Theme, cx: &mut Context<Self>) -> Button {
         let installing = self.agy_is_installing();
         let cancelling = self.agy_is_cancelling_install();
         let leading_icon = if installing {
@@ -953,7 +908,7 @@ impl Padu {
         controls
     }
 
-    fn render_agy_auth_control(&self, theme: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn render_agy_auth_control(&self, theme: &Theme, cx: &mut Context<Self>) -> Button {
         let signing_in = self.agy_is_signing_in();
         let signing_out = self.agy_is_signing_out();
         let checking = self.agy_auth_checking && self.agy_action == AgyActionState::Idle;
@@ -1005,7 +960,7 @@ impl Padu {
         )
     }
 
-    fn render_agy_copy_link_control(&self, theme: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn render_agy_copy_link_control(&self, theme: &Theme, cx: &mut Context<Self>) -> Button {
         let has_url = self.agy_auth_url.is_some();
         let button = self.render_settings_action_button(
             "agy-copy-auth-link",
@@ -1024,7 +979,7 @@ impl Padu {
         button.tooltip(Tooltip::text(tr!("providers.agy_copy_link_tooltip")))
     }
 
-    fn render_agy_reinstall_control(&self, theme: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn render_agy_reinstall_control(&self, theme: &Theme, cx: &mut Context<Self>) -> Button {
         let installing = self.agy_is_installing();
         let cancelling = self.agy_is_cancelling_install();
         let busy = self.agy_is_busy();
@@ -1077,7 +1032,7 @@ impl Padu {
         )
     }
 
-    fn render_agy_remove_control(&self, theme: &Theme, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn render_agy_remove_control(&self, theme: &Theme, cx: &mut Context<Self>) -> Button {
         let removing = self.agy_is_removing();
         let busy = self.agy_is_busy();
 

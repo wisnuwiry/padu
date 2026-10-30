@@ -1,6 +1,7 @@
 //! The settings page for archived conversations.
 
 use super::*;
+use crate::ui::button::{Button, ButtonRole, ButtonStyle};
 
 impl Padu {
     fn archived_search_query(&self, cx: &App) -> String {
@@ -110,60 +111,30 @@ impl Padu {
                                 ),
                         )
                         .child(
-                            div()
-                                .id(SharedString::from(format!("restore-archived-{session_id}")))
-                                .track_focus(&cx.focus_handle())
-                                .tab_index(0)
-                                .px(px(9.0))
-                                .py(px(5.0))
-                                .rounded(px(5.0))
-                                .cursor_pointer()
-                                .text_size(sp(12.0))
-                                .text_color(theme.text_secondary)
-                                .focus_visible(|style| style.border_1().border_color(theme.accent))
-                                .hover(|element| element.bg(theme.overlay))
-                                .child(tr!("settings.restore"))
-                                .on_click(cx.listener(move |this, _, _, cx| {
+                            Button::new(
+                                SharedString::from(format!("restore-archived-{session_id}")),
+                                tr!("settings.restore"),
+                            )
+                            .button_style(ButtonStyle::Ghost)
+                            .on_press(cx.listener(
+                                move |this, _, _, cx| {
                                     this.set_session_archived(session_id, false, cx);
                                     this.select_session(session_id, cx);
-                                }))
-                                .on_key_down(cx.listener(
-                                    move |this, event: &KeyDownEvent, _, cx| {
-                                        if matches!(event.keystroke.key.as_str(), "enter" | "space")
-                                        {
-                                            this.set_session_archived(session_id, false, cx);
-                                            this.select_session(session_id, cx);
-                                            cx.stop_propagation();
-                                        }
-                                    },
-                                )),
+                                },
+                            )),
                         )
                         .child(
-                            div()
-                                .id(SharedString::from(format!("delete-archived-{session_id}")))
-                                .track_focus(&cx.focus_handle())
-                                .tab_index(0)
-                                .px(px(9.0))
-                                .py(px(5.0))
-                                .rounded(px(5.0))
-                                .cursor_pointer()
-                                .text_size(sp(12.0))
-                                .text_color(theme.danger)
-                                .focus_visible(|style| style.border_1().border_color(theme.accent))
-                                .hover(|element| element.bg(theme.danger.opacity(0.12)))
-                                .child(tr!("common.remove"))
-                                .on_click(cx.listener(move |this, _, window, cx| {
+                            Button::new(
+                                SharedString::from(format!("delete-archived-{session_id}")),
+                                tr!("common.remove"),
+                            )
+                            .button_style(ButtonStyle::Ghost)
+                            .role(ButtonRole::Destructive)
+                            .on_press(cx.listener(
+                                move |this, _, window, cx| {
                                     this.confirm_delete_session(session_id, window, cx);
-                                }))
-                                .on_key_down(cx.listener(
-                                    move |this, event: &KeyDownEvent, window, cx| {
-                                        if matches!(event.keystroke.key.as_str(), "enter" | "space")
-                                        {
-                                            this.confirm_delete_session(session_id, window, cx);
-                                            cx.stop_propagation();
-                                        }
-                                    },
-                                )),
+                                },
+                            )),
                         ),
                 )
             },

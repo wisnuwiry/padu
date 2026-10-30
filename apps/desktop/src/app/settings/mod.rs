@@ -2,6 +2,7 @@ use gpui::actions;
 
 use super::composer::next_picker_highlight;
 use super::*;
+use crate::ui::button::{Button, ButtonStyle};
 
 actions!(padu_settings, [FocusSettingsSearch]);
 
@@ -304,48 +305,17 @@ impl Padu {
         window.focus(&focus, cx);
     }
 
-    fn render_settings_back_button(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let theme = Theme::current(cx);
-        div()
-            .id("settings-back")
-            .tab_index(0)
-            .h(px(26.0))
-            .px(px(6.0))
-            .flex_none()
-            .rounded(px(6.0))
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .cursor_pointer()
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
-            .hover(|element| element.bg(theme.overlay))
-            .active(|element| element.bg(theme.overlay_strong))
+    fn render_settings_back_button(&self, cx: &mut Context<Self>) -> Button {
+        Button::new("settings-back", tr!("settings.back"))
+            .button_style(ButtonStyle::Ghost)
+            .icon("icons/arrow-left.svg")
             .tooltip(Tooltip::text(tr!("settings.back")))
-            .child(icon("icons/arrow-left.svg", 14.0, theme.text_tertiary))
-            .child(
-                div()
-                    .text_size(sp(13.0))
-                    .text_color(theme.text_secondary)
-                    .child(tr!("settings.back")),
-            )
-            .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                cx.stop_propagation();
-            })
-            .on_click(cx.listener(|this, _, window, cx| {
+            .on_press(cx.listener(|this, _, window, cx| {
                 cx.stop_propagation();
                 this.settings_page = None;
                 let focus_handle = this.composer_focus(cx);
                 window.focus(&focus_handle, cx);
                 cx.notify();
-            }))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.settings_page = None;
-                    let focus_handle = this.composer_focus(cx);
-                    window.focus(&focus_handle, cx);
-                    cx.notify();
-                    cx.stop_propagation();
-                }
             }))
     }
 

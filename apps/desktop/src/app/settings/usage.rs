@@ -11,6 +11,7 @@ use chrono::{Datelike, Local, NaiveDate};
 use gpui::{PathBuilder, relative};
 
 use super::*;
+use crate::ui::button::{Button, ButtonStyle};
 use crate::usage_history::{
     self, MONTHLY_WINDOW, MonthSlice, PricingStatus, ProjectSlice, ProviderDay, UsageHistory,
     UsageProvider, UsageWindow, WINDOW_CHOICES,
@@ -358,26 +359,17 @@ impl Padu {
         } else {
             icon("icons/rotate-cw.svg", 12.0, theme.text_tertiary).into_any_element()
         };
-        let refresh = div()
-            .id("usage-refresh")
-            .tab_index(0)
-            .focus_visible(|style| style.border_color(theme.accent))
-            .h(px(28.0))
-            .px(px(8.0))
-            .rounded(px(7.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .items_center()
-            .cursor_pointer()
-            .hover(|element| element.bg(theme.overlay))
+        let refresh = Button::new("usage-refresh", tr!("usage.rescan"))
+            .button_style(ButtonStyle::Ghost)
+            .label_hidden()
+            .leading(refresh_glyph)
+            .enabled(!pending)
             .tooltip(Tooltip::text(if pending {
                 tr!("usage.scanning")
             } else {
                 tr!("usage.rescan")
             }))
-            .child(refresh_glyph)
-            .on_click(cx.listener(|this, _, _, cx| {
+            .on_press(cx.listener(|this, _, _, cx| {
                 this.ensure_usage_history(true, cx);
             }));
 
