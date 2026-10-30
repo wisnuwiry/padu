@@ -39,34 +39,15 @@ impl Padu {
                     .text_color(theme.danger)
                     .child(tr!("notifications.permission_denied"))
                     .into_any_element();
-                let action = div()
-                    .id("open-system-notification-settings")
-                    .tab_index(0)
-                    .h(px(32.0))
-                    .px(px(14.0))
-                    .rounded(px(8.0))
-                    .border_1()
-                    .border_color(theme.border_strong)
-                    .flex()
-                    .items_center()
-                    .cursor_pointer()
-                    .text_size(sp(12.5))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.text)
-                    .hover(|el| el.bg(theme.overlay))
-                    .focus_visible(|style| style.border_color(theme.accent))
-                    .child(tr!("notifications.open_settings"))
-                    .on_click(cx.listener(|_, _, _, _| {
-                        crate::platform::open_system_notification_settings();
-                    }))
-                    .on_key_down(cx.listener(|_, event: &KeyDownEvent, _, _| {
-                        if !event.keystroke.modifiers.modified()
-                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                        {
-                            crate::platform::open_system_notification_settings();
-                        }
-                    }))
-                    .into_any_element();
+                let action = Button::new(
+                    "open-system-notification-settings",
+                    tr!("notifications.open_settings"),
+                )
+                .button_style(ButtonStyle::Ghost)
+                .on_press(|_, _, _| {
+                    crate::platform::open_system_notification_settings();
+                })
+                .into_any_element();
                 (badge, Some(action))
             }
             NotificationPermissionStatus::NotDetermined => {
@@ -80,34 +61,15 @@ impl Padu {
                     .text_color(theme.warning)
                     .child(tr!("notifications.permission_not_determined"))
                     .into_any_element();
-                let action = div()
-                    .id("request-notification-permission")
-                    .tab_index(0)
-                    .h(px(32.0))
-                    .px(px(14.0))
-                    .rounded(px(8.0))
-                    .bg(theme.inverse)
-                    .flex()
-                    .items_center()
-                    .cursor_pointer()
-                    .text_size(sp(12.5))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.on_inverse)
-                    .hover(|el| el.opacity(0.9))
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
-                    .child(tr!("notifications.request_permission"))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.request_notification_permission(cx);
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                        if !event.keystroke.modifiers.modified()
-                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                        {
-                            this.request_notification_permission(cx);
-                            cx.stop_propagation();
-                        }
-                    }))
-                    .into_any_element();
+                let action = Button::new(
+                    "request-notification-permission",
+                    tr!("notifications.request_permission"),
+                )
+                .button_style(ButtonStyle::Prominent)
+                .on_press(cx.listener(|this, _, _, cx| {
+                    this.request_notification_permission(cx);
+                }))
+                .into_any_element();
                 (badge, Some(action))
             }
             NotificationPermissionStatus::Unsupported => {
