@@ -6,8 +6,8 @@ use std::rc::Rc;
 use bezel::theme::{ControlSize, Sizing, Theme};
 use bezel::ui::focus::pressable;
 use gpui::{
-    App, ElementId, IntoElement, Refineable, RenderOnce, SharedString, StyleRefinement, Styled,
-    Window, div, prelude::*, px,
+    AnyElement, AnyView, App, ElementId, IntoElement, Refineable, RenderOnce, SharedString,
+    StyleRefinement, Styled, Window, div, prelude::*, px,
 };
 
 pub use bezel::ui::widgets::{ButtonRole, ButtonStyle};
@@ -29,6 +29,9 @@ pub struct Button {
     id: ElementId,
     label: SharedString,
     icon: Option<&'static str>,
+    leading: Option<AnyElement>,
+    trailing: Option<AnyElement>,
+    tooltip: Option<Rc<dyn Fn(&mut Window, &mut App) -> AnyView>>,
     label_hidden: bool,
     style: ButtonStyle,
     size: ControlSize,
@@ -46,6 +49,9 @@ impl Button {
             id: id.into(),
             label: label.into(),
             icon: None,
+            leading: None,
+            trailing: None,
+            tooltip: None,
             label_hidden: false,
             style: ButtonStyle::Ghost,
             size: ControlSize::Regular,
@@ -74,6 +80,21 @@ impl Button {
 
     pub fn icon(mut self, icon_path: &'static str) -> Self {
         self.icon = Some(icon_path);
+        self
+    }
+
+    pub fn leading(mut self, leading: impl IntoElement) -> Self {
+        self.leading = Some(leading.into_any_element());
+        self
+    }
+
+    pub fn trailing(mut self, trailing: impl IntoElement) -> Self {
+        self.trailing = Some(trailing.into_any_element());
+        self
+    }
+
+    pub fn tooltip(mut self, build: impl Fn(&mut Window, &mut App) -> AnyView + 'static) -> Self {
+        self.tooltip = Some(Rc::new(build));
         self
     }
 
@@ -192,16 +213,21 @@ impl RenderOnce for Button {
         });
 
         let frame = frame
+            .id(self.id)
+            .role(gpui::Role::Button)
+            .aria_label(self.label.clone())
+            .children(self.leading)
             .when_some(self.icon, |el, icon_path| {
                 el.child(icon(icon_path, 14.0, tint))
             })
             .when(!self.label_hidden, |el| el.child(self.label.clone()))
+            .children(self.trailing)
             .children(kbd_badge)
+            .when_some(self.tooltip, |el, tooltip| {
+                el.tooltip(move |window, cx| tooltip(window, cx))
+            })
             .when(enabled, |el| el.cursor_pointer())
-            .when(!enabled, |el| el.opacity(0.5))
-            .id(self.id)
-            .role(gpui::Role::Button)
-            .aria_label(self.label);
+            .when(!enabled, |el| el.opacity(0.5));
 
         pressable(
             bezel_theme,
