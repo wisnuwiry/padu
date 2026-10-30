@@ -848,7 +848,7 @@ impl Padu {
         }
         // Left column: transport inputs, tunnel action, address, and code.
         // Right column: what the other device needs for this transport.
-        let header = div().mt(px(10.0)).child(header_tabs);
+        let header = div().mt(px(10.0)).flex().items_start().child(header_tabs);
         let mut left = div().flex().flex_col().gap(px(10.0)).flex_1().min_w_0();
         let right = self.qr_instruction_panel(self.daemon_qr_transport, theme, cx);
 
