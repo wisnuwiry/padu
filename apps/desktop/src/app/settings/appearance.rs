@@ -1,7 +1,9 @@
+use std::cell::Cell;
+
 use super::*;
 use crate::ui::button::{Button, ButtonRole, ButtonStyle};
-use crate::ui::slider::slider;
-use bezel::ui::widgets::Controls;
+use bezel::ui::widgets::{Controls, SliderDrag, slider_fraction};
+use gpui::{Bounds, DragMoveEvent, ElementId, MouseButton, MouseDownEvent, canvas};
 
 /// Sizes offered by the font-size dropdowns. A hand-edited `app.json` may
 /// hold values outside this list; they render as-is and simply select
@@ -17,6 +19,7 @@ fn font_size_label(size: f32) -> String {
 }
 
 fn render_background_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) -> AnyElement {
+    let bezel_theme = bezel::theme::Theme::of(cx);
     let settings = &padu.state.conversation_background;
     let image = padu.conversation_background_image();
     let weak = cx.entity().downgrade();
@@ -140,6 +143,7 @@ fn render_background_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) 
                             0.0,
                             100.0,
                             theme,
+                            bezel_theme,
                             {
                                 let weak = cx.entity().downgrade();
                                 move |value, cx| {
@@ -156,6 +160,7 @@ fn render_background_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) 
                             20.0,
                             100.0,
                             theme,
+                            bezel_theme,
                             {
                                 let weak = cx.entity().downgrade();
                                 move |value, cx| {
@@ -178,13 +183,57 @@ fn background_adjuster(
     min: f32,
     max: f32,
     theme: Theme,
+    bezel_theme: &bezel::theme::Theme,
     on_change: impl Fn(f32, &mut App) + 'static,
 ) -> AnyElement {
     let value = value.clamp(min, max);
     let value_label = format!("{value:.0}%");
+    let fraction = if max > min {
+        (value - min) / (max - min)
+    } else {
+        0.0
+    };
     let on_change: Rc<dyn Fn(f32, &mut App)> = Rc::new(on_change);
     let slider_id = format!("{id_prefix}-slider");
+    let control_id = format!("{id_prefix}-control");
     let slider_on_change = on_change.clone();
+    let bounds_cell = Rc::new(Cell::new(None));
+
+    let bounds_ref = bounds_cell.clone();
+    let bounds_recorder = canvas(
+        move |bounds: Bounds<Pixels>, _, _| bounds_ref.set(Some(bounds)),
+        |_, _, _, _| (),
+    )
+    .absolute()
+    .inset_0();
+
+    let drag_id: ElementId = control_id.clone().into();
+    let drag_move_on_change = on_change.clone();
+    let mouse_down_on_change = on_change.clone();
+
+    let slider_control = bezel_theme
+        .slider(fraction)
+        .child(bounds_recorder)
+        .id(control_id)
+        .on_drag(SliderDrag(drag_id.clone()), |_, _, _, cx| {
+            cx.new(|_| gpui::Empty)
+        })
+        .on_drag_move(move |event: &DragMoveEvent<SliderDrag>, _, cx| {
+            if let Some(fraction) = slider_fraction(event, drag_id.clone(), cx) {
+                let next = (min + fraction * (max - min)).round().clamp(min, max);
+                drag_move_on_change(next, cx);
+            }
+        })
+        .on_mouse_down(MouseButton::Left, move |event: &MouseDownEvent, _, cx| {
+            if let Some(bounds) = bounds_cell.get() {
+                if bounds.size.width > px(0.0) {
+                    let fraction =
+                        ((event.position.x - bounds.left()) / bounds.size.width).clamp(0.0, 1.0);
+                    let next = (min + fraction * (max - min)).round().clamp(min, max);
+                    mouse_down_on_change(next, cx);
+                }
+            }
+        });
 
     div()
         .w_full()
@@ -233,16 +282,7 @@ fn background_adjuster(
                         cx.stop_propagation();
                     }
                 })
-                .child(
-                    slider(format!("{id_prefix}-control"), value)
-                        .range(min..=max)
-                        .step(1.0)
-                        .colors(theme.accent, theme.border, theme.text)
-                        .on_change({
-                            let on_change = on_change.clone();
-                            move |value, cx| on_change(value, cx)
-                        }),
-                ),
+                .child(slider_control),
         )
         .into_any_element()
 }

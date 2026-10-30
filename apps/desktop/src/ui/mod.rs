@@ -12,7 +12,6 @@ pub mod menu;
 pub mod motion;
 pub mod scrollbar;
 pub mod shortcut_recorder;
-pub mod slider;
 pub mod tag_input;
 pub mod text_field;
 pub mod tooltip;
@@ -33,7 +32,7 @@ impl<T> RestrictScrollExt for T {}
 #[allow(unused_imports)]
 pub use bezel::ui::widgets::{
     ButtonRole, ButtonStyle, Buttons, Content, Controls, Icons, Layout as BezelLayout, Scaffolding,
-    Status,
+    SliderDrag, Status, slider_fraction,
 };
 
 #[allow(unused_imports)]
