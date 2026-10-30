@@ -1,6 +1,7 @@
 use std::cell::Cell;
 
 use super::*;
+use crate::ui::Switch;
 use crate::ui::button::{Button, ButtonRole, ButtonStyle};
 use bezel::ui::widgets::{Controls, SliderDrag, slider_fraction};
 use gpui::{Bounds, DragMoveEvent, ElementId, MouseButton, MouseDownEvent, canvas};
@@ -441,14 +442,10 @@ fn render_code_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) -> Any
     );
 
     let wrap = padu.state.code_word_wrap;
-    let wrap_toggle = toggle_switch(
-        "code-word-wrap-toggle",
-        wrap,
-        false,
-        theme,
-        cx,
-        move |this, _, cx| this.set_code_word_wrap(!wrap, cx),
-    );
+    let weak = cx.entity().downgrade();
+    let wrap_toggle = Switch::new("code-word-wrap-toggle", wrap).on_toggle(move |wrap, _, cx| {
+        let _ = weak.update(cx, |this, cx| this.set_code_word_wrap(wrap, cx));
+    });
 
     div()
         .mt(px(15.0))
@@ -496,14 +493,11 @@ fn render_code_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) -> Any
 
 fn render_sidebar_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) -> AnyElement {
     let show_provider = padu.state.sidebar_show_provider;
-    let toggle = toggle_switch(
-        "sidebar-show-provider-toggle",
-        show_provider,
-        false,
-        theme,
-        cx,
-        move |this, _, cx| this.set_sidebar_show_provider(!show_provider, cx),
-    );
+    let weak = cx.entity().downgrade();
+    let toggle =
+        Switch::new("sidebar-show-provider-toggle", show_provider).on_toggle(move |show, _, cx| {
+            let _ = weak.update(cx, |this, cx| this.set_sidebar_show_provider(show, cx));
+        });
 
     div()
         .mt(px(15.0))

@@ -5,9 +5,9 @@ use uuid::Uuid;
 
 use crate::app::*;
 use crate::model::{ProjectScript, ProjectScriptIcon};
+use crate::ui::Switch;
 use crate::ui::button::{Button, ButtonRole, ButtonStyle};
 use crate::ui::dialog::dialog_backdrop;
-use crate::ui::toggle_switch;
 
 actions!(
     padu_project_action_dialog,
@@ -1227,20 +1227,25 @@ impl Padu {
                                                     )),
                                             ),
                                     )
-                                    .child(toggle_switch(
-                                        "toggle-action-worktree",
-                                        run_on_worktree_create,
-                                        false,
-                                        theme,
-                                        cx,
-                                        |this: &mut Self, _, cx| {
-                                            if let Some(d) = this.project_action_dialog.as_mut() {
-                                                d.run_on_worktree_create =
-                                                    !d.run_on_worktree_create;
-                                                cx.notify();
-                                            }
-                                        },
-                                    )),
+                                    .child({
+                                        let weak = cx.entity().downgrade();
+                                        Switch::new(
+                                            "toggle-action-worktree",
+                                            run_on_worktree_create,
+                                        )
+                                        .on_toggle(
+                                            move |enabled, _, cx| {
+                                                let _ = weak.update(cx, |this, cx| {
+                                                    if let Some(d) =
+                                                        this.project_action_dialog.as_mut()
+                                                    {
+                                                        d.run_on_worktree_create = enabled;
+                                                        cx.notify();
+                                                    }
+                                                });
+                                            },
+                                        )
+                                    }),
                             )
                             // Toggle 2: Wait for setup (indented sub-item)
                             .child(
@@ -1279,21 +1284,23 @@ impl Padu {
                                                     .child(tr!("actions.wait_for_setup_desc")),
                                             ),
                                     )
-                                    .child(toggle_switch(
-                                        "toggle-action-wait-setup",
-                                        wait_for_setup,
-                                        !run_on_worktree_create,
-                                        theme,
-                                        cx,
-                                        |this: &mut Self, _, cx| {
-                                            if let Some(d) = this.project_action_dialog.as_mut() {
-                                                if d.run_on_worktree_create {
-                                                    d.wait_for_setup = !d.wait_for_setup;
-                                                    cx.notify();
-                                                }
-                                            }
-                                        },
-                                    )),
+                                    .child({
+                                        let weak = cx.entity().downgrade();
+                                        Switch::new("toggle-action-wait-setup", wait_for_setup)
+                                            .enabled(run_on_worktree_create)
+                                            .on_toggle(move |enabled, _, cx| {
+                                                let _ = weak.update(cx, |this, cx| {
+                                                    if let Some(d) =
+                                                        this.project_action_dialog.as_mut()
+                                                    {
+                                                        if d.run_on_worktree_create {
+                                                            d.wait_for_setup = enabled;
+                                                            cx.notify();
+                                                        }
+                                                    }
+                                                });
+                                            })
+                                    }),
                             )
                             // Divider
                             .child(div().h(px(1.0)).bg(theme.border))
@@ -1327,27 +1334,29 @@ impl Padu {
                                                     .child(tr!("actions.auto_open_preview_desc")),
                                             ),
                                     )
-                                    .child(toggle_switch(
-                                        "toggle-action-auto-preview",
-                                        auto_open_preview,
-                                        !has_preview_url,
-                                        theme,
-                                        cx,
-                                        |this: &mut Self, _, cx| {
-                                            if let Some(d) = this.project_action_dialog.as_mut() {
-                                                let has_url = !d
-                                                    .preview_url_input
-                                                    .read(cx)
-                                                    .content()
-                                                    .trim()
-                                                    .is_empty();
-                                                if has_url {
-                                                    d.auto_open_preview = !d.auto_open_preview;
-                                                    cx.notify();
-                                                }
-                                            }
-                                        },
-                                    )),
+                                    .child({
+                                        let weak = cx.entity().downgrade();
+                                        Switch::new("toggle-action-auto-preview", auto_open_preview)
+                                            .enabled(has_preview_url)
+                                            .on_toggle(move |enabled, _, cx| {
+                                                let _ = weak.update(cx, |this, cx| {
+                                                    if let Some(d) =
+                                                        this.project_action_dialog.as_mut()
+                                                    {
+                                                        let has_url = !d
+                                                            .preview_url_input
+                                                            .read(cx)
+                                                            .content()
+                                                            .trim()
+                                                            .is_empty();
+                                                        if has_url {
+                                                            d.auto_open_preview = enabled;
+                                                            cx.notify();
+                                                        }
+                                                    }
+                                                });
+                                            })
+                                    }),
                             ),
                     ),
             )

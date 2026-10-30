@@ -12,6 +12,7 @@ pub mod menu;
 pub mod motion;
 pub mod scrollbar;
 pub mod shortcut_recorder;
+pub mod switch;
 pub mod tag_input;
 pub mod text_field;
 pub mod tooltip;
@@ -20,6 +21,7 @@ pub mod tooltip;
 pub use button::{Button, ButtonKbd};
 #[allow(unused_imports)]
 pub use editor::{EditorLoader, RichEditor, SharedEditor, configure_editor, editor_theme};
+pub use switch::Switch;
 pub use tag_input::TagInput;
 
 pub trait RestrictScrollExt: Sized {
@@ -249,37 +251,6 @@ impl ActivationExt for Stateful<Div> {
                 cx.stop_propagation();
             }
         }))
-    }
-}
-
-/// The shared pill switch used by settings and automation forms.
-///
-/// `activate` is ignored while `disabled` is true, but the control remains in
-/// the tab order so a pending operation does not move focus unexpectedly.
-pub fn toggle_switch<E>(
-    id: impl Into<ElementId>,
-    on: bool,
-    disabled: bool,
-    theme: Theme,
-    cx: &mut Context<E>,
-    activate: impl Fn(&mut E, &mut Window, &mut Context<E>) + 'static,
-) -> Stateful<Div>
-where
-    E: 'static,
-{
-    let bezel_theme = bezel::theme::Theme::of(cx);
-    let base = bezel_theme
-        .toggle(on)
-        .id(id)
-        .tab_index(0)
-        .focus_visible(|style| style.border_color(theme.accent))
-        .cursor_pointer()
-        .when(disabled, |element| element.opacity(0.55));
-
-    if disabled {
-        base
-    } else {
-        base.on_activation(cx, activate)
     }
 }
 

@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::Switch;
 use crate::ui::button::{Button, ButtonRole, ButtonStyle};
 
 impl Padu {
@@ -108,27 +109,30 @@ impl Padu {
                 "providers.toggle_tooltip",
                 provider = kind.display_name()
             ));
+            let weak = cx.entity().downgrade();
             let toggle = if let Some(profile) = profile {
                 let version = profile.version;
-                toggle_switch(
+                Switch::new(
                     SharedString::from(format!("provider-enabled-{}", kind.id())),
                     enabled,
-                    false,
-                    theme,
-                    cx,
-                    move |this, _, cx| this.set_profile_enabled(kind, !enabled, version, cx),
                 )
                 .tooltip(toggle_tooltip)
+                .on_toggle(move |enabled, _, cx| {
+                    let _ = weak.update(cx, |this, cx| {
+                        this.set_profile_enabled(kind, enabled, version, cx);
+                    });
+                })
             } else {
-                toggle_switch(
+                Switch::new(
                     SharedString::from(format!("provider-enabled-{}", kind.id())),
                     enabled,
-                    false,
-                    theme,
-                    cx,
-                    move |this, _, cx| this.set_provider_enabled(kind, !enabled, cx),
                 )
                 .tooltip(toggle_tooltip)
+                .on_toggle(move |enabled, _, cx| {
+                    let _ = weak.update(cx, |this, cx| {
+                        this.set_provider_enabled(kind, enabled, cx);
+                    });
+                })
             };
 
             let expanded = self.expanded_provider_settings == Some(kind);

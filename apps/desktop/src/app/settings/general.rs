@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::Switch;
 use crate::ui::button::{Button, ButtonStyle};
 
 impl Padu {
@@ -8,14 +9,11 @@ impl Padu {
             .try_global::<crate::updater::UpdaterState>()
             .is_some_and(|updater| updater.0.is_some());
         let analytics_enabled = self.state.analytics_enabled;
-        let analytics_toggle = toggle_switch(
-            "anonymous-analytics-toggle",
-            analytics_enabled,
-            false,
-            theme,
-            cx,
-            move |this, _, cx| this.set_analytics_enabled(!analytics_enabled, cx),
-        );
+        let weak = cx.entity().downgrade();
+        let analytics_toggle = Switch::new("anonymous-analytics-toggle", analytics_enabled)
+            .on_toggle(move |enabled, _, cx| {
+                let _ = weak.update(cx, |this, cx| this.set_analytics_enabled(enabled, cx));
+            });
         div()
             .child(
                 div()
@@ -77,13 +75,13 @@ impl Padu {
             )
             .when(updater_available, |column| {
                 let enabled = self.automatic_updates_enabled;
-                let toggle = toggle_switch(
-                    "automatic-updates-toggle",
-                    enabled,
-                    false,
-                    theme,
-                    cx,
-                    move |this, _, cx| this.set_automatic_updates_enabled(!enabled, cx),
+                let weak = cx.entity().downgrade();
+                let toggle = Switch::new("automatic-updates-toggle", enabled).on_toggle(
+                    move |enabled, _, cx| {
+                        let _ = weak.update(cx, |this, cx| {
+                            this.set_automatic_updates_enabled(enabled, cx)
+                        });
+                    },
                 );
                 column.child(
                     div()

@@ -65,7 +65,7 @@ use crate::ui::text_field::TextField;
 use crate::ui::{
     MenuChip, ProjectNameSelector, activity_icon, activity_noun, contain_horizontal_scroll,
     contain_scroll, file_icon, icon, icon_button, motion, provider_color, provider_icon,
-    status_color, toggle_switch,
+    status_color,
 };
 use crate::{
     CancelTaskSwitch, CancelTurn, CloseFind, CloseWindow, ConfirmTaskSwitch, CopySelection,

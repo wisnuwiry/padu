@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui::Switch;
 use crate::ui::button::{Button, ButtonRole, ButtonStyle};
 
 impl Padu {
@@ -113,14 +114,16 @@ impl Padu {
                                     .child(tr!("computer_use.availability")),
                             ),
                     )
-                    .child(toggle_switch(
-                        "computer-use-enabled",
-                        enabled,
-                        false,
-                        theme,
-                        cx,
-                        move |this, _, cx| this.set_computer_use_enabled(!enabled, cx),
-                    )),
+                    .child({
+                        let weak = cx.entity().downgrade();
+                        Switch::new("computer-use-enabled", enabled).on_toggle(
+                            move |enabled, _, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.set_computer_use_enabled(enabled, cx)
+                                });
+                            },
+                        )
+                    }),
             )
             .child(
                 div()

@@ -1,5 +1,6 @@
 use super::*;
 use crate::platform::NotificationPermissionStatus;
+use crate::ui::Switch;
 use crate::ui::button::{Button, ButtonStyle};
 
 impl Padu {
@@ -86,22 +87,21 @@ impl Padu {
             }
         };
 
-        let notifications_toggle = toggle_switch(
-            "notifications-enabled-toggle",
-            notifications_enabled,
-            false,
-            theme,
-            cx,
-            move |this, _, cx| this.set_notifications_enabled(!notifications_enabled, cx),
-        );
+        let weak = cx.entity().downgrade();
+        let notifications_toggle =
+            Switch::new("notifications-enabled-toggle", notifications_enabled).on_toggle({
+                let weak = weak.clone();
+                move |enabled, _, cx| {
+                    let _ = weak.update(cx, |this, cx| this.set_notifications_enabled(enabled, cx));
+                }
+            });
 
-        let sound_toggle = toggle_switch(
-            "notification-sound-toggle",
-            sound_enabled,
-            false,
-            theme,
-            cx,
-            move |this, _, cx| this.set_notification_sound_enabled(!sound_enabled, cx),
+        let sound_toggle = Switch::new("notification-sound-toggle", sound_enabled).on_toggle(
+            move |enabled, _, cx| {
+                let _ = weak.update(cx, |this, cx| {
+                    this.set_notification_sound_enabled(enabled, cx)
+                });
+            },
         );
 
         let preview_button = Button::new(

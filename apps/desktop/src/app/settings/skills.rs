@@ -17,6 +17,7 @@ use super::composer::next_picker_highlight;
 use crate::skills::{SkillEntry, SkillSource, SkillsCatalog};
 
 use super::*;
+use crate::ui::Switch;
 use crate::ui::button::{Button, ButtonRole, ButtonStyle};
 
 /// Key context the left pane declares around its search field.
@@ -865,40 +866,19 @@ impl Padu {
         };
         let caption = format!("{} · {}", skill.sources_label(), scope_caption);
 
-        let toggle = div()
-            .id(SharedString::from(format!(
-                "skill-enabled-{}",
-                skill.row_key
-            )))
-            .tab_index(0)
-            .focus_visible(|style| style.border_color(theme.accent))
-            .w(px(36.0))
-            .h(px(20.0))
-            .p(px(2.0))
-            .flex_none()
-            .rounded_full()
-            .cursor_pointer()
-            .bg(if enabled { theme.inverse } else { theme.inset })
-            .border_1()
-            .border_color(if enabled {
-                theme.inverse
-            } else {
-                theme.border_strong
+        let toggle = {
+            let weak = cx.entity().downgrade();
+            let dir = dir.clone();
+            Switch::new(
+                SharedString::from(format!("skill-enabled-{}", skill.row_key)),
+                enabled,
+            )
+            .on_toggle(move |next_enabled, _, cx| {
+                let _ = weak.update(cx, |this, cx| {
+                    this.toggle_skill_enabled(dir.clone(), next_enabled, cx);
+                });
             })
-            .flex()
-            .items_center()
-            .when(enabled, |element| element.justify_end())
-            .child(div().w(px(14.0)).h(px(14.0)).rounded_full().bg(if enabled {
-                theme.on_inverse
-            } else {
-                theme.text_tertiary
-            }))
-            .on_click(cx.listener({
-                let dir = dir.clone();
-                move |this, _, _, cx| {
-                    this.toggle_skill_enabled(dir.clone(), !enabled, cx);
-                }
-            }));
+        };
 
         let mut contents = Vec::new();
         if skill.supporting_files == 1 {

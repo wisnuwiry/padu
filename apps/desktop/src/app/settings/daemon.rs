@@ -7,6 +7,7 @@ use padu_client::transport::{
 };
 
 use super::*;
+use crate::ui::Switch;
 use crate::ui::button::{Button, ButtonStyle};
 use bezel::ui::widgets::Buttons;
 
@@ -474,14 +475,12 @@ impl Padu {
         let fields_dirty = self.daemon_exposure_fields_dirty(cx);
         let token = self.state.daemon_exposure.token.clone();
 
-        let exposure_toggle = toggle_switch(
-            "daemon-exposure-toggle",
-            enabled,
-            pending,
-            theme,
-            cx,
-            move |this, _, cx| this.set_daemon_exposure_enabled(!enabled, cx),
-        );
+        let weak = cx.entity().downgrade();
+        let exposure_toggle = Switch::new("daemon-exposure-toggle", enabled)
+            .enabled(!pending)
+            .on_toggle(move |enabled, _, cx| {
+                let _ = weak.update(cx, |this, cx| this.set_daemon_exposure_enabled(enabled, cx));
+            });
 
         let apply_disabled = pending || !fields_dirty;
         let apply_button = Button::new(
