@@ -3,7 +3,7 @@ use gpui::actions;
 use super::composer::next_picker_highlight;
 use super::*;
 use crate::ui::button::{Button, ButtonStyle};
-use bezel::ui::widgets::Content;
+use bezel::ui::widgets::{Content, Scaffolding};
 
 actions!(padu_settings, [FocusSettingsSearch]);
 
@@ -460,6 +460,8 @@ impl Padu {
                 .into_any_element()
         };
 
+        let titlebar_drag_region =
+            self.render_settings_drag_region("settings-content-titlebar", cx);
         let bezel_theme = bezel::theme::Theme::of(cx);
         let breadcrumb = bezel_theme
             .breadcrumb()
@@ -495,25 +497,19 @@ impl Padu {
                     .flex()
                     .items_center()
                     .child(breadcrumb)
-                    .child(
-                        self.render_settings_drag_region("settings-content-titlebar", cx)
-                            .flex_1(),
-                    )
+                    .child(titlebar_drag_region.flex_1())
                     .children(right_window_controls),
             )
             .child(
-                div()
+                bezel_theme
+                    .group_box()
                     .id("settings-content-card")
                     .flex_1()
                     .min_h_0()
                     .ml(px(2.0))
                     .mr(px(8.0))
                     .mb(px(8.0))
-                    .rounded(px(10.0))
-                    .border_1()
-                    .border_color(theme.border)
                     .bg(theme.surface)
-                    .overflow_hidden()
                     .child(card_content),
             )
     }
