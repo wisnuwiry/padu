@@ -21,6 +21,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { TagInput } from '@/components/ui/tag-input'
 import { Tooltip } from '@/components/ui/tooltip'
 import { useTaskState } from '@/hooks/use-daemon-data'
+import { cn } from '@/lib/utils'
 import {
   createNote,
   deleteNote,
@@ -601,7 +602,7 @@ function NotesWorkspace({
     : t('project.no_project_name')
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
+    <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground">
       <header className="flex h-12 shrink-0 items-center gap-1.5 px-3.5">
         {!sidebarVisible && (
           <Tooltip content={t('menu.toggle_sidebar')} shortcut={toggleSidebarShortcut}>
@@ -633,7 +634,12 @@ function NotesWorkspace({
         {saving && <span className="text-[11px] text-[var(--text-tertiary)]">{t('notes.save')}</span>}
       </header>
 
-      <div className="flex min-h-0 flex-1 gap-4 px-2 pb-6">
+      <div
+        className={cn(
+          'relative mb-2 flex min-h-0 flex-1 gap-4 overflow-hidden rounded-[10px] border border-border bg-background p-4 text-foreground',
+          sidebarVisible ? 'ml-0.5 mr-2' : 'mx-2',
+        )}
+      >
         {!listCollapsed && (
           <aside aria-label={t('settings.notes')} className="flex w-60 shrink-0 flex-col gap-2">
             <Tooltip content={t('notes.new')} shortcut={newShortcut}>

@@ -1,9 +1,9 @@
-use std::rc::Rc;
-
 use super::board::types::split_board_labels;
 use super::*;
 use crate::ui::TagInput;
+use crate::ui::button::{Button, ButtonRole, ButtonStyle};
 use crate::ui::editor::EditorExt as _;
+use bezel::ui::widgets::{Controls, Scaffolding};
 
 pub(super) const NOTES_PAGE_SIZE: usize = 25;
 
@@ -905,6 +905,35 @@ impl Padu {
         }
     }
 
+    fn set_notes_layout(&mut self, layout: NotesLayout, cx: &mut Context<Self>) {
+        if self.notes_layout == layout {
+            return;
+        }
+        self.notes_layout = layout;
+        match layout {
+            NotesLayout::Rich => {
+                let content = self.notes_code_body.read(cx).content().to_owned();
+                self.notes_body.update(cx, |ed, cx| {
+                    if ed.content() != content {
+                        ed.set_content(&content, cx);
+                    }
+                    ed.set_mode(bezel_editor::Mode::Blocks, cx);
+                });
+                self.ensure_notes_editor_configured(cx);
+            }
+            NotesLayout::Code => {
+                let content = self.notes_body.read(cx).content();
+                self.notes_code_body.update(cx, |input, cx| {
+                    if input.content() != content {
+                        input.set_content(content, cx);
+                    }
+                });
+            }
+            NotesLayout::Preview => {}
+        }
+        cx.notify();
+    }
+
     fn notes_key_down(
         &mut self,
         event: &KeyDownEvent,
@@ -921,31 +950,8 @@ impl Padu {
             "n" if modifiers.alt && !modifiers.shift => self.create_note(cx),
             "up" if plain_primary => self.select_adjacent_note(-1, cx),
             "down" if plain_primary => self.select_adjacent_note(1, cx),
-            "1" if plain_primary => {
-                if self.notes_layout != NotesLayout::Rich {
-                    self.notes_layout = NotesLayout::Rich;
-                    let content = self.notes_code_body.read(cx).content().to_owned();
-                    self.notes_body.update(cx, |ed, cx| {
-                        if ed.content() != content {
-                            ed.set_content(&content, cx);
-                        }
-                        ed.set_mode(bezel_editor::Mode::Blocks, cx);
-                    });
-                    cx.notify();
-                }
-            }
-            "2" if plain_primary => {
-                if self.notes_layout != NotesLayout::Code {
-                    self.notes_layout = NotesLayout::Code;
-                    let content = self.notes_body.read(cx).content();
-                    self.notes_code_body.update(cx, |input, cx| {
-                        if input.content() != content {
-                            input.set_content(content, cx);
-                        }
-                    });
-                    cx.notify();
-                }
-            }
+            "1" if plain_primary => self.set_notes_layout(NotesLayout::Rich, cx),
+            "2" if plain_primary => self.set_notes_layout(NotesLayout::Code, cx),
             "backspace" if plain_primary => {
                 if let Some(note) = self.notes.get(self.notes_selected) {
                     self.confirm_delete_note(note.id, window, cx);
@@ -1218,6 +1224,7 @@ impl Padu {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx).clone();
         let selected = self.notes_selected;
         let query = self.notes_search.read(cx).content().trim().to_lowercase();
         self.refresh_notes_filtered(&query);
@@ -1329,14 +1336,15 @@ impl Padu {
                                 .gap(px(6.0))
                                 .text_size(sp(11.0))
                                 .text_color(theme.text_tertiary)
-                                .child(self.notes_button(
-                                    "note-add-to-chat",
-                                    tr!("files.add_to_chat"),
-                                    cx,
-                                    move |this, window, cx| {
-                                        this.add_note_to_chat(note_id, window, cx);
-                                    },
-                                ))
+                                .child(
+                                    Button::new("note-add-to-chat", tr!("files.add_to_chat"))
+                                        .button_style(ButtonStyle::Prominent)
+                                        .icon("icons/add-to-chat.svg")
+                                        .kbd(crate::platform::primary_shortcut("⌘↵", "Ctrl+Enter"))
+                                        .on_press(cx.listener(move |this, _, window, cx| {
+                                            this.add_note_to_chat(note_id, window, cx);
+                                        })),
+                                )
                                 .child(tr!("notes.created", time = created_ago))
                                 .child(tr!("notes.updated", time = updated_ago)),
                         )
@@ -1344,66 +1352,107 @@ impl Padu {
                             div()
                                 .flex()
                                 .items_center()
-                                .gap(px(2.0))
+                                .gap(px(6.0))
                                 .child(
-                                    div()
-                                        .flex()
-                                        .gap(px(1.0))
-                                        .p(px(2.0))
-                                        .rounded(px(7.0))
-                                        .bg(theme.overlay)
-                                        .child(self.notes_button(
-                                            "note-rich",
-                                            tr!("notes.rich_editor"),
-                                            cx,
-                                            |this, _, cx| {
-                                                if this.notes_layout != NotesLayout::Rich {
-                                                    this.notes_layout = NotesLayout::Rich;
-                                                    let content = this
-                                                        .notes_code_body
-                                                        .read(cx)
-                                                        .content()
-                                                        .to_owned();
-                                                    this.notes_body.update(cx, |ed, cx| {
-                                                        if ed.content() != content {
-                                                            ed.set_content(&content, cx);
+                                    bezel_theme
+                                        .toggle_group()
+                                        .id("notes-view-mode-toggle")
+                                        .child(
+                                            bezel_theme
+                                                .toggle_group_item(
+                                                    tr!("notes.rich_editor"),
+                                                    matches!(self.notes_layout, NotesLayout::Rich),
+                                                )
+                                                .id("note-rich")
+                                                .tab_index(0)
+                                                .focus_visible(|style| {
+                                                    style.border_color(theme.accent)
+                                                })
+                                                .tooltip(Tooltip::with_shortcut(
+                                                    tr!("notes.rich_editor"),
+                                                    crate::platform::primary_shortcut(
+                                                        "⌘1", "Ctrl+1",
+                                                    ),
+                                                ))
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.set_notes_layout(NotesLayout::Rich, cx);
+                                                }))
+                                                .on_key_down(cx.listener(
+                                                    |this, event: &KeyDownEvent, _, cx| {
+                                                        if !event.keystroke.modifiers.modified()
+                                                            && matches!(
+                                                                event.keystroke.key.as_str(),
+                                                                "enter" | "space"
+                                                            )
+                                                        {
+                                                            this.set_notes_layout(
+                                                                NotesLayout::Rich,
+                                                                cx,
+                                                            );
+                                                            cx.stop_propagation();
                                                         }
-                                                        ed.set_mode(bezel_editor::Mode::Blocks, cx);
-                                                    });
-                                                    this.ensure_notes_editor_configured(cx);
-                                                    cx.notify();
-                                                }
-                                            },
-                                        ))
-                                        .child(self.notes_button(
-                                            "note-code",
-                                            tr!("notes.code"),
-                                            cx,
-                                            |this, _, cx| {
-                                                if this.notes_layout != NotesLayout::Code {
-                                                    this.notes_layout = NotesLayout::Code;
-                                                    let content =
-                                                        this.notes_body.read(cx).content();
-                                                    this.notes_code_body.update(cx, |input, cx| {
-                                                        if input.content() != content {
-                                                            input.set_content(content, cx);
+                                                    },
+                                                )),
+                                        )
+                                        .child(
+                                            bezel_theme
+                                                .toggle_group_item(
+                                                    tr!("notes.code"),
+                                                    matches!(self.notes_layout, NotesLayout::Code),
+                                                )
+                                                .id("note-code")
+                                                .tab_index(0)
+                                                .focus_visible(|style| {
+                                                    style.border_color(theme.accent)
+                                                })
+                                                .tooltip(Tooltip::with_shortcut(
+                                                    tr!("notes.code"),
+                                                    crate::platform::primary_shortcut(
+                                                        "⌘2", "Ctrl+2",
+                                                    ),
+                                                ))
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.set_notes_layout(NotesLayout::Code, cx);
+                                                }))
+                                                .on_key_down(cx.listener(
+                                                    |this, event: &KeyDownEvent, _, cx| {
+                                                        if !event.keystroke.modifiers.modified()
+                                                            && matches!(
+                                                                event.keystroke.key.as_str(),
+                                                                "enter" | "space"
+                                                            )
+                                                        {
+                                                            this.set_notes_layout(
+                                                                NotesLayout::Code,
+                                                                cx,
+                                                            );
+                                                            cx.stop_propagation();
                                                         }
-                                                    });
-                                                    cx.notify();
-                                                }
-                                            },
-                                        )),
+                                                    },
+                                                )),
+                                        ),
                                 )
-                                .child(self.notes_button(
-                                    "note-delete",
-                                    tr!("notes.delete"),
-                                    cx,
-                                    |this, window, cx| {
-                                        if let Some(note) = this.notes.get(this.notes_selected) {
-                                            this.confirm_delete_note(note.id, window, cx);
-                                        }
-                                    },
-                                )),
+                                .child(
+                                    Button::new("note-delete", tr!("notes.delete"))
+                                        .button_style(ButtonStyle::Ghost)
+                                        .role(ButtonRole::Destructive)
+                                        .icon("icons/trash.svg")
+                                        .label_hidden()
+                                        .tooltip(Tooltip::with_shortcut(
+                                            tr!("notes.delete"),
+                                            crate::platform::primary_shortcut(
+                                                "⌘⌫",
+                                                "Ctrl+Backspace",
+                                            ),
+                                        ))
+                                        .on_press(cx.listener(|this, _, window, cx| {
+                                            if let Some(note) =
+                                                this.notes.get(this.notes_selected)
+                                            {
+                                                this.confirm_delete_note(note.id, window, cx);
+                                            }
+                                        })),
+                                ),
                         ),
                 );
             let edit_pane = if !matches!(layout, NotesLayout::Code) {
@@ -1445,9 +1494,7 @@ impl Padu {
             .min_h_0()
             .flex()
             .gap(px(16.0))
-            .px(px(8.0))
-            .pb(px(24.0))
-            .pt(px(0.0));
+            .p(px(16.0));
         if !list_collapsed {
             body = body.child(
                 div()
@@ -1457,9 +1504,13 @@ impl Padu {
                     .flex_col()
                     .gap(px(8.0))
                     .child(
-                        self.notes_button("note-new", tr!("notes.new"), cx, |this, _, cx| {
-                            this.create_note(cx);
-                        }),
+                        Button::new("note-new", tr!("notes.new"))
+                            .button_style(ButtonStyle::Ghost)
+                            .icon("icons/plus.svg")
+                            .kbd(crate::platform::primary_shortcut("⌘⌥N", "Ctrl+Alt+N"))
+                            .on_press(cx.listener(|this, _, _, cx| {
+                                this.create_note(cx);
+                            })),
                     )
                     .child(
                         div()
@@ -1488,6 +1539,89 @@ impl Padu {
         }
         body = body.child(editor);
 
+        let header = div()
+            .id("notes-page-header")
+            .h(px(48.0))
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .pl(if self.sidebar_visible {
+                px(10.0)
+            } else {
+                px(0.0)
+            })
+            .pr(px(14.0))
+            .when(!self.sidebar_visible, |element| {
+                element
+                    .child(
+                        self.window_drag_region(
+                            div()
+                                .id("notes-page-traffic-light-drag-region")
+                                .w(px((TRAFFIC_LIGHT_CLEARANCE - 8.0).max(0.0)))
+                                .h_full()
+                                .flex_none(),
+                            cx,
+                        ),
+                    )
+                    .child(self.render_sidebar_navigation_controls(true, cx))
+            })
+            .child(icon("icons/note.svg", 16.0, theme.text_secondary))
+            .child(
+                div()
+                    .text_size(sp(13.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(tr!("settings.notes")),
+            )
+            .child(
+                Button::new(
+                    "note-toggle-list",
+                    if list_collapsed {
+                        tr!("notes.expand")
+                    } else {
+                        tr!("notes.collapse")
+                    },
+                )
+                .button_style(ButtonStyle::Ghost)
+                .icon(if list_collapsed {
+                    "icons/expand-2.svg"
+                } else {
+                    "icons/collapse-2.svg"
+                })
+                .label_hidden()
+                .tooltip(Tooltip::with_shortcut(
+                    if list_collapsed {
+                        tr!("notes.expand")
+                    } else {
+                        tr!("notes.collapse")
+                    },
+                    crate::platform::primary_shortcut("⌘⇧L", "Ctrl+Shift+L"),
+                ))
+                .on_press(cx.listener(|this, _, _, cx| {
+                    this.notes_list_collapsed = !this.notes_list_collapsed;
+                    cx.notify();
+                })),
+            )
+            .child(
+                self.window_drag_region(div().id("notes-page-drag-region").h_full().flex_1(), cx),
+            );
+
+        let card = bezel_theme
+            .group_box()
+            .id("notes-content-card")
+            .flex_1()
+            .min_h_0()
+            .ml(if self.sidebar_visible {
+                px(2.0)
+            } else {
+                px(8.0)
+            })
+            .mr(px(8.0))
+            .mb(px(8.0))
+            .bg(theme.surface)
+            .child(body);
+
         div()
             .id("notes-page")
             .key_context("NotesPage")
@@ -1495,170 +1629,10 @@ impl Padu {
             .size_full()
             .flex()
             .flex_col()
-            .bg(theme.canvas)
-            .child(
-                div()
-                    .id("notes-page-header")
-                    .h(px(48.0))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .pl(if self.sidebar_visible {
-                        px(10.0)
-                    } else {
-                        px(0.0)
-                    })
-                    .pr(px(14.0))
-                    .when(!self.sidebar_visible, |element| {
-                        element
-                            .child(
-                                self.window_drag_region(
-                                    div()
-                                        .id("notes-page-traffic-light-drag-region")
-                                        .w(px((TRAFFIC_LIGHT_CLEARANCE - 8.0).max(0.0)))
-                                        .h_full()
-                                        .flex_none(),
-                                    cx,
-                                ),
-                            )
-                            .child(self.render_sidebar_navigation_controls(true, cx))
-                    })
-                    .child(icon("icons/note.svg", 16.0, theme.text_secondary))
-                    .child(
-                        div()
-                            .text_size(sp(13.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text)
-                            .child(tr!("settings.notes")),
-                    )
-                    .child(self.notes_button(
-                        "note-toggle-list",
-                        if list_collapsed {
-                            tr!("notes.expand")
-                        } else {
-                            tr!("notes.collapse")
-                        },
-                        cx,
-                        |this, _, cx| {
-                            this.notes_list_collapsed = !this.notes_list_collapsed;
-                            cx.notify();
-                        },
-                    ))
-                    .child(self.window_drag_region(
-                        div().id("notes-page-drag-region").h_full().flex_1(),
-                        cx,
-                    )),
-            )
-            .child(body)
+            .bg(theme.frosted)
+            .child(header)
+            .child(card)
             .into_any_element()
-    }
-
-    fn notes_button(
-        &self,
-        id: &'static str,
-        label: String,
-        cx: &mut Context<Self>,
-        action: impl Fn(&mut Padu, &mut Window, &mut Context<Self>) + 'static,
-    ) -> Stateful<Div> {
-        let theme = Theme::current(cx);
-        let selected = match id {
-            "note-rich" | "note-toggle-preview" => matches!(self.notes_layout, NotesLayout::Rich),
-            "note-code" => matches!(self.notes_layout, NotesLayout::Code),
-            _ => false,
-        };
-        let (icon_path, icon_only) = match id {
-            "note-new" => ("icons/plus.svg", false),
-            "note-rich" | "note-toggle-preview" => ("icons/pencil.svg", true),
-            "note-code" => ("icons/code.svg", true),
-            "note-delete" => ("icons/trash.svg", true),
-            "note-add-to-chat" => ("icons/add-to-chat.svg", false),
-            "note-toggle-list" => (
-                if self.notes_list_collapsed {
-                    "icons/expand-2.svg"
-                } else {
-                    "icons/collapse-2.svg"
-                },
-                true,
-            ),
-            _ => ("icons/check.svg", false),
-        };
-        let foreground = if id == "note-add-to-chat" {
-            theme.on_inverse
-        } else {
-            theme.text_secondary
-        };
-        let tooltip = label.clone();
-        let shortcut = match id {
-            "note-new" => crate::platform::primary_shortcut("⌘⌥N", "Ctrl+Alt+N"),
-            "note-rich" | "note-toggle-preview" => {
-                crate::platform::primary_shortcut("⌘1", "Ctrl+1")
-            }
-            "note-code" => crate::platform::primary_shortcut("⌘2", "Ctrl+2"),
-            "note-delete" => crate::platform::primary_shortcut("⌘⌫", "Ctrl+Backspace"),
-            "note-add-to-chat" => crate::platform::primary_shortcut("⌘↵", "Ctrl+Enter"),
-            "note-toggle-list" => crate::platform::primary_shortcut("⌘⇧L", "Ctrl+Shift+L"),
-            _ => "",
-        };
-        let shortcut_id = id;
-        let tooltip = Tooltip::with_shortcut(tooltip, shortcut);
-        let action = Rc::new(action);
-        let key_action = action.clone();
-        div()
-            .id(id)
-            .tab_index(0)
-            .tab_stop(true)
-            .h(px(28.0))
-            .px(px(10.0))
-            .rounded(px(6.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .gap(px(6.0))
-            .cursor_pointer()
-            .when(selected, |button| button.bg(theme.overlay_strong))
-            .text_size(sp(12.5))
-            .text_color(foreground)
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
-            .when(id != "note-add-to-chat", |button| {
-                button.hover(|style| style.bg(theme.overlay_strong))
-            })
-            .when(id == "note-add-to-chat", |button| button.bg(theme.inverse))
-            .when(id != "note-add-to-chat", |button| button.tooltip(tooltip))
-            .on_click(cx.listener(move |this, _, window, cx| action(this, window, cx)))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                let key = event.keystroke.key.as_str();
-                let shortcut_pressed = event.keystroke.modifiers.modified()
-                    && match shortcut_id {
-                        "note-new" => {
-                            key == "n"
-                                && event.keystroke.modifiers.alt
-                                && !event.keystroke.modifiers.shift
-                        }
-                        "note-rich" | "note-toggle-preview" => key == "1",
-                        "note-code" => key == "2",
-                        "note-delete" => key == "backspace",
-                        "note-add-to-chat" => key == "enter",
-                        "note-toggle-list" => {
-                            key == "l"
-                                && event.keystroke.modifiers.secondary()
-                                && event.keystroke.modifiers.shift
-                                && !event.keystroke.modifiers.alt
-                        }
-                        _ => false,
-                    };
-                if (!event.keystroke.modifiers.modified() && matches!(key, "enter" | "space"))
-                    || shortcut_pressed
-                {
-                    key_action(this, window, cx);
-                    cx.stop_propagation();
-                }
-            }))
-            .child(icon(icon_path, 14.0, foreground))
-            .when(!icon_only, |button| button.child(label))
-            .when(matches!(id, "note-new" | "note-add-to-chat"), |button| {
-                button.child(crate::ui::kbd_badge(shortcut, &theme))
-            })
     }
 }
 

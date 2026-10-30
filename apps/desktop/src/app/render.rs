@@ -499,7 +499,7 @@ impl Render for Padu {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .bg(theme.surface)
+                    .bg(theme.frosted)
                     .child(if notes_page {
                         self.notes_pane
                             .clone()

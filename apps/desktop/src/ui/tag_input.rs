@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
+use bezel::theme::Theme as BezelTheme;
+use bezel::ui::widgets::Content;
 use gpui::{
-    AnyElement, App, Div, ElementId, FontWeight, InteractiveElement, Interactivity, IntoElement,
-    KeyDownEvent, ParentElement, RenderOnce, SharedString, Stateful, StyleRefinement, Styled,
-    Window, div, prelude::*, px,
+    AnyElement, App, Div, ElementId, InteractiveElement, Interactivity, IntoElement, KeyDownEvent,
+    ParentElement, RenderOnce, SharedString, Stateful, StyleRefinement, Styled, Window, div,
+    prelude::*, px,
 };
 
 use crate::input::TextInput;
 use crate::theme::{Theme, sp};
-
-use super::icon;
 
 /// A common tag/label chip input shell: displays tokens as compact chips
 /// inside the input container, followed by an inline [`TextInput`] to add more.
@@ -97,6 +97,7 @@ impl ParentElement for TagInput {
 
 impl RenderOnce for TagInput {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let bezel_theme = BezelTheme::of(cx);
         let theme = Theme::current(cx);
         let focused = self.input.read(cx).is_visually_focused(window);
         let input_clone = self.input.clone();
@@ -141,82 +142,53 @@ impl RenderOnce for TagInput {
             });
 
         for (i, tag) in self.tags.iter().enumerate() {
-            let remove_cb = on_remove.clone();
-            container = container.child(
-                div()
-                    .id(SharedString::from(format!("tag-chip-{}", i)))
-                    .when(is_small, |s| {
-                        s.h(px(18.0))
-                            .px(px(5.0))
-                            .rounded(px(3.5))
-                            .gap(px(3.0))
-                            .text_size(sp(10.0))
+            let mut chip = bezel_theme
+                .tag(tag.clone())
+                .id(SharedString::from(format!("tag-chip-{}", i)));
+
+            if is_small {
+                chip = chip
+                    .h(px(18.0))
+                    .pl(px(5.0))
+                    .pr(px(4.0))
+                    .py(px(0.0))
+                    .gap(px(3.0))
+                    .text_size(sp(10.0));
+            }
+
+            if accent_chips {
+                chip = chip
+                    .bg(theme.accent.opacity(0.12))
+                    .border_color(theme.accent.opacity(0.40))
+                    .text_color(theme.accent)
+                    .hover(|s| s.bg(theme.accent.opacity(0.20)));
+            } else {
+                chip = chip.hover(|s| s.bg(bezel_theme.element_hover));
+            }
+
+            if let Some(on_remove) = &on_remove {
+                let remove_cb = on_remove.clone();
+                let remove_cb_key = on_remove.clone();
+                chip = chip
+                    .cursor_pointer()
+                    .tab_index(0)
+                    .focus_visible(move |style| style.border_color(theme.accent))
+                    .on_click(move |_, window, cx| {
+                        cx.stop_propagation();
+                        remove_cb(i, window, cx);
                     })
-                    .when(!is_small, |s| {
-                        s.h(px(22.0))
-                            .px(px(7.0))
-                            .rounded(px(4.0))
-                            .gap(px(4.0))
-                            .text_size(sp(11.0))
-                    })
-                    .when(accent_chips, |s| {
-                        s.bg(theme.accent.opacity(0.12))
-                            .border_1()
-                            .border_color(theme.accent.opacity(0.40))
-                            .text_color(theme.accent)
-                    })
-                    .when(!accent_chips, |s| {
-                        s.bg(theme.overlay)
-                            .border_1()
-                            .border_color(theme.border)
-                            .text_color(theme.text)
-                    })
-                    .flex()
-                    .items_center()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(tag.clone())
-                    .child(
-                        div()
-                            .id(SharedString::from(format!("tag-chip-remove-{}", i)))
-                            .cursor_pointer()
-                            .text_color(if accent_chips {
-                                theme.accent.opacity(0.7)
-                            } else {
-                                theme.text_tertiary
-                            })
-                            .hover(|s| s.text_color(theme.danger))
-                            .tab_index(0)
-                            .focus_visible(|style| style.border_color(theme.accent))
-                            .child(icon(
-                                "icons/x.svg",
-                                if is_small { 9.0 } else { 10.0 },
-                                if accent_chips {
-                                    theme.accent.opacity(0.7)
-                                } else {
-                                    theme.text_tertiary
-                                },
-                            ))
-                            .on_click({
-                                let remove_cb = remove_cb.clone();
-                                move |_, window, cx| {
-                                    if let Some(cb) = &remove_cb {
-                                        cb(i, window, cx);
-                                    }
-                                }
-                            })
-                            .on_key_down({
-                                let remove_cb = remove_cb.clone();
-                                move |event: &KeyDownEvent, window, cx| {
-                                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                        if let Some(cb) = &remove_cb {
-                                            cb(i, window, cx);
-                                        }
-                                        cx.stop_propagation();
-                                    }
-                                }
-                            }),
-                    ),
-            );
+                    .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                        if matches!(
+                            event.keystroke.key.as_str(),
+                            "enter" | "space" | "backspace" | "delete"
+                        ) {
+                            cx.stop_propagation();
+                            remove_cb_key(i, window, cx);
+                        }
+                    });
+            }
+
+            container = container.child(chip);
         }
 
         // Inline text input to type new tags
