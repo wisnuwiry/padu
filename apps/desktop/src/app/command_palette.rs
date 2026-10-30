@@ -46,6 +46,7 @@ const EMPTY_RESULTS_HEIGHT: f32 = 160.0;
 const RESULTS_BOTTOM_PADDING: f32 = 6.0;
 const MAX_CARD_HEIGHT: f32 = 440.0;
 const FOOTER_HEIGHT: f32 = 36.0;
+const PALETTE_WIDTH: f32 = 640.0;
 
 /// Bind list navigation beneath the focused one-line input. This is registered
 /// after the input's bindings, although the more-specific key context would
@@ -2147,6 +2148,7 @@ impl Padu {
 
         let mut results = div()
             .id("command-palette-results")
+            .w_full()
             .h(px(results_height))
             .flex_none()
             .overflow_y_scroll()
@@ -2201,6 +2203,7 @@ impl Padu {
             let empty_icon = icon(icon_path, 16.0, theme.text_ghost);
             results = results.child(
                 div()
+                    .w_full()
                     .h(px(EMPTY_RESULTS_HEIGHT))
                     .flex()
                     .flex_col()
@@ -2258,9 +2261,10 @@ impl Padu {
                                 .mt(px(12.0))
                                 .h(px(28.0))
                                 .px(px(9.0))
-                                .rounded(px(8.0))
+                                .rounded(px(bezel::theme::Theme::control_radius()))
                                 .border_1()
                                 .border_color(theme.border)
+                                .bg(theme.overlay_strong)
                                 .flex()
                                 .items_center()
                                 .gap(px(7.0))
@@ -2299,10 +2303,10 @@ impl Padu {
                                 .pt(px(8.0))
                                 .flex()
                                 .items_center()
-                                .text_size(sp(12.0))
-                                .font_weight(FontWeight::MEDIUM)
+                                .text_size(sp(11.0))
+                                .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(theme.text_tertiary)
-                                .child(item.section.label()),
+                                .child(bezel::ui::popover::tracked_upper(&item.section.label())),
                         );
                     }
                     previous_section = Some(item.section);
@@ -2344,9 +2348,13 @@ impl Padu {
                             starts_section && item.section == PaletteSection::Providers,
                             |row| row.mt(px(PROVIDER_SECTION_TOP_MARGIN)),
                         )
+                        .w_full()
                         .h(px(command_palette_row_height(item)))
                         .px(px(10.0))
-                        .rounded(px(8.0))
+                        .rounded(px(bezel::theme::Theme::inset_radius(
+                            bezel::theme::Theme::surface_radius(),
+                            4.0,
+                        )))
                         .border_1()
                         .border_color(if highlighted {
                             theme.border_strong
@@ -2487,15 +2495,18 @@ impl Padu {
                             row.child(
                                 div()
                                     .h(px(20.0))
-                                    .min_w(px(24.0))
-                                    .px(px(6.0))
-                                    .rounded(px(6.0))
+                                    .min_w(px(20.0))
+                                    .px(px(5.0))
+                                    .rounded(px(bezel::theme::Theme::control_radius()))
                                     .flex_none()
                                     .flex()
                                     .items_center()
                                     .justify_center()
                                     .bg(theme.overlay_strong)
-                                    .text_size(sp(12.0))
+                                    .border_1()
+                                    .border_color(theme.border)
+                                    .text_size(sp(11.0))
+                                    .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme.text_tertiary)
                                     .child(shortcut),
                             )
@@ -2536,13 +2547,15 @@ impl Padu {
                     this.dismiss_command_palette(window, cx)
                 }),
             )
-            .w_full()
-            .max_w(px(640.0))
+            .w(px(PALETTE_WIDTH))
+            .max_w_full()
             .h(px(card_height))
             .overflow_hidden()
-            .rounded(px(bezel::theme::Theme::panel_radius()))
+            .rounded(px(bezel::theme::Theme::surface_radius()))
             .bg(theme.raised)
-            .shadow_xl()
+            .border_1()
+            .border_color(theme.border_strong)
+            .shadow_2xl()
             .relative()
             .flex()
             .flex_col()
@@ -2563,13 +2576,20 @@ impl Padu {
                     .when(file_view, |header| {
                         header.child(
                             div()
-                                .text_size(sp(12.5))
+                                .px(px(6.0))
+                                .py(px(2.0))
+                                .rounded(px(bezel::theme::Theme::control_radius()))
+                                .bg(theme.overlay_strong)
+                                .border_1()
+                                .border_color(theme.border)
+                                .text_size(sp(12.0))
+                                .font_weight(FontWeight::MEDIUM)
                                 .text_color(theme.text_secondary)
                                 .child(tr!("command_palette.find_file")),
                         )
                     })
                     .when(file_view, |header| {
-                        header.child(icon("icons/chevron-right.svg", 11.0, theme.text_ghost))
+                        header.child(icon("icons/chevron-right.svg", 10.0, theme.text_ghost))
                     })
                     .child(
                         div()
@@ -2587,93 +2607,107 @@ impl Padu {
                     .flex_none()
                     .flex()
                     .items_center()
-                    .gap(px(18.0))
+                    .gap(px(16.0))
                     .border_t_1()
                     .border_color(theme.border)
-                    .bg(theme.canvas.opacity(0.75))
+                    .bg(theme.canvas.opacity(0.85))
                     .text_size(sp(11.0))
                     .text_color(theme.text_tertiary)
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(4.0))
+                            .gap(px(6.0))
                             .child(
                                 div()
                                     .h(px(20.0))
-                                    .min_w(px(24.0))
-                                    .px(px(6.0))
-                                    .rounded(px(6.0))
+                                    .px(px(5.0))
+                                    .rounded(px(bezel::theme::Theme::control_radius()))
                                     .flex()
                                     .items_center()
-                                    .justify_center()
+                                    .gap(px(3.0))
                                     .bg(theme.overlay_strong)
-                                    .child(icon("icons/arrow-up.svg", 10.0, theme.text_tertiary)),
+                                    .border_1()
+                                    .border_color(theme.border)
+                                    .child(icon("icons/arrow-up.svg", 10.0, theme.text_secondary))
+                                    .child(div().h(px(10.0)).w(px(1.0)).bg(theme.border))
+                                    .child(icon(
+                                        "icons/arrow-down.svg",
+                                        10.0,
+                                        theme.text_secondary,
+                                    )),
                             )
                             .child(
                                 div()
-                                    .h(px(20.0))
-                                    .min_w(px(24.0))
-                                    .px(px(6.0))
-                                    .rounded(px(6.0))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .bg(theme.overlay_strong)
-                                    .child(icon("icons/arrow-down.svg", 10.0, theme.text_tertiary)),
-                            )
-                            .child(SharedString::from("Navigate")),
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_tertiary)
+                                    .child(SharedString::from("Navigate")),
+                            ),
                     )
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(4.0))
+                            .gap(px(6.0))
                             .child(
                                 div()
                                     .h(px(20.0))
-                                    .min_w(px(24.0))
                                     .px(px(6.0))
-                                    .rounded(px(6.0))
+                                    .rounded(px(bezel::theme::Theme::control_radius()))
                                     .flex()
                                     .items_center()
                                     .justify_center()
                                     .bg(theme.overlay_strong)
+                                    .border_1()
+                                    .border_color(theme.border)
                                     .child(icon(
                                         "icons/corner-down-left.svg",
                                         10.0,
-                                        theme.text_tertiary,
+                                        theme.text_secondary,
                                     )),
                             )
-                            .child(SharedString::from("Select")),
+                            .child(
+                                div()
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_tertiary)
+                                    .child(SharedString::from("Select")),
+                            ),
                     )
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(4.0))
+                            .gap(px(6.0))
                             .child(
                                 div()
                                     .h(px(20.0))
                                     .min_w(px(24.0))
                                     .px(px(6.0))
-                                    .rounded(px(6.0))
+                                    .rounded(px(bezel::theme::Theme::control_radius()))
                                     .flex()
                                     .items_center()
                                     .justify_center()
                                     .bg(theme.overlay_strong)
-                                    .text_size(sp(12.0))
-                                    .text_color(theme.text_tertiary)
+                                    .border_1()
+                                    .border_color(theme.border)
+                                    .text_size(sp(11.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text_secondary)
                                     .child(SharedString::from("Esc")),
                             )
-                            .child(SharedString::from("Close")),
+                            .child(
+                                div()
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_tertiary)
+                                    .child(SharedString::from("Close")),
+                            ),
                     ),
             );
 
         let scrim = if theme.is_dark {
-            gpui::hsla(0.0, 0.0, 0.0, 0.26)
+            gpui::hsla(0.0, 0.0, 0.0, 0.35)
         } else {
-            gpui::hsla(0.0, 0.0, 0.0, 0.14)
+            gpui::hsla(0.0, 0.0, 0.0, 0.16)
         };
         let layer = div()
             .id("command-palette-layer")
@@ -2692,7 +2726,14 @@ impl Padu {
             )
             .child(bezel::motion::dialog_in(
                 "command-palette-motion",
-                div().occlude().child(card),
+                div()
+                    .occlude()
+                    .w(px(PALETTE_WIDTH))
+                    .max_w_full()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .child(card),
             ));
         Some(gpui::deferred(layer).with_priority(3).into_any_element())
     }
