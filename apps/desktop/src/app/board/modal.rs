@@ -6,6 +6,7 @@ use crate::ui::MenuChip;
 use crate::ui::dialog::{dialog_backdrop, dialog_cancel_button, dialog_card};
 use crate::ui::menu::{MenuAlign, MenuItem as PaduMenuItem, dropdown_menu};
 use crate::ui::text_field::TextField;
+use bezel::ui::widgets::{Button, ButtonStyle};
 
 use super::types::{BOARD_MODAL_PROVIDERS, BoardAgentPickTarget};
 
@@ -16,7 +17,6 @@ impl Padu {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let cancel_focus = self.board_new_task_cancel_focus.clone();
         let title_input = self.board_new_task_title.clone();
         let desc_input = self.board_new_task_description.clone();
         let project_id = self
@@ -265,33 +265,17 @@ impl Padu {
                     .child(dialog_cancel_button(
                         "cancel-new-task",
                         tr!("board.cancel"),
-                        &cancel_focus,
-                        theme,
-                        cx,
-                        |this, _, cx| {
+                        cx.listener(|this, _, _, cx| {
                             this.board_new_task_modal_open = false;
                             cx.notify();
-                        },
+                        }),
                     ))
                     .child({
                         let title_str = title_input.read(cx).content().to_owned();
                         let desc_str = desc_input.read(cx).content().to_owned();
-                        div()
-                            .id("create-new-task-submit")
-                            .h(px(32.0))
-                            .px(px(14.0))
-                            .rounded(px(7.0))
-                            .bg(theme.inverse)
-                            .text_color(theme.on_inverse)
-                            .cursor_pointer()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .text_size(sp(13.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .hover(|s| s.opacity(0.92))
-                            .child(tr!("board.create_task"))
-                            .on_click(cx.listener(move |this, _, _, cx| {
+                        Button::new("create-new-task-submit", tr!("board.create_task"))
+                            .button_style(ButtonStyle::Prominent)
+                            .on_press(cx.listener(move |this, _, _, cx| {
                                 let model = this.board_new_task_model.clone();
                                 this.create_board_task(
                                     project_id,

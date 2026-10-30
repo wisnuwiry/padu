@@ -15,6 +15,7 @@ use gpui::{KeyBinding, actions};
 
 use super::*;
 use crate::ui::ActivationExt;
+use bezel::ui::widgets::{Button, ButtonStyle};
 
 actions!(padu_whats_new, [OpenWhatsNew, DismissWhatsNew]);
 
@@ -43,6 +44,7 @@ pub(super) struct WhatsNewState {
     scrollbar: Rc<ScrollbarState>,
     focus: FocusHandle,
     close_focus: FocusHandle,
+    #[allow(dead_code)]
     done_focus: FocusHandle,
     previous_focus: Option<FocusHandle>,
 }
@@ -177,7 +179,6 @@ impl Padu {
         let state = self.whats_new.as_ref()?;
         let theme = Theme::current(cx);
         let close_focus = state.close_focus.clone();
-        let done_focus = state.done_focus.clone();
         let selection = state.selection.clone();
         let palette = MarkdownPalette::from_theme(&theme);
         let markdown_context = MarkdownCtx::new(
@@ -349,58 +350,19 @@ impl Padu {
             .border_color(theme.border)
             .pt(px(14.0))
             .child(
-                div()
-                    .id("whats-new-view-full")
-                    .tab_index(0)
-                    .cursor_pointer()
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
-                    .h(px(32.0))
-                    .px(px(12.0))
-                    .rounded(px(7.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .text_size(sp(13.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.text_secondary)
-                    .hover(|style| style.bg(theme.overlay).text_color(theme.text))
-                    .active(|style| style.bg(theme.overlay_strong))
-                    .child(tr!("whats_new.view_full_changelog"))
-                    .child(icon("icons/arrow-up-right.svg", 11.0, theme.text_tertiary))
-                    .on_activation(cx, |_, _, cx| {
+                Button::new("whats-new-view-full", tr!("whats_new.view_full_changelog"))
+                    .button_style(ButtonStyle::Ghost)
+                    .on_press(cx.listener(|_, _, _, cx| {
                         cx.open_url(WHATS_NEW_CHANGELOG_URL);
-                    }),
+                    })),
             )
             .child(div().flex_1())
             .child(
-                div()
-                    .id("whats-new-done")
-                    .track_focus(&done_focus)
-                    .tab_index(0)
-                    .cursor_pointer()
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
-                    .h(px(32.0))
-                    .px(px(14.0))
-                    .rounded(px(7.0))
-                    .bg(theme.inverse)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(6.0))
-                    .text_size(sp(13.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.on_inverse)
-                    .hover(|style| style.opacity(0.9))
-                    .child(tr!("whats_new.done"))
-                    .child(crate::ui::kbd_badge_icon(
-                        "icons/corner-down-left.svg",
-                        theme.inverse,
-                        theme.on_inverse,
-                        gpui::hsla(0.0, 0.0, 1.0, 0.25),
-                    ))
-                    .on_activation(cx, |this, window, cx| {
+                Button::new("whats-new-done", tr!("whats_new.done"))
+                    .button_style(ButtonStyle::Prominent)
+                    .on_press(cx.listener(|this, _, window, cx| {
                         this.dismiss_whats_new(window, cx);
-                    }),
+                    })),
             );
 
         let card = div()

@@ -7,6 +7,7 @@ use crate::app::*;
 use crate::model::{ProjectScript, ProjectScriptIcon};
 use crate::ui::dialog::dialog_backdrop;
 use crate::ui::toggle_switch;
+use bezel::ui::widgets::{Button, ButtonRole, ButtonStyle};
 
 actions!(
     padu_project_action_dialog,
@@ -318,8 +319,8 @@ impl Padu {
         let auto_open_preview = dialog.auto_open_preview;
         let validation_error = dialog.validation_error.clone();
 
-        let save_focus = dialog.save_focus.clone();
-        let cancel_focus = dialog.cancel_focus.clone();
+        let _save_focus = dialog.save_focus.clone();
+        let _cancel_focus = dialog.cancel_focus.clone();
         let delete_focus = dialog.delete_focus.clone();
 
         let shortcut_focus = dialog.recorder.focus.clone();
@@ -1364,44 +1365,13 @@ impl Padu {
                     .items_center()
                     .justify_between()
                     // Left: Delete Action (when editing)
-                    .when_some(delete_focus.clone(), |row, del_focus| {
+                    .when_some(delete_focus.clone(), |row, _del_focus| {
                         row.child(
-                            div()
-                                .id("delete-project-action-button")
-                                .track_focus(&del_focus)
-                                .tab_index(0)
-                                .h(px(32.0))
-                                .px(px(10.0))
-                                .rounded(px(7.0))
-                                .border_1()
-                                .border_color(theme.border)
-                                .cursor_pointer()
-                                .text_size(sp(12.0))
-                                .text_color(theme.danger)
-                                .focus_visible(|style| style.border_1().border_color(theme.accent))
-                                .hover(|e| e.bg(theme.overlay))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .gap(px(6.0))
-                                .child(icon("icons/trash.svg", 13.0, theme.danger))
-                                .child(tr!("actions.delete"))
-                                .on_click(cx.listener(|this, _, window, cx| {
+                            Button::new("delete-project-action-button", tr!("actions.delete"))
+                                .role(ButtonRole::Destructive)
+                                .on_press(cx.listener(|this, _, window, cx| {
                                     this.project_action_dialog_delete(window, cx);
-                                }))
-                                .on_key_down(cx.listener(
-                                    |this, event: &KeyDownEvent, window, cx| {
-                                        if !event.keystroke.modifiers.modified()
-                                            && matches!(
-                                                event.keystroke.key.as_str(),
-                                                "enter" | "space"
-                                            )
-                                        {
-                                            this.project_action_dialog_delete(window, cx);
-                                            cx.stop_propagation();
-                                        }
-                                    },
-                                )),
+                                })),
                         )
                     })
                     .when(delete_focus.is_none(), |row| row.child(div()))
@@ -1413,98 +1383,20 @@ impl Padu {
                             .gap(px(8.0))
                             // Cancel Button
                             .child(
-                                div()
-                                    .id("cancel-project-action-dialog")
-                                    .track_focus(&cancel_focus)
-                                    .tab_index(0)
-                                    .h(px(32.0))
-                                    .px(px(14.0))
-                                    .rounded(px(7.0))
-                                    .border_1()
-                                    .border_color(theme.border)
-                                    .cursor_pointer()
-                                    .text_size(sp(12.0))
-                                    .text_color(theme.text_secondary)
-                                    .focus_visible(|style| {
-                                        style.border_1().border_color(theme.accent)
-                                    })
-                                    .hover(|e| e.bg(theme.overlay))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .gap(px(6.0))
-                                    .child(tr!("actions.cancel"))
-                                    .child(
-                                        div()
-                                            .text_size(sp(10.0))
-                                            .text_color(theme.text_tertiary)
-                                            .child("Esc"),
-                                    )
-                                    .on_click(cx.listener(|this, _, window, cx| {
+                                Button::new("cancel-project-action-dialog", tr!("actions.cancel"))
+                                    .button_style(ButtonStyle::Ghost)
+                                    .role(ButtonRole::Cancel)
+                                    .on_press(cx.listener(|this, _, window, cx| {
                                         this.close_project_action_dialog(window, cx);
-                                    }))
-                                    .on_key_down(cx.listener(
-                                        |this, event: &KeyDownEvent, window, cx| {
-                                            if !event.keystroke.modifiers.modified()
-                                                && matches!(
-                                                    event.keystroke.key.as_str(),
-                                                    "enter" | "space"
-                                                )
-                                            {
-                                                this.close_project_action_dialog(window, cx);
-                                                cx.stop_propagation();
-                                            }
-                                        },
-                                    )),
+                                    })),
                             )
                             // Primary Save Button
                             .child(
-                                div()
-                                    .id("save-project-action-dialog")
-                                    .track_focus(&save_focus)
-                                    .tab_index(0)
-                                    .h(px(32.0))
-                                    .px(px(14.0))
-                                    .rounded(px(7.0))
-                                    .border_1()
-                                    .border_color(theme.inverse)
-                                    .cursor_pointer()
-                                    .text_size(sp(12.0))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.on_inverse)
-                                    .bg(theme.inverse)
-                                    .focus_visible(|style| {
-                                        style.border_1().border_color(theme.accent)
-                                    })
-                                    .hover(|e| e.opacity(0.9))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .gap(px(6.0))
-                                    .child(save_label)
-                                    .child(
-                                        div()
-                                            .text_size(sp(10.0))
-                                            .font_weight(FontWeight::NORMAL)
-                                            .text_color(theme.on_inverse.opacity(0.75))
-                                            .child("⌘↵"),
-                                    )
-                                    .on_click(cx.listener(|this, _, window, cx| {
+                                Button::new("save-project-action-dialog", save_label)
+                                    .button_style(ButtonStyle::Prominent)
+                                    .on_press(cx.listener(|this, _, window, cx| {
                                         this.project_action_dialog_save(window, cx);
-                                    }))
-                                    .on_key_down(cx.listener(
-                                        |this, event: &KeyDownEvent, window, cx| {
-                                            if !event.keystroke.modifiers.modified()
-                                                && matches!(
-                                                    event.keystroke.key.as_str(),
-                                                    "enter" | "space"
-                                                )
-                                            {
-                                                this.project_action_dialog_save(window, cx);
-                                                cx.stop_propagation();
-                                            }
-                                        },
-                                    )),
+                                    })),
                             ),
                     ),
             );
