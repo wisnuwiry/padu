@@ -139,9 +139,16 @@ impl RenderOnce for Button {
         let destructive =
             self.role == Some(ButtonRole::Destructive) || self.style == ButtonStyle::Destructive;
 
+        let pad_y = if self.kbd.is_some() {
+            px(((self.size.height() - 20.0 - 2.0) / 2.0).max(0.0))
+        } else {
+            px((self.size.pad_y() - 1.0).max(0.0))
+        };
+
         let frame = div()
             .control_size(self.size)
-            .py(px((self.size.pad_y() - 1.0).max(0.0)))
+            .h(px(self.size.height()))
+            .py(pad_y)
             .flex()
             .items_center()
             .justify_center()
