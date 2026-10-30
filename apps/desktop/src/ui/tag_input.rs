@@ -3,9 +3,9 @@ use std::sync::Arc;
 use bezel::theme::Theme as BezelTheme;
 use bezel::ui::widgets::Content;
 use gpui::{
-    AnyElement, App, Div, ElementId, InteractiveElement, Interactivity, IntoElement, KeyDownEvent,
-    ParentElement, RenderOnce, SharedString, Stateful, StyleRefinement, Styled, Window, div,
-    prelude::*, px,
+    AnyElement, App, Div, ElementId, FontWeight, InteractiveElement, Interactivity, IntoElement,
+    KeyDownEvent, ParentElement, RenderOnce, SharedString, Stateful, StyleRefinement, Styled,
+    Window, div, prelude::*, px,
 };
 
 use crate::input::TextInput;
@@ -23,6 +23,8 @@ pub struct TagInput {
     focus_outline: bool,
     small: bool,
     accent_chips: bool,
+    prefix: Option<SharedString>,
+    transparent: bool,
     on_remove: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + 'static>>,
 }
 
@@ -36,6 +38,8 @@ impl TagInput {
             focus_outline: true,
             small: false,
             accent_chips: false,
+            prefix: None,
+            transparent: false,
             on_remove: None,
         }
     }
@@ -59,6 +63,7 @@ impl TagInput {
     }
 
     /// Whether chips should be styled with primary/accent outline and text.
+    #[allow(dead_code)]
     pub fn accent_chips(mut self, accent_chips: bool) -> Self {
         self.accent_chips = accent_chips;
         self
@@ -67,6 +72,18 @@ impl TagInput {
     /// The list of tags/labels to render as chips inside the input container.
     pub fn tags(mut self, tags: impl IntoIterator<Item = impl Into<SharedString>>) -> Self {
         self.tags = tags.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Optional prefix label displayed before chips and input (e.g. "Tags").
+    pub fn prefix(mut self, prefix: impl Into<SharedString>) -> Self {
+        self.prefix = Some(prefix.into());
+        self
+    }
+
+    /// Whether container background should be transparent rather than `theme.inset`.
+    pub fn transparent(mut self, transparent: bool) -> Self {
+        self.transparent = transparent;
         self
     }
 
@@ -107,20 +124,30 @@ impl RenderOnce for TagInput {
         let show_focus_border = focused && self.focus_outline;
         let is_small = self.small;
         let accent_chips = self.accent_chips;
+        let is_transparent = self.transparent;
 
         let mut container = self
             .base
-            .when(is_small, |s| {
+            .when(is_small && !is_transparent, |s| {
                 s.min_h(px(24.0))
                     .py(px(1.5))
                     .px(px(4.0))
                     .rounded(px(5.0))
                     .gap(px(4.0))
             })
-            .when(!is_small, |s| {
+            .when(is_small && is_transparent, |s| {
+                s.min_h(px(24.0))
+                    .py(px(1.5))
+                    .px(px(0.0))
+                    .gap(px(4.0))
+            })
+            .when(!is_small && !is_transparent, |s| {
                 s.min_h(px(34.0)).p(px(6.0)).rounded(px(6.0)).gap(px(6.0))
             })
-            .bg(theme.inset)
+            .when(!is_small && is_transparent, |s| {
+                s.min_h(px(34.0)).py(px(4.0)).px(px(0.0)).gap(px(6.0))
+            })
+            .when(!is_transparent, |s| s.bg(theme.inset))
             .when(bordered, |s| {
                 s.border_1().border_color(if show_focus_border {
                     theme.accent
@@ -140,6 +167,18 @@ impl RenderOnce for TagInput {
                 let focus = input_clone.read(cx).focus();
                 window.focus(&focus, cx);
             });
+
+        if let Some(prefix) = &self.prefix {
+            container = container.child(
+                div()
+                    .flex_none()
+                    .text_size(if is_small { sp(11.0) } else { sp(12.0) })
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(bezel_theme.text_muted)
+                    .mr(px(2.0))
+                    .child(prefix.clone()),
+            );
+        }
 
         for (i, tag) in self.tags.iter().enumerate() {
             let mut chip = bezel_theme
