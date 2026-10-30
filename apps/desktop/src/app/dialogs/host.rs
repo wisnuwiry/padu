@@ -9,8 +9,8 @@ use padu_client::persistence::{
 use padu_client::transport::TailscaleConfig;
 
 use crate::app::*;
+use crate::ui::button::{Button, ButtonRole, ButtonStyle};
 use crate::ui::dialog::dialog_backdrop;
-use bezel::ui::widgets::{Button, ButtonRole, ButtonStyle};
 
 actions!(padu_host_dialog, [ConfirmHostDialog, DismissHostDialog]);
 
@@ -820,6 +820,7 @@ impl Padu {
                                 Button::new("cancel-host-dialog", tr!("common.cancel"))
                                     .button_style(ButtonStyle::Ghost)
                                     .role(ButtonRole::Cancel)
+                                    .kbd("Esc")
                                     .on_press(cx.listener(|this, _, window, cx| {
                                         this.close_host_dialog(window, cx);
                                     })),
@@ -827,6 +828,7 @@ impl Padu {
                             .child(
                                 Button::new("save-host-dialog", save_label)
                                     .button_style(ButtonStyle::Prominent)
+                                    .kbd_icon("icons/corner-down-left.svg")
                                     .on_press(cx.listener(|this, _, window, cx| {
                                         this.host_dialog_save(window, cx);
                                     })),

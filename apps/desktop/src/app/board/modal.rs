@@ -3,10 +3,10 @@ use uuid::Uuid;
 use super::super::*;
 use crate::theme::{Theme, sp};
 use crate::ui::MenuChip;
+use crate::ui::button::{Button, ButtonStyle};
 use crate::ui::dialog::{dialog_backdrop, dialog_cancel_button, dialog_card};
 use crate::ui::menu::{MenuAlign, MenuItem as PaduMenuItem, dropdown_menu};
 use crate::ui::text_field::TextField;
-use bezel::ui::widgets::{Button, ButtonStyle};
 
 use super::types::{BOARD_MODAL_PROVIDERS, BoardAgentPickTarget};
 
@@ -275,6 +275,7 @@ impl Padu {
                         let desc_str = desc_input.read(cx).content().to_owned();
                         Button::new("create-new-task-submit", tr!("board.create_task"))
                             .button_style(ButtonStyle::Prominent)
+                            .kbd_icon("icons/corner-down-left.svg")
                             .on_press(cx.listener(move |this, _, _, cx| {
                                 let model = this.board_new_task_model.clone();
                                 this.create_board_task(

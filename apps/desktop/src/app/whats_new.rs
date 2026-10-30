@@ -15,7 +15,7 @@ use gpui::{KeyBinding, actions};
 
 use super::*;
 use crate::ui::ActivationExt;
-use bezel::ui::widgets::{Button, ButtonStyle};
+use crate::ui::button::{Button, ButtonStyle};
 
 actions!(padu_whats_new, [OpenWhatsNew, DismissWhatsNew]);
 
@@ -360,6 +360,7 @@ impl Padu {
             .child(
                 Button::new("whats-new-done", tr!("whats_new.done"))
                     .button_style(ButtonStyle::Prominent)
+                    .kbd_icon("icons/corner-down-left.svg")
                     .on_press(cx.listener(|this, _, window, cx| {
                         this.dismiss_whats_new(window, cx);
                     })),

@@ -5,8 +5,8 @@ use gpui::{
 };
 
 use crate::theme::{Theme, sp};
+use crate::ui::button::{Button, ButtonRole, ButtonStyle};
 use crate::ui::icon;
-use bezel::ui::widgets::{Button, ButtonRole, ButtonStyle};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConfirmVariant {
@@ -75,7 +75,7 @@ pub fn dialog_card(id: impl Into<ElementId>, theme: &Theme, width: Pixels) -> St
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
 }
 
-/// Standardized cancel button backed by bezel's Button component.
+/// Standardized cancel button backed by bezel's Button component with Esc shortcut badge.
 pub fn dialog_cancel_button(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
@@ -84,10 +84,11 @@ pub fn dialog_cancel_button(
     Button::new(id, label)
         .button_style(ButtonStyle::Ghost)
         .role(ButtonRole::Cancel)
+        .kbd("Esc")
         .on_press(on_click)
 }
 
-/// Standardized confirmation button backed by bezel's Button component.
+/// Standardized confirmation button backed by bezel's Button component with Enter shortcut badge.
 pub fn dialog_confirm_button(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
@@ -100,6 +101,7 @@ pub fn dialog_confirm_button(
     Button::new(id, label)
         .button_style(style)
         .role(role)
+        .kbd_icon("icons/corner-down-left.svg")
         .on_press(on_confirm)
 }
 

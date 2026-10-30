@@ -5,6 +5,7 @@ use gpui::{
     img, point, prelude::*, px, rgb, svg,
 };
 
+pub mod button;
 pub mod dialog;
 pub mod editor;
 pub mod menu;
@@ -16,6 +17,8 @@ pub mod tag_input;
 pub mod text_field;
 pub mod tooltip;
 
+#[allow(unused_imports)]
+pub use button::{Button, ButtonKbd};
 #[allow(unused_imports)]
 pub use editor::{EditorLoader, RichEditor, SharedEditor, configure_editor, editor_theme};
 pub use tag_input::TagInput;
@@ -29,8 +32,8 @@ impl<T> RestrictScrollExt for T {}
 
 #[allow(unused_imports)]
 pub use bezel::ui::widgets::{
-    Button, ButtonRole, ButtonStyle, Buttons, Content, Controls, Icons, Layout as BezelLayout,
-    Scaffolding, Status,
+    ButtonRole, ButtonStyle, Buttons, Content, Controls, Icons, Layout as BezelLayout, Scaffolding,
+    Status,
 };
 
 #[allow(unused_imports)]

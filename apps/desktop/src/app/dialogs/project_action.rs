@@ -5,9 +5,9 @@ use uuid::Uuid;
 
 use crate::app::*;
 use crate::model::{ProjectScript, ProjectScriptIcon};
+use crate::ui::button::{Button, ButtonRole, ButtonStyle};
 use crate::ui::dialog::dialog_backdrop;
 use crate::ui::toggle_switch;
-use bezel::ui::widgets::{Button, ButtonRole, ButtonStyle};
 
 actions!(
     padu_project_action_dialog,
@@ -1386,6 +1386,7 @@ impl Padu {
                                 Button::new("cancel-project-action-dialog", tr!("actions.cancel"))
                                     .button_style(ButtonStyle::Ghost)
                                     .role(ButtonRole::Cancel)
+                                    .kbd("Esc")
                                     .on_press(cx.listener(|this, _, window, cx| {
                                         this.close_project_action_dialog(window, cx);
                                     })),
@@ -1394,6 +1395,7 @@ impl Padu {
                             .child(
                                 Button::new("save-project-action-dialog", save_label)
                                     .button_style(ButtonStyle::Prominent)
+                                    .kbd("⌘↵")
                                     .on_press(cx.listener(|this, _, window, cx| {
                                         this.project_action_dialog_save(window, cx);
                                     })),
