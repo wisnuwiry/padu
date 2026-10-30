@@ -84,34 +84,11 @@ impl Padu {
                             ),
                     )
                     .child(
-                        div()
-                            .id("add-remote-host-btn")
-                            .tab_index(0)
-                            .h(px(28.0))
-                            .px(px(11.0))
-                            .rounded(px(7.0))
-                            .border_1()
-                            .border_color(theme.border_strong)
-                            .flex()
-                            .items_center()
-                            .gap(px(5.0))
-                            .cursor_pointer()
-                            .text_size(sp(12.5))
-                            .text_color(theme.text)
-                            .hover(|e| e.bg(theme.overlay))
-                            .focus_visible(|style| style.border_color(theme.accent))
-                            .child(icon("icons/plus.svg", 12.0, theme.text_secondary))
-                            .child(tr!("host.add_host"))
-                            .on_click(cx.listener(|this, _, _, cx| {
+                        Button::new("add-remote-host-btn", tr!("host.add_host"))
+                            .button_style(ButtonStyle::Ghost)
+                            .icon("icons/plus.svg")
+                            .on_press(cx.listener(|this, _, _, cx| {
                                 this.request_host_dialog(None, cx);
-                            }))
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                                if !event.keystroke.modifiers.modified()
-                                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                                {
-                                    this.request_host_dialog(None, cx);
-                                    cx.stop_propagation();
-                                }
                             })),
                     ),
             )
@@ -334,64 +311,36 @@ impl Padu {
                                     .when(!is_active, |row| {
                                         let switch_id = switch_id.clone();
                                         row.child(
-                                            div()
-                                                .id(SharedString::from(format!(
+                                            Button::new(
+                                                SharedString::from(format!(
                                                     "connect-host-{}",
                                                     switch_id
-                                                )))
-                                                .tab_index(0)
-                                                .h(px(28.0))
-                                                .px(px(11.0))
-                                                .rounded(px(6.0))
-                                                .bg(theme.inverse)
-                                                .text_color(theme.on_inverse)
-                                                .font_weight(FontWeight::MEDIUM)
-                                                .flex()
-                                                .items_center()
-                                                .cursor_pointer()
-                                                .text_size(sp(12.0))
-                                                .hover(|e| e.opacity(0.9))
-                                                .focus_visible(|style| {
-                                                    style.border_color(theme.accent)
-                                                })
-                                                .child(tr!("host.connect"))
-                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                )),
+                                                tr!("host.connect"),
+                                            )
+                                            .button_style(ButtonStyle::Prominent)
+                                            .on_press(
+                                                cx.listener(move |this, _, _, cx| {
                                                     this.switch_to_host(
                                                         Some(switch_id.clone()),
                                                         cx,
                                                     );
-                                                })),
+                                                }),
+                                            ),
                                         )
                                     })
                                     .child(
-                                        div()
-                                            .id(SharedString::from(format!(
-                                                "edit-host-{}",
-                                                edit_id
-                                            )))
-                                            .tab_index(0)
-                                            .h(px(28.0))
-                                            .px(px(10.0))
-                                            .rounded(px(6.0))
-                                            .border_1()
-                                            .border_color(theme.border_strong)
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(4.0))
-                                            .cursor_pointer()
-                                            .text_size(sp(12.0))
-                                            .text_color(theme.text_secondary)
-                                            .hover(|e| e.bg(theme.overlay).text_color(theme.text))
-                                            .focus_visible(|style| style.border_color(theme.accent))
-                                            .child(icon(
-                                                "icons/pencil.svg",
-                                                11.0,
-                                                theme.text_tertiary,
-                                            ))
-                                            .child(tr!("common.edit"))
-                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                        Button::new(
+                                            SharedString::from(format!("edit-host-{}", edit_id)),
+                                            tr!("common.edit"),
+                                        )
+                                        .button_style(ButtonStyle::Ghost)
+                                        .icon("icons/pencil.svg")
+                                        .on_press(
+                                            cx.listener(move |this, _, _, cx| {
                                                 this.request_host_dialog(Some(edit_id.clone()), cx);
-                                            })),
+                                            }),
+                                        ),
                                     ),
                             )
                     }))
@@ -500,34 +449,11 @@ impl Padu {
                         ),
                 )
                 .child(
-                    div()
-                        .id("switch-to-local-btn")
-                        .tab_index(0)
-                        .h(px(30.0))
-                        .px(px(12.0))
-                        .rounded(px(7.0))
-                        .border_1()
-                        .border_color(theme.border_strong)
-                        .flex()
-                        .items_center()
-                        .gap(px(6.0))
-                        .cursor_pointer()
-                        .text_size(sp(12.5))
-                        .text_color(theme.text)
-                        .hover(|e| e.bg(theme.overlay))
-                        .focus_visible(|style| style.border_color(theme.accent))
-                        .child(icon("icons/arrow-left.svg", 12.0, theme.text_secondary))
-                        .child(tr!("daemon.switch_to_local"))
-                        .on_click(cx.listener(|this, _, _, cx| {
+                    Button::new("switch-to-local-btn", tr!("daemon.switch_to_local"))
+                        .button_style(ButtonStyle::Ghost)
+                        .icon("icons/arrow-left.svg")
+                        .on_press(cx.listener(|this, _, _, cx| {
                             this.switch_to_host(None, cx);
-                        }))
-                        .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                            if !event.keystroke.modifiers.modified()
-                                && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                            {
-                                this.switch_to_host(None, cx);
-                                cx.stop_propagation();
-                            }
                         })),
                 );
 
@@ -775,46 +701,15 @@ impl Padu {
                                         ))
                                         .child(
                                             div().flex().items_center().justify_start().child(
-                                                div()
-                                                    .id("add-daemon-origin-btn")
-                                                    .tab_index(0)
-                                                    .h(px(26.0))
-                                                    .px(px(8.0))
-                                                    .rounded(px(6.0))
-                                                    .border_1()
-                                                    .border_color(theme.border_strong)
-                                                    .flex()
-                                                    .items_center()
-                                                    .gap(px(5.0))
-                                                    .cursor_pointer()
-                                                    .text_size(sp(12.0))
-                                                    .text_color(theme.text_secondary)
-                                                    .hover(|el| el.bg(theme.overlay))
-                                                    .focus_visible(|style| {
-                                                        style.border_color(theme.accent)
-                                                    })
-                                                    .on_click(cx.listener(|this, _, window, cx| {
-                                                        this.add_daemon_origin(window, cx);
-                                                    }))
-                                                    .on_key_down(cx.listener(
-                                                        |this, event: &KeyDownEvent, window, cx| {
-                                                            if !event.keystroke.modifiers.modified()
-                                                                && matches!(
-                                                                    event.keystroke.key.as_str(),
-                                                                    "enter" | "space"
-                                                                )
-                                                            {
-                                                                this.add_daemon_origin(window, cx);
-                                                                cx.stop_propagation();
-                                                            }
-                                                        },
-                                                    ))
-                                                    .child(icon(
-                                                        "icons/plus.svg",
-                                                        11.0,
-                                                        theme.text_secondary,
-                                                    ))
-                                                    .child(tr!("daemon.add_origin")),
+                                                Button::new(
+                                                    "add-daemon-origin-btn",
+                                                    tr!("daemon.add_origin"),
+                                                )
+                                                .button_style(ButtonStyle::Ghost)
+                                                .icon("icons/plus.svg")
+                                                .on_press(cx.listener(|this, _, window, cx| {
+                                                    this.add_daemon_origin(window, cx);
+                                                })),
                                             ),
                                         ),
                                 ),
