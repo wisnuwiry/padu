@@ -10,6 +10,7 @@ actions!(padu_settings, [FocusSettingsSearch]);
 mod about;
 mod appearance;
 mod archive;
+pub(crate) mod browser;
 mod computer_use;
 mod daemon;
 mod general;
@@ -48,22 +49,25 @@ const SETTINGS_SEARCH_CONTEXT: &str = "SettingsSidebar > TextInput";
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SettingsGroup {
     Preferences,
+    Integration,
     Agents,
     System,
 }
 
 impl SettingsGroup {
-    pub(crate) fn label_key(self) -> &'static str {
+    pub(crate) fn label_key(self) -> Option<&'static str> {
         match self {
-            Self::Preferences => "settings.group_preferences",
-            Self::Agents => "settings.group_agents",
-            Self::System => "settings.group_system",
+            Self::Preferences => None,
+            Self::Integration => Some("settings.group_integration"),
+            Self::Agents => Some("settings.group_agents"),
+            Self::System => Some("settings.group_system"),
         }
     }
 
     pub(crate) fn id_str(self) -> &'static str {
         match self {
             Self::Preferences => "preferences",
+            Self::Integration => "integration",
             Self::Agents => "agents",
             Self::System => "system",
         }
@@ -72,7 +76,7 @@ impl SettingsGroup {
 
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
-const SETTINGS_PAGES: [(SettingsGroup, SettingsPage, &str, &str, &str); 11] = [
+const SETTINGS_PAGES: [(SettingsGroup, SettingsPage, &str, &str, &str); 12] = [
     (
         SettingsGroup::Preferences,
         SettingsPage::General,
@@ -100,6 +104,13 @@ const SETTINGS_PAGES: [(SettingsGroup, SettingsPage, &str, &str, &str); 11] = [
         "settings.notifications",
         "icons/bell.svg",
         "settings.notifications_keywords",
+    ),
+    (
+        SettingsGroup::Integration,
+        SettingsPage::Browser,
+        "settings.browser",
+        "icons/globe.svg",
+        "settings.browser_keywords",
     ),
     (
         SettingsGroup::Agents,
@@ -245,20 +256,22 @@ impl Padu {
         for (group, page, label, icon_path) in visible_settings_pages(&query) {
             if current_group != Some(group) {
                 current_group = Some(group);
-                navigation = navigation.child(
-                    div()
-                        .id(SharedString::from(format!(
-                            "settings-group-{}",
-                            group.id_str()
-                        )))
-                        .pt(if is_first_group { px(0.0) } else { px(8.0) })
-                        .pb(px(2.0))
-                        .px(px(10.0))
-                        .text_size(sp(11.0))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(theme.text_tertiary)
-                        .child(crate::i18n::translate(group.label_key())),
-                );
+                if let Some(label_key) = group.label_key() {
+                    navigation = navigation.child(
+                        div()
+                            .id(SharedString::from(format!(
+                                "settings-group-{}",
+                                group.id_str()
+                            )))
+                            .pt(if is_first_group { px(0.0) } else { px(8.0) })
+                            .pb(px(2.0))
+                            .px(px(10.0))
+                            .text_size(sp(11.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme.text_tertiary)
+                            .child(crate::i18n::translate(label_key)),
+                    );
+                }
                 is_first_group = false;
             }
 
@@ -445,6 +458,7 @@ impl Padu {
             SettingsPage::Appearance => tr!("settings.appearance"),
             SettingsPage::Keybindings => tr!("settings.keybindings"),
             SettingsPage::Notifications => tr!("settings.notifications"),
+            SettingsPage::Browser => tr!("settings.browser"),
             SettingsPage::Providers => tr!("settings.providers"),
             SettingsPage::Skills => tr!("settings.skills"),
             SettingsPage::Usage => tr!("settings.usage"),
@@ -489,6 +503,7 @@ impl Padu {
                     SettingsPage::Appearance => self.render_appearance_settings(cx),
                     SettingsPage::Keybindings => self.render_keybindings_settings(cx),
                     SettingsPage::Notifications => self.render_notifications_settings(cx),
+                    SettingsPage::Browser => self.render_browser_settings(cx),
                     SettingsPage::Providers => self.render_providers_settings(cx),
                     SettingsPage::Skills => self.render_skills_settings(cx),
                     SettingsPage::Usage => self.render_usage_settings(cx),
@@ -638,12 +653,19 @@ mod tests {
     fn settings_pages_are_grouped() {
         use super::{SETTINGS_PAGES, SettingsGroup, SettingsPage};
 
+        assert_eq!(SettingsGroup::Preferences.label_key(), None);
         assert_eq!(
-            SettingsGroup::Preferences.label_key(),
-            "settings.group_preferences"
+            SettingsGroup::Integration.label_key(),
+            Some("settings.group_integration")
         );
-        assert_eq!(SettingsGroup::Agents.label_key(), "settings.group_agents");
-        assert_eq!(SettingsGroup::System.label_key(), "settings.group_system");
+        assert_eq!(
+            SettingsGroup::Agents.label_key(),
+            Some("settings.group_agents")
+        );
+        assert_eq!(
+            SettingsGroup::System.label_key(),
+            Some("settings.group_system")
+        );
 
         for (group, page, ..) in SETTINGS_PAGES {
             match page {
@@ -651,6 +673,7 @@ mod tests {
                 | SettingsPage::Appearance
                 | SettingsPage::Keybindings
                 | SettingsPage::Notifications => assert_eq!(group, SettingsGroup::Preferences),
+                SettingsPage::Browser => assert_eq!(group, SettingsGroup::Integration),
                 SettingsPage::Providers
                 | SettingsPage::Skills
                 | SettingsPage::Usage

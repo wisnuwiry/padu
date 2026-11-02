@@ -219,6 +219,7 @@ pub fn run() {
             cx.set_app_identity(APP_ID, APP_NAME);
             crate::assets::register_fonts(cx).expect("failed to register bundled fonts");
             let _ = bezel::ui::register_fonts(cx);
+            bezel::ui::input::init(cx);
             crate::input::init(cx);
             crate::md::init(cx);
             bezel_editor::init(cx);
@@ -240,6 +241,7 @@ pub fn run() {
             crate::app::init_skills_keys(cx);
             crate::terminal::init(cx);
             crate::theme::init(cx);
+            crate::browser::init(cx);
             crate::platform::init_reduce_motion(cx);
 
             // Platform updaters only run from a supported release layout (or
@@ -255,99 +257,103 @@ pub fn run() {
             });
             cx.on_action(|_: &About, _| crate::platform::show_about_panel());
 
-            cx.bind_keys([
-                // `secondary` is Command on macOS and Control elsewhere.
-                KeyBinding::new("secondary-q", Quit, None),
-                KeyBinding::new("secondary-w", CloseWindow, None),
-                KeyBinding::new("secondary-n", NewSession, None),
-                KeyBinding::new("secondary-o", NewProject, None),
-                KeyBinding::new("secondary-,", OpenSettings, None),
-                KeyBinding::new("secondary-b", ToggleSidebar, None),
-                KeyBinding::new("secondary-shift-b", ToggleRightPanel, None),
-                KeyBinding::new("secondary-j", ToggleRightPanelFullscreen, None),
-                KeyBinding::new("secondary-alt-right", NextRightPanelTab, None),
-                KeyBinding::new("secondary-alt-left", PrevRightPanelTab, None),
-                KeyBinding::new("secondary-alt-b", OpenBrowser, None),
-                KeyBinding::new("secondary-t", OpenTerminal, None),
-                KeyBinding::new("secondary-shift-e", OpenFiles, None),
-                KeyBinding::new("secondary-p", OpenFilePicker, None),
-                KeyBinding::new("secondary-d", OpenReview, None),
-                KeyBinding::new("secondary-shift-m", OpenNotes, None),
-                KeyBinding::new("secondary-shift-t", OpenBoard, None),
-                KeyBinding::new("secondary-k", ToggleCommandPalette, None),
-                KeyBinding::new("secondary-alt-shift-f", ToggleFpsCounter, None),
-                KeyBinding::new("secondary-[", NavigateBack, Some("Padu")),
-                KeyBinding::new("secondary-]", NavigateForward, Some("Padu")),
-                KeyBinding::new("secondary-alt-up", SelectPreviousSession, Some("Padu")),
-                KeyBinding::new("secondary-alt-down", SelectNextSession, Some("Padu")),
-                KeyBinding::new("secondary-shift-[", SelectPreviousSession, Some("Padu")),
-                KeyBinding::new("secondary-shift-]", SelectNextSession, Some("Padu")),
-                KeyBinding::new("ctrl-tab", SwitchTaskForward, Some("Padu")),
-                KeyBinding::new("ctrl-shift-tab", SwitchTaskBackward, Some("Padu")),
-                KeyBinding::new("ctrl-escape", CancelTaskSwitch, Some("Padu")),
-                KeyBinding::new("ctrl-shift-escape", CancelTaskSwitch, Some("Padu")),
-                KeyBinding::new("down", SwitchTaskForward, Some("TaskSwitcher")),
-                KeyBinding::new("right", SwitchTaskForward, Some("TaskSwitcher")),
-                KeyBinding::new("up", SwitchTaskBackward, Some("TaskSwitcher")),
-                KeyBinding::new("left", SwitchTaskBackward, Some("TaskSwitcher")),
-                KeyBinding::new("home", SelectFirstTask, Some("TaskSwitcher")),
-                KeyBinding::new("end", SelectLastTask, Some("TaskSwitcher")),
-                KeyBinding::new("enter", ConfirmTaskSwitch, Some("TaskSwitcher")),
-                KeyBinding::new("escape", CancelTaskSwitch, Some("TaskSwitcher")),
-                KeyBinding::new("secondary-l", FocusComposer, None),
-                KeyBinding::new("secondary-/", ToggleModelPicker, None),
-                KeyBinding::new("secondary-u", ToggleUsagePanel, None),
-                KeyBinding::new("secondary-s", SaveFile, None),
-                KeyBinding::new("escape", CancelTurn, Some("Padu")),
-                KeyBinding::new("secondary-c", CopySelection, Some("Padu")),
-                // Find and replace in the right panel's file editor, on the
-                // conventional VS Code bindings. The primary shortcut + G cycles matches from
-                // the editor without moving focus to the bar.
-                KeyBinding::new("secondary-f", OpenFind, Some("Padu")),
-                // The text input's macOS-style Ctrl-F caret binding is more
-                // specific than Padu's root context. Reassert the platform
-                // primary shortcut for inputs inside this window so Ctrl-F
-                // remains find-in-page on Linux/Windows while Cmd-F keeps the
-                // native behavior on macOS.
-                KeyBinding::new("secondary-f", OpenFind, Some("Padu > TextInput")),
-                KeyBinding::new("secondary-alt-f", OpenFindReplace, Some("Padu")),
-                KeyBinding::new("secondary-g", FindNext, Some("Padu")),
-                KeyBinding::new("secondary-shift-g", FindPrevious, Some("Padu")),
-                // Scoped to the editor pane: escape closes the bar there and
-                // falls through to CancelTurn anywhere else.
-                KeyBinding::new("escape", CloseFind, Some("FileEditorPane")),
-                KeyBinding::new("escape", CloseFind, Some("FindBar")),
-                KeyBinding::new(
-                    "secondary-alt-c",
-                    ToggleFindCaseSensitive,
-                    Some("FileEditorPane"),
-                ),
-                KeyBinding::new(
-                    "secondary-alt-w",
-                    ToggleFindWholeWord,
-                    Some("FileEditorPane"),
-                ),
-                KeyBinding::new("secondary-alt-r", ToggleFindRegex, Some("FileEditorPane")),
-                KeyBinding::new("shift-enter", FindPrevious, Some("FindBar")),
-                KeyBinding::new("secondary-alt-enter", ReplaceAllMatches, Some("FindBar")),
-                // Browser surface. Deeper than "Padu", so while focus is on the
-                // page or its address bar the browser reads the platform's
-                // conventional navigation shortcuts; the same keys elsewhere
-                // keep their app meanings. The clipboard trio is rebound
-                // because GPUI's window view claims key equivalents before
-                // AppKit can walk the responder chain into the webview.
-                KeyBinding::new("secondary-l", FocusBrowserAddress, Some("Browser")),
-                KeyBinding::new("secondary-r", BrowserReload, Some("Browser")),
-                KeyBinding::new("secondary-shift-r", BrowserHardReload, Some("Browser")),
-                KeyBinding::new("secondary-[", BrowserBack, Some("Browser")),
-                KeyBinding::new("secondary-]", BrowserForward, Some("Browser")),
-                KeyBinding::new("escape", BrowserStop, Some("Browser")),
-                KeyBinding::new("secondary-c", WebviewCopy, Some("Browser")),
-                KeyBinding::new("secondary-x", WebviewCut, Some("Browser")),
-                KeyBinding::new("secondary-v", WebviewPaste, Some("Browser")),
-                KeyBinding::new("secondary-a", WebviewSelectAll, Some("Browser")),
-                KeyBinding::new("escape", BrowserAddressCancel, Some("BrowserAddress")),
-            ]);
+            cx.bind_keys(
+                [
+                    // `secondary` is Command on macOS and Control elsewhere.
+                    KeyBinding::new("secondary-q", Quit, None),
+                    KeyBinding::new("secondary-w", CloseWindow, None),
+                    KeyBinding::new("secondary-n", NewSession, None),
+                    KeyBinding::new("secondary-o", NewProject, None),
+                    KeyBinding::new("secondary-,", OpenSettings, None),
+                    KeyBinding::new("secondary-b", ToggleSidebar, None),
+                    KeyBinding::new("secondary-shift-b", ToggleRightPanel, None),
+                    KeyBinding::new("secondary-j", ToggleRightPanelFullscreen, None),
+                    KeyBinding::new("secondary-alt-right", NextRightPanelTab, None),
+                    KeyBinding::new("secondary-alt-left", PrevRightPanelTab, None),
+                    KeyBinding::new("secondary-alt-b", OpenBrowser, None),
+                    KeyBinding::new("secondary-t", OpenTerminal, None),
+                    KeyBinding::new("secondary-shift-e", OpenFiles, None),
+                    KeyBinding::new("secondary-p", OpenFilePicker, None),
+                    KeyBinding::new("secondary-d", OpenReview, None),
+                    KeyBinding::new("secondary-shift-m", OpenNotes, None),
+                    KeyBinding::new("secondary-shift-t", OpenBoard, None),
+                    KeyBinding::new("secondary-k", ToggleCommandPalette, None),
+                    KeyBinding::new("secondary-alt-shift-f", ToggleFpsCounter, None),
+                    KeyBinding::new("secondary-[", NavigateBack, Some("Padu")),
+                    KeyBinding::new("secondary-]", NavigateForward, Some("Padu")),
+                    KeyBinding::new("secondary-alt-up", SelectPreviousSession, Some("Padu")),
+                    KeyBinding::new("secondary-alt-down", SelectNextSession, Some("Padu")),
+                    KeyBinding::new("secondary-shift-[", SelectPreviousSession, Some("Padu")),
+                    KeyBinding::new("secondary-shift-]", SelectNextSession, Some("Padu")),
+                    KeyBinding::new("ctrl-tab", SwitchTaskForward, Some("Padu")),
+                    KeyBinding::new("ctrl-shift-tab", SwitchTaskBackward, Some("Padu")),
+                    KeyBinding::new("ctrl-escape", CancelTaskSwitch, Some("Padu")),
+                    KeyBinding::new("ctrl-shift-escape", CancelTaskSwitch, Some("Padu")),
+                    KeyBinding::new("down", SwitchTaskForward, Some("TaskSwitcher")),
+                    KeyBinding::new("right", SwitchTaskForward, Some("TaskSwitcher")),
+                    KeyBinding::new("up", SwitchTaskBackward, Some("TaskSwitcher")),
+                    KeyBinding::new("left", SwitchTaskBackward, Some("TaskSwitcher")),
+                    KeyBinding::new("home", SelectFirstTask, Some("TaskSwitcher")),
+                    KeyBinding::new("end", SelectLastTask, Some("TaskSwitcher")),
+                    KeyBinding::new("enter", ConfirmTaskSwitch, Some("TaskSwitcher")),
+                    KeyBinding::new("escape", CancelTaskSwitch, Some("TaskSwitcher")),
+                    KeyBinding::new("secondary-l", FocusComposer, None),
+                    KeyBinding::new("secondary-/", ToggleModelPicker, None),
+                    KeyBinding::new("secondary-u", ToggleUsagePanel, None),
+                    KeyBinding::new("secondary-s", SaveFile, None),
+                    KeyBinding::new("escape", CancelTurn, Some("Padu")),
+                    KeyBinding::new("secondary-c", CopySelection, Some("Padu")),
+                    // Find and replace in the right panel's file editor, on the
+                    // conventional VS Code bindings. The primary shortcut + G cycles matches from
+                    // the editor without moving focus to the bar.
+                    KeyBinding::new("secondary-f", OpenFind, Some("Padu")),
+                    // The text input's macOS-style Ctrl-F caret binding is more
+                    // specific than Padu's root context. Reassert the platform
+                    // primary shortcut for inputs inside this window so Ctrl-F
+                    // remains find-in-page on Linux/Windows while Cmd-F keeps the
+                    // native behavior on macOS.
+                    KeyBinding::new("secondary-f", OpenFind, Some("Padu > TextInput")),
+                    KeyBinding::new("secondary-alt-f", OpenFindReplace, Some("Padu")),
+                    KeyBinding::new("secondary-g", FindNext, Some("Padu")),
+                    KeyBinding::new("secondary-shift-g", FindPrevious, Some("Padu")),
+                    // Scoped to the editor pane: escape closes the bar there and
+                    // falls through to CancelTurn anywhere else.
+                    KeyBinding::new("escape", CloseFind, Some("FileEditorPane")),
+                    KeyBinding::new("escape", CloseFind, Some("FindBar")),
+                    KeyBinding::new(
+                        "secondary-alt-c",
+                        ToggleFindCaseSensitive,
+                        Some("FileEditorPane"),
+                    ),
+                    KeyBinding::new(
+                        "secondary-alt-w",
+                        ToggleFindWholeWord,
+                        Some("FileEditorPane"),
+                    ),
+                    KeyBinding::new("secondary-alt-r", ToggleFindRegex, Some("FileEditorPane")),
+                    KeyBinding::new("shift-enter", FindPrevious, Some("FindBar")),
+                    KeyBinding::new("secondary-alt-enter", ReplaceAllMatches, Some("FindBar")),
+                    // Browser surface. Deeper than "Padu", so while focus is on the
+                    // page or its address bar the browser reads the platform's
+                    // conventional navigation shortcuts; the same keys elsewhere
+                    // keep their app meanings. The clipboard trio is rebound
+                    // because GPUI's window view claims key equivalents before
+                    // AppKit can walk the responder chain into the webview.
+                    KeyBinding::new("secondary-l", FocusBrowserAddress, Some("Browser")),
+                    KeyBinding::new("secondary-r", BrowserReload, Some("Browser")),
+                    KeyBinding::new("secondary-shift-r", BrowserHardReload, Some("Browser")),
+                    KeyBinding::new("secondary-[", BrowserBack, Some("Browser")),
+                    KeyBinding::new("secondary-]", BrowserForward, Some("Browser")),
+                    KeyBinding::new("escape", BrowserStop, Some("Browser")),
+                    KeyBinding::new("secondary-c", WebviewCopy, Some("Browser")),
+                    KeyBinding::new("secondary-x", WebviewCut, Some("Browser")),
+                    KeyBinding::new("secondary-v", WebviewPaste, Some("Browser")),
+                    KeyBinding::new("secondary-a", WebviewSelectAll, Some("Browser")),
+                    KeyBinding::new("escape", BrowserAddressCancel, Some("BrowserAddress")),
+                ]
+                .into_iter()
+                .chain(crate::browser::bindings()),
+            );
 
             cx.on_action(|_: &Quit, cx| cx.quit());
 

@@ -286,6 +286,7 @@ pub(crate) enum SettingsPage {
     Appearance,
     Keybindings,
     Notifications,
+    Browser,
     Providers,
     Skills,
     Usage,
@@ -1173,6 +1174,15 @@ pub struct Padu {
     model_search: Entity<TextInput>,
     settings_search: Entity<TextInput>,
     archived_search: Entity<TextInput>,
+    pub(crate) browser_data: crate::app::settings::browser::BrowserData,
+    pub(crate) browser_search_combobox: Entity<bezel::ui::combobox::Combobox>,
+    pub(crate) browser_home_input: Entity<TextInput>,
+    pub(crate) browser_blocked_input: Entity<TextInput>,
+    pub(crate) editing_browser_home: bool,
+    pub(crate) editing_browser_blocked: bool,
+    pub(crate) adding_custom_engine: bool,
+    pub(crate) custom_engine_name_input: Entity<TextInput>,
+    pub(crate) custom_engine_url_input: Entity<TextInput>,
     keybindings_search: Entity<TextInput>,
     language_combobox: Entity<bezel::ui::combobox::Combobox>,
     daemon_port_input: Entity<TextInput>,
@@ -2644,6 +2654,26 @@ impl Padu {
                 .clear_on_escape()
                 .placeholder(tr!("settings.archived_search"))
         });
+        let browser_home_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .placeholder("https://duckduckgo.com")
+        });
+        let browser_blocked_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .placeholder("example.com, api.site.com")
+        });
+        let custom_engine_name_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .placeholder(tr!("settings.browser_engine_name_placeholder"))
+        });
+        let custom_engine_url_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .placeholder(tr!("settings.browser_engine_url_placeholder"))
+        });
         let notes_title =
             cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("notes.title_placeholder")));
         let notes_body = cx.new(|cx| bezel_editor::Editor::new("", cx));
@@ -3006,6 +3036,7 @@ impl Padu {
 
         let entity = cx.new(|cx| {
             let language_combobox = Self::create_language_combobox(state.language, cx);
+            let browser_search_combobox = Self::create_browser_search_combobox(cx);
             let settings_focus = cx.focus_handle();
             let onboarding_add_project_focus = cx.focus_handle();
             let onboarding_projectless_focus = cx.focus_handle();
@@ -3596,6 +3627,15 @@ impl Padu {
                 branch_create_input,
                 settings_search,
                 archived_search,
+                browser_data: crate::app::settings::browser::BrowserData::default(),
+                browser_search_combobox,
+                browser_home_input,
+                browser_blocked_input,
+                editing_browser_home: false,
+                editing_browser_blocked: false,
+                adding_custom_engine: false,
+                custom_engine_name_input,
+                custom_engine_url_input,
                 keybindings_search,
                 language_combobox,
                 daemon_port_input,

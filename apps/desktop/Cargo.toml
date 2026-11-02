@@ -14,6 +14,7 @@ chrono = "0.4"
 crossbeam-channel = "0.5"
 dirs = "7.0"
 bezel = "0.2.22"
+browser = { package = "bezel-browser", version = "0.2.22" }
 gpui = { package = "bezel-gpui", version = "0.3.21" }
 gpui_platform = { package = "bezel-gpui-platform", version = "0.3.21", features = [
     "font-kit",

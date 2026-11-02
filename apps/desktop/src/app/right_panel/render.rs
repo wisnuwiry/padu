@@ -159,13 +159,18 @@ impl Padu {
     pub(crate) fn ensure_right_panel_browser(
         &mut self,
         browser_id: Uuid,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<crate::browser::BrowserView> {
         if let Some(browser) = self.right_panel_browsers.get(&browser_id) {
             return browser.clone();
         }
-        let browser = cx.new(|cx| crate::browser::BrowserView::new(window, cx));
+        let id = browser_id.as_u128() as u64;
+        let initial_url = self
+            .right_panel_pending_browser_urls
+            .remove(&browser_id)
+            .unwrap_or_else(|| crate::browser::home(cx));
+        let browser = cx.new(|cx| crate::browser::Browser::new(id, initial_url, String::new(), cx));
         // Tab titles and toolbar state live on the browser entity; the panel
         // chrome re-renders when they move.
         cx.observe(&browser, |_, _, cx| cx.notify()).detach();
