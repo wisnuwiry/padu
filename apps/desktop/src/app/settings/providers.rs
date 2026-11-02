@@ -1222,7 +1222,7 @@ impl Padu {
     /// Row order: registry priority when loaded, otherwise the canonical
     /// `ProviderKind::ALL` order with settings-backed toggles, so a slow or
     /// unreachable daemon never blanks the page.
-    fn profile_row_order(&self) -> Vec<ProviderKind> {
+    pub(crate) fn profile_row_order(&self) -> Vec<ProviderKind> {
         order_providers_by_profiles(&self.agent_profiles)
     }
 
