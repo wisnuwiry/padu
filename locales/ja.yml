@@ -1331,6 +1331,17 @@ diff.rows_hidden: "残り %{count} 行 · レビューを開くと変更全体�
 terminal.transport_failed: ターミナル転送に失敗しました
 terminal.no_workspace_description: ターミナルを開く前にタスクを選択してください。
 terminal.process_exited: プロセスが終了しました
+terminal.split_horizontal: 水平分割 (%{shortcut})
+terminal.split_vertical: 垂直分割 (%{shortcut})
+terminal.expand_full: 最大化 (%{shortcut})
+terminal.show_all_panes: すべてのペインを表示 (%{shortcut})
+terminal.close_pane: ターミナルを閉じる (%{shortcut})
+terminal.switch_to_terminal: "%{title} に切り替え"
+terminal.drag_to_dock: ドラッグしてペインをドック
+terminal.terminals_count_one:
+  ja: "%{count} 個のターミナル"
+terminal.terminals_count_many:
+  ja: "%{count} 個のターミナル"
 
 browser.back: 戻る（%{shortcut}）
 browser.forward: 進む（%{shortcut}）

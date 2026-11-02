@@ -2764,6 +2764,24 @@ terminal.no_workspace_description:
   en: Select a task before opening a terminal.
 terminal.process_exited:
   en: Process exited
+terminal.split_horizontal:
+  en: Split horizontal (%{shortcut})
+terminal.split_vertical:
+  en: Split vertical (%{shortcut})
+terminal.expand_full:
+  en: Expand full (%{shortcut})
+terminal.show_all_panes:
+  en: Show all panes (%{shortcut})
+terminal.close_pane:
+  en: Close terminal (%{shortcut})
+terminal.switch_to_terminal:
+  en: Switch to %{title}
+terminal.drag_to_dock:
+  en: Drag to dock pane
+terminal.terminals_count_one:
+  en: "%{count} terminal"
+terminal.terminals_count_many:
+  en: "%{count} terminals"
 
 browser.back:
   en: Back (%{shortcut})

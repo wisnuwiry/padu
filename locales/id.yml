@@ -1286,6 +1286,15 @@ diff.rows_hidden: "%{count} baris lagi · buka Peninjauan untuk melihat seluruh 
 terminal.transport_failed: Transport terminal gagal
 terminal.no_workspace_description: Pilih tugas sebelum membuka terminal.
 terminal.process_exited: Proses telah keluar
+terminal.split_horizontal: Bagi horizontal (%{shortcut})
+terminal.split_vertical: Bagi vertikal (%{shortcut})
+terminal.expand_full: Perbesar penuh (%{shortcut})
+terminal.show_all_panes: Tampilkan semua panel (%{shortcut})
+terminal.close_pane: Tutup terminal (%{shortcut})
+terminal.switch_to_terminal: Beralih ke %{title}
+terminal.drag_to_dock: Seret untuk menambatkan panel
+terminal.terminals_count_one: "%{count} terminal"
+terminal.terminals_count_many: "%{count} terminal"
 browser.back: Kembali (%{shortcut})
 browser.forward: Maju (%{shortcut})
 browser.stop_loading: Hentikan pemuatan (Esc)

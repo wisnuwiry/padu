@@ -1287,6 +1287,15 @@ diff.rows_hidden: "还有 %{count} 行 · 打开审阅查看完整更改"
 terminal.transport_failed: 终端传输失败
 terminal.no_workspace_description: 请先选择一个任务，再打开终端。
 terminal.process_exited: 进程已退出
+terminal.split_horizontal: 水平拆分 (%{shortcut})
+terminal.split_vertical: 垂直拆分 (%{shortcut})
+terminal.expand_full: 最大化 (%{shortcut})
+terminal.show_all_panes: 显示全部终端 (%{shortcut})
+terminal.close_pane: 关闭终端 (%{shortcut})
+terminal.switch_to_terminal: 切换到 %{title}
+terminal.drag_to_dock: 拖拽停靠面板
+terminal.terminals_count_one: "%{count} 个终端"
+terminal.terminals_count_many: "%{count} 个终端"
 browser.back: 后退（%{shortcut}）
 browser.forward: 前进（%{shortcut}）
 browser.stop_loading: 停止加载（Esc）
