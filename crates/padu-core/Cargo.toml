@@ -16,7 +16,7 @@ crossbeam-channel = "0.5"
 dirs = "7.0"
 ignore = "0.4"
 nucleo-matcher = "0.3"
-parking_lot = "0.12"
+parking_lot = "0.13"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls", "system-proxy"] }
 rust-i18n = "4"
 rusqlite = { version = "0.40", features = ["bundled"] }
