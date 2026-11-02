@@ -4,6 +4,7 @@ use uuid::Uuid;
 use super::super::*;
 use crate::model::{ProviderKind, unix_time};
 use crate::theme::{Theme, sp};
+use crate::ui::editor::{EditorSelectionToolbar, RichEditor};
 use crate::ui::tooltip::Tooltip;
 use crate::ui::{TagInput, icon, provider_icon};
 use bezel::ui::popover::{Side, sheet, sheet_panel};
@@ -514,24 +515,37 @@ impl Padu {
             );
         }
 
-        // Description editor (markdown editor with Write/Preview tabs & toolbar)
+        // Description editor with rich text editor
         let can_save = hydrated.is_some()
             && !self.board_edit_saving
             && !self.board_edit_title.read(cx).content().trim().is_empty();
-        body = body.child(self.render_board_markdown_editor(
-            "task-edit-description",
-            &self.board_edit_description,
-            self.board_edit_preview,
-            px(110.0),
-            px(280.0),
-            theme,
-            window,
-            cx,
-            |this, preview, cx| {
-                this.board_edit_preview = preview;
-                cx.notify();
-            },
-        ));
+        body = body.child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(4.0))
+                .child(
+                    div()
+                        .text_size(sp(12.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text_secondary)
+                        .child(tr!("board.task_description")),
+                )
+                .child(
+                    div()
+                        .h(px(220.0))
+                        .rounded(px(6.0))
+                        .border_1()
+                        .border_color(theme.border)
+                        .overflow_hidden()
+                        .flex()
+                        .flex_col()
+                        .child(RichEditor::new(
+                            "task-edit-description-editor",
+                            self.board_edit_description.clone(),
+                        )),
+                ),
+        );
 
         panel = panel.child(body);
 
@@ -629,6 +643,28 @@ impl Padu {
             );
 
         panel = panel.child(footer);
+
+        let entity = cx.entity().downgrade();
+        let entity_close = cx.entity().downgrade();
+        let selection_toolbar = EditorSelectionToolbar::new(
+            "task-edit-selection-toolbar",
+            self.board_edit_description.clone(),
+            self.board_edit_turn_open,
+            move |_, cx| {
+                let _ = entity.update(cx, |this, cx| {
+                    this.board_edit_turn_open = !this.board_edit_turn_open;
+                    cx.notify();
+                });
+            },
+            move |_, cx| {
+                let _ = entity_close.update(cx, |this, cx| {
+                    this.board_edit_turn_open = false;
+                    cx.notify();
+                });
+            },
+        )
+        .render(window, cx);
+        panel = panel.children(selection_toolbar);
 
         let weak = cx.entity().downgrade();
         sheet(

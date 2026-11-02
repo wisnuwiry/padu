@@ -9,6 +9,7 @@ use crate::ui::icon;
 use crate::ui::tooltip::Tooltip;
 
 impl Padu {
+    #[allow(dead_code)]
     pub(crate) fn apply_markdown_format(
         input: &Entity<TextInput>,
         prefix: &str,
@@ -40,6 +41,7 @@ impl Padu {
         cx.notify();
     }
 
+    #[allow(dead_code)]
     pub(crate) fn markdown_toolbar_btn(
         id: impl Into<ElementId>,
         label: impl IntoElement,
@@ -79,6 +81,7 @@ impl Padu {
             }))
     }
 
+    #[allow(dead_code)]
     pub(crate) fn render_board_markdown_editor(
         &self,
         field_id: &'static str,

@@ -1694,12 +1694,15 @@ pub struct Padu {
     board_new_task_cancel_focus: FocusHandle,
     board_new_task_preview: bool,
     board_edit_title: Entity<TextInput>,
-    board_edit_description: Entity<TextInput>,
+    board_edit_description: Entity<bezel_editor::Editor>,
+    board_edit_turn_open: bool,
     board_edit_labels: Entity<TextInput>,
     board_edit_labels_list: Vec<String>,
     board_edit_agent: Option<ProviderKind>,
     board_edit_saving: bool,
+    #[allow(dead_code)]
     board_edit_preview: bool,
+    #[allow(dead_code)]
     board_markdown_preview: RefCell<MarkdownView>,
     board_collapsed_columns: std::collections::HashSet<padu_client::kanban::TaskStatus>,
     card_updated_events: Receiver<Uuid>,
@@ -2668,12 +2671,8 @@ impl Padu {
         let board_new_task_turn_open = false;
         let board_edit_title =
             cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("board.task_title")));
-        let board_edit_description = cx.new(|cx| {
-            TextInput::new(window, cx)
-                .multi_line()
-                .syntax(Some("markdown"))
-                .placeholder(tr!("board.task_description"))
-        });
+        let board_edit_description = cx.new(|cx| bezel_editor::Editor::new("", cx));
+        let board_edit_turn_open = false;
         let board_edit_labels =
             cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("board.labels_placeholder")));
         let keybindings_search = cx.new(|cx| {
@@ -3382,6 +3381,12 @@ impl Padu {
                 }
             })
             .detach();
+            cx.observe(&board_edit_description, |this: &mut Self, _, cx| {
+                if this.board_selected_task_id.is_some() {
+                    cx.notify();
+                }
+            })
+            .detach();
             cx.subscribe(
                 &notes_code_body,
                 |this: &mut Self, _, event: &InputEvent, cx| {
@@ -3884,6 +3889,7 @@ impl Padu {
                 board_new_task_preview: false,
                 board_edit_title,
                 board_edit_description,
+                board_edit_turn_open,
                 board_edit_labels,
                 board_edit_labels_list: Vec::new(),
                 board_edit_agent: None,

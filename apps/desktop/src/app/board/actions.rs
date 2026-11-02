@@ -137,6 +137,7 @@ impl Padu {
         self.board_edit_agent = None;
         self.board_edit_saving = false;
         self.board_edit_preview = false;
+        self.board_edit_turn_open = false;
         self.board_edit_title
             .update(cx, |field, cx| field.set_content("", cx));
         self.board_edit_description
