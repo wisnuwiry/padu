@@ -176,6 +176,7 @@ keybindings.section_editor: 编辑器与查找
 keybindings.section_browser: 内置浏览器
 keybindings.section_files: 文件
 keybindings.section_review: 审阅
+keybindings.section_terminal: 终端
 keybindings.new_task: 新建任务
 keybindings.new_task_desc: 创建新对话或任务
 keybindings.open_project: 打开项目
@@ -268,6 +269,14 @@ keybindings.focus_review_filter: 聚焦审阅文件搜索
 keybindings.focus_review_filter_desc: 聚焦已更改文件的搜索框
 keybindings.toggle_review_tree: 展开或折叠文件夹
 keybindings.toggle_review_tree_desc: 展开或折叠已更改文件树中的文件夹
+keybindings.terminal_split_horizontal: 水平拆分
+keybindings.terminal_split_horizontal_desc: 水平拆分当前活动的终端面板
+keybindings.terminal_split_vertical: 垂直拆分
+keybindings.terminal_split_vertical_desc: 垂直拆分当前活动的终端面板
+keybindings.terminal_toggle_expand: 切换全屏
+keybindings.terminal_toggle_expand_desc: 最大化当前终端面板或恢复全部面板
+keybindings.terminal_close_pane: 关闭终端面板
+keybindings.terminal_close_pane_desc: 关闭当前活动的终端面板
 keybindings.search: 搜索快捷键...
 keybindings.no_results: 未找到快捷键
 settings.back: 返回

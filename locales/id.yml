@@ -175,6 +175,7 @@ keybindings.section_editor: Editor & Pencarian
 keybindings.section_browser: Browser Bawaan
 keybindings.section_files: Berkas
 keybindings.section_review: Tinjauan
+keybindings.section_terminal: Terminal
 keybindings.new_task: Tugas Baru
 keybindings.new_task_desc: Buat percakapan atau tugas baru
 keybindings.open_project: Buka Proyek
@@ -267,6 +268,14 @@ keybindings.focus_review_filter: Fokuskan Pencarian File Tinjauan
 keybindings.focus_review_filter_desc: Fokuskan kolom pencarian file yang berubah
 keybindings.toggle_review_tree: Perluas atau Ciutkan Folder
 keybindings.toggle_review_tree_desc: Perluas atau ciutkan folder pada pohon file yang berubah
+keybindings.terminal_split_horizontal: Bagi Horizontal
+keybindings.terminal_split_horizontal_desc: Bagi panel terminal aktif secara horizontal
+keybindings.terminal_split_vertical: Bagi Vertikal
+keybindings.terminal_split_vertical_desc: Bagi panel terminal aktif secara vertikal
+keybindings.terminal_toggle_expand: Alihkan Ukuran Penuh
+keybindings.terminal_toggle_expand_desc: Perbesar panel terminal aktif atau pulihkan semua panel
+keybindings.terminal_close_pane: Tutup Panel Terminal
+keybindings.terminal_close_pane_desc: Tutup panel terminal yang aktif
 keybindings.search: Cari pintasan tombol...
 keybindings.no_results: Pintasan tombol tidak ditemukan
 settings.back: Kembali

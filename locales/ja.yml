@@ -180,6 +180,7 @@ keybindings.section_editor: エディタと検索
 keybindings.section_browser: 内蔵ブラウザ
 keybindings.section_files: ファイル
 keybindings.section_review: レビュー
+keybindings.section_terminal: ターミナル
 keybindings.new_task: 新規タスク
 keybindings.new_task_desc: 新しい会話またはタスクを作成
 keybindings.open_project: プロジェクトを開く
@@ -272,6 +273,14 @@ keybindings.focus_review_filter: レビューのファイル検索にフォー�
 keybindings.focus_review_filter_desc: 変更ファイルの検索フィールドにフォーカスする
 keybindings.toggle_review_tree: フォルダを展開/折りたたむ
 keybindings.toggle_review_tree_desc: 変更ファイルツリーのフォルダを展開または折りたたむ
+keybindings.terminal_split_horizontal: 水平分割
+keybindings.terminal_split_horizontal_desc: アクティブなターミナルペインを水平に分割
+keybindings.terminal_split_vertical: 垂直分割
+keybindings.terminal_split_vertical_desc: アクティブなターミナルペインを垂直に分割
+keybindings.terminal_toggle_expand: 最大化の切り替え
+keybindings.terminal_toggle_expand_desc: アクティブなターミナルペインを最大化またはすべて復元
+keybindings.terminal_close_pane: ターミナルペインを閉じる
+keybindings.terminal_close_pane_desc: アクティブなターミナルペインを閉じる
 keybindings.search: ショートカットを検索...
 keybindings.no_results: ショートカットが見つかりません
 settings.back: 戻る

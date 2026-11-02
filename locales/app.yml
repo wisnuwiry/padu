@@ -375,6 +375,8 @@ keybindings.section_files:
   en: Files
 keybindings.section_review:
   en: Review
+keybindings.section_terminal:
+  en: Terminal
 keybindings.new_task:
   en: New Task
 keybindings.new_task_desc:
@@ -559,6 +561,22 @@ keybindings.toggle_review_tree:
   en: Expand or Collapse Folders
 keybindings.toggle_review_tree_desc:
   en: Expand or collapse folders in the changed-file tree
+keybindings.terminal_split_horizontal:
+  en: Split Horizontal
+keybindings.terminal_split_horizontal_desc:
+  en: Split the active terminal pane horizontally
+keybindings.terminal_split_vertical:
+  en: Split Vertical
+keybindings.terminal_split_vertical_desc:
+  en: Split the active terminal pane vertically
+keybindings.terminal_toggle_expand:
+  en: Toggle Full Size
+keybindings.terminal_toggle_expand_desc:
+  en: Expand the active terminal pane or restore all panes
+keybindings.terminal_close_pane:
+  en: Close Terminal Pane
+keybindings.terminal_close_pane_desc:
+  en: Close the active terminal pane
 keybindings.search:
   en: Search keybindings...
 keybindings.no_results:
