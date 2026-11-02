@@ -2,33 +2,42 @@ use super::super::*;
 use crate::app::TRAFFIC_LIGHT_CLEARANCE;
 use crate::model::ProviderKind;
 use crate::theme::{Theme, sp};
+use crate::ui::button::{Button, ButtonStyle};
 use crate::ui::menu::{MenuAlign, MenuItem, dropdown_menu};
 use crate::ui::text_field::TextField;
-use crate::ui::{MenuChip, icon, provider_icon};
+use crate::ui::tooltip::Tooltip;
+use crate::ui::{icon, provider_icon};
+use bezel::ui::widgets::Content;
 
 impl Padu {
-    pub(super) fn render_board_header(&mut self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let theme = Theme::current(cx);
-        let has_filter = self.board_filter_project.is_some()
-            || self.board_filter_agent.is_some()
-            || self.board_filter_needs_attention
-            || self.board_filter_sync_failed
-            || !self.board_search.read(cx).content().trim().is_empty();
+    pub(crate) fn board_filter_agents(&self) -> Vec<ProviderKind> {
+        self.profile_row_order()
+    }
 
-        let project_handle = self.menu_handle("board-filter-project", cx);
-        let current_project_id = self.board_filter_project;
-        let current_project_name = current_project_id
-            .and_then(|id| self.state.projects.iter().find(|p| p.id == id))
-            .map(|p| p.display_name())
-            .unwrap_or_else(|| tr!("board.all_projects"));
-        let project_options = self
-            .state
-            .projects
-            .iter()
-            .filter(|p| !p.is_projectless())
-            .map(|p| (p.id, p.display_name()))
-            .collect::<Vec<_>>();
-        let weak_project = cx.entity().downgrade();
+    pub(crate) fn reset_board_filters(&mut self, cx: &mut Context<Self>) {
+        self.board_filter_project = None;
+        self.board_filter_agent = None;
+        self.board_filter_needs_attention = false;
+        self.board_filter_sync_failed = false;
+        self.board_search.update(cx, |s, cx| s.set_content("", cx));
+        cx.notify();
+    }
+
+    pub(super) fn render_board_header(&mut self, cx: &mut Context<Self>) -> Stateful<Div> {
+        self.ensure_agent_profiles(false, cx);
+        let filter_agents = self.board_filter_agents();
+
+        let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx).clone();
+
+        let active_filter_count = (self.board_filter_project.is_some() as usize)
+            + (self.board_filter_agent.is_some() as usize)
+            + (self.board_filter_needs_attention as usize)
+            + (self.board_filter_sync_failed as usize);
+        let is_filtered = active_filter_count > 0;
+        let has_search = !self.board_search.read(cx).content().trim().is_empty();
+        let has_any_filter = is_filtered || has_search;
+
         let filtered_count = self
             .board_tasks
             .iter()
@@ -61,300 +70,240 @@ impl Padu {
             })
             .count();
 
-        let project_filter_selector = dropdown_menu(
-            MenuChip::new("board-filter-project-chip")
-                .icon(
-                    "icons/folder.svg",
-                    if current_project_id.is_some() {
-                        theme.accent
-                    } else {
-                        theme.text_tertiary
-                    },
-                )
-                .label(current_project_name)
-                .outlined()
-                .background(if current_project_id.is_some() {
-                    theme.accent.opacity(0.12)
-                } else {
-                    theme.inset
-                })
-                .height(px(28.0))
-                .selected(project_handle.is_open()),
-            "board-filter-project-menu",
-            &project_handle,
-            MenuAlign::BelowLeft,
-            move |_| {
-                let mut items = Vec::new();
-                let weak = weak_project.clone();
-                items.push(
-                    MenuItem::new(tr!("board.all_projects"), move |_, cx| {
-                        let _ = weak.update(cx, |this, cx| {
-                            this.board_filter_project = None;
-                            cx.notify();
-                        });
-                    })
-                    .icon("icons/folder.svg")
-                    .selected(current_project_id.is_none()),
-                );
-                if !project_options.is_empty() {
-                    items.push(MenuItem::Separator);
-                }
-                for (pid, pname) in project_options.clone() {
-                    let weak = weak_project.clone();
-                    let is_sel = current_project_id == Some(pid);
-                    items.push(
-                        MenuItem::new(pname, move |_, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.board_filter_project = Some(pid);
-                                cx.notify();
-                            });
-                        })
-                        .icon("icons/folder.svg")
-                        .selected(is_sel),
-                    );
-                }
-                items
-            },
-        );
+        let filter_menu_handle = self.menu_handle("board-filter-menu", cx);
+        let is_menu_open = filter_menu_handle.is_open();
 
-        let agent_handle = self.menu_handle("board-filter-agent", cx);
+        let current_project_id = self.board_filter_project;
         let current_agent = self.board_filter_agent;
-        let current_agent_name = current_agent
-            .map(|a| a.short_name().to_string())
-            .unwrap_or_else(|| tr!("board.all_agents"));
-        let weak_agent = cx.entity().downgrade();
-        let agent_filter_selector = dropdown_menu(
-            MenuChip::new("board-filter-agent-chip")
-                .icon(
-                    match current_agent {
-                        Some(a) => provider_icon(a),
-                        None => "icons/bot.svg",
-                    },
-                    if current_agent.is_some() {
-                        theme.accent
-                    } else {
-                        theme.text_tertiary
-                    },
-                )
-                .label(current_agent_name)
-                .outlined()
-                .background(if current_agent.is_some() {
-                    theme.accent.opacity(0.12)
-                } else {
-                    theme.inset
-                })
-                .height(px(28.0))
-                .selected(agent_handle.is_open()),
-            "board-filter-agent-menu",
-            &agent_handle,
-            MenuAlign::BelowLeft,
-            move |_| {
-                let mut items = Vec::new();
-                let weak = weak_agent.clone();
-                items.push(
-                    MenuItem::new(tr!("board.all_agents"), move |_, cx| {
-                        let _ = weak.update(cx, |this, cx| {
-                            this.board_filter_agent = None;
-                            cx.notify();
-                        });
-                    })
-                    .icon("icons/bot.svg")
-                    .selected(current_agent.is_none()),
-                );
-                items.push(MenuItem::Separator);
-                for p in [
-                    ProviderKind::Agy,
-                    ProviderKind::Claude,
-                    ProviderKind::Codex,
-                    ProviderKind::Cursor,
-                    ProviderKind::DeepSeek,
-                    ProviderKind::OpenCode,
-                ] {
-                    let weak = weak_agent.clone();
-                    let is_sel = current_agent == Some(p);
-                    items.push(
-                        MenuItem::new(p.short_name(), move |_, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.board_filter_agent = Some(p);
-                                cx.notify();
-                            });
-                        })
-                        .icon(provider_icon(p))
-                        .selected(is_sel),
-                    );
-                }
-                items
-            },
-        );
+        let is_attention_active = self.board_filter_needs_attention;
+        let is_sync_active = self.board_filter_sync_failed;
 
-        let flags_group = div()
-            .id("board-filter-flags-group")
+        let projects_for_menu: Vec<(Uuid, String)> = self
+            .state
+            .projects
+            .iter()
+            .filter(|p| !p.is_projectless())
+            .map(|p| (p.id, p.display_name().to_string()))
+            .collect();
+
+        let weak = cx.entity().downgrade();
+
+        let filter_trigger = div()
+            .id("board-filter-button")
             .h(px(28.0))
-            .p(px(2.0))
-            .rounded(px(7.0))
-            .bg(theme.inset)
+            .px(px(8.0))
+            .rounded(px(bezel::theme::Theme::button_radius()))
             .border_1()
-            .border_color(theme.border)
+            .border_color(if is_filtered {
+                theme.accent.opacity(0.6)
+            } else if is_menu_open {
+                theme.accent
+            } else {
+                theme.border
+            })
+            .bg(if is_filtered {
+                theme.accent.opacity(0.12)
+            } else if is_menu_open {
+                theme.overlay_strong
+            } else {
+                theme.inset
+            })
+            .cursor_pointer()
             .flex()
             .items_center()
-            .gap(px(2.0))
-            .child({
-                let active = self.board_filter_needs_attention;
+            .gap(px(5.0))
+            .child(icon(
+                "icons/list-filter.svg",
+                13.0,
+                if is_filtered {
+                    theme.accent
+                } else {
+                    theme.text_secondary
+                },
+            ))
+            .child(
                 div()
-                    .id("board-filter-attention")
-                    .h(px(24.0))
-                    .px(px(8.0))
-                    .rounded(px(5.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(5.0))
-                    .cursor_pointer()
                     .text_size(sp(12.0))
                     .font_weight(FontWeight::MEDIUM)
-                    .bg(if active {
-                        theme.warning.opacity(0.18)
+                    .text_color(if is_filtered {
+                        theme.accent
                     } else {
-                        gpui::transparent_black()
+                        theme.text
                     })
-                    .text_color(if active {
-                        theme.warning
-                    } else {
-                        theme.text_secondary
-                    })
-                    .hover(|s| {
-                        if !active {
-                            s.bg(theme.overlay_strong).text_color(theme.text)
-                        } else {
-                            s.opacity(0.85)
-                        }
-                    })
-                    .child(icon(
-                        "icons/alert.svg",
-                        12.0,
-                        if active {
-                            theme.warning
-                        } else {
-                            theme.text_tertiary
-                        },
-                    ))
-                    .child(tr!("board.needs_attention"))
-                    .tab_index(0)
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.board_filter_needs_attention = !this.board_filter_needs_attention;
-                        cx.notify();
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    .child(tr!("board.filters")),
+            )
+            .when(is_filtered, |el| {
+                el.child(bezel_theme.badge(active_filter_count.to_string()))
+            })
+            .child(icon(
+                "icons/chevron-down.svg",
+                11.0,
+                if is_filtered {
+                    theme.accent
+                } else {
+                    theme.text_tertiary
+                },
+            ))
+            .hover(|s| {
+                s.bg(if is_filtered {
+                    theme.accent.opacity(0.18)
+                } else {
+                    bezel_theme.element_hover
+                })
+            })
+            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .tab_index(0)
+            .tooltip(Tooltip::text(tr!("board.filters")));
+
+        let filter_dropdown = dropdown_menu(
+            filter_trigger,
+            "board-filter-menu",
+            &filter_menu_handle,
+            MenuAlign::BelowLeft,
+            move |_| {
+                let weak = weak.clone();
+                let mut items = Vec::new();
+
+                // 1. Status Quick-Toggles Header
+                items.push(MenuItem::Header(tr!("board.status").into()));
+
+                // Needs Attention
+                let weak_attn = weak.clone();
+                let attn_active = is_attention_active;
+                items.push(
+                    MenuItem::new(tr!("board.needs_attention"), move |_, cx| {
+                        let _ = weak_attn.update(cx, |this, cx| {
                             this.board_filter_needs_attention = !this.board_filter_needs_attention;
                             cx.notify();
-                            cx.stop_propagation();
-                        }
-                    }))
-            })
-            .child({
-                let active = self.board_filter_sync_failed;
-                div()
-                    .id("board-filter-sync-failed")
-                    .h(px(24.0))
-                    .px(px(8.0))
-                    .rounded(px(5.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(5.0))
-                    .cursor_pointer()
-                    .text_size(sp(12.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .bg(if active {
-                        theme.danger.opacity(0.18)
-                    } else {
-                        gpui::transparent_black()
+                        });
                     })
-                    .text_color(if active {
-                        theme.danger
-                    } else {
-                        theme.text_secondary
-                    })
-                    .hover(|s| {
-                        if !active {
-                            s.bg(theme.overlay_strong).text_color(theme.text)
-                        } else {
-                            s.opacity(0.85)
-                        }
-                    })
-                    .child(icon(
-                        "icons/sync-failed.svg",
-                        12.0,
-                        if active {
-                            theme.danger
-                        } else {
-                            theme.text_tertiary
-                        },
-                    ))
-                    .child(tr!("board.sync_failed"))
-                    .tab_index(0)
-                    .focus_visible(|style| style.border_1().border_color(theme.accent))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.board_filter_sync_failed = !this.board_filter_sync_failed;
-                        cx.notify();
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    .icon("icons/alert.svg")
+                    .selected(attn_active),
+                );
+
+                // Sync Failed
+                let weak_sync = weak.clone();
+                let sync_active = is_sync_active;
+                items.push(
+                    MenuItem::new(tr!("board.sync_failed"), move |_, cx| {
+                        let _ = weak_sync.update(cx, |this, cx| {
                             this.board_filter_sync_failed = !this.board_filter_sync_failed;
                             cx.notify();
-                            cx.stop_propagation();
-                        }
-                    }))
-            });
+                        });
+                    })
+                    .icon("icons/sync-failed.svg")
+                    .selected(sync_active),
+                );
 
-        let clear_filters_button = if has_filter {
-            Some(
-                div()
-                    .id("board-clear-filters")
-                    .h(px(28.0))
-                    .px(px(8.0))
-                    .rounded(px(6.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(4.0))
-                    .cursor_pointer()
-                    .bg(theme.inset)
-                    .border_1()
-                    .border_color(theme.border)
-                    .text_size(sp(11.5))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.text_secondary)
-                    .hover(|s| s.bg(theme.overlay_strong).text_color(theme.text))
-                    .child(icon("icons/x.svg", 11.0, theme.text_secondary))
-                    .child(tr!("board.clear_filters"))
-                    .tab_index(0)
-                    .focus_visible(|style| style.border_color(theme.accent))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.board_filter_project = None;
-                        this.board_filter_agent = None;
-                        this.board_filter_needs_attention = false;
-                        this.board_filter_sync_failed = false;
-                        this.board_search.update(cx, |s, cx| s.set_content("", cx));
-                        cx.notify();
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            this.board_filter_project = None;
-                            this.board_filter_agent = None;
-                            this.board_filter_needs_attention = false;
-                            this.board_filter_sync_failed = false;
-                            this.board_search.update(cx, |s, cx| s.set_content("", cx));
-                            cx.notify();
-                            cx.stop_propagation();
+                items.push(MenuItem::Separator);
+
+                // 2. Project Submenu
+                let current_project_name = current_project_id
+                    .and_then(|id| projects_for_menu.iter().find(|p| p.0 == id))
+                    .map(|p| p.1.clone())
+                    .unwrap_or_else(|| tr!("board.filter_all_projects"));
+
+                let weak_proj = weak.clone();
+                let projects_list = projects_for_menu.clone();
+                let selected_proj_id = current_project_id;
+                items.push(MenuItem::submenu_with_value(
+                    tr!("board.project"),
+                    current_project_name,
+                    move |_| {
+                        let mut proj_items = Vec::new();
+                        let weak_all = weak_proj.clone();
+                        proj_items.push(
+                            MenuItem::new(tr!("board.filter_all_projects"), move |_, cx| {
+                                let _ = weak_all.update(cx, |this, cx| {
+                                    this.board_filter_project = None;
+                                    cx.notify();
+                                });
+                            })
+                            .icon("icons/folder.svg")
+                            .selected(selected_proj_id.is_none()),
+                        );
+                        proj_items.push(MenuItem::Separator);
+
+                        for (pid, pname) in projects_list.clone() {
+                            let weak_item = weak_proj.clone();
+                            let is_sel = selected_proj_id == Some(pid);
+                            proj_items.push(
+                                MenuItem::new(pname, move |_, cx| {
+                                    let _ = weak_item.update(cx, |this, cx| {
+                                        this.board_filter_project = Some(pid);
+                                        cx.notify();
+                                    });
+                                })
+                                .icon("icons/folder.svg")
+                                .selected(is_sel),
+                            );
                         }
-                    })),
-            )
-        } else {
-            None
-        };
+                        proj_items
+                    },
+                ));
+
+                // 3. Agent Submenu
+                let current_agent_name = current_agent
+                    .map(|a| a.short_name().to_string())
+                    .unwrap_or_else(|| tr!("board.filter_all_agents"));
+
+                let weak_agent = weak.clone();
+                let selected_agent = current_agent;
+                let agents_list = filter_agents.clone();
+                items.push(MenuItem::submenu_with_value(
+                    tr!("board.assigned_agent"),
+                    current_agent_name,
+                    move |_| {
+                        let mut agent_items = Vec::new();
+                        let weak_all = weak_agent.clone();
+                        agent_items.push(
+                            MenuItem::new(tr!("board.filter_all_agents"), move |_, cx| {
+                                let _ = weak_all.update(cx, |this, cx| {
+                                    this.board_filter_agent = None;
+                                    cx.notify();
+                                });
+                            })
+                            .icon("icons/bot.svg")
+                            .selected(selected_agent.is_none()),
+                        );
+                        agent_items.push(MenuItem::Separator);
+
+                        for &provider in &agents_list {
+                            let weak_item = weak_agent.clone();
+                            let is_sel = selected_agent == Some(provider);
+                            agent_items.push(
+                                MenuItem::new(provider.short_name(), move |_, cx| {
+                                    let _ = weak_item.update(cx, |this, cx| {
+                                        this.board_filter_agent = Some(provider);
+                                        cx.notify();
+                                    });
+                                })
+                                .icon(provider_icon(provider))
+                                .selected(is_sel),
+                            );
+                        }
+                        agent_items
+                    },
+                ));
+
+                // 4. Clear Filters item
+                if has_any_filter {
+                    items.push(MenuItem::Separator);
+                    let weak_clear = weak.clone();
+                    items.push(
+                        MenuItem::new(tr!("board.clear_filters"), move |_, cx| {
+                            let _ = weak_clear.update(cx, |this, cx| {
+                                this.reset_board_filters(cx);
+                            });
+                        })
+                        .icon("icons/x.svg")
+                        .destructive(true),
+                    );
+                }
+
+                items
+            },
+        );
 
         let header = div()
             .id("board-header")
@@ -362,141 +311,84 @@ impl Padu {
             .flex_none()
             .flex()
             .items_center()
-            .justify_between()
-            .px(px(16.0))
-            .border_b_1()
-            .border_color(theme.border)
+            .gap(px(6.0))
+            .pl(if self.sidebar_visible {
+                px(10.0)
+            } else {
+                px(0.0)
+            })
+            .pr(px(14.0))
+            .when(!self.sidebar_visible, |element| {
+                element
+                    .child(
+                        self.window_drag_region(
+                            div()
+                                .id("board-traffic-light-drag-region")
+                                .w(px((TRAFFIC_LIGHT_CLEARANCE - 8.0).max(0.0)))
+                                .h_full()
+                                .flex_none(),
+                            cx,
+                        ),
+                    )
+                    .child(self.render_sidebar_navigation_controls(true, cx))
+            })
             .child(
                 div()
-                    .id("board-header-left")
+                    .id("board-header-filters")
                     .flex()
                     .items_center()
-                    .gap(px(8.0))
+                    .gap(px(6.0))
                     .min_w_0()
-                    .overflow_x_scroll()
-                    .when(!self.sidebar_visible, |element| {
-                        element
-                            .child(
-                                self.window_drag_region(
-                                    div()
-                                        .id("board-traffic-light-drag-region")
-                                        .w(px((TRAFFIC_LIGHT_CLEARANCE - 8.0).max(0.0)))
-                                        .h_full()
-                                        .flex_none(),
-                                    cx,
-                                ),
-                            )
-                            .child(self.render_sidebar_navigation_controls(true, cx))
-                    })
+                    .child(icon("icons/list-checks.svg", 16.0, theme.text_secondary))
                     .child(
                         div()
-                            .flex_none()
-                            .text_size(sp(15.0))
-                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_size(sp(13.0))
+                            .font_weight(FontWeight::MEDIUM)
                             .text_color(theme.text)
                             .child(tr!("board.title")),
                     )
-                    .child(
-                        div()
-                            .flex_none()
-                            .px(px(6.0))
-                            .py(px(1.0))
-                            .rounded(px(10.0))
-                            .bg(theme.inset)
-                            .border_1()
-                            .border_color(theme.border)
-                            .text_size(sp(11.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text_secondary)
-                            .child(filtered_count.to_string()),
-                    )
+                    .child(bezel_theme.badge(filtered_count.to_string()))
                     .child(div().w(px(1.0)).h(px(16.0)).flex_none().bg(theme.border))
                     // Search field
                     .child(
-                        div()
-                            .w(px(140.0))
-                            .flex_shrink_0()
-                            .h(px(28.0))
-                            .rounded(px(6.0))
-                            .bg(theme.inset)
-                            .child(
-                                TextField::new("board-search", self.board_search.clone())
-                                    .icon("icons/search.svg", 12.0),
-                            ),
+                        TextField::new("board-search", self.board_search.clone())
+                            .icon("icons/search.svg", 12.0)
+                            .w(px(160.0))
+                            .flex_shrink_0(),
                     )
-                    // Project dropdown filter
-                    .child(project_filter_selector)
-                    // Agent dropdown filter
-                    .child(agent_filter_selector)
-                    .child(div().w(px(1.0)).h(px(16.0)).flex_none().bg(theme.border))
-                    // Flags group
-                    .child(flags_group)
-                    // Clear filters button if active
-                    .children(clear_filters_button),
+                    // Filter dropdown menu
+                    .child(filter_dropdown),
+            )
+            // Drag region
+            .child(
+                self.window_drag_region(div().id("board-page-drag-region").h_full().flex_1(), cx),
             )
             .child(
                 div()
+                    .id("board-header-actions")
                     .flex()
                     .items_center()
-                    .gap(px(8.0))
+                    .gap(px(6.0))
                     .flex_none()
                     // Refresh button
                     .child(
-                        div()
-                            .id("board-refresh")
-                            .h(px(28.0))
-                            .w(px(28.0))
-                            .rounded(px(6.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .cursor_pointer()
-                            .bg(theme.inset)
-                            .border_1()
-                            .border_color(theme.border)
-                            .text_color(theme.text_secondary)
-                            .hover(|s| s.bg(theme.overlay_strong).text_color(theme.text))
-                            .child(icon("icons/rotate-cw.svg", 13.0, theme.text_secondary))
-                            .tab_index(0)
-                            .focus_visible(|style| style.border_color(theme.accent))
-                            .on_click(cx.listener(|this, _, _, cx| {
+                        Button::new("board-refresh", tr!("common.refresh"))
+                            .button_style(ButtonStyle::Ghost)
+                            .icon("icons/rotate-cw.svg")
+                            .label_hidden()
+                            .tooltip(Tooltip::text(tr!("common.refresh")))
+                            .on_press(cx.listener(|this, _, _, cx| {
                                 this.load_board_tasks_from_daemon(cx);
-                            }))
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                    this.load_board_tasks_from_daemon(cx);
-                                    cx.stop_propagation();
-                                }
                             })),
                     )
                     // New Task button
                     .child(
-                        div()
-                            .id("board-new-task-button")
-                            .h(px(28.0))
-                            .px(px(10.0))
-                            .rounded(px(6.0))
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .cursor_pointer()
-                            .bg(theme.inverse)
-                            .text_color(theme.on_inverse)
-                            .text_size(sp(12.5))
-                            .font_weight(FontWeight::MEDIUM)
-                            .hover(|s| s.opacity(0.92))
-                            .child(icon("icons/plus.svg", 13.0, theme.on_inverse))
-                            .child(tr!("board.new_task"))
-                            .tab_index(0)
-                            .focus_visible(|style| style.border_color(theme.accent))
-                            .on_click(cx.listener(|this, _, _, cx| {
+                        Button::new("board-new-task-button", tr!("board.new_task"))
+                            .button_style(ButtonStyle::Prominent)
+                            .icon("icons/plus.svg")
+                            .tooltip(Tooltip::text(tr!("board.new_task")))
+                            .on_press(cx.listener(|this, _, _, cx| {
                                 this.open_new_task_modal(cx);
-                            }))
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                    this.open_new_task_modal(cx);
-                                    cx.stop_propagation();
-                                }
                             })),
                     ),
             );

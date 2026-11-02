@@ -233,9 +233,9 @@ export function BoardPage() {
       )}
 
       {/* Main Board View */}
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground">
         {/* Top Header */}
-        <header className="flex h-14 flex-none items-center justify-between border-b border-border px-3 sm:px-4 gap-2 sm:gap-3 bg-card/40 backdrop-blur-xs">
+        <header className="flex h-12 flex-none items-center justify-between px-3.5 gap-2">
           <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 overflow-x-auto no-scrollbar py-1">
             {!sidebarVisible && (
               <Button
@@ -248,8 +248,8 @@ export function BoardPage() {
               </Button>
             )}
             <div className="flex items-center gap-2 flex-none">
-              <PaduIcon name="listChecks" className="size-5 text-primary" />
-              <h1 className="text-sm sm:text-base font-semibold text-foreground whitespace-nowrap">
+              <PaduIcon name="listChecks" className="size-4 text-[var(--text-secondary)]" />
+              <h1 className="text-[13px] font-medium text-foreground whitespace-nowrap">
                 {t('board.title')}
               </h1>
               <Badge variant="outline" className="px-1.5 py-0 text-[11px] font-mono">
@@ -447,8 +447,14 @@ export function BoardPage() {
         </header>
 
         {/* Kanban Board Columns Container */}
-        <div className="flex flex-1 overflow-x-auto p-4 gap-3 bg-muted/20">
-          {COLUMNS.map((column) => {
+        <div
+          className={cn(
+            'relative mb-2 flex min-h-0 flex-1 overflow-hidden rounded-[10px] border border-border bg-background text-foreground',
+            sidebarVisible ? 'ml-0.5 mr-2' : 'mx-2',
+          )}
+        >
+          <div className="flex flex-1 overflow-x-auto p-4 gap-3 bg-muted/20">
+            {COLUMNS.map((column) => {
             const columnTasks = filteredTasks.filter((t) => t.status === column.id)
             const isDragOver = dragOverColumn === column.id
             const isCollapsed = collapsedColumns.has(column.id)
@@ -559,6 +565,7 @@ export function BoardPage() {
               </div>
             )
           })}
+          </div>
         </div>
       </div>
 

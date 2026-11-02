@@ -1,4 +1,4 @@
-use crate::model::{AgentSession, ProviderKind};
+use crate::model::AgentSession;
 use crate::theme::Theme;
 use padu_client::kanban::TaskStatus;
 
@@ -8,17 +8,6 @@ pub const BOARD_COLUMNS: [TaskStatus; 5] = [
     TaskStatus::Running,
     TaskStatus::Review,
     TaskStatus::Done,
-];
-
-/// Curated assignee shortlist for the new-task modal. The detail drawer
-/// offers the full `ProviderKind::ALL` registry like the web client.
-pub const BOARD_MODAL_PROVIDERS: [ProviderKind; 6] = [
-    ProviderKind::Agy,
-    ProviderKind::Claude,
-    ProviderKind::Codex,
-    ProviderKind::Cursor,
-    ProviderKind::DeepSeek,
-    ProviderKind::OpenCode,
 ];
 
 pub fn task_status_label(status: TaskStatus) -> String {
