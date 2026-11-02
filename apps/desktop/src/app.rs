@@ -1686,7 +1686,8 @@ pub struct Padu {
     board_new_task_modal_open: bool,
     board_new_task_project_id: Option<Uuid>,
     board_new_task_title: Entity<TextInput>,
-    board_new_task_description: Entity<TextInput>,
+    board_new_task_description: Entity<bezel_editor::Editor>,
+    board_new_task_turn_open: bool,
     board_new_task_agent: Option<ProviderKind>,
     board_new_task_model: Option<String>,
     #[allow(dead_code)]
@@ -2663,12 +2664,8 @@ impl Padu {
         });
         let board_new_task_title =
             cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("board.task_title")));
-        let board_new_task_description = cx.new(|cx| {
-            TextInput::new(window, cx)
-                .multi_line()
-                .syntax(Some("markdown"))
-                .placeholder(tr!("board.task_description"))
-        });
+        let board_new_task_description = cx.new(|cx| bezel_editor::Editor::new("", cx));
+        let board_new_task_turn_open = false;
         let board_edit_title =
             cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("board.task_title")));
         let board_edit_description = cx.new(|cx| {
@@ -3379,6 +3376,12 @@ impl Padu {
                 }
             })
             .detach();
+            cx.observe(&board_new_task_description, |this: &mut Self, _, cx| {
+                if this.board_new_task_modal_open {
+                    cx.notify();
+                }
+            })
+            .detach();
             cx.subscribe(
                 &notes_code_body,
                 |this: &mut Self, _, event: &InputEvent, cx| {
@@ -3874,6 +3877,7 @@ impl Padu {
                 board_new_task_project_id: None,
                 board_new_task_title,
                 board_new_task_description,
+                board_new_task_turn_open,
                 board_new_task_agent: None,
                 board_new_task_model: None,
                 board_new_task_cancel_focus: cx.focus_handle(),

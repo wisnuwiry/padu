@@ -4,6 +4,7 @@ use super::super::*;
 use crate::theme::{Theme, sp};
 use crate::ui::MenuChip;
 use crate::ui::button::{Button, ButtonStyle};
+use crate::ui::editor::{EditorExt as _, EditorSelectionToolbar, RichEditor};
 use crate::ui::icon;
 use crate::ui::menu::{MenuAlign, MenuItem as PaduMenuItem, dropdown_menu};
 use crate::ui::text_field::TextField;
@@ -185,21 +186,34 @@ impl Padu {
                             .child(TextField::new("new-task-title", title_input.clone())),
                     ),
             )
-            // Description field with markdown editor
-            .child(self.render_board_markdown_editor(
-                "new-task-description",
-                &self.board_new_task_description,
-                self.board_new_task_preview,
-                px(96.0),
-                px(220.0),
-                theme,
-                window,
-                cx,
-                |this, preview, cx| {
-                    this.board_new_task_preview = preview;
-                    cx.notify();
-                },
-            ))
+            // Description field with rich text editor
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .text_size(sp(12.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text_secondary)
+                            .child(tr!("board.task_description")),
+                    )
+                    .child(
+                        div()
+                            .h(px(180.0))
+                            .rounded(px(6.0))
+                            .border_1()
+                            .border_color(theme.border)
+                            .overflow_hidden()
+                            .flex()
+                            .flex_col()
+                            .child(RichEditor::new(
+                                "new-task-description-editor",
+                                self.board_new_task_description.clone(),
+                            )),
+                    ),
+            )
             // Agent selector chips (disabled profiles unselectable)
             .child(
                 div()
@@ -358,6 +372,28 @@ impl Padu {
             );
 
         panel = panel.child(footer);
+
+        let entity = cx.entity().downgrade();
+        let entity_close = cx.entity().downgrade();
+        let selection_toolbar = EditorSelectionToolbar::new(
+            "new-task-selection-toolbar",
+            self.board_new_task_description.clone(),
+            self.board_new_task_turn_open,
+            move |_, cx| {
+                let _ = entity.update(cx, |this, cx| {
+                    this.board_new_task_turn_open = !this.board_new_task_turn_open;
+                    cx.notify();
+                });
+            },
+            move |_, cx| {
+                let _ = entity_close.update(cx, |this, cx| {
+                    this.board_new_task_turn_open = false;
+                    cx.notify();
+                });
+            },
+        )
+        .render(window, cx);
+        panel = panel.children(selection_toolbar);
 
         let weak = cx.entity().downgrade();
         sheet(

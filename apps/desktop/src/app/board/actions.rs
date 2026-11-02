@@ -1,6 +1,7 @@
 use super::types::split_board_labels;
 use crate::app::{Padu, WorkspacePage};
 use crate::model::ProviderKind;
+use crate::ui::editor::EditorExt as _;
 use gpui::Context;
 use padu_client::kanban::{CreateTask, Task, TaskStatus, TaskSummary};
 use uuid::Uuid;
@@ -388,6 +389,7 @@ impl Padu {
     pub(crate) fn open_new_task_modal(&mut self, cx: &mut Context<Self>) {
         self.board_new_task_modal_open = true;
         self.board_new_task_preview = false;
+        self.board_new_task_turn_open = false;
         self.board_new_task_title
             .update(cx, |t, cx| t.set_content("", cx));
         self.board_new_task_description
