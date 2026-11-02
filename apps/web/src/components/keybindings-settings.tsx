@@ -316,6 +316,35 @@ export const KEYBINDING_SECTIONS: KeybindingSection[] = [
       },
     ],
   },
+  {
+    sectionKey: 'keybindings.section_terminal',
+    items: [
+      {
+        titleKey: 'keybindings.terminal_split_horizontal',
+        descKey: 'keybindings.terminal_split_horizontal_desc',
+        mac: '⇧⌘H',
+        other: 'Ctrl+Shift+H',
+      },
+      {
+        titleKey: 'keybindings.terminal_split_vertical',
+        descKey: 'keybindings.terminal_split_vertical_desc',
+        mac: '⇧⌘V',
+        other: 'Ctrl+Shift+V',
+      },
+      {
+        titleKey: 'keybindings.terminal_toggle_expand',
+        descKey: 'keybindings.terminal_toggle_expand_desc',
+        mac: '⇧⌘Enter',
+        other: 'Ctrl+Shift+Enter',
+      },
+      {
+        titleKey: 'keybindings.terminal_close_pane',
+        descKey: 'keybindings.terminal_close_pane_desc',
+        mac: '⇧⌘W',
+        other: 'Ctrl+Shift+W',
+      },
+    ],
+  },
 ]
 
 export function KeybindingsSettings() {

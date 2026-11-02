@@ -48,7 +48,7 @@ describe('keybindings settings parity', () => {
   })
 
   test('every keybinding item and section has valid English translations', () => {
-    expect(KEYBINDING_SECTIONS.length).toBe(7)
+    expect(KEYBINDING_SECTIONS.length).toBe(8)
 
     for (const section of KEYBINDING_SECTIONS) {
       expect(en[section.sectionKey]).toBeDefined()

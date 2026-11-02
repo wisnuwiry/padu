@@ -260,6 +260,31 @@ impl Padu {
                     ),
                 ],
             ),
+            (
+                "keybindings.section_terminal",
+                &[
+                    (
+                        "keybindings.terminal_split_horizontal",
+                        "keybindings.terminal_split_horizontal_desc",
+                        crate::platform::primary_shortcut("⇧⌘H", "Ctrl+Shift+H"),
+                    ),
+                    (
+                        "keybindings.terminal_split_vertical",
+                        "keybindings.terminal_split_vertical_desc",
+                        crate::platform::primary_shortcut("⇧⌘V", "Ctrl+Shift+V"),
+                    ),
+                    (
+                        "keybindings.terminal_toggle_expand",
+                        "keybindings.terminal_toggle_expand_desc",
+                        crate::platform::primary_shortcut("⇧⌘Enter", "Ctrl+Shift+Enter"),
+                    ),
+                    (
+                        "keybindings.terminal_close_pane",
+                        "keybindings.terminal_close_pane_desc",
+                        crate::platform::primary_shortcut("⇧⌘W", "Ctrl+Shift+W"),
+                    ),
+                ],
+            ),
         ];
 
         let query = self
