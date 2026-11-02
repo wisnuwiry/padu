@@ -1631,21 +1631,12 @@ impl TerminalView {
                 .map_or(TERMINAL_CELL_WIDTH, |advance| f32::from(advance.width))
         });
 
-        let (pane_width, pane_height) = if let Some(bounds) = pane.grid_bounds.get() {
-            (f32::from(bounds.size.width), f32::from(bounds.size.height))
-        } else {
-            (
-                self.panel_width.max(300.0),
-                (f32::from(viewport.height) - 56.0).max(120.0),
-            )
-        };
-
-        let columns = ((pane_width - TERMINAL_PADDING_X * 2.0) / cell_width)
-            .floor()
-            .max(TERMINAL_MIN_COLUMNS as f32) as usize;
-        let rows = ((pane_height - TERMINAL_PADDING_Y * 2.0) / TERMINAL_CELL_HEIGHT)
-            .floor()
-            .max(TERMINAL_MIN_ROWS as f32) as usize;
+        let (columns, rows) = terminal_grid_dimensions(
+            pane.grid_bounds.get(),
+            self.panel_width,
+            viewport.height,
+            cell_width,
+        );
 
         let terminal_focused = window.is_window_active() && pane.focus_handle.is_focused(window);
         let cursor_style =
@@ -1668,6 +1659,7 @@ impl TerminalView {
             .map(|session| session.snapshot(theme, selection_color, cursor_style, hovered_link));
 
         let mut screen = div()
+            .size_full()
             .flex_1()
             .min_h_0()
             .min_w_0()
@@ -1803,9 +1795,26 @@ impl TerminalView {
         }
 
         let grid_bounds = pane.grid_bounds.clone();
+        let terminal_view_id = cx.entity().entity_id();
         screen = screen.child(
             canvas(
-                move |bounds, _, _| grid_bounds.set(Some(bounds)),
+                move |bounds, _, cx| {
+                    if bounds.size.width <= px(0.0) || bounds.size.height <= px(0.0) {
+                        return;
+                    }
+                    let old_bounds = grid_bounds.get();
+                    grid_bounds.set(Some(bounds));
+                    let needs_notify = match old_bounds {
+                        Some(old) => {
+                            (old.size.width - bounds.size.width).abs() > px(1.0)
+                                || (old.size.height - bounds.size.height).abs() > px(1.0)
+                        }
+                        None => true,
+                    };
+                    if needs_notify {
+                        cx.notify(terminal_view_id);
+                    }
+                },
                 |_, _, _, _| {},
             )
             .absolute()
@@ -1815,7 +1824,7 @@ impl TerminalView {
         let context_terminal = cx.entity();
         let context_menu_handle = &pane.context_menu;
         let screen = context_menu(
-            div().size_full().child(screen),
+            screen,
             SharedString::from(format!("terminal-context-menu-{pane_id}")),
             context_menu_handle,
             move |cx| {
@@ -2238,6 +2247,7 @@ impl TerminalView {
                         .child(
                             div()
                                 .flex_1()
+                                .h_full()
                                 .w_full()
                                 .min_h_0()
                                 .min_w_0()
@@ -2371,6 +2381,7 @@ impl Render for TerminalView {
             .size_full()
             .h_full()
             .w_full()
+            .flex_1()
             .min_h_0()
             .min_w_0()
             .flex()
@@ -2419,6 +2430,35 @@ fn terminal_cursor_style(focused: bool, blink_visible: bool) -> TerminalCursorSt
         TerminalCursorStyle::Solid
     } else {
         TerminalCursorStyle::Hidden
+    }
+}
+
+fn terminal_grid_dimensions(
+    bounds: Option<Bounds<Pixels>>,
+    fallback_panel_width: f32,
+    viewport_height: Pixels,
+    cell_width: f32,
+) -> (usize, usize) {
+    if let Some(bounds) = bounds {
+        let width = f32::from(bounds.size.width);
+        let height = f32::from(bounds.size.height);
+        let cols = (width / cell_width)
+            .floor()
+            .max(TERMINAL_MIN_COLUMNS as f32) as usize;
+        let rows = (height / TERMINAL_CELL_HEIGHT)
+            .floor()
+            .max(TERMINAL_MIN_ROWS as f32) as usize;
+        (cols, rows)
+    } else {
+        let pane_width = fallback_panel_width.max(300.0);
+        let pane_height = (f32::from(viewport_height) - 56.0).max(120.0);
+        let cols = ((pane_width - TERMINAL_PADDING_X * 2.0) / cell_width)
+            .floor()
+            .max(TERMINAL_MIN_COLUMNS as f32) as usize;
+        let rows = ((pane_height - TERMINAL_PADDING_Y * 2.0) / TERMINAL_CELL_HEIGHT)
+            .floor()
+            .max(TERMINAL_MIN_ROWS as f32) as usize;
+        (cols, rows)
     }
 }
 
@@ -3134,5 +3174,26 @@ mod tests {
 
         // Docking onto itself returns false
         assert!(!tree.dock_pane(1, 1, 13, Zone::Left));
+    }
+
+    #[test]
+    fn test_terminal_grid_dimensions_expand_to_container() {
+        let cell_width = 8.0;
+        // Measured container bounds (e.g. 400px wide, 720px tall)
+        let bounds = Bounds::new(point(px(10.0), px(8.0)), size(px(400.0), px(720.0)));
+        let (cols, rows) = terminal_grid_dimensions(Some(bounds), 300.0, px(800.0), cell_width);
+
+        // 400.0 / 8.0 = 50 cols
+        assert_eq!(cols, 50);
+        // 720.0 / 18.0 = 40 rows: must expand to all 40 available rows
+        assert_eq!(rows, 40);
+
+        // Fallback when bounds are not measured yet
+        let (fallback_cols, fallback_rows) =
+            terminal_grid_dimensions(None, 400.0, px(800.0), cell_width);
+        // (400 - 20) / 8 = 47 cols
+        assert_eq!(fallback_cols, 47);
+        // (800 - 56 - 16) / 18 = 40 rows
+        assert_eq!(fallback_rows, 40);
     }
 }
