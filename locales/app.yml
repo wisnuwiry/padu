@@ -198,6 +198,8 @@ language.description:
 
 settings.group_preferences:
   en: Preferences
+settings.group_integration:
+  en: Integrations
 settings.group_agents:
   en: Agents
 settings.group_system:
@@ -255,6 +257,68 @@ settings.daemon_keywords:
   en: hosts host remote server devbox cloud daemon web network expose origin token port websocket ssh lan
 settings.notifications:
   en: Notifications
+settings.browser:
+  en: Browser
+settings.browser_keywords:
+  en: browser web webview search engine home page cookies cache data clear sites integrations
+settings.browser_search_engine:
+  en: Default Search Engine
+settings.browser_search_engine_description:
+  en: Searches from the address bar use %{engine}.
+settings.browser_add_search_engine:
+  en: Add Search Engine…
+settings.browser_add_search_engine_hint:
+  en: Enter the provider name and search URL with %s in place of the query.
+settings.browser_engine_name_placeholder:
+  en: Provider name (e.g. Brave)
+settings.browser_engine_url_placeholder:
+  en: Search URL (e.g. https://search.brave.com/search?q=%s)
+settings.browser_home:
+  en: Startup & Home Page
+settings.browser_home_description:
+  en: The initial webpage loaded whenever a new browser tab is opened.
+settings.browser_agents_read:
+  en: Agent Web Reading
+settings.browser_agents_read_description:
+  en: Allow AI agents to navigate tabs, inspect page structure, and extract text.
+settings.browser_agents_act:
+  en: Agent Web Interaction
+settings.browser_agents_act_description:
+  en: Allow AI agents to click buttons, type text, and submit forms. Requires web reading.
+settings.browser_blocked:
+  en: Restricted Domains
+settings.browser_blocked_description:
+  en: Websites and domains that AI agents are forbidden from visiting or inspecting.
+settings.browser_blocked_none:
+  en: No restricted domains. All reachable websites are permitted.
+settings.browser_keep_signed_in:
+  en: Remember Logins & Cookies
+settings.browser_keep_signed_in_description:
+  en: Keep authentication cookies and site data active across restarts. When disabled, tabs run in private browsing mode.
+settings.browser_data:
+  en: Browsing Data & Cache
+settings.browser_clear_data:
+  en: Clear Browsing Data
+settings.browser_clearing:
+  en: Clearing browsing data…
+settings.browser_clear_failed:
+  en: Failed to clear browsing data. Please try again.
+settings.browser_cleared:
+  en: Browsing data cleared successfully. Active browser tabs have been closed.
+settings.browser_clear_unavailable:
+  en: Clearing browsing data is only available on macOS.
+settings.browser_calculating:
+  en: Calculating storage usage…
+settings.browser_data_unavailable:
+  en: Storage usage data unavailable.
+settings.browser_no_data:
+  en: No stored website data found.
+settings.browser_one_site:
+  en: Storing cookies and cache from 1 website.
+settings.browser_sites_data:
+  en: Storing cookies and cache from %{count} websites.
+settings.browser_clear_footer:
+  en: Clearing deletes cookies, cache, and storage, closes all browser tabs, and signs you out.
 settings.computer_use_keywords:
   en: computer use screen recording accessibility apps control codex
 settings.notifications_keywords:
@@ -1289,6 +1353,10 @@ common.copy_code:
   en: Copy Code
 common.cancel:
   en: Cancel
+common.save:
+  en: Save
+common.change:
+  en: Change…
 common.edit:
   en: Edit
 common.send:

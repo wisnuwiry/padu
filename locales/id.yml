@@ -96,6 +96,7 @@ language.title: Bahasa
 language.system: Sistem
 language.description: Pilih bahasa yang digunakan di seluruh Padu
 settings.group_preferences: Preferensi
+settings.group_integration: Integrasi
 settings.group_agents: Agen
 settings.group_system: Sistem
 settings.general: Umum
@@ -106,6 +107,8 @@ settings.usage: Penggunaan
 settings.daemon: Host & Daemon
 settings.computer_use: Penggunaan Komputer
 settings.notifications: Notifikasi
+settings.browser: Peramban
+settings.browser_keywords: peramban web webview mesin pencari beranda cookie data bersihkan situs
 settings.about: Tentang
 settings.general_keywords: umum lokal proyek percakapan privasi analitik telemetri anonim bagikan pembaruan otomatis sparkle versi
 settings.appearance_keywords: tampilan tema sistem terang gelap bahasa inggris indonesia jepang mandarin font ukuran teks editor

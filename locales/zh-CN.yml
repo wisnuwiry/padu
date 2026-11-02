@@ -97,6 +97,7 @@ language.title: 语言
 language.system: 跟随系统
 language.description: 选择 Padu 的界面语言
 settings.group_preferences: 偏好设置
+settings.group_integration: 集成
 settings.group_agents: 智能体
 settings.group_system: 系统
 settings.general: 通用
@@ -107,6 +108,8 @@ settings.usage: 用量
 settings.daemon: 主机与守护进程
 settings.computer_use: 电脑操作
 settings.notifications: 通知
+settings.browser: 浏览器
+settings.browser_keywords: 浏览器 网页 webview 搜索引擎 主页 cookie 数据 清除 网站
 settings.about: 关于
 settings.general_keywords: 通用 本地 项目 对话 隐私 匿名 使用数据 分析 分享 更新 自动 版本
 settings.appearance_keywords: 外观 主题 系统 浅色 深色 语言 英语 中文 简体 字号 字体 大小 编辑器

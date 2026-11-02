@@ -101,6 +101,7 @@ language.system: システム
 language.description: Padu 全体で使用する言語を選択します
 
 settings.group_preferences: 設定
+settings.group_integration: 連携
 settings.group_agents: エージェント
 settings.group_system: システム
 settings.general: 一般
@@ -111,6 +112,8 @@ settings.usage: 使用状況
 settings.daemon: ホストとデーモン
 settings.computer_use: コンピュータ操作
 settings.notifications: 通知
+settings.browser: ブラウザ
+settings.browser_keywords: ブラウザ ウェブ webview 検索エンジン ホームページ クッキー データ 消去 サイト
 settings.about: 情報
 settings.general_keywords: 一般 ローカル プロジェクト 会話 プライバシー 分析 テレメトリ 匿名 共有 アップデート 自動 バージョン
 settings.appearance_keywords: 外観 テーマ システム ライト ダーク 言語 英語 中国語 簡体字 日本語 フォント サイズ 文字 エディタ
