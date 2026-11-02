@@ -1,12 +1,16 @@
 use std::borrow::Cow;
 use std::cell::Cell;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::Duration;
 
+use crate::ui::icon;
+use crate::ui::icon_button;
 use crate::ui::menu::{ContextMenuHandle, MenuItem, context_menu};
+use crate::ui::tooltip::Tooltip;
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::event_loop::{EventLoop, EventLoopSender, Msg};
 use alacritty_terminal::grid::{BidirectionalIterator, Dimensions, Scroll};
@@ -20,19 +24,66 @@ use alacritty_terminal::tty::{self, Shell};
 use alacritty_terminal::vte::ansi::{Color, NamedColor, Rgb};
 use anyhow::{Context as _, Result};
 use crossbeam_channel::{Receiver, Sender, unbounded};
+use gpui::prelude::*;
 use gpui::{
-    App, AppContext, Bounds, ClipboardItem, Context, FocusHandle, Focusable, FontFallbacks,
-    FontStyle, FontWeight, Hsla, InteractiveElement, IntoElement, KeyDownEvent, Keystroke,
-    Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent,
-    MouseUpEvent, ParentElement, Pixels, Point, Render, ScrollDelta, ScrollWheelEvent,
+    App, AppContext, Bounds, ClipboardItem, Context, DragMoveEvent, ElementId, FocusHandle,
+    Focusable, FontFallbacks, FontStyle, FontWeight, Hsla, InteractiveElement, IntoElement,
+    KeyBinding, KeyDownEvent, Keystroke, Modifiers, ModifiersChangedEvent, MouseButton,
+    MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point,
+    Render, ScrollDelta, ScrollWheelEvent, SharedString, StatefulInteractiveElement,
     StrikethroughStyle, Styled, StyledText, Subscription, Task, TextRun, UnderlineStyle, Window,
-    canvas, div, font, px, rgb,
+    actions, canvas, div, font, px, relative, rgb,
 };
 use parking_lot::Mutex;
+
+use bezel::ui::docking::{Zone, preview_bounds, zone};
+use bezel::ui::widgets::{Layout as BezelLayout, SplitStyle, axis_fraction};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DraggedTerminalPane(pub u64);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TerminalSplitDrag {
+    pub split_id: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ActiveSplitDrag {
+    split_id: u64,
+    axis: gpui::Axis,
+    bounds: Bounds<Pixels>,
+}
 
 use crate::persistence::DEFAULT_RIGHT_PANEL_WIDTH;
 use crate::theme::{Theme, sp};
 use crate::ui::scrollbar::{self, ScrollbarState};
+
+actions!(
+    padu_terminal,
+    [
+        SplitTerminalHorizontal,
+        SplitTerminalVertical,
+        ToggleTerminalExpand,
+        CloseTerminalPane,
+    ]
+);
+
+pub fn init(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new(
+            "secondary-shift-h",
+            SplitTerminalHorizontal,
+            Some("Terminal"),
+        ),
+        KeyBinding::new("secondary-shift-v", SplitTerminalVertical, Some("Terminal")),
+        KeyBinding::new(
+            "secondary-shift-enter",
+            ToggleTerminalExpand,
+            Some("Terminal"),
+        ),
+        KeyBinding::new("secondary-shift-w", CloseTerminalPane, Some("Terminal")),
+    ]);
+}
 
 /// Fallback advance width, used only until the font has been measured.
 const TERMINAL_CELL_WIDTH: f32 = 7.8;
@@ -619,7 +670,179 @@ impl TerminalCursorBlink {
     }
 }
 
-pub struct TerminalView {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SplitDirection {
+    Horizontal,
+    Vertical,
+}
+
+#[derive(Clone, Debug)]
+pub enum PaneTree {
+    Leaf(u64),
+    Split {
+        id: u64,
+        direction: SplitDirection,
+        fraction: f32,
+        first: Box<PaneTree>,
+        second: Box<PaneTree>,
+    },
+}
+
+impl PaneTree {
+    pub fn pane_ids(&self) -> Vec<u64> {
+        let mut ids = Vec::new();
+        self.collect_ids(&mut ids);
+        ids
+    }
+
+    fn collect_ids(&self, ids: &mut Vec<u64>) {
+        match self {
+            PaneTree::Leaf(id) => ids.push(*id),
+            PaneTree::Split { first, second, .. } => {
+                first.collect_ids(ids);
+                second.collect_ids(ids);
+            }
+        }
+    }
+
+    pub fn split_pane(
+        &mut self,
+        target: u64,
+        new_id: u64,
+        split_id: u64,
+        direction: SplitDirection,
+    ) -> bool {
+        match self {
+            PaneTree::Leaf(id) if *id == target => {
+                *self = PaneTree::Split {
+                    id: split_id,
+                    direction,
+                    fraction: 0.5,
+                    first: Box::new(PaneTree::Leaf(target)),
+                    second: Box::new(PaneTree::Leaf(new_id)),
+                };
+                true
+            }
+            PaneTree::Leaf(_) => false,
+            PaneTree::Split { first, second, .. } => {
+                if first.split_pane(target, new_id, split_id, direction) {
+                    true
+                } else {
+                    second.split_pane(target, new_id, split_id, direction)
+                }
+            }
+        }
+    }
+
+    pub fn update_fraction(&mut self, target_split_id: u64, fraction: f32) -> bool {
+        match self {
+            PaneTree::Leaf(_) => false,
+            PaneTree::Split {
+                id,
+                fraction: current_fraction,
+                first,
+                second,
+                ..
+            } => {
+                if *id == target_split_id {
+                    *current_fraction = fraction.clamp(0.05, 0.95);
+                    true
+                } else if first.update_fraction(target_split_id, fraction) {
+                    true
+                } else {
+                    second.update_fraction(target_split_id, fraction)
+                }
+            }
+        }
+    }
+
+    pub fn dock_pane(&mut self, target: u64, incoming: u64, split_id: u64, zone: Zone) -> bool {
+        if target == incoming {
+            return false;
+        }
+
+        // Remove incoming from the tree if already placed
+        self.remove_pane(incoming);
+
+        // Insert incoming adjacent to target according to zone
+        self.insert_dock(target, incoming, split_id, zone)
+    }
+
+    fn insert_dock(&mut self, target: u64, incoming: u64, split_id: u64, zone: Zone) -> bool {
+        match self {
+            PaneTree::Leaf(id) if *id == target => {
+                let (first, second, direction) = match zone {
+                    Zone::Left => (
+                        Box::new(PaneTree::Leaf(incoming)),
+                        Box::new(PaneTree::Leaf(target)),
+                        SplitDirection::Horizontal,
+                    ),
+                    Zone::Right | Zone::Join => (
+                        Box::new(PaneTree::Leaf(target)),
+                        Box::new(PaneTree::Leaf(incoming)),
+                        SplitDirection::Horizontal,
+                    ),
+                    Zone::Top => (
+                        Box::new(PaneTree::Leaf(incoming)),
+                        Box::new(PaneTree::Leaf(target)),
+                        SplitDirection::Vertical,
+                    ),
+                    Zone::Bottom => (
+                        Box::new(PaneTree::Leaf(target)),
+                        Box::new(PaneTree::Leaf(incoming)),
+                        SplitDirection::Vertical,
+                    ),
+                };
+
+                *self = PaneTree::Split {
+                    id: split_id,
+                    direction,
+                    fraction: 0.5,
+                    first,
+                    second,
+                };
+                true
+            }
+            PaneTree::Leaf(_) => false,
+            PaneTree::Split { first, second, .. } => {
+                if first.insert_dock(target, incoming, split_id, zone) {
+                    true
+                } else {
+                    second.insert_dock(target, incoming, split_id, zone)
+                }
+            }
+        }
+    }
+
+    pub fn remove_pane(&mut self, target: u64) -> bool {
+        match self {
+            PaneTree::Leaf(_) => false,
+            PaneTree::Split { first, second, .. } => {
+                if let PaneTree::Leaf(id) = **first {
+                    if id == target {
+                        *self = (**second).clone();
+                        return true;
+                    }
+                }
+                if let PaneTree::Leaf(id) = **second {
+                    if id == target {
+                        *self = (**first).clone();
+                        return true;
+                    }
+                }
+                if first.remove_pane(target) {
+                    true
+                } else {
+                    second.remove_pane(target)
+                }
+            }
+        }
+    }
+}
+
+pub struct TerminalPane {
+    #[allow(dead_code)]
+    id: u64,
     session: Option<TerminalSession>,
     error: Option<String>,
     focus_handle: FocusHandle,
@@ -627,9 +850,6 @@ pub struct TerminalView {
     title: String,
     exited: bool,
     scroll_accumulator: f32,
-    panel_width: f32,
-    /// Advance width of one grid cell, measured from the terminal font on
-    /// first render so grid math matches what `StyledText` actually lays out.
     measured_cell_width: Option<f32>,
     scrollbar_state: Rc<ScrollbarState>,
     grid_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
@@ -641,8 +861,8 @@ pub struct TerminalView {
     _subscriptions: Vec<Subscription>,
 }
 
-impl TerminalView {
-    pub fn new(working_directory: PathBuf, cx: &mut Context<Self>) -> Self {
+impl TerminalPane {
+    pub fn new(id: u64, working_directory: PathBuf, cx: &mut Context<TerminalView>) -> Self {
         let terminal_cwd = working_directory.clone();
         cx.spawn(async move |this, cx| {
             let started = cx
@@ -651,30 +871,17 @@ impl TerminalView {
                 .await;
             if this
                 .update(cx, |this, cx| {
-                    match started {
-                        Ok(session) => this.session = Some(session),
-                        Err(error) => this.error = Some(error.to_string()),
+                    if let Some(pane) = this.panes.get_mut(&id) {
+                        match started {
+                            Ok(session) => pane.session = Some(session),
+                            Err(error) => pane.error = Some(error.to_string()),
+                        }
+                        cx.notify();
                     }
-                    cx.notify();
                 })
                 .is_err()
             {
                 return;
-            }
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(24))
-                    .await;
-                if this
-                    .update(cx, |this, cx| {
-                        if this.poll(cx) {
-                            cx.notify();
-                        }
-                    })
-                    .is_err()
-                {
-                    break;
-                }
             }
         })
         .detach();
@@ -684,14 +891,14 @@ impl TerminalView {
         let subscriptions = vec![cx.observe(&cursor_blink, |_, _, cx| cx.notify())];
 
         Self {
+            id,
             session: None,
             error: None,
             focus_handle: cx.focus_handle(),
-            title: tr!("right_panel.terminal"),
             working_directory,
+            title: tr!("right_panel.terminal"),
             exited: false,
             scroll_accumulator: 0.0,
-            panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
             measured_cell_width: None,
             scrollbar_state: ScrollbarState::new(),
             grid_bounds: Rc::new(Cell::new(None)),
@@ -704,43 +911,7 @@ impl TerminalView {
         }
     }
 
-    pub fn working_directory(&self) -> &Path {
-        &self.working_directory
-    }
-
-    pub fn is_ready(&self) -> bool {
-        self.session.is_some()
-    }
-
-    pub fn send_command(&mut self, command: &str) {
-        if let Some(session) = &self.session {
-            let mut bytes = command.as_bytes().to_vec();
-            if !bytes.ends_with(b"\n") {
-                bytes.push(b'\n');
-            }
-            session.write(bytes);
-            session
-                .dirty
-                .store(true, std::sync::atomic::Ordering::Release);
-        }
-    }
-
-    pub fn set_panel_width(&mut self, width: f32) {
-        self.panel_width = width;
-    }
-
-    pub fn title(&self) -> &str {
-        &self.title
-    }
-
-    pub fn refresh_localized_text(&mut self, cx: &mut Context<Self>) {
-        if matches!(self.title.as_str(), "Terminal" | "终端") {
-            self.title = tr!("right_panel.terminal");
-            cx.notify();
-        }
-    }
-
-    fn poll(&mut self, cx: &mut Context<Self>) -> bool {
+    fn poll(&mut self, cx: &mut App) -> bool {
         let Some(session) = &self.session else {
             return false;
         };
@@ -766,7 +937,7 @@ impl TerminalView {
         changed
     }
 
-    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut App) {
         self.pause_cursor_blink(cx);
         let keystroke = &event.keystroke;
         if terminal_clipboard_modifier_pressed(&keystroke.modifiers)
@@ -835,16 +1006,7 @@ impl TerminalView {
         )
     }
 
-    fn on_mouse_down(
-        &mut self,
-        event: &MouseDownEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        // The overlay scrollbar's listeners already ran (bubble order is
-        // reverse registration and it paints above the grid) but do not stop
-        // propagation; a grab or track click must not also start a selection
-        // underneath the bar.
+    fn on_mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut App) {
         if self.scrollbar_state.engaged() {
             return;
         }
@@ -871,7 +1033,6 @@ impl TerminalView {
             }
             window.prevent_default();
             cx.stop_propagation();
-            cx.notify();
             return;
         }
 
@@ -897,19 +1058,15 @@ impl TerminalView {
         self.selecting = true;
         session.dirty.store(true, Ordering::Release);
         cx.stop_propagation();
-        cx.notify();
     }
 
-    fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let hover_changed = if self.selecting {
+    fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut App) {
+        let _hover_changed = if self.selecting {
             self.set_hovered_link(None)
         } else {
             self.refresh_hovered_link(primary_modifier_pressed(&event.modifiers), event.position)
         };
         if !self.selecting || event.pressed_button != Some(MouseButton::Left) {
-            if hover_changed {
-                cx.notify();
-            }
             return;
         }
         let Some((point, side)) = self.grid_point_for_position(event.position, true) else {
@@ -923,34 +1080,27 @@ impl TerminalView {
             selection.update(point, side);
             session.dirty.store(true, Ordering::Release);
             cx.stop_propagation();
-            cx.notify();
-        } else if hover_changed {
-            cx.notify();
         }
     }
 
-    fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
+    fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut App) {
         self.selecting = false;
     }
 
-    fn on_mouse_exit(&mut self, _: &MouseExitEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if self.set_hovered_link(None) {
-            cx.notify();
-        }
+    fn on_mouse_exit(&mut self, _: &MouseExitEvent, _: &mut Window, _: &mut App) {
+        self.set_hovered_link(None);
     }
 
     fn on_modifiers_changed(
         &mut self,
         event: &ModifiersChangedEvent,
         window: &mut Window,
-        cx: &mut Context<Self>,
+        _: &mut App,
     ) {
-        if self.refresh_hovered_link(
+        self.refresh_hovered_link(
             primary_modifier_pressed(&event.modifiers),
             window.mouse_position(),
-        ) {
-            cx.notify();
-        }
+        );
     }
 
     fn refresh_hovered_link(&mut self, command_pressed: bool, position: Point<Pixels>) -> bool {
@@ -986,7 +1136,7 @@ impl TerminalView {
         }
     }
 
-    fn paste(&mut self, text: String, cx: &mut Context<Self>) {
+    fn paste(&mut self, text: String, cx: &mut App) {
         self.pause_cursor_blink(cx);
         let Some(session) = &self.session else {
             return;
@@ -994,10 +1144,9 @@ impl TerminalView {
         session.term.lock().selection = None;
         session.write(bracketed_paste(text, session.mode()));
         session.dirty.store(true, Ordering::Release);
-        cx.notify();
     }
 
-    fn select_all(&mut self, cx: &mut Context<Self>) {
+    fn select_all(&mut self, _: &mut App) {
         let Some(session) = &self.session else {
             return;
         };
@@ -1009,15 +1158,9 @@ impl TerminalView {
         term.selection = Some(selection);
         drop(term);
         session.dirty.store(true, Ordering::Release);
-        cx.notify();
     }
 
-    fn on_scroll_wheel(
-        &mut self,
-        event: &ScrollWheelEvent,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn on_scroll_wheel(&mut self, event: &ScrollWheelEvent, _: &mut Window, cx: &mut App) {
         let Some(session) = &self.session else {
             return;
         };
@@ -1031,11 +1174,15 @@ impl TerminalView {
             self.scroll_accumulator -= lines as f32;
             session.scroll(lines);
             cx.stop_propagation();
-            cx.notify();
         }
     }
 
-    fn ensure_cursor_focus_tracking(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn ensure_cursor_focus_tracking(
+        &mut self,
+        pane_id: u64,
+        window: &mut Window,
+        cx: &mut Context<TerminalView>,
+    ) {
         if self.cursor_focus_tracking_started {
             return;
         }
@@ -1043,20 +1190,29 @@ impl TerminalView {
 
         let focus_handle = self.focus_handle.clone();
         self._subscriptions.extend([
-            cx.observe_window_activation(window, |terminal, window, cx| {
-                terminal.update_cursor_blinking(window, cx);
+            cx.observe_window_activation(window, move |terminal, window, cx| {
+                if let Some(pane) = terminal.panes.get_mut(&pane_id) {
+                    pane.update_cursor_blinking(window, cx);
+                }
             }),
-            cx.on_focus(&focus_handle, window, |terminal, window, cx| {
-                terminal.update_cursor_blinking(window, cx);
+            cx.on_focus(&focus_handle, window, move |terminal, window, cx| {
+                terminal.active_pane = pane_id;
+                if let Some(pane) = terminal.panes.get_mut(&pane_id) {
+                    pane.update_cursor_blinking(window, cx);
+                }
+                cx.notify();
             }),
-            cx.on_blur(&focus_handle, window, |terminal, window, cx| {
-                terminal.update_cursor_blinking(window, cx);
+            cx.on_blur(&focus_handle, window, move |terminal, window, cx| {
+                if let Some(pane) = terminal.panes.get_mut(&pane_id) {
+                    pane.update_cursor_blinking(window, cx);
+                }
+                cx.notify();
             }),
         ]);
         self.update_cursor_blinking(window, cx);
     }
 
-    fn update_cursor_blinking(&mut self, window: &Window, cx: &mut Context<Self>) {
+    fn update_cursor_blinking(&mut self, window: &Window, cx: &mut App) {
         let focused = window.is_window_active() && self.focus_handle.is_focused(window);
         self.cursor_blink.update(cx, |cursor, cx| {
             if focused {
@@ -1067,58 +1223,446 @@ impl TerminalView {
         });
     }
 
-    fn pause_cursor_blink(&mut self, cx: &mut Context<Self>) {
+    fn pause_cursor_blink(&mut self, cx: &mut App) {
         self.cursor_blink.update(cx, |cursor, cx| cursor.pause(cx));
     }
 }
 
-impl Focusable for TerminalView {
-    fn focus_handle(&self, _: &App) -> FocusHandle {
-        self.focus_handle.clone()
-    }
+pub struct TerminalView {
+    panes: BTreeMap<u64, TerminalPane>,
+    layout: PaneTree,
+    active_pane: u64,
+    expanded_pane: Option<u64>,
+    next_pane_id: u64,
+    next_split_id: u64,
+    active_split: Option<ActiveSplitDrag>,
+    dock_target: Option<(u64, Zone, Bounds<Pixels>)>,
+    working_directory: PathBuf,
+    panel_width: f32,
+    focus_handle: FocusHandle,
 }
 
-impl Render for TerminalView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.ensure_cursor_focus_tracking(window, cx);
+impl TerminalView {
+    pub fn new(working_directory: PathBuf, cx: &mut Context<Self>) -> Self {
+        let initial_pane = TerminalPane::new(1, working_directory.clone(), cx);
+        let focus_handle = initial_pane.focus_handle.clone();
+        let mut panes = BTreeMap::new();
+        panes.insert(1, initial_pane);
+
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(24))
+                    .await;
+                if this
+                    .update(cx, |this, cx| {
+                        if this.poll(cx) {
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
+
+        Self {
+            panes,
+            layout: PaneTree::Leaf(1),
+            active_pane: 1,
+            expanded_pane: None,
+            next_pane_id: 2,
+            next_split_id: 1,
+            active_split: None,
+            dock_target: None,
+            working_directory,
+            panel_width: DEFAULT_RIGHT_PANEL_WIDTH,
+            focus_handle,
+        }
+    }
+
+    pub fn working_directory(&self) -> &Path {
+        self.panes
+            .get(&self.active_pane)
+            .map(|p| p.working_directory.as_path())
+            .unwrap_or(&self.working_directory)
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.panes
+            .get(&self.active_pane)
+            .is_some_and(|p| p.session.is_some())
+    }
+
+    pub fn send_command(&mut self, command: &str) {
+        if let Some(pane) = self.panes.get_mut(&self.active_pane) {
+            if let Some(session) = &pane.session {
+                let mut bytes = command.as_bytes().to_vec();
+                if !bytes.ends_with(b"\n") {
+                    bytes.push(b'\n');
+                }
+                session.write(bytes);
+                session
+                    .dirty
+                    .store(true, std::sync::atomic::Ordering::Release);
+            }
+        }
+    }
+
+    pub fn set_panel_width(&mut self, width: f32) {
+        self.panel_width = width;
+    }
+
+    pub fn title(&self) -> &str {
+        self.panes
+            .get(&self.active_pane)
+            .map(|p| p.title.as_str())
+            .unwrap_or("Terminal")
+    }
+
+    pub fn refresh_localized_text(&mut self, cx: &mut Context<Self>) {
+        for pane in self.panes.values_mut() {
+            if matches!(pane.title.as_str(), "Terminal" | "终端") {
+                pane.title = tr!("right_panel.terminal");
+            }
+        }
+        cx.notify();
+    }
+
+    fn poll(&mut self, cx: &mut App) -> bool {
+        let mut changed = false;
+        for pane in self.panes.values_mut() {
+            if pane.poll(cx) {
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    fn activate_pane(&mut self, pane_id: u64, window: &mut Window, cx: &mut Context<Self>) {
+        if self.active_pane != pane_id {
+            self.active_pane = pane_id;
+            if let Some(pane) = self.panes.get(&pane_id) {
+                window.focus(&pane.focus_handle, cx);
+                pane.cursor_blink.update(cx, |cursor, cx| cursor.start(cx));
+            }
+            cx.notify();
+        }
+    }
+
+    fn split_horizontal(&mut self, target_id: u64, window: &mut Window, cx: &mut Context<Self>) {
+        self.split_pane(target_id, SplitDirection::Horizontal, window, cx);
+    }
+
+    fn split_vertical(&mut self, target_id: u64, window: &mut Window, cx: &mut Context<Self>) {
+        self.split_pane(target_id, SplitDirection::Vertical, window, cx);
+    }
+
+    fn update_split_fraction(&mut self, split_id: u64, fraction: f32) {
+        self.layout.update_fraction(split_id, fraction);
+    }
+
+    fn dock_pane(
+        &mut self,
+        incoming: u64,
+        target: u64,
+        zone: Zone,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if incoming == target {
+            return;
+        }
+
+        let split_id = self.next_split_id;
+        self.next_split_id += 1;
+
+        if self.layout.dock_pane(target, incoming, split_id, zone) {
+            self.expanded_pane = None;
+            self.dock_target = None;
+            self.activate_pane(incoming, window, cx);
+        }
+    }
+
+    fn split_pane(
+        &mut self,
+        target_id: u64,
+        direction: SplitDirection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let new_id = self.next_pane_id;
+        self.next_pane_id += 1;
+        let split_id = self.next_split_id;
+        self.next_split_id += 1;
+
+        let cwd = self
+            .panes
+            .get(&target_id)
+            .map(|p| p.working_directory.clone())
+            .unwrap_or_else(|| self.working_directory.clone());
+
+        let new_pane = TerminalPane::new(new_id, cwd, cx);
+        let focus_handle = new_pane.focus_handle.clone();
+        self.panes.insert(new_id, new_pane);
+        self.layout
+            .split_pane(target_id, new_id, split_id, direction);
+
+        self.expanded_pane = None;
+        self.active_pane = new_id;
+
+        window.focus(&focus_handle, cx);
+        cx.notify();
+    }
+
+    fn close_pane(&mut self, target_id: u64, window: &mut Window, cx: &mut Context<Self>) {
+        if self.panes.len() <= 1 {
+            return;
+        }
+
+        if self.expanded_pane == Some(target_id) {
+            self.expanded_pane = None;
+        }
+
+        self.panes.remove(&target_id);
+        self.layout.remove_pane(target_id);
+
+        if self.active_pane == target_id {
+            let remaining = self.layout.pane_ids();
+            if let Some(&first) = remaining.first() {
+                self.active_pane = first;
+                if let Some(pane) = self.panes.get(&first) {
+                    window.focus(&pane.focus_handle, cx);
+                }
+            }
+        }
+
+        cx.notify();
+    }
+
+    fn expand_pane(&mut self, target_id: u64, window: &mut Window, cx: &mut Context<Self>) {
+        self.expanded_pane = Some(target_id);
+        self.active_pane = target_id;
+        if let Some(pane) = self.panes.get(&target_id) {
+            window.focus(&pane.focus_handle, cx);
+        }
+        cx.notify();
+    }
+
+    fn restore_all_panes(&mut self, cx: &mut Context<Self>) {
+        self.expanded_pane = None;
+        cx.notify();
+    }
+
+    fn toggle_expand(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.panes.len() <= 1 {
+            return;
+        }
+        if self.expanded_pane.is_some() {
+            self.restore_all_panes(cx);
+        } else {
+            self.expand_pane(self.active_pane, window, cx);
+        }
+    }
+
+    #[allow(dead_code)]
+    fn switch_expanded_pane(
+        &mut self,
+        target_id: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.panes.contains_key(&target_id) {
+            self.expanded_pane = Some(target_id);
+            self.active_pane = target_id;
+            if let Some(pane) = self.panes.get(&target_id) {
+                window.focus(&pane.focus_handle, cx);
+            }
+            cx.notify();
+        }
+    }
+
+    fn on_pane_key_down(
+        &mut self,
+        pane_id: u64,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let keystroke = &event.keystroke;
+        let secondary = keystroke.modifiers.secondary();
+        let shift = keystroke.modifiers.shift;
+
+        if secondary && shift {
+            if keystroke.key.eq_ignore_ascii_case("h") {
+                self.split_horizontal(pane_id, window, cx);
+                window.prevent_default();
+                cx.stop_propagation();
+                return;
+            }
+            if keystroke.key.eq_ignore_ascii_case("v") {
+                self.split_vertical(pane_id, window, cx);
+                window.prevent_default();
+                cx.stop_propagation();
+                return;
+            }
+            if matches!(keystroke.key.as_str(), "enter" | "return") {
+                self.toggle_expand(window, cx);
+                window.prevent_default();
+                cx.stop_propagation();
+                return;
+            }
+            if keystroke.key.eq_ignore_ascii_case("w") && self.panes.len() > 1 {
+                self.close_pane(pane_id, window, cx);
+                window.prevent_default();
+                cx.stop_propagation();
+                return;
+            }
+        }
+
+        if let Some(pane) = self.panes.get_mut(&pane_id) {
+            pane.on_key_down(event, window, cx);
+        }
+    }
+
+    fn on_pane_mouse_down(
+        &mut self,
+        pane_id: u64,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.activate_pane(pane_id, window, cx);
+        if let Some(pane) = self.panes.get_mut(&pane_id) {
+            pane.on_mouse_down(event, window, cx);
+            cx.notify();
+        }
+    }
+
+    fn on_pane_mouse_move(
+        &mut self,
+        pane_id: u64,
+        event: &MouseMoveEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(pane) = self.panes.get_mut(&pane_id) {
+            pane.on_mouse_move(event, window, cx);
+            cx.notify();
+        }
+    }
+
+    fn on_pane_mouse_up(
+        &mut self,
+        pane_id: u64,
+        event: &MouseUpEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(pane) = self.panes.get_mut(&pane_id) {
+            pane.on_mouse_up(event, window, cx);
+        }
+    }
+
+    fn on_pane_mouse_exit(
+        &mut self,
+        pane_id: u64,
+        event: &MouseExitEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(pane) = self.panes.get_mut(&pane_id) {
+            pane.on_mouse_exit(event, window, cx);
+            cx.notify();
+        }
+    }
+
+    fn on_pane_modifiers_changed(
+        &mut self,
+        pane_id: u64,
+        event: &ModifiersChangedEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(pane) = self.panes.get_mut(&pane_id) {
+            pane.on_modifiers_changed(event, window, cx);
+            cx.notify();
+        }
+    }
+
+    fn on_pane_scroll_wheel(
+        &mut self,
+        pane_id: u64,
+        event: &ScrollWheelEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(pane) = self.panes.get_mut(&pane_id) {
+            pane.on_scroll_wheel(event, window, cx);
+            cx.notify();
+        }
+    }
+
+    fn render_pane(
+        &mut self,
+        pane_id: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
         let theme = Theme::current(cx);
         let selection_color = theme.selection;
         let viewport = window.viewport_size();
-        let panel_width = self.panel_width;
-        let body_height = (f32::from(viewport.height) - 56.0).max(120.0);
-        // The rows are laid out by `StyledText` at the font's own advance, so
-        // the grid must be sized from that same measured advance or the text
-        // wraps short of (or past) the panel edge.
-        let cell_width = *self.measured_cell_width.get_or_insert_with(|| {
+        let is_active = self.active_pane == pane_id;
+        let is_expanded = self.expanded_pane == Some(pane_id);
+        let opacity = if is_active || is_expanded { 1.0 } else { 0.70 };
+        let pane_count = self.panes.len();
+        let is_single = pane_count <= 1;
+
+        let pane = self.panes.get_mut(&pane_id).expect("pane exists");
+        pane.ensure_cursor_focus_tracking(pane_id, window, cx);
+
+        let cell_width = *pane.measured_cell_width.get_or_insert_with(|| {
             let text_system = cx.text_system();
             let font_id = text_system.resolve_font(&terminal_font());
             text_system
                 .advance(font_id, px(TERMINAL_FONT_SIZE), 'm')
                 .map_or(TERMINAL_CELL_WIDTH, |advance| f32::from(advance.width))
         });
-        let columns = ((panel_width - TERMINAL_PADDING_X * 2.0) / cell_width)
+
+        let (pane_width, pane_height) = if let Some(bounds) = pane.grid_bounds.get() {
+            (f32::from(bounds.size.width), f32::from(bounds.size.height))
+        } else {
+            (
+                self.panel_width.max(300.0),
+                (f32::from(viewport.height) - 56.0).max(120.0),
+            )
+        };
+
+        let columns = ((pane_width - TERMINAL_PADDING_X * 2.0) / cell_width)
             .floor()
             .max(TERMINAL_MIN_COLUMNS as f32) as usize;
-        let rows = ((body_height - TERMINAL_PADDING_Y * 2.0) / TERMINAL_CELL_HEIGHT)
+        let rows = ((pane_height - TERMINAL_PADDING_Y * 2.0) / TERMINAL_CELL_HEIGHT)
             .floor()
             .max(TERMINAL_MIN_ROWS as f32) as usize;
 
-        let terminal_focused = window.is_window_active() && self.focus_handle.is_focused(window);
+        let terminal_focused = window.is_window_active() && pane.focus_handle.is_focused(window);
         let cursor_style =
-            terminal_cursor_style(terminal_focused, self.cursor_blink.read(cx).visible());
-        if let Some(session) = self.session.as_mut() {
+            terminal_cursor_style(terminal_focused, pane.cursor_blink.read(cx).visible());
+        if let Some(session) = pane.session.as_mut() {
             session.resize(columns, rows, cell_width);
         }
-        if self.selecting {
-            self.set_hovered_link(None);
+        if pane.selecting {
+            pane.set_hovered_link(None);
         } else {
-            self.refresh_hovered_link(
+            pane.refresh_hovered_link(
                 primary_modifier_pressed(&window.modifiers()),
                 window.mouse_position(),
             );
         }
-        let hovered_link = self.hovered_link.as_ref().map(|link| &link.bounds);
-        let snapshot = self
+        let hovered_link = pane.hovered_link.as_ref().map(|link| &link.bounds);
+        let snapshot = pane
             .session
             .as_ref()
             .map(|session| session.snapshot(theme, selection_color, cursor_style, hovered_link));
@@ -1132,18 +1676,39 @@ impl Render for TerminalView {
             .flex_col()
             .relative()
             .cursor_text()
-            .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
-            .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
-            .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
-            .on_mouse_move(cx.listener(Self::on_mouse_move))
-            .on_mouse_exit(cx.listener(Self::on_mouse_exit))
-            .on_modifiers_changed(cx.listener(Self::on_modifiers_changed));
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event, window, cx| {
+                    this.on_pane_mouse_down(pane_id, event, window, cx);
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(move |this, event, window, cx| {
+                    this.on_pane_mouse_up(pane_id, event, window, cx);
+                }),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(move |this, event, window, cx| {
+                    this.on_pane_mouse_up(pane_id, event, window, cx);
+                }),
+            )
+            .on_mouse_move(cx.listener(move |this, event, window, cx| {
+                this.on_pane_mouse_move(pane_id, event, window, cx);
+            }))
+            .on_mouse_exit(cx.listener(move |this, event, window, cx| {
+                this.on_pane_mouse_exit(pane_id, event, window, cx);
+            }))
+            .on_modifiers_changed(cx.listener(move |this, event, window, cx| {
+                this.on_pane_modifiers_changed(pane_id, event, window, cx);
+            }));
 
-        if self.hovered_link.is_some() {
+        if pane.hovered_link.is_some() {
             screen = screen.cursor_pointer();
         }
 
-        if self.exited {
+        if pane.exited {
             screen = screen.child(
                 div()
                     .absolute()
@@ -1224,20 +1789,20 @@ impl Render for TerminalView {
                     .p(px(12.0))
                     .text_size(sp(12.5))
                     .line_height(sp(17.0))
-                    .text_color(if self.error.is_some() {
+                    .text_color(if pane.error.is_some() {
                         theme.danger
                     } else {
                         theme.text_tertiary
                     })
                     .child(
-                        self.error
+                        pane.error
                             .clone()
                             .unwrap_or_else(|| tr!("terminal.starting")),
                     ),
             );
         }
 
-        let grid_bounds = self.grid_bounds.clone();
+        let grid_bounds = pane.grid_bounds.clone();
         screen = screen.child(
             canvas(
                 move |bounds, _, _| grid_bounds.set(Some(bounds)),
@@ -1248,24 +1813,33 @@ impl Render for TerminalView {
         );
 
         let context_terminal = cx.entity();
+        let context_menu_handle = &pane.context_menu;
         let screen = context_menu(
             div().size_full().child(screen),
-            "terminal-context-menu",
-            &self.context_menu,
+            SharedString::from(format!("terminal-context-menu-{pane_id}")),
+            context_menu_handle,
             move |cx| {
-                let has_selection = context_terminal.read(cx).selected_text().is_some();
+                let (has_selection, has_session) = context_terminal
+                    .read(cx)
+                    .panes
+                    .get(&pane_id)
+                    .map(|p| (p.selected_text().is_some(), p.session.is_some()))
+                    .unwrap_or((false, false));
                 let can_paste = cx
                     .read_from_clipboard()
                     .and_then(|item| item.text())
                     .is_some_and(|text| !text.is_empty());
-                let has_session = context_terminal.read(cx).session.is_some();
 
                 let copy_terminal = context_terminal.clone();
                 let paste_terminal = context_terminal.clone();
                 let select_all_terminal = context_terminal.clone();
                 vec![
                     MenuItem::new(tr!("menu.copy"), move |_, cx| {
-                        let selected_text = { copy_terminal.read(cx).selected_text() };
+                        let selected_text = copy_terminal
+                            .read(cx)
+                            .panes
+                            .get(&pane_id)
+                            .and_then(|p| p.selected_text());
                         if let Some(text) = selected_text {
                             cx.write_to_clipboard(ClipboardItem::new_string(text));
                         }
@@ -1276,30 +1850,205 @@ impl Render for TerminalView {
                         else {
                             return;
                         };
-                        paste_terminal.update(cx, |terminal, cx| terminal.paste(text, cx));
+                        paste_terminal.update(cx, |terminal, cx| {
+                            if let Some(pane) = terminal.panes.get_mut(&pane_id) {
+                                pane.paste(text, cx);
+                            }
+                        });
                     })
                     .disabled(!can_paste),
                     MenuItem::Separator,
                     MenuItem::new(tr!("menu.select_all"), move |_, cx| {
-                        select_all_terminal.update(cx, |terminal, cx| terminal.select_all(cx));
+                        select_all_terminal.update(cx, |terminal, cx| {
+                            if let Some(pane) = terminal.panes.get_mut(&pane_id) {
+                                pane.select_all(cx);
+                            }
+                        });
                     })
                     .disabled(!has_session),
                 ]
             },
         );
 
-        let scrollbar = self.session.as_ref().map(|session| {
+        let scrollbar = pane.session.as_ref().map(|session| {
             scrollbar::vertical(
                 &TerminalScrollbarTarget {
                     term: session.term.clone(),
                     dirty: session.dirty.clone(),
                     viewport_rows: session.grid_size.1,
                 },
-                &self.scrollbar_state,
+                &pane.scrollbar_state,
             )
         });
 
+        let h_shortcut = crate::platform::primary_shortcut("⌘⇧H", "Ctrl+Shift+H");
+        let v_shortcut = crate::platform::primary_shortcut("⌘⇧V", "Ctrl+Shift+V");
+        let expand_shortcut = crate::platform::primary_shortcut("⌘⇧Enter", "Ctrl+Shift+Enter");
+        let close_shortcut = crate::platform::primary_shortcut("⌘⇧W", "Ctrl+Shift+W");
+
+        let mut actions_bar = div().flex().items_center().gap(px(2.0));
+
+        let split_h_shortcut = h_shortcut;
+        actions_bar = actions_bar.child(
+            icon_button(
+                SharedString::from(format!("terminal-split-h-{pane_id}")),
+                "icons/split.svg",
+                theme,
+            )
+            .tooltip(move |window, cx| {
+                Tooltip::new(tr!(
+                    "terminal.split_horizontal",
+                    shortcut = split_h_shortcut
+                ))
+                .build(window, cx)
+            })
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.split_horizontal(pane_id, window, cx);
+            })),
+        );
+
+        let split_v_shortcut = v_shortcut;
+        actions_bar = actions_bar.child(
+            icon_button(
+                SharedString::from(format!("terminal-split-v-{pane_id}")),
+                "icons/split-vertical.svg",
+                theme,
+            )
+            .tooltip(move |window, cx| {
+                Tooltip::new(tr!("terminal.split_vertical", shortcut = split_v_shortcut))
+                    .build(window, cx)
+            })
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.split_vertical(pane_id, window, cx);
+            })),
+        );
+
+        if !is_single && !is_expanded {
+            actions_bar = actions_bar.child(
+                icon_button(
+                    SharedString::from(format!("terminal-drag-{pane_id}")),
+                    "icons/grip-vertical.svg",
+                    theme,
+                )
+                .cursor_grab()
+                .tooltip(move |window, cx| {
+                    Tooltip::new(tr!("terminal.drag_to_dock")).build(window, cx)
+                })
+                .on_drag(DraggedTerminalPane(pane_id), |_, _, _, cx| {
+                    cx.new(|_| gpui::Empty)
+                }),
+            );
+        }
+
+        if !is_single {
+            if is_expanded {
+                let show_shortcut = expand_shortcut;
+                actions_bar = actions_bar.child(
+                    icon_button(
+                        SharedString::from(format!("terminal-restore-{pane_id}")),
+                        "icons/minimize.svg",
+                        theme,
+                    )
+                    .tooltip(move |window, cx| {
+                        Tooltip::new(tr!("terminal.show_all_panes", shortcut = show_shortcut))
+                            .build(window, cx)
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.restore_all_panes(cx);
+                    })),
+                );
+            } else {
+                let exp_shortcut = expand_shortcut;
+                actions_bar = actions_bar.child(
+                    icon_button(
+                        SharedString::from(format!("terminal-expand-{pane_id}")),
+                        "icons/maximize.svg",
+                        theme,
+                    )
+                    .tooltip(move |window, cx| {
+                        Tooltip::new(tr!("terminal.expand_full", shortcut = exp_shortcut))
+                            .build(window, cx)
+                    })
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.expand_pane(pane_id, window, cx);
+                    })),
+                );
+            }
+
+            let cls_shortcut = close_shortcut;
+            actions_bar = actions_bar.child(
+                icon_button(
+                    SharedString::from(format!("terminal-close-{pane_id}")),
+                    "icons/x.svg",
+                    theme,
+                )
+                .tooltip(move |window, cx| {
+                    Tooltip::new(tr!("terminal.close_pane", shortcut = cls_shortcut))
+                        .build(window, cx)
+                })
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.close_pane(pane_id, window, cx);
+                })),
+            );
+        }
+
+        let actions_overlay = div()
+            .id(SharedString::from(format!("terminal-actions-{pane_id}")))
+            .absolute()
+            .top(px(6.0))
+            .right(px(12.0))
+            .flex()
+            .items_center()
+            .gap(px(2.0))
+            .p(px(2.0))
+            .rounded(px(bezel::theme::Theme::control_radius()))
+            .bg(theme.frosted.opacity(0.85))
+            .border_1()
+            .border_color(theme.border.opacity(0.5))
+            .shadow_sm()
+            .when(pane.exited, |el| {
+                el.child(
+                    div()
+                        .px(px(4.0))
+                        .py(px(1.0))
+                        .mr(px(2.0))
+                        .rounded(px(3.0))
+                        .bg(theme.danger.opacity(0.15))
+                        .text_size(sp(10.0))
+                        .text_color(theme.danger)
+                        .child(tr!("terminal.process_exited")),
+                )
+            })
+            .child(actions_bar);
+
+        let dock_preview = if let Some((target_id, target_zone, bounds)) = self.dock_target {
+            if target_id == pane_id && cx.has_active_drag() {
+                let preview = preview_bounds(bounds, target_zone);
+                let offset = preview.origin - bounds.origin;
+                Some(
+                    div()
+                        .absolute()
+                        .left(offset.x)
+                        .top(offset.y)
+                        .w(preview.size.width)
+                        .h(preview.size.height)
+                        .rounded(px(bezel::theme::Theme::panel_radius()))
+                        .bg(theme.accent.opacity(0.18))
+                        .border_2()
+                        .border_color(theme.accent),
+                )
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let grid = div()
+            .id(SharedString::from(format!("terminal-grid-{pane_id}")))
+            .key_context("Terminal")
+            .track_focus(&pane.focus_handle)
+            .size_full()
             .flex_1()
             .min_h_0()
             .min_w_0()
@@ -1311,21 +2060,355 @@ impl Render for TerminalView {
             .flex_col()
             .relative()
             .child(screen)
-            .children(scrollbar);
+            .children(scrollbar)
+            .children(dock_preview)
+            .when(is_active, |el| el.child(actions_overlay))
+            .on_key_down(cx.listener(move |this, event, window, cx| {
+                this.on_pane_key_down(pane_id, event, window, cx);
+            }))
+            .on_scroll_wheel(cx.listener(move |this, event, window, cx| {
+                this.on_pane_scroll_wheel(pane_id, event, window, cx);
+            }));
 
         div()
-            .id("alacritty-terminal")
-            .key_context("Terminal")
-            .track_focus(&self.focus_handle)
+            .id(SharedString::from(format!(
+                "terminal-pane-container-{pane_id}"
+            )))
             .size_full()
+            .flex_1()
             .min_h_0()
             .min_w_0()
             .flex()
             .flex_col()
+            .rounded(px(bezel::theme::Theme::panel_radius()))
+            .border_1()
+            .border_color(if is_active {
+                theme.border
+            } else {
+                theme.border.opacity(0.6)
+            })
             .bg(theme.surface)
+            .overflow_hidden()
+            .opacity(opacity)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _, window, cx| {
+                    this.activate_pane(pane_id, window, cx);
+                }),
+            )
+            .on_drag_move(cx.listener(
+                move |view, event: &DragMoveEvent<DraggedTerminalPane>, _, cx| {
+                    let incoming = event.drag(cx).0;
+                    if incoming != pane_id {
+                        if let Some(target_zone) = zone(event.bounds, px(0.0), event.event.position)
+                        {
+                            if view.dock_target != Some((pane_id, target_zone, event.bounds)) {
+                                view.dock_target = Some((pane_id, target_zone, event.bounds));
+                                cx.notify();
+                            }
+                        }
+                    }
+                },
+            ))
+            .on_drop(
+                cx.listener(move |view, drag: &DraggedTerminalPane, window, cx| {
+                    let incoming = drag.0;
+                    if incoming != pane_id {
+                        if let Some((target, target_zone, _)) = view.dock_target.take() {
+                            if target == pane_id {
+                                view.dock_pane(incoming, target, target_zone, window, cx);
+                            }
+                        }
+                    }
+                }),
+            )
             .child(grid)
-            .on_key_down(cx.listener(Self::on_key_down))
-            .on_scroll_wheel(cx.listener(Self::on_scroll_wheel))
+            .into_any_element()
+    }
+
+    fn render_pane_tree(
+        &mut self,
+        tree: &PaneTree,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        match tree {
+            PaneTree::Leaf(pane_id) => self.render_pane(*pane_id, window, cx),
+            PaneTree::Split {
+                id: split_id,
+                direction,
+                fraction,
+                first,
+                second,
+            } => {
+                let first_el = self.render_pane_tree(first, window, cx);
+                let second_el = self.render_pane_tree(second, window, cx);
+                let bezel_theme = bezel::theme::Theme::of(cx);
+
+                let split_id = *split_id;
+                let fraction = *fraction;
+                let direction = *direction;
+
+                let axis = match direction {
+                    SplitDirection::Horizontal => gpui::Axis::Horizontal,
+                    SplitDirection::Vertical => gpui::Axis::Vertical,
+                };
+
+                let handle = bezel_theme
+                    .split_handle(axis, SplitStyle::Ghost)
+                    .id(ElementId::NamedInteger(
+                        "terminal-split-handle".into(),
+                        split_id,
+                    ))
+                    .when(axis == gpui::Axis::Horizontal, |el| el.w(px(8.0)).h_full())
+                    .when(axis == gpui::Axis::Vertical, |el| el.h(px(8.0)).w_full())
+                    .on_drag(TerminalSplitDrag { split_id }, |_, _, _, cx| {
+                        cx.new(|_| gpui::Empty)
+                    });
+
+                let container = div()
+                    .id(ElementId::NamedInteger(
+                        "terminal-split-container".into(),
+                        split_id,
+                    ))
+                    .size_full()
+                    .flex_1()
+                    .min_w_0()
+                    .min_h_0()
+                    .flex()
+                    .on_drag_move(cx.listener(
+                        move |view, event: &DragMoveEvent<TerminalSplitDrag>, _, cx| {
+                            if event.drag(cx).split_id == split_id {
+                                view.active_split = Some(ActiveSplitDrag {
+                                    split_id,
+                                    axis,
+                                    bounds: event.bounds,
+                                });
+                                let new_frac =
+                                    axis_fraction(event.event.position, event.bounds, axis, 0.10);
+                                view.update_split_fraction(split_id, new_frac);
+                                cx.notify();
+                            }
+                        },
+                    ));
+
+                match direction {
+                    SplitDirection::Horizontal => container
+                        .flex_row()
+                        .child(
+                            div()
+                                .flex_none()
+                                .w(relative(fraction))
+                                .h_full()
+                                .min_w_0()
+                                .min_h_0()
+                                .overflow_hidden()
+                                .flex()
+                                .flex_col()
+                                .child(first_el),
+                        )
+                        .child(handle)
+                        .child(
+                            div()
+                                .flex_1()
+                                .h_full()
+                                .min_w_0()
+                                .min_h_0()
+                                .overflow_hidden()
+                                .flex()
+                                .flex_col()
+                                .child(second_el),
+                        )
+                        .into_any_element(),
+                    SplitDirection::Vertical => container
+                        .flex_col()
+                        .child(
+                            div()
+                                .flex_none()
+                                .h(relative(fraction))
+                                .w_full()
+                                .min_h_0()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .flex()
+                                .flex_col()
+                                .child(first_el),
+                        )
+                        .child(handle)
+                        .child(
+                            div()
+                                .flex_1()
+                                .w_full()
+                                .min_h_0()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .flex()
+                                .flex_col()
+                                .child(second_el),
+                        )
+                        .into_any_element(),
+                }
+            }
+        }
+    }
+
+    fn render_bottom_bar(
+        total_count: usize,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        let count_label = if total_count == 1 {
+            tr!("terminal.terminals_count_one", count = total_count)
+        } else {
+            tr!("terminal.terminals_count_many", count = total_count)
+        };
+        let restore_shortcut = crate::platform::primary_shortcut("⌘⇧Enter", "Ctrl+Shift+Enter");
+
+        div()
+            .id("terminal-fullsize-bottom-bar")
+            .h(px(32.0))
+            .flex_none()
+            .px(px(10.0))
+            .rounded(px(bezel::theme::Theme::control_radius()))
+            .bg(theme.raised)
+            .border_1()
+            .border_color(theme.border)
+            .flex()
+            .items_center()
+            .justify_between()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(icon(
+                        "icons/terminal-square.svg",
+                        13.0,
+                        theme.text_secondary,
+                    ))
+                    .child(
+                        div()
+                            .text_size(sp(11.5))
+                            .text_color(theme.text_secondary)
+                            .child(count_label),
+                    ),
+            )
+            .child(
+                div()
+                    .h(px(24.0))
+                    .px(px(8.0))
+                    .rounded(px(4.0))
+                    .flex_none()
+                    .bg(theme.overlay)
+                    .hover(|el| el.bg(theme.overlay_strong))
+                    .cursor_pointer()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
+                    .id("terminal-restore-panes-button")
+                    .child(icon("icons/minimize.svg", 12.0, theme.text_secondary))
+                    .child(
+                        div()
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_secondary)
+                            .child(tr!("terminal.show_all_panes", shortcut = restore_shortcut)),
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.restore_all_panes(cx);
+                    })),
+            )
+            .into_any_element()
+    }
+}
+
+impl Focusable for TerminalView {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.panes
+            .get(&self.active_pane)
+            .map(|p| p.focus_handle.clone())
+            .unwrap_or_else(|| self.focus_handle.clone())
+    }
+}
+
+impl Render for TerminalView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.active_split.is_some() && !cx.has_active_drag() {
+            self.active_split = None;
+        }
+        if self.dock_target.is_some() && !cx.has_active_drag() {
+            self.dock_target = None;
+        }
+
+        let theme = Theme::current(cx);
+
+        let body = if let Some(expanded_id) = self.expanded_pane {
+            if self.panes.contains_key(&expanded_id) {
+                let bottom_bar = Self::render_bottom_bar(self.panes.len(), theme, cx);
+                let pane_el = self.render_pane(expanded_id, window, cx);
+                div()
+                    .size_full()
+                    .flex_1()
+                    .min_h_0()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.0))
+                    .child(pane_el)
+                    .child(bottom_bar)
+                    .into_any_element()
+            } else {
+                self.expanded_pane = None;
+                let layout = self.layout.clone();
+                self.render_pane_tree(&layout, window, cx)
+            }
+        } else {
+            let layout = self.layout.clone();
+            self.render_pane_tree(&layout, window, cx)
+        };
+
+        div()
+            .id("padu-terminal-root")
+            .size_full()
+            .h_full()
+            .w_full()
+            .min_h_0()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .on_drag_move(cx.listener(
+                move |view, event: &DragMoveEvent<TerminalSplitDrag>, _, cx| {
+                    let drag_id = event.drag(cx).split_id;
+                    if let Some(active) = view.active_split {
+                        if active.split_id == drag_id {
+                            let new_frac = axis_fraction(
+                                event.event.position,
+                                active.bounds,
+                                active.axis,
+                                0.10,
+                            );
+                            view.update_split_fraction(drag_id, new_frac);
+                            cx.notify();
+                        }
+                    }
+                },
+            ))
+            .child(body)
+            .on_action(
+                cx.listener(|this, _: &SplitTerminalHorizontal, window, cx| {
+                    this.split_horizontal(this.active_pane, window, cx);
+                }),
+            )
+            .on_action(cx.listener(|this, _: &SplitTerminalVertical, window, cx| {
+                this.split_vertical(this.active_pane, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleTerminalExpand, window, cx| {
+                this.toggle_expand(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &CloseTerminalPane, window, cx| {
+                if this.panes.len() > 1 {
+                    this.close_pane(this.active_pane, window, cx);
+                }
+            }))
     }
 }
 
@@ -1997,5 +3080,59 @@ mod tests {
             ),
             Some((TerminalPoint::new(Line(-3), Column(0)), Side::Left))
         );
+    }
+
+    #[test]
+    fn test_pane_tree_split_horizontal_vertical_and_remove() {
+        let mut tree = PaneTree::Leaf(1);
+        assert_eq!(tree.pane_ids(), vec![1]);
+
+        // Split 1 horizontally into 1 and 2
+        assert!(tree.split_pane(1, 2, 1, SplitDirection::Horizontal));
+        assert_eq!(tree.pane_ids(), vec![1, 2]);
+
+        // Split 2 vertically into 2 and 3
+        assert!(tree.split_pane(2, 3, 2, SplitDirection::Vertical));
+        assert_eq!(tree.pane_ids(), vec![1, 2, 3]);
+
+        // Update split fraction for split 1
+        assert!(tree.update_fraction(1, 0.35));
+        if let PaneTree::Split { fraction, .. } = tree {
+            assert!((fraction - 0.35).abs() < 1e-4);
+        } else {
+            panic!("expected Split");
+        }
+
+        // Remove 2 -> 3 takes its place
+        assert!(tree.remove_pane(2));
+        assert_eq!(tree.pane_ids(), vec![1, 3]);
+
+        // Remove 3 -> 1 takes the whole space
+        assert!(tree.remove_pane(3));
+        assert_eq!(tree.pane_ids(), vec![1]);
+
+        // Cannot remove the only remaining pane
+        assert!(!tree.remove_pane(1));
+        assert_eq!(tree.pane_ids(), vec![1]);
+    }
+
+    #[test]
+    fn test_pane_tree_dock_pane() {
+        let mut tree = PaneTree::Leaf(1);
+
+        // Dock 2 to the right of 1
+        assert!(tree.dock_pane(1, 2, 10, Zone::Right));
+        assert_eq!(tree.pane_ids(), vec![1, 2]);
+
+        // Dock 3 to the top of 2
+        assert!(tree.dock_pane(2, 3, 11, Zone::Top));
+        assert_eq!(tree.pane_ids(), vec![1, 3, 2]);
+
+        // Redock 1 to the bottom of 3
+        assert!(tree.dock_pane(3, 1, 12, Zone::Bottom));
+        assert_eq!(tree.pane_ids(), vec![3, 1, 2]);
+
+        // Docking onto itself returns false
+        assert!(!tree.dock_pane(1, 1, 13, Zone::Left));
     }
 }

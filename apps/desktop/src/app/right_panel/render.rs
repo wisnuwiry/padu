@@ -95,23 +95,41 @@ impl Padu {
             }
         };
 
+        let is_terminal = matches!(
+            self.active_right_panel_surface(),
+            Some(RightPanelSurface::Terminal(_))
+        );
         let bezel_theme = bezel::theme::Theme::of(cx);
-        let card = bezel_theme
-            .group_box()
-            .id("right-panel-content-card")
-            .flex_1()
-            .min_h_0()
-            .ml(
-                if self.right_panel_fullscreen_active() && !self.sidebar_visible {
-                    px(8.0)
-                } else {
-                    px(2.0)
-                },
-            )
-            .mr(px(8.0))
-            .mb(px(8.0))
-            .bg(theme.surface)
-            .child(body);
+        let card = if is_terminal {
+            div()
+                .id("right-panel-content-card")
+                .flex_1()
+                .size_full()
+                .min_h_0()
+                .min_w_0()
+                .p(px(8.0))
+                .overflow_hidden()
+                .flex()
+                .flex_col()
+                .child(body)
+        } else {
+            bezel_theme
+                .group_box()
+                .id("right-panel-content-card")
+                .flex_1()
+                .min_h_0()
+                .ml(
+                    if self.right_panel_fullscreen_active() && !self.sidebar_visible {
+                        px(8.0)
+                    } else {
+                        px(2.0)
+                    },
+                )
+                .mr(px(8.0))
+                .mb(px(8.0))
+                .bg(theme.surface)
+                .child(body)
+        };
 
         div()
             .id("right-panel")

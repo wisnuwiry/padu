@@ -238,6 +238,7 @@ pub fn run() {
             crate::app::init_right_panel_files_keys(cx);
             crate::app::init_right_panel_diff_keys(cx);
             crate::app::init_skills_keys(cx);
+            crate::terminal::init(cx);
             crate::theme::init(cx);
             crate::platform::init_reduce_motion(cx);
 
