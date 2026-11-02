@@ -6,6 +6,7 @@ use crate::model::{ProviderKind, unix_time};
 use crate::theme::{Theme, sp};
 use crate::ui::tooltip::Tooltip;
 use crate::ui::{TagInput, icon, provider_icon};
+use bezel::ui::popover::{Side, sheet, sheet_panel};
 
 use super::types::{
     BOARD_COLUMNS, BoardAgentPickTarget, task_live_badges, task_status_color, task_status_label,
@@ -18,7 +19,7 @@ impl Padu {
         theme: &Theme,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
+    ) -> AnyElement {
         let task_summary = self.board_tasks.iter().find(|t| t.id == task_id).cloned();
         let hydrated = self.board_hydrated_task.clone();
 
@@ -59,19 +60,13 @@ impl Padu {
             .and_then(|t| t.model.clone())
             .or_else(|| task_summary.as_ref().and_then(|t| t.model.clone()));
 
-        let mut drawer = div()
-            .id("task-detail-drawer")
-            .absolute()
-            .top_0()
-            .right_0()
-            .bottom_0()
-            .w(px(380.0))
-            .bg(theme.raised)
-            .border_l_1()
-            .border_color(theme.border_strong)
-            .shadow_xl()
-            .flex()
-            .flex_col()
+        let bezel_theme = bezel::theme::Theme::of(cx);
+        let viewport = window.viewport_size();
+        let extent = px(440.0).min(viewport.width * 0.9);
+
+        let mut panel = sheet_panel(bezel_theme, Side::Right)
+            .id("task-detail-sheet-panel")
+            .occlude()
             .tab_index(0)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
                 if event.keystroke.key.as_str() == "escape" {
@@ -137,7 +132,7 @@ impl Padu {
                     })),
             );
 
-        drawer = drawer.child(header);
+        panel = panel.child(header);
 
         // Drawer Body: Scrollable middle section
         let mut body = div()
@@ -538,7 +533,7 @@ impl Padu {
             },
         ));
 
-        drawer = drawer.child(body);
+        panel = panel.child(body);
 
         // Sticky Footer: Delete on the left, Save on the right
         let title_for_delete_click = title.clone();
@@ -633,8 +628,21 @@ impl Padu {
                     }),
             );
 
-        drawer = drawer.child(footer);
+        panel = panel.child(footer);
 
-        drawer
+        let weak = cx.entity().downgrade();
+        sheet(
+            "task-detail-sheet",
+            viewport,
+            Side::Right,
+            extent,
+            panel.into_any_element(),
+            None,
+            move |_event, _window, cx| {
+                let _ = weak.update(cx, |this, cx| {
+                    this.select_board_task(None, cx);
+                });
+            },
+        )
     }
 }
