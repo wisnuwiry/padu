@@ -1648,6 +1648,7 @@ pub struct Padu {
     notes_tags: Entity<TextInput>,
     notes_tags_list: Vec<String>,
     notes_layout: notes::NotesLayout,
+    notes_turn_open: bool,
     notes_list_collapsed: bool,
     notes_split_ratio: f32,
     notes_save_generation: u64,
@@ -3370,6 +3371,14 @@ impl Padu {
                 },
             )
             .detach();
+            cx.observe(&notes_body, |this: &mut Self, _, cx| {
+                if this.workspace_page == WorkspacePage::Notes
+                    && this.notes_layout == notes::NotesLayout::Rich
+                {
+                    cx.notify();
+                }
+            })
+            .detach();
             cx.subscribe(
                 &notes_code_body,
                 |this: &mut Self, _, event: &InputEvent, cx| {
@@ -3833,6 +3842,7 @@ impl Padu {
                 notes_tags,
                 notes_tags_list: Vec::new(),
                 notes_layout: notes::NotesLayout::Rich,
+                notes_turn_open: false,
                 notes_list_collapsed: false,
                 notes_split_ratio: 0.5,
                 notes_save_generation: 0,

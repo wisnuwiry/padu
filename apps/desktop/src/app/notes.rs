@@ -4,6 +4,7 @@ use crate::ui::TagInput;
 use crate::ui::button::{Button, ButtonRole, ButtonStyle};
 use crate::ui::editor::EditorExt as _;
 use bezel::ui::widgets::{Controls, Scaffolding};
+use bezel_markdown::Mark;
 
 pub(super) const NOTES_PAGE_SIZE: usize = 25;
 
@@ -1619,6 +1620,8 @@ impl Padu {
             .bg(theme.surface)
             .child(body);
 
+        let toolbar = self.render_notes_selection_toolbar(&bezel_theme, window, cx);
+
         div()
             .id("notes-page")
             .key_context("NotesPage")
@@ -1629,7 +1632,245 @@ impl Padu {
             .bg(theme.frosted)
             .child(header)
             .child(card)
+            .children(toolbar)
             .into_any_element()
+    }
+
+    fn render_notes_selection_toolbar(
+        &mut self,
+        bezel_theme: &bezel::theme::Theme,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if self.notes_layout != NotesLayout::Rich {
+            self.notes_turn_open = false;
+            return None;
+        }
+        if self.notes.get(self.notes_selected).is_none() {
+            self.notes_turn_open = false;
+            return None;
+        }
+
+        let editor = self.notes_body.read(cx);
+        let formatting = editor.formatting();
+        if formatting.mode == bezel_editor::Mode::Source {
+            self.notes_turn_open = false;
+            return None;
+        }
+
+        let bounds = editor.selection_bounds()?;
+        let viewport_h = window.viewport_size().height;
+        if bounds.origin.y < px(60.0) || bounds.origin.y > viewport_h - px(40.0) {
+            self.notes_turn_open = false;
+            return None;
+        }
+
+        let view = bezel::motion::Painter::of(cx);
+        let block_idx = editor.selection().head.block;
+        let block_label = formatting
+            .block
+            .clone()
+            .unwrap_or_else(|| SharedString::from("Text"));
+        let turn_open = self.notes_turn_open;
+
+        let turn_trigger = div()
+            .id("notes-turn-trigger")
+            .relative()
+            .child(
+                bezel::ui::popover::menu_row(
+                    bezel_theme,
+                    turn_open,
+                    Some(bezel::motion::Fade::new(view, "notes-turn-trigger")),
+                )
+                .id("notes-turn-trigger-btn")
+                .px(px(7.0))
+                .py(px(4.0))
+                .h(px(24.0))
+                .rounded(px(4.0))
+                .cursor_pointer()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(4.0))
+                .child(
+                    div()
+                        .text_size(sp(12.0))
+                        .text_color(bezel_theme.text)
+                        .child(block_label.clone()),
+                )
+                .child(
+                    bezel::ui::icons::icon(bezel::ui::icons::glyph::ChevronDown)
+                        .size(px(10.0))
+                        .text_color(bezel_theme.text_faint),
+                )
+                .tooltip(Tooltip::text("Turn into"))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.notes_turn_open = !this.notes_turn_open;
+                    cx.notify();
+                })),
+            )
+            .when(turn_open, |el| {
+                let current_block_name = block_label.clone();
+                let turn_items = bezel_editor::turns();
+                el.child(
+                    bezel::ui::popover::anchored_menu_below(
+                        "notes-turn-menu",
+                        bezel::ui::popover::popover_card(bezel_theme)
+                            .id("notes-turn-menu-card")
+                            .w(px(160.0))
+                            .max_h(px(260.0))
+                            .overflow_y_scroll()
+                            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                                this.notes_turn_open = false;
+                                cx.notify();
+                            }))
+                            .children(turn_items.into_iter().map(|(name, kind)| {
+                                let is_current = current_block_name.as_ref() == name.as_ref();
+                                let row_name = name.clone();
+                                bezel::ui::popover::menu_row(
+                                    bezel_theme,
+                                    is_current,
+                                    Some(bezel::motion::Fade::new(view, format!("turn-{}", name))),
+                                )
+                                .id(SharedString::from(format!("turn-{}", name)))
+                                .px(px(8.0))
+                                .py(px(5.0))
+                                .rounded(px(4.0))
+                                .cursor_pointer()
+                                .flex()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .text_size(sp(12.0))
+                                        .text_color(if is_current {
+                                            bezel_theme.text
+                                        } else {
+                                            bezel_theme.text.opacity(0.9)
+                                        })
+                                        .child(row_name),
+                                )
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    let kind = kind.clone();
+                                    this.notes_body.update(cx, |editor, cx| {
+                                        editor.set_block(block_idx, kind, cx);
+                                        window.focus(&editor.focus_handle(cx), cx);
+                                    });
+                                    this.notes_turn_open = false;
+                                    cx.notify();
+                                }))
+                            }))
+                            .into_any_element(),
+                        None,
+                    ),
+                )
+            });
+
+        let divider = div()
+            .w(px(1.0))
+            .h(px(14.0))
+            .my_auto()
+            .mx(px(2.0))
+            .bg(bezel_theme.border_strong);
+
+        struct MarkButton {
+            key: &'static str,
+            glyph: &'static [u8],
+            label: &'static str,
+            shortcut: (&'static str, &'static str),
+            mark: Mark,
+        }
+
+        let marks = [
+            MarkButton {
+                key: "bold",
+                glyph: bezel::ui::icons::glyph::Bold,
+                label: "Bold",
+                shortcut: ("⌘B", "Ctrl+B"),
+                mark: Mark::Bold,
+            },
+            MarkButton {
+                key: "italic",
+                glyph: bezel::ui::icons::glyph::Italic,
+                label: "Italic",
+                shortcut: ("⌘I", "Ctrl+I"),
+                mark: Mark::Italic,
+            },
+            MarkButton {
+                key: "strike",
+                glyph: bezel::ui::icons::glyph::Strikethrough,
+                label: "Strikethrough",
+                shortcut: ("⌘⇧X", "Ctrl+Shift+X"),
+                mark: Mark::Strike,
+            },
+            MarkButton {
+                key: "code",
+                glyph: bezel::ui::icons::glyph::Code,
+                label: "Code",
+                shortcut: ("⌘E", "Ctrl+E"),
+                mark: Mark::Code,
+            },
+        ];
+
+        let buttons = marks.map(|item| {
+            let lit = formatting.marks.contains(&item.mark);
+            let mark = item.mark.clone();
+            let label = item.label;
+            let shortcut = crate::platform::primary_shortcut(item.shortcut.0, item.shortcut.1);
+
+            bezel::ui::popover::menu_row(
+                bezel_theme,
+                lit,
+                Some(bezel::motion::Fade::new(view, format!("notes-bubble-{}", item.key))),
+            )
+            .id(SharedString::from(format!("notes-bubble-{}", item.key)))
+            .px(px(6.0))
+            .py(px(4.0))
+            .h(px(24.0))
+            .rounded(px(4.0))
+            .cursor_pointer()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                bezel::ui::icons::icon(item.glyph)
+                    .size(px(13.0))
+                    .text_color(if lit {
+                        bezel_theme.text
+                    } else {
+                        bezel_theme.text.opacity(0.85)
+                    }),
+            )
+            .tooltip(Tooltip::with_shortcut(label, shortcut))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                let mark = mark.clone();
+                this.notes_body.update(cx, |editor, cx| {
+                    editor.toggle_mark(mark, cx);
+                    window.focus(&editor.focus_handle(cx), cx);
+                });
+            }))
+        });
+
+        let at = gpui::point(
+            bounds.origin.x,
+            bounds.origin.y + bounds.size.height + px(6.0),
+        );
+
+        Some(bezel::ui::popover::menu_at(
+            "notes-selection-toolbar",
+            at,
+            div()
+                .id("notes-selection-toolbar-card")
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(2.0))
+                .p(px(3.0))
+                .child(turn_trigger)
+                .child(divider)
+                .children(buttons)
+                .into_any_element(),
+            None,
+        ))
     }
 }
 
