@@ -1607,6 +1607,7 @@ board.empty_running: Tidak ada agen yang berjalan
 board.empty_review: Tidak ada tugas menunggu review
 board.empty_done: Tidak ada tugas yang selesai
 board.filter_empty: Tidak ada tugas yang cocok dengan filter
+board.filters: Filter
 board.clear_filters: Hapus Filter
 board.clear_filters_short: Bersihkan
 board.clear_search: Hapus pencarian

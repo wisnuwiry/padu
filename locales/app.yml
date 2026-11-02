@@ -3277,6 +3277,8 @@ board.empty_done:
   en: No completed tasks
 board.filter_empty:
   en: No tasks match filters
+board.filters:
+  en: Filters
 board.clear_filters:
   en: Clear Filters
 board.clear_filters_short:

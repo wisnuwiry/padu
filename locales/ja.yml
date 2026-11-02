@@ -1665,6 +1665,7 @@ board.empty_running: 実行中のエージェントはありません
 board.empty_review: レビュー待ちのタスクはありません
 board.empty_done: 完了したタスクはありません
 board.filter_empty: フィルターに一致するタスクはありません
+board.filters: フィルター
 board.clear_filters: フィルターをクリア
 board.clear_filters_short: クリア
 board.clear_search: 検索をクリア
