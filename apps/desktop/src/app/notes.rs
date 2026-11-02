@@ -1365,8 +1365,7 @@ impl Padu {
                                             ),
                                         ))
                                         .on_press(cx.listener(|this, _, window, cx| {
-                                            if let Some(note) =
-                                                this.notes.get(this.notes_selected)
+                                            if let Some(note) = this.notes.get(this.notes_selected)
                                             {
                                                 this.confirm_delete_note(note.id, window, cx);
                                             }
@@ -1385,14 +1384,10 @@ impl Padu {
                                         )
                                         .id("note-rich")
                                         .tab_index(0)
-                                        .focus_visible(|style| {
-                                            style.border_color(theme.accent)
-                                        })
+                                        .focus_visible(|style| style.border_color(theme.accent))
                                         .tooltip(Tooltip::with_shortcut(
                                             tr!("notes.rich_editor"),
-                                            crate::platform::primary_shortcut(
-                                                "⌘1", "Ctrl+1",
-                                            ),
+                                            crate::platform::primary_shortcut("⌘1", "Ctrl+1"),
                                         ))
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.set_notes_layout(NotesLayout::Rich, cx);
@@ -1405,10 +1400,7 @@ impl Padu {
                                                         "enter" | "space"
                                                     )
                                                 {
-                                                    this.set_notes_layout(
-                                                        NotesLayout::Rich,
-                                                        cx,
-                                                    );
+                                                    this.set_notes_layout(NotesLayout::Rich, cx);
                                                     cx.stop_propagation();
                                                 }
                                             },
@@ -1422,14 +1414,10 @@ impl Padu {
                                         )
                                         .id("note-code")
                                         .tab_index(0)
-                                        .focus_visible(|style| {
-                                            style.border_color(theme.accent)
-                                        })
+                                        .focus_visible(|style| style.border_color(theme.accent))
                                         .tooltip(Tooltip::with_shortcut(
                                             tr!("notes.code"),
-                                            crate::platform::primary_shortcut(
-                                                "⌘2", "Ctrl+2",
-                                            ),
+                                            crate::platform::primary_shortcut("⌘2", "Ctrl+2"),
                                         ))
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.set_notes_layout(NotesLayout::Code, cx);
@@ -1442,10 +1430,7 @@ impl Padu {
                                                         "enter" | "space"
                                                     )
                                                 {
-                                                    this.set_notes_layout(
-                                                        NotesLayout::Code,
-                                                        cx,
-                                                    );
+                                                    this.set_notes_layout(NotesLayout::Code, cx);
                                                     cx.stop_propagation();
                                                 }
                                             },
@@ -1712,44 +1697,44 @@ impl Padu {
             .when(turn_open, |el| {
                 let current_block_name = block_label.clone();
                 let turn_items = bezel_editor::turns();
-                el.child(
-                    bezel::ui::popover::anchored_menu_below(
-                        "notes-turn-menu",
-                        bezel::ui::popover::popover_card(bezel_theme)
-                            .id("notes-turn-menu-card")
-                            .w(px(160.0))
-                            .max_h(px(260.0))
-                            .overflow_y_scroll()
-                            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                                this.notes_turn_open = false;
-                                cx.notify();
-                            }))
-                            .children(turn_items.into_iter().map(|(name, kind)| {
-                                let is_current = current_block_name.as_ref() == name.as_ref();
-                                let row_name = name.clone();
-                                bezel::ui::popover::menu_row(
-                                    bezel_theme,
-                                    is_current,
-                                    Some(bezel::motion::Fade::new(view, format!("turn-{}", name))),
-                                )
-                                .id(SharedString::from(format!("turn-{}", name)))
-                                .px(px(8.0))
-                                .py(px(5.0))
-                                .rounded(px(4.0))
-                                .cursor_pointer()
-                                .flex()
-                                .items_center()
-                                .child(
-                                    div()
-                                        .text_size(sp(12.0))
-                                        .text_color(if is_current {
-                                            bezel_theme.text
-                                        } else {
-                                            bezel_theme.text.opacity(0.9)
-                                        })
-                                        .child(row_name),
-                                )
-                                .on_click(cx.listener(move |this, _, window, cx| {
+                el.child(bezel::ui::popover::anchored_menu_below(
+                    "notes-turn-menu",
+                    bezel::ui::popover::popover_card(bezel_theme)
+                        .id("notes-turn-menu-card")
+                        .w(px(160.0))
+                        .max_h(px(260.0))
+                        .overflow_y_scroll()
+                        .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                            this.notes_turn_open = false;
+                            cx.notify();
+                        }))
+                        .children(turn_items.into_iter().map(|(name, kind)| {
+                            let is_current = current_block_name.as_ref() == name.as_ref();
+                            let row_name = name.clone();
+                            bezel::ui::popover::menu_row(
+                                bezel_theme,
+                                is_current,
+                                Some(bezel::motion::Fade::new(view, format!("turn-{}", name))),
+                            )
+                            .id(SharedString::from(format!("turn-{}", name)))
+                            .px(px(8.0))
+                            .py(px(5.0))
+                            .rounded(px(4.0))
+                            .cursor_pointer()
+                            .flex()
+                            .items_center()
+                            .child(
+                                div()
+                                    .text_size(sp(12.0))
+                                    .text_color(if is_current {
+                                        bezel_theme.text
+                                    } else {
+                                        bezel_theme.text.opacity(0.9)
+                                    })
+                                    .child(row_name),
+                            )
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
                                     let kind = kind.clone();
                                     this.notes_body.update(cx, |editor, cx| {
                                         editor.set_block(block_idx, kind, cx);
@@ -1757,12 +1742,12 @@ impl Padu {
                                     });
                                     this.notes_turn_open = false;
                                     cx.notify();
-                                }))
-                            }))
-                            .into_any_element(),
-                        None,
-                    ),
-                )
+                                },
+                            ))
+                        }))
+                        .into_any_element(),
+                    None,
+                ))
             });
 
         let divider = div()
@@ -1820,7 +1805,10 @@ impl Padu {
             bezel::ui::popover::menu_row(
                 bezel_theme,
                 lit,
-                Some(bezel::motion::Fade::new(view, format!("notes-bubble-{}", item.key))),
+                Some(bezel::motion::Fade::new(
+                    view,
+                    format!("notes-bubble-{}", item.key),
+                )),
             )
             .id(SharedString::from(format!("notes-bubble-{}", item.key)))
             .px(px(6.0))

@@ -25,8 +25,8 @@ use gpui::{
     FontStyle, FontWeight, Hsla, InteractiveElement, IntoElement, KeyDownEvent, Keystroke,
     Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent,
     MouseUpEvent, ParentElement, Pixels, Point, Render, ScrollDelta, ScrollWheelEvent,
-    StrikethroughStyle, Styled, StyledText, Subscription, Task, TextRun,
-    UnderlineStyle, Window, canvas, div, font, px, rgb,
+    StrikethroughStyle, Styled, StyledText, Subscription, Task, TextRun, UnderlineStyle, Window,
+    canvas, div, font, px, rgb,
 };
 use parking_lot::Mutex;
 

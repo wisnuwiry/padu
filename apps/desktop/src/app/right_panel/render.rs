@@ -101,11 +101,13 @@ impl Padu {
             .id("right-panel-content-card")
             .flex_1()
             .min_h_0()
-            .ml(if self.right_panel_fullscreen_active() && !self.sidebar_visible {
-                px(8.0)
-            } else {
-                px(2.0)
-            })
+            .ml(
+                if self.right_panel_fullscreen_active() && !self.sidebar_visible {
+                    px(8.0)
+                } else {
+                    px(2.0)
+                },
+            )
             .mr(px(8.0))
             .mb(px(8.0))
             .bg(theme.surface)
@@ -269,10 +271,7 @@ impl Padu {
         if !matches_project {
             let terminal = cx.new(|cx| TerminalView::new(working_directory.clone(), cx));
             cx.observe(&terminal, |_, _, cx| cx.notify()).detach();
-            self.right_panel_terminals.insert(
-                terminal_id,
-                terminal,
-            );
+            self.right_panel_terminals.insert(terminal_id, terminal);
         }
     }
 

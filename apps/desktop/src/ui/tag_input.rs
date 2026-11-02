@@ -136,10 +136,7 @@ impl RenderOnce for TagInput {
                     .gap(px(4.0))
             })
             .when(is_small && is_transparent, |s| {
-                s.min_h(px(24.0))
-                    .py(px(1.5))
-                    .px(px(0.0))
-                    .gap(px(4.0))
+                s.min_h(px(24.0)).py(px(1.5)).px(px(0.0)).gap(px(4.0))
             })
             .when(!is_small && !is_transparent, |s| {
                 s.min_h(px(34.0)).p(px(6.0)).rounded(px(6.0)).gap(px(6.0))
