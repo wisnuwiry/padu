@@ -171,6 +171,9 @@ impl Padu {
             .remove(&browser_id)
             .unwrap_or_else(|| crate::browser::home(cx));
         let browser = cx.new(|cx| crate::browser::Browser::new(id, initial_url, String::new(), cx));
+        browser.update(cx, |b, cx| {
+            let _ = b.page(_window, cx);
+        });
         // Tab titles and toolbar state live on the browser entity; the panel
         // chrome re-renders when they move.
         cx.observe(&browser, |_, _, cx| cx.notify()).detach();

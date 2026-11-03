@@ -1836,6 +1836,7 @@ impl Padu {
             let project = Project::from_path(summary.cwd.clone());
             let project_id = project.id;
             self.state.projects.push(project);
+            self.sync_open_projects();
             self.analytics.track(crate::analytics::Event::ProjectAdded);
             project_id
         };

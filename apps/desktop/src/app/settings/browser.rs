@@ -666,6 +666,7 @@ impl Padu {
             browsing.agents_act = false;
         }
         browsing.save();
+        crate::mcp_serve::set_browser(browsing.agents_read, browsing.agents_act);
         cx.set_global(browsing);
         cx.notify();
     }
@@ -674,6 +675,7 @@ impl Padu {
         let mut browsing = cx.try_global::<Browsing>().cloned().unwrap_or_default();
         browsing.agents_act = agents_act;
         browsing.save();
+        crate::mcp_serve::set_browser(browsing.agents_read, browsing.agents_act);
         cx.set_global(browsing);
         cx.notify();
     }

@@ -32,12 +32,14 @@ macro_rules! tr_cow {
 mod analytics;
 mod app;
 mod assets;
+pub mod browse;
 mod browser;
 mod computer_use;
 pub mod daemon;
 mod driver;
 mod inline_file;
 mod input;
+pub mod mcp_serve;
 mod md;
 mod platform;
 mod query;
@@ -242,6 +244,12 @@ pub fn run() {
             crate::terminal::init(cx);
             crate::theme::init(cx);
             crate::browser::init(cx);
+            let browsing = cx
+                .try_global::<crate::browser::Browsing>()
+                .cloned()
+                .unwrap_or_default();
+            crate::mcp_serve::set_browser(browsing.agents_read, browsing.agents_act);
+            crate::mcp_serve::serve(true);
             crate::platform::init_reduce_motion(cx);
 
             // Platform updaters only run from a supported release layout (or
@@ -411,6 +419,9 @@ pub fn run() {
                         bezel::theme::appearance::observe_window(window, cx).detach();
                         crate::platform::configure_main_window_close_behavior(window, cx);
                         let padu = Padu::new(window, cx, daemon);
+                        padu.update(cx, |_, cx| {
+                            crate::browse::take_browser(window, cx);
+                        });
                         let composer_focus = padu.read(cx).composer_focus(cx);
                         window.focus(&composer_focus, cx);
                         // Relay tunnels (`cloudflared`, `ssh -R`) are child

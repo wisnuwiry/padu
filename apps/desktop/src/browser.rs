@@ -108,6 +108,20 @@ impl Browsing {
         self.search.clone()
     }
 
+    /// Whether `url`'s host is one [`Self::agents_blocked`] names.
+    pub fn blocks(&self, url: &str) -> bool {
+        let Some(host) = url::Url::parse(url)
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
+        else {
+            return false;
+        };
+        self.agents_blocked.iter().any(|blocked| {
+            let blocked = blocked.trim().trim_start_matches("*.").to_ascii_lowercase();
+            !blocked.is_empty() && (host == blocked || host.ends_with(&format!(".{blocked}")))
+        })
+    }
+
     pub fn load_or_default() -> Self {
         let path = Self::settings_path();
         if let Ok(content) = std::fs::read_to_string(&path) {
@@ -423,7 +437,7 @@ impl Browser {
         page.update(cx, |page, _| page.forward());
     }
 
-    fn page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<WebView> {
+    pub(crate) fn page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<WebView> {
         if let Some(page) = &self.page {
             return page.clone();
         }

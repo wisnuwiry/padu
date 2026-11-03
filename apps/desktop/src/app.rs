@@ -1629,7 +1629,7 @@ pub struct Padu {
     /// since the event handler has no `Context` to refresh them itself.
     workspace_queries_stale: bool,
     right_panel_terminals: HashMap<Uuid, Entity<TerminalView>>,
-    right_panel_browsers: HashMap<Uuid, Entity<BrowserView>>,
+    pub(crate) right_panel_browsers: HashMap<Uuid, Entity<BrowserView>>,
     /// A Browser surface was just opened; the next right panel render moves
     /// focus into its address bar.
     right_panel_pending_browser_focus: Option<Uuid>,
@@ -4071,6 +4071,7 @@ impl Padu {
             // And the header's "open project in app" targets, so its menu
             // lists installed apps and icons without ever probing on a frame.
             this.detect_open_in_apps(cx);
+            this.sync_open_projects();
             let keystroke_listener =
                 cx.listener(|this, event: &gpui::KeystrokeEvent, window, cx| {
                     this.handle_project_action_keystroke_event(event, window, cx);
@@ -4081,6 +4082,11 @@ impl Padu {
             }
         });
         entity
+    }
+
+    pub(crate) fn sync_open_projects(&self) {
+        let open_paths = self.state.projects.iter().map(|p| p.path.clone()).collect();
+        padu_mcp::rail::set_open(open_paths);
     }
 }
 
