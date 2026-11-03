@@ -1634,6 +1634,7 @@ pub struct Padu {
     /// focus into its address bar.
     right_panel_pending_browser_focus: Option<Uuid>,
     pub(crate) right_panel_pending_browser_urls: HashMap<Uuid, String>,
+    pub(crate) right_panel_add_menu: bezel::ui::context_menu::ContextMenu<Self>,
     _keystroke_interceptor: Option<gpui::Subscription>,
     /// GPUI is compositing deferred draws on a plane above native views, so
     /// menus render over the live webview and no snapshot occlusion is needed.
@@ -1963,6 +1964,7 @@ pub use note_preview::init as init_note_preview_keys;
 pub use onboarding::init as init_onboarding_keys;
 pub use right_panel::init_diff_keys as init_right_panel_diff_keys;
 pub use right_panel::init_files_keys as init_right_panel_files_keys;
+pub use right_panel::{AddRightPanelTab, ToggleRightPanelAddMenu};
 pub use settings::init as init_settings_keys;
 pub use settings::init_skills_keys;
 pub use sidebar::init as init_sidebar_keys;
@@ -3876,6 +3878,7 @@ impl Padu {
                 right_panel_browsers: HashMap::new(),
                 right_panel_pending_browser_focus: None,
                 right_panel_pending_browser_urls: HashMap::new(),
+                right_panel_add_menu: bezel::ui::context_menu::ContextMenu::default(),
                 _keystroke_interceptor: None,
                 scene_overlay_enabled,
                 settings_page: None,

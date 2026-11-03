@@ -424,6 +424,14 @@ impl Render for Padu {
             .on_action(cx.listener(Self::toggle_right_panel_fullscreen_action))
             .on_action(cx.listener(Self::next_right_panel_tab_action))
             .on_action(cx.listener(Self::prev_right_panel_tab_action))
+            .on_action(
+                cx.listener(|this, _: &ToggleRightPanelAddMenu, window, cx| {
+                    this.toggle_right_panel_add_menu(window, cx);
+                }),
+            )
+            .on_action(cx.listener(|this, _: &AddRightPanelTab, window, cx| {
+                this.toggle_right_panel_add_menu(window, cx);
+            }))
             .on_action(cx.listener(Self::open_browser_action))
             .on_action(cx.listener(Self::open_terminal_action))
             .on_action(cx.listener(Self::open_files_action))

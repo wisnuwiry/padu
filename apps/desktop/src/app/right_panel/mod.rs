@@ -1,9 +1,16 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use gpui::actions;
+
 use super::*;
 
 const TAB_SCROLL_FADE_WIDTH: f32 = 24.0;
+
+actions!(
+    padu_right_panel,
+    [ToggleRightPanelAddMenu, AddRightPanelTab]
+);
 
 mod diff;
 mod files;
@@ -880,5 +887,17 @@ mod tests {
                 depth: 1,
             }
         );
+    }
+
+    #[test]
+    fn right_panel_add_surface_options_contain_browser_and_terminal() {
+        let browser = RightPanelSurface::new_browser();
+        let terminal = RightPanelSurface::new_terminal();
+        assert!(matches!(browser, RightPanelSurface::Browser(_)));
+        assert!(matches!(terminal, RightPanelSurface::Terminal(_)));
+        assert_eq!(browser.label(), "Browser");
+        assert_eq!(terminal.label(), "Terminal");
+        assert_eq!(RightPanelSurface::Files.label(), "Files");
+        assert_eq!(RightPanelSurface::Diff.label(), "Review");
     }
 }

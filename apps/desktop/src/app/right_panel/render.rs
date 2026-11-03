@@ -1,4 +1,9 @@
-use bezel::ui::widgets::Scaffolding;
+use bezel::ui::{
+    context_menu::{ContextMenu, Place},
+    icons::Icon,
+    menu::Item,
+    widgets::Scaffolding,
+};
 
 use super::*;
 
@@ -218,6 +223,7 @@ impl Padu {
     /// the live page swaps for a frozen snapshot.
     pub(crate) fn any_overlay_open(&self, cx: &App) -> bool {
         self.menus.borrow().values().any(ContextMenuHandle::is_open)
+            || self.right_panel_add_menu.is_open()
             || self.command_palette.is_open()
             || self.task_switcher.is_open()
             || self.commit_dialog.is_some()
@@ -326,7 +332,7 @@ impl Padu {
 
     pub(crate) fn render_right_panel_header(
         &self,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let theme = Theme::current(cx);
@@ -632,51 +638,53 @@ impl Padu {
         }
 
         if !self.right_panel_surfaces.is_empty() {
-            let weak = cx.entity().downgrade();
-            let existing_surfaces = self.right_panel_surfaces.clone();
-            let has_project = self.active_project().is_some();
-            let mut options = vec![
-                RightPanelSurface::new_browser(),
-                RightPanelSurface::new_terminal(),
-            ];
-            if has_project {
-                options.push(RightPanelSurface::Files);
-                options.push(RightPanelSurface::Diff);
-            }
-            let handle = self.menu_handle("add-right-panel-surface", cx);
-            header = header.child(
-                div()
-                    .flex_none()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+            let focus = self.transcript_control_focus("right-panel-add-surface", cx);
+            let is_menu_open = self.right_panel_add_menu.is_open();
+            let add_button = div()
+                .id("add-right-panel-surface")
+                .relative()
+                .track_focus(&focus)
+                .tab_index(0)
+                .size(px(22.0))
+                .rounded(px(6.0))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .hover(|element| element.bg(theme.overlay))
+                .active(|element| element.bg(theme.overlay_strong))
+                .when(is_menu_open, |element| element.bg(theme.overlay))
+                .child(icon(
+                    "icons/plus.svg",
+                    13.0,
+                    if is_menu_open {
+                        theme.text
+                    } else {
+                        theme.text_tertiary
+                    },
+                ))
+                .tooltip(Tooltip::text(tr!("right_panel.add_tab")))
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.toggle_right_panel_add_menu(window, cx);
+                }))
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
                         cx.stop_propagation();
-                    })
-                    .child(dropdown_menu(
-                        icon_button("add-right-panel-surface", "icons/plus.svg", theme),
+                        this.toggle_right_panel_add_menu(window, cx);
+                    }
+                }));
+
+            let add_trigger =
+                ContextMenu::trigger(add_button, |this| &mut this.right_panel_add_menu, (), cx)
+                    .children(self.right_panel_add_menu.render(
                         "add-right-panel-surface-menu",
-                        &handle,
-                        MenuAlign::BelowRight,
-                        move |_| {
-                            options
-                                .clone()
-                                .into_iter()
-                                .map(|surface| {
-                                    let weak = weak.clone();
-                                    let open_surface = surface.clone();
-                                    let already_open =
-                                        reusable_surface_index(&existing_surfaces, &surface)
-                                            .is_some();
-                                    MenuItem::new(surface.label(), move |_, cx| {
-                                        let _ = weak.update(cx, |this, cx| {
-                                            this.open_right_panel_surface(open_surface.clone(), cx);
-                                        });
-                                    })
-                                    .icon(surface.icon_path())
-                                    .selected(already_open)
-                                })
-                                .collect()
-                        },
-                    )),
-            );
+                        |this| &mut this.right_panel_add_menu,
+                        window,
+                        cx,
+                    ));
+            header = header.child(add_trigger);
         }
 
         // Fullscreen expand: only while an expandable surface (browser,
@@ -746,6 +754,66 @@ impl Padu {
                 )),
             cx,
         )
+    }
+
+    pub(crate) fn right_panel_add_surface_options(&self) -> Vec<RightPanelSurface> {
+        let mut options = vec![
+            RightPanelSurface::new_browser(),
+            RightPanelSurface::new_terminal(),
+        ];
+        if self.active_project().is_some() {
+            options.push(RightPanelSurface::Files);
+            options.push(RightPanelSurface::Diff);
+        }
+        options
+    }
+
+    pub(crate) fn toggle_right_panel_add_menu(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.right_panel_visible {
+            self.set_right_panel_visible(true, cx);
+        }
+        let options = self.right_panel_add_surface_options();
+        let existing_surfaces = self.right_panel_surfaces.clone();
+        ContextMenu::toggle(
+            self,
+            |this| &mut this.right_panel_add_menu,
+            (),
+            Place::BelowEnd,
+            move |_, _, _| {
+                let items = options
+                    .iter()
+                    .map(|surface| {
+                        let already_open =
+                            reusable_surface_index(&existing_surfaces, surface).is_some();
+                        let mut item = Item::action(surface.label())
+                            .with_icon(Icon::asset(surface.icon_path()))
+                            .checked(already_open);
+                        if let Some(shortcut) = surface.shortcut() {
+                            item = item.with_keystroke(shortcut);
+                        }
+                        item
+                    })
+                    .collect::<Vec<_>>();
+                let choose_options = options.clone();
+                let choose = move |this: &mut Padu,
+                                   path: &[usize],
+                                   _: &mut Window,
+                                   cx: &mut Context<Padu>| {
+                    if let Some(&index) = path.first() {
+                        if let Some(surface) = choose_options.get(index) {
+                            this.open_right_panel_surface(surface.clone(), cx);
+                        }
+                    }
+                };
+                (items, choose)
+            },
+            window,
+            cx,
+        );
     }
 
     pub(crate) fn render_right_panel_chooser(&self, cx: &mut Context<Self>) -> Stateful<Div> {
