@@ -114,6 +114,35 @@ settings.computer_use: コンピュータ操作
 settings.notifications: 通知
 settings.browser: ブラウザ
 settings.browser_keywords: ブラウザ ウェブ webview 検索エンジン ホームページ クッキー データ 消去 サイト
+settings.browser_search_engine: デフォルトの検索エンジン
+settings.browser_search_engine_description: アドレスバーからの検索には %{engine} を使用します。
+settings.browser_add_search_engine: 検索エンジンを追加…
+settings.browser_add_search_engine_hint: プロバイダー名と、クエリの場所に %s を含む検索 URL を入力してください。
+settings.browser_engine_name_placeholder: "プロバイダー名（例: Brave）"
+settings.browser_engine_url_placeholder: "検索 URL（例: https://search.brave.com/search?q=%s）"
+settings.browser_home: 起動時およびホームページ
+settings.browser_home_description: 新しいブラウザタブを開いたときに最初に読み込まれるウェブページ。
+settings.browser_agents_read: エージェントのウェブ読み取り
+settings.browser_agents_read_description: AI エージェントによるタブの移動、ページ構造の確認、テキストの抽出を許可します。
+settings.browser_agents_act: エージェントのウェブ操作
+settings.browser_agents_act_description: AI エージェントによるボタンのクリック、テキストの入力、フォームの送信を許可します。ウェブ読み取りが必要です。
+settings.browser_blocked: 制限されたドメイン
+settings.browser_blocked_description: AI エージェントのアクセスや確認を禁止するウェブサイトとドメイン。
+settings.browser_blocked_none: 制限されたドメインはありません。アクセス可能なすべてのウェブサイトが許可されています。
+settings.browser_keep_signed_in: ログイン情報とクッキーを保持
+settings.browser_keep_signed_in_description: 再起動後も認証クッキーとサイトデータを保持します。無効にすると、プライベートブラウジングモードで実行されます。
+settings.browser_data: 閲覧データとキャッシュ
+settings.browser_clear_data: 閲覧データを消去
+settings.browser_clearing: 閲覧データを消去中…
+settings.browser_clear_failed: 閲覧データの消去に失敗しました。もう一度お試しください。
+settings.browser_cleared: 閲覧データが正常に消去されました。開いているブラウザタブは閉じられました。
+settings.browser_clear_unavailable: 閲覧データの消去は macOS でのみ利用可能です。
+settings.browser_calculating: ストレージ使用量を計算中…
+settings.browser_data_unavailable: ストレージ使用量データは利用できません。
+settings.browser_no_data: 保存されたウェブサイトデータはありません。
+settings.browser_one_site: 1 件のウェブサイトからクッキーとキャッシュを保存しています。
+settings.browser_sites_data: "%{count} 件のウェブサイトからクッキーとキャッシュを保存しています。"
+settings.browser_clear_footer: 消去すると、クッキー、キャッシュ、ストレージが削除され、すべてのブラウザタブが閉じられ、ログアウトされます。
 settings.about: 情報
 settings.general_keywords: 一般 ローカル プロジェクト 会話 プライバシー 分析 テレメトリ 匿名 共有 アップデート 自動 バージョン
 settings.appearance_keywords: 外観 テーマ システム ライト ダーク 言語 英語 中国語 簡体字 日本語 フォント サイズ 文字 エディタ
@@ -588,6 +617,8 @@ common.copy_selection: 選択範囲をコピー
 common.copy_to_composer: 入力欄にコピー
 common.copy_code: コードをコピー
 common.cancel: キャンセル
+common.save: 保存
+common.change: 変更…
 common.edit: 編集
 common.send: 送信
 notes.new: 新しいノート

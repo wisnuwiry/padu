@@ -109,6 +109,35 @@ settings.computer_use: Penggunaan Komputer
 settings.notifications: Notifikasi
 settings.browser: Peramban
 settings.browser_keywords: peramban web webview mesin pencari beranda cookie data bersihkan situs
+settings.browser_search_engine: Mesin Pencari Default
+settings.browser_search_engine_description: Pencarian dari bilah alamat menggunakan %{engine}.
+settings.browser_add_search_engine: Tambah Mesin Pencari…
+settings.browser_add_search_engine_hint: Masukkan nama penyedia dan URL pencarian dengan %s sebagai pengganti kueri.
+settings.browser_engine_name_placeholder: Nama penyedia (mis. Brave)
+settings.browser_engine_url_placeholder: "URL pencarian (mis. https://search.brave.com/search?q=%s)"
+settings.browser_home: Halaman Awal & Beranda
+settings.browser_home_description: Halaman web awal yang dimuat setiap kali tab peramban baru dibuka.
+settings.browser_agents_read: Pembacaan Web oleh Agen
+settings.browser_agents_read_description: Izinkan agen AI menavigasi tab, memeriksa struktur halaman, dan mengekstrak teks.
+settings.browser_agents_act: Interaksi Web oleh Agen
+settings.browser_agents_act_description: Izinkan agen AI mengklik tombol, mengetik teks, dan mengirim formulir. Memerlukan pembacaan web.
+settings.browser_blocked: Domain yang Dibatasi
+settings.browser_blocked_description: Situs web dan domain yang dilarang dikunjungi atau diperiksa oleh agen AI.
+settings.browser_blocked_none: Tidak ada domain yang dibatasi. Semua situs web yang dapat dijangkau diizinkan.
+settings.browser_keep_signed_in: Ingat Masuk & Cookie
+settings.browser_keep_signed_in_description: Pertahankan cookie autentikasi dan data situs tetap aktif setelah dimulai ulang. Jika dinonaktifkan, tab berjalan dalam mode penjelajahan pribadi.
+settings.browser_data: Data & Cache Penjelajahan
+settings.browser_clear_data: Bersihkan Data Penjelajahan
+settings.browser_clearing: Membersihkan data penjelajahan…
+settings.browser_clear_failed: Gagal membersihkan data penjelajahan. Silakan coba lagi.
+settings.browser_cleared: Data penjelajahan berhasil dibersihkan. Tab peramban yang aktif telah ditutup.
+settings.browser_clear_unavailable: Pembersihan data penjelajahan hanya tersedia di macOS.
+settings.browser_calculating: Menghitung penggunaan penyimpanan…
+settings.browser_data_unavailable: Data penggunaan penyimpanan tidak tersedia.
+settings.browser_no_data: Tidak ada data situs web yang tersimpan.
+settings.browser_one_site: Menyimpan cookie dan cache dari 1 situs web.
+settings.browser_sites_data: Menyimpan cookie dan cache dari %{count} situs web.
+settings.browser_clear_footer: Pembersihan akan menghapus cookie, cache, dan penyimpanan, menutup semua tab peramban, dan mengeluarkan akun Anda.
 settings.about: Tentang
 settings.general_keywords: umum lokal proyek percakapan privasi analitik telemetri anonim bagikan pembaruan otomatis sparkle versi
 settings.appearance_keywords: tampilan tema sistem terang gelap bahasa inggris indonesia jepang mandarin font ukuran teks editor
@@ -572,6 +601,8 @@ common.copy_selection: Salin Pilihan
 common.copy_to_composer: Salin ke Komposer
 common.copy_code: Salin Kode
 common.cancel: Batal
+common.save: Simpan
+common.change: Ubah…
 common.edit: Edit
 common.send: Kirim
 notes.new: Catatan Baru

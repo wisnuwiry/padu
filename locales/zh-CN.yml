@@ -110,6 +110,35 @@ settings.computer_use: 电脑操作
 settings.notifications: 通知
 settings.browser: 浏览器
 settings.browser_keywords: 浏览器 网页 webview 搜索引擎 主页 cookie 数据 清除 网站
+settings.browser_search_engine: 默认搜索引擎
+settings.browser_search_engine_description: 地址栏中的搜索使用 %{engine}。
+settings.browser_add_search_engine: 添加搜索引擎…
+settings.browser_add_search_engine_hint: 输入服务提供商名称和带有 %s 查询占位符的搜索 URL。
+settings.browser_engine_name_placeholder: 提供商名称（例如 Brave）
+settings.browser_engine_url_placeholder: "搜索 URL（例如 https://search.brave.com/search?q=%s）"
+settings.browser_home: 启动与主页
+settings.browser_home_description: 每次打开新浏览器标签页时加载的初始网页。
+settings.browser_agents_read: 智能体网页读取
+settings.browser_agents_read_description: 允许 AI 智能体浏览标签页、检查页面结构和提取文本。
+settings.browser_agents_act: 智能体网页交互
+settings.browser_agents_act_description: 允许 AI 智能体点击按钮、输入文本和提交表单。需要启用网页读取。
+settings.browser_blocked: 受限域名
+settings.browser_blocked_description: 禁止 AI 智能体访问或检查的网站和域名。
+settings.browser_blocked_none: 无受限域名。允许访问所有可达网站。
+settings.browser_keep_signed_in: 记住登录与 Cookie
+settings.browser_keep_signed_in_description: 在重启后保持身份验证 cookie 和网站数据有效。禁用后，标签页以隐私浏览模式运行。
+settings.browser_data: 浏览数据与缓存
+settings.browser_clear_data: 清除浏览数据
+settings.browser_clearing: 正在清除浏览数据…
+settings.browser_clear_failed: 清除浏览数据失败，请重试。
+settings.browser_cleared: 浏览数据已成功清除。活动的浏览器标签页已关闭。
+settings.browser_clear_unavailable: 清除浏览数据仅在 macOS 上可用。
+settings.browser_calculating: 正在计算存储占用…
+settings.browser_data_unavailable: 存储占用数据不可用。
+settings.browser_no_data: 未找到已保存的网站数据。
+settings.browser_one_site: 正在存储来自 1 个网站的 cookie 和缓存。
+settings.browser_sites_data: 正在存储来自 %{count} 个网站的 cookie 和缓存。
+settings.browser_clear_footer: 清除将删除 cookie、缓存和存储数据，关闭所有浏览器标签页并退出登录。
 settings.about: 关于
 settings.general_keywords: 通用 本地 项目 对话 隐私 匿名 使用数据 分析 分享 更新 自动 版本
 settings.appearance_keywords: 外观 主题 系统 浅色 深色 语言 英语 中文 简体 字号 字体 大小 编辑器
@@ -573,6 +602,8 @@ common.copy_selection: 复制所选内容
 common.copy_to_composer: 复制到输入框
 common.copy_code: 复制代码
 common.cancel: 取消
+common.save: 保存
+common.change: 更改…
 common.edit: 编辑
 common.send: 发送
 notes.new: 新建笔记
