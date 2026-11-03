@@ -1635,6 +1635,10 @@ pub struct Padu {
     right_panel_pending_browser_focus: Option<Uuid>,
     pub(crate) right_panel_pending_browser_urls: HashMap<Uuid, String>,
     pub(crate) right_panel_add_menu: bezel::ui::context_menu::ContextMenu<Self>,
+    pub(crate) right_panel_files_menu:
+        bezel::ui::context_menu::ContextMenu<Self, crate::app::right_panel::RightPanelFilesMenuKey>,
+    pub(crate) right_panel_tab_reorder:
+        bezel::ui::tabs::Reorder<crate::app::right_panel::RightPanelTabId>,
     _keystroke_interceptor: Option<gpui::Subscription>,
     /// GPUI is compositing deferred draws on a plane above native views, so
     /// menus render over the live webview and no snapshot occlusion is needed.
@@ -3879,6 +3883,8 @@ impl Padu {
                 right_panel_pending_browser_focus: None,
                 right_panel_pending_browser_urls: HashMap::new(),
                 right_panel_add_menu: bezel::ui::context_menu::ContextMenu::default(),
+                right_panel_files_menu: bezel::ui::context_menu::ContextMenu::default(),
+                right_panel_tab_reorder: bezel::ui::tabs::Reorder::new(),
                 _keystroke_interceptor: None,
                 scene_overlay_enabled,
                 settings_page: None,

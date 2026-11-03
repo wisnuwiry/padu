@@ -20,6 +20,7 @@ mod render;
 mod tabs;
 
 pub use diff::init_keys as init_diff_keys;
+pub(crate) use files::RightPanelFilesMenuKey;
 pub use files::init_keys as init_files_keys;
 pub(crate) use links::*;
 pub(crate) use model::*;
@@ -899,5 +900,59 @@ mod tests {
         assert_eq!(terminal.label(), "Terminal");
         assert_eq!(RightPanelSurface::Files.label(), "Files");
         assert_eq!(RightPanelSurface::Diff.label(), "Review");
+    }
+
+    #[test]
+    fn right_panel_files_menu_key_variants() {
+        let entry_key = RightPanelFilesMenuKey::Entry("src/main.rs".to_owned());
+        let empty_key = RightPanelFilesMenuKey::Empty;
+        let preview_key = RightPanelFilesMenuKey::Preview("README.md".to_owned());
+        assert_eq!(
+            entry_key,
+            RightPanelFilesMenuKey::Entry("src/main.rs".to_owned())
+        );
+        assert_ne!(entry_key, empty_key);
+        assert_ne!(entry_key, preview_key);
+    }
+
+    #[test]
+    fn right_panel_header_uses_bezel_tab_strip() {
+        let source = include_str!("render.rs");
+        let header = source
+            .split_once("\n    pub(crate) fn render_right_panel_header(")
+            .expect("right panel header renderer")
+            .1
+            .split_once("\n    pub(crate) fn render_right_panel_chooser(")
+            .expect("right panel header renderer end")
+            .0;
+
+        assert!(header.contains("right_panel_tab_reorder"));
+        assert!(header.contains(".bar("));
+        assert!(header.contains("tabs::tab("));
+        assert!(header.contains("tabs::close("));
+        assert!(header.contains(".on_reorder("));
+    }
+
+    #[test]
+    fn test_reorder_surface_indices() {
+        // [A, B, C], active = 1 (B)
+        // Move A (0) to 2: [B, C, A], active should become 0
+        assert_eq!(reorder_surface_indices(3, 0, 2, Some(1)), Some(0));
+
+        // Move C (2) to 0: [C, A, B], active should become 2
+        assert_eq!(reorder_surface_indices(3, 2, 0, Some(1)), Some(2));
+
+        // Move active tab B (1) to 0: [B, A, C], active should become 0
+        assert_eq!(reorder_surface_indices(3, 1, 0, Some(1)), Some(0));
+
+        // Move active tab B (1) to 2: [A, C, B], active should become 2
+        assert_eq!(reorder_surface_indices(3, 1, 2, Some(1)), Some(2));
+
+        // Move C (2) to 1: when active is 0 (A), active should stay 0
+        assert_eq!(reorder_surface_indices(3, 2, 1, Some(0)), Some(0));
+
+        // Out of bounds or no move
+        assert_eq!(reorder_surface_indices(3, 1, 1, Some(1)), Some(1));
+        assert_eq!(reorder_surface_indices(3, 0, 5, Some(1)), Some(1));
     }
 }

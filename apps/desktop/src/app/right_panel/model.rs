@@ -1,5 +1,11 @@
 use super::*;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum RightPanelTabId {
+    Conversation,
+    Surface(RightPanelSurface),
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum EmptyStateCardAction {
     NewProject,

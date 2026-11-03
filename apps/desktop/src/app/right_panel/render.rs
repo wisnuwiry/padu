@@ -2,6 +2,7 @@ use bezel::ui::{
     context_menu::{ContextMenu, Place},
     icons::Icon,
     menu::Item,
+    tabs::{self, Close, Label, State},
     widgets::Scaffolding,
 };
 
@@ -224,6 +225,7 @@ impl Padu {
     pub(crate) fn any_overlay_open(&self, cx: &App) -> bool {
         self.menus.borrow().values().any(ContextMenuHandle::is_open)
             || self.right_panel_add_menu.is_open()
+            || self.right_panel_files_menu.is_open()
             || self.command_palette.is_open()
             || self.task_switcher.is_open()
             || self.commit_dialog.is_some()
@@ -336,66 +338,46 @@ impl Padu {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx);
         let fullscreen = self.right_panel_fullscreen_active();
         let showing_conversation = fullscreen && self.right_panel_fullscreen_conversation;
         let active_surface = self.right_panel_active_surface;
-        let mut tabs = div()
-            .id("right-panel-tabs")
-            .h_full()
-            .min_w_0()
-            .flex_1()
-            .flex()
-            .items_center()
-            .gap(px(4.0))
-            .overflow_x_scroll()
-            .track_scroll(&self.right_panel_tabs_scroll_handle);
+        let mut tab_items = Vec::new();
+        let mut strip_ids = Vec::new();
+
         // Fullscreen surfaces read like tabs with Conversation first, so the
         // transcript stays one ←/→ step away from every surface.
         if fullscreen {
             let active = showing_conversation;
-            tabs = tabs.child(
-                div()
-                    .id("right-panel-tab-conversation")
-                    .h(px(28.0))
-                    .min_w(px(100.0))
-                    .max_w(px(176.0))
-                    .px(px(8.0))
-                    .rounded(px(6.0))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .cursor_pointer()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                        cx.stop_propagation();
-                    })
-                    .when(active, |element| element.bg(theme.overlay_strong))
-                    .when(!active, |element| {
-                        element.hover(|element| element.bg(theme.overlay))
-                    })
-                    .child(icon("icons/compose.svg", 13.0, theme.text_secondary))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .truncate()
-                            .text_size(sp(12.5))
-                            .text_color(if active {
-                                theme.text
-                            } else {
-                                theme.text_secondary
-                            })
-                            .child(tr!("right_panel.conversation")),
-                    )
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.select_right_panel_fullscreen_conversation(Some(window), cx);
-                    })),
-            );
+            let state = if active {
+                State::Focused
+            } else {
+                State::Resting
+            };
+            let label = Label::new(tr!("right_panel.conversation")).with_lead(icon(
+                "icons/compose.svg",
+                13.0,
+                theme.text_secondary,
+            ));
+            let conversation_tab = tabs::tab(&bezel_theme, "conversation", label, state)
+                .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                    cx.stop_propagation();
+                })
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.select_right_panel_fullscreen_conversation(Some(window), cx);
+                }));
+            strip_ids.push(RightPanelTabId::Conversation);
+            tab_items.push((RightPanelTabId::Conversation, conversation_tab));
         }
         for (index, surface) in self.right_panel_surfaces.iter().cloned().enumerate() {
             let active = !showing_conversation && active_surface == Some(index);
+            let state = if active {
+                State::Focused
+            } else {
+                State::Resting
+            };
             let dirty = self.right_panel_surface_is_dirty(&surface);
-            let label = SharedString::from(match &surface {
+            let label_text = SharedString::from(match &surface {
                 // Browser tabs read like browser tabs: the page title once
                 // known, the address until then.
                 RightPanelSurface::Browser(browser_id) => self
@@ -418,100 +400,90 @@ impl Padu {
             let uses_file_icon = matches!(&surface, RightPanelSurface::File(_))
                 || matches!(&surface, RightPanelSurface::Files)
                     && self.right_panel_files_selected_path.is_some();
+            let lead = if uses_file_icon {
+                file_icon(icon_path, 13.0).into_any_element()
+            } else {
+                icon(icon_path, 13.0, theme.text_secondary).into_any_element()
+            };
+            let tab_label = Label::new(label_text).with_lead(lead);
+            let tab_key = SharedString::from(format!("surface-{index}"));
             let close_weak = cx.entity().downgrade();
-            tabs = tabs.child(
-                div()
-                    .id(SharedString::from(format!("right-panel-tab-{index}")))
-                    .h(px(28.0))
-                    .min_w(px(100.0))
-                    .max_w(px(176.0))
-                    .px(px(8.0))
-                    .rounded(px(6.0))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .cursor_pointer()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+            let close_style = if active {
+                Close::Always
+            } else {
+                Close::OnHover
+            };
+            let surface_tab = tabs::tab(&bezel_theme, tab_key.clone(), tab_label, state)
+                .on_mouse_down(MouseButton::Middle, {
+                    let close_weak = close_weak.clone();
+                    move |_, _, cx| {
                         cx.stop_propagation();
-                    })
-                    .on_mouse_down(MouseButton::Middle, {
-                        let close_weak = close_weak.clone();
-                        move |_, _, cx| {
+                        let _ = close_weak.update(cx, |this, cx| {
+                            this.close_right_panel_surface(index, cx);
+                        });
+                    }
+                })
+                .when(dirty, |element| {
+                    element.child(
+                        div()
+                            .id(SharedString::from(format!("right-panel-tab-dirty-{index}")))
+                            .size(px(7.0))
+                            .flex_none()
+                            .rounded_full()
+                            .bg(theme.warning)
+                            .tooltip(|window, cx| {
+                                Tooltip::new(tr!(
+                                    "files.unsaved_changes",
+                                    shortcut = crate::platform::primary_shortcut("⌘S", "Ctrl+S"),
+                                ))
+                                .build(window, cx)
+                            }),
+                    )
+                })
+                .child(
+                    tabs::close(&bezel_theme, tab_key, close_style)
+                        .id(SharedString::from(format!("close-right-panel-tab-{index}")))
+                        .on_click(cx.listener(move |this, _, _, cx| {
                             cx.stop_propagation();
-                            let _ = close_weak.update(cx, |this, cx| {
-                                this.close_right_panel_surface(index, cx);
-                            });
-                        }
-                    })
-                    .when(active, |element| element.bg(theme.overlay_strong))
-                    .when(!active, |element| {
-                        element.hover(|element| element.bg(theme.overlay))
-                    })
-                    .child(if uses_file_icon {
-                        file_icon(icon_path, 13.0).into_any_element()
-                    } else {
-                        icon(icon_path, 13.0, theme.text_secondary).into_any_element()
-                    })
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .truncate()
-                            .text_size(sp(12.5))
-                            .text_color(if active {
-                                theme.text
-                            } else {
-                                theme.text_secondary
-                            })
-                            .child(label),
-                    )
-                    .when(dirty, |element| {
-                        element.child(
-                            div()
-                                .id(SharedString::from(format!("right-panel-tab-dirty-{index}")))
-                                .size(px(7.0))
-                                .flex_none()
-                                .rounded_full()
-                                .bg(theme.warning)
-                                .tooltip(|window, cx| {
-                                    Tooltip::new(tr!(
-                                        "files.unsaved_changes",
-                                        shortcut =
-                                            crate::platform::primary_shortcut("⌘S", "Ctrl+S")
-                                    ))
-                                    .build(window, cx)
-                                }),
-                        )
-                    })
-                    .child(
-                        div()
-                            .id(SharedString::from(format!("close-right-panel-tab-{index}")))
-                            .w(px(16.0))
-                            .h(px(16.0))
-                            .rounded(px(4.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .hover(|element| element.bg(theme.overlay_strong))
-                            .child(icon("icons/x.svg", 10.0, theme.text_tertiary))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                cx.stop_propagation();
-                                this.close_right_panel_surface(index, cx);
-                            })),
-                    )
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.right_panel_active_surface = Some(index);
-                        this.right_panel_fullscreen_conversation = false;
-                        this.reveal_right_panel_tab(index);
-                        this.focus_active_surface(window, cx);
-                        cx.notify();
-                    })),
-            );
+                            this.close_right_panel_surface(index, cx);
+                        })),
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.right_panel_active_surface = Some(index);
+                    this.right_panel_fullscreen_conversation = false;
+                    this.reveal_right_panel_tab(index);
+                    this.focus_active_surface(window, cx);
+                    cx.notify();
+                }));
+            let id = RightPanelTabId::Surface(surface);
+            strip_ids.push(id.clone());
+            tab_items.push((id, surface_tab));
         }
-        tabs = tabs
-            .child(div().w(px(TAB_SCROLL_FADE_WIDTH)).h(px(1.0)).flex_none())
-            .when(fullscreen, |element| element.justify_center());
+
+        let mut strip = tabs::Strip::from_iter(strip_ids);
+        if showing_conversation {
+            strip.activate(&RightPanelTabId::Conversation);
+        } else if let Some(active_index) = active_surface {
+            if let Some(surface) = self.right_panel_surfaces.get(active_index) {
+                strip.activate(&RightPanelTabId::Surface(surface.clone()));
+            }
+        }
+
+        let tab_bar = self
+            .right_panel_tab_reorder
+            .bar("right-panel-tabs", &strip, tab_items)
+            .on_reorder(cx.listener(move |this, step: &tabs::Move, _window, cx| {
+                if fullscreen {
+                    if step.from == 0 {
+                        return;
+                    }
+                    let surface_from = step.from.saturating_sub(1);
+                    let surface_to = step.to.max(1).saturating_sub(1);
+                    this.reorder_right_panel_surface(surface_from, surface_to, cx);
+                } else {
+                    this.reorder_right_panel_surface(step.from, step.to, cx);
+                }
+            }));
 
         let left_window_controls = (fullscreen && !self.sidebar_visible)
             .then(|| {
@@ -609,11 +581,11 @@ impl Padu {
                     .h_full()
                     .min_w_0()
                     .flex_1()
+                    .flex()
+                    .items_center()
                     .overflow_hidden()
-                    .when(fullscreen, |element| {
-                        element.flex().items_center().justify_center()
-                    })
-                    .child(tabs)
+                    .when(fullscreen, |element| element.justify_center())
+                    .child(tab_bar)
                     .when_some(self.right_panel_pending_tab_reveal, |element, tab_index| {
                         element.child(tab_scroll_reveal_guard(
                             self.right_panel_tabs_scroll_handle.clone(),

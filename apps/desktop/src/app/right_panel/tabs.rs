@@ -129,6 +129,28 @@ pub(crate) fn fullscreen_cycle_next(
     (position as isize + direction).rem_euclid(len as isize) as usize
 }
 
+pub(crate) fn reorder_surface_indices(
+    len: usize,
+    from: usize,
+    to: usize,
+    active: Option<usize>,
+) -> Option<usize> {
+    if from == to || from >= len || to >= len {
+        return active;
+    }
+    active.map(|active| {
+        if active == from {
+            to
+        } else if from < active && to >= active {
+            active - 1
+        } else if from > active && to <= active {
+            active + 1
+        } else {
+            active
+        }
+    })
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum TabScrollFadeSide {
     Left,
@@ -414,6 +436,35 @@ impl Padu {
     pub(crate) fn reveal_right_panel_tab(&mut self, index: usize) {
         self.right_panel_pending_tab_reveal = Some(index);
         self.right_panel_tabs_scroll_handle.scroll_to_item(index);
+    }
+
+    pub(crate) fn reorder_right_panel_surface(
+        &mut self,
+        from: usize,
+        to: usize,
+        cx: &mut Context<Self>,
+    ) {
+        if from == to
+            || from >= self.right_panel_surfaces.len()
+            || to >= self.right_panel_surfaces.len()
+        {
+            return;
+        }
+        let surface = self.right_panel_surfaces.remove(from);
+        self.right_panel_surfaces.insert(to, surface);
+        self.right_panel_active_surface = reorder_surface_indices(
+            self.right_panel_surfaces.len(),
+            from,
+            to,
+            self.right_panel_active_surface,
+        );
+        if let Some(session_id) = self.state.selected_session {
+            if let Some(state) = self.right_panel_session_states.get_mut(&session_id) {
+                state.surfaces = self.right_panel_surfaces.clone();
+                state.active_surface = self.right_panel_active_surface;
+            }
+        }
+        cx.notify();
     }
 
     pub(crate) fn active_right_panel_surface(&self) -> Option<&RightPanelSurface> {
