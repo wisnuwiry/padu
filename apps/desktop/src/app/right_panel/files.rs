@@ -1,4 +1,7 @@
-use gpui::{KeyBinding, actions};
+use std::path::{Path, PathBuf};
+
+use bezel::ui::{context_menu::Place, icons::Icon, menu::Item};
+use gpui::{KeyBinding, Pixels, Point, actions};
 
 use super::*;
 
@@ -6,6 +9,125 @@ actions!(padu_inline_file, [CancelInlineFile, SubmitInlineFile]);
 
 pub(crate) const INLINE_FILE_PARENT_CONTEXT: &str = "InlineFileField";
 pub(crate) const INLINE_FILE_FIELD_CONTEXT: &str = "InlineFileField > TextInput";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum RightPanelFilesMenuKey {
+    Entry(String),
+    Empty,
+    Preview(String),
+}
+
+#[derive(Clone)]
+pub(crate) enum RightPanelFilesMenuAction {
+    AddToChat(String),
+    NewFile { parent: PathBuf, depth: usize },
+    NewFolder { parent: PathBuf, depth: usize },
+    CopyPath(PathBuf),
+    CopyRelativePath(String),
+    Rename(PathBuf),
+    Delete(PathBuf),
+    PreviewCopy(TranscriptSelection),
+    PreviewSelectAll(TranscriptSelection),
+}
+
+pub(crate) fn right_panel_file_context_menu_items(
+    is_dir: bool,
+    absolute_path: &Path,
+    relative_path: &str,
+    entry_depth: usize,
+) -> (Vec<Item>, Vec<RightPanelFilesMenuAction>) {
+    let mut items = Vec::new();
+    let mut actions = Vec::new();
+
+    let chat_relative = if is_dir {
+        format!("{relative_path}/")
+    } else {
+        relative_path.to_owned()
+    };
+    items.push(Item::action(tr!("files.add_to_chat")).with_icon(Icon::asset("icons/compose.svg")));
+    actions.push(RightPanelFilesMenuAction::AddToChat(chat_relative));
+
+    if is_dir {
+        let parent = absolute_path.to_path_buf();
+        let depth = entry_depth + 1;
+        items
+            .push(Item::action(tr!("files.new_file")).with_icon(Icon::asset("icons/file-add.svg")));
+        actions.push(RightPanelFilesMenuAction::NewFile {
+            parent: parent.clone(),
+            depth,
+        });
+
+        items.push(
+            Item::action(tr!("files.new_folder")).with_icon(Icon::asset("icons/folder-new.svg")),
+        );
+        actions.push(RightPanelFilesMenuAction::NewFolder { parent, depth });
+    } else {
+        let parent = absolute_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| absolute_path.to_path_buf());
+        let depth = entry_depth;
+        items
+            .push(Item::action(tr!("files.new_file")).with_icon(Icon::asset("icons/file-add.svg")));
+        actions.push(RightPanelFilesMenuAction::NewFile {
+            parent: parent.clone(),
+            depth,
+        });
+
+        items.push(
+            Item::action(tr!("files.new_folder")).with_icon(Icon::asset("icons/folder-new.svg")),
+        );
+        actions.push(RightPanelFilesMenuAction::NewFolder { parent, depth });
+    }
+
+    items.push(Item::action(tr!("files.copy_path")).with_icon(Icon::asset("icons/copy.svg")));
+    actions.push(RightPanelFilesMenuAction::CopyPath(
+        absolute_path.to_path_buf(),
+    ));
+
+    items.push(
+        Item::action(tr!("files.copy_relative_path")).with_icon(Icon::asset("icons/copy.svg")),
+    );
+    actions.push(RightPanelFilesMenuAction::CopyRelativePath(
+        relative_path.to_owned(),
+    ));
+
+    items.push(Item::action(tr!("common.rename")).with_icon(Icon::asset("icons/pencil.svg")));
+    actions.push(RightPanelFilesMenuAction::Rename(
+        absolute_path.to_path_buf(),
+    ));
+
+    items.push(Item::Separator);
+
+    items.push(Item::action(tr!("files.delete")).with_icon(Icon::asset("icons/trash.svg")));
+    actions.push(RightPanelFilesMenuAction::Delete(
+        absolute_path.to_path_buf(),
+    ));
+
+    (items, actions)
+}
+
+pub(crate) fn right_panel_empty_context_menu_items(
+    root_path: &Path,
+) -> (Vec<Item>, Vec<RightPanelFilesMenuAction>) {
+    let mut items = Vec::new();
+    let mut actions = Vec::new();
+
+    items.push(Item::action(tr!("files.new_file")).with_icon(Icon::asset("icons/file-add.svg")));
+    actions.push(RightPanelFilesMenuAction::NewFile {
+        parent: root_path.to_path_buf(),
+        depth: 0,
+    });
+
+    items
+        .push(Item::action(tr!("files.new_folder")).with_icon(Icon::asset("icons/folder-new.svg")));
+    actions.push(RightPanelFilesMenuAction::NewFolder {
+        parent: root_path.to_path_buf(),
+        depth: 0,
+    });
+
+    (items, actions)
+}
 
 pub fn init_keys(cx: &mut App) {
     cx.bind_keys([
@@ -24,13 +146,14 @@ impl Padu {
         if let Some(relative_path) = self.right_panel_files_selected_path.clone() {
             self.render_right_panel_file(relative_path, panel_width, window, cx)
         } else {
-            self.render_right_panel_working_tree(None, cx)
+            self.render_right_panel_working_tree(None, window, cx)
         }
     }
 
     pub(crate) fn render_right_panel_working_tree(
         &self,
         selected_path: Option<&str>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = Theme::current(cx);
@@ -52,12 +175,7 @@ impl Padu {
             .right_panel_files_cursor
             .filter(|&index| index < entries.len());
 
-        let empty_menu = self.menu_handle(
-            SharedString::from("right-panel-working-tree-empty-context"),
-            cx,
-        );
         let root_path = self.selected_workspace_path().map(Path::to_path_buf);
-        let weak = cx.entity().downgrade();
 
         let inline_create = match &self.right_panel_inline_file_operation {
             Some(InlineFileOperation {
@@ -193,16 +311,11 @@ impl Padu {
                         .child(entry.name)
                         .into_any_element()
                 });
-            let menu = self.menu_handle(
-                SharedString::from(format!("right-panel-file-menu-{relative_path}")),
-                cx,
-            );
-            let keyboard_menu = menu.clone();
-            let menu_path = absolute_path.clone();
-            let menu_relative = relative_path.clone();
-
             let click_path = absolute_path.clone();
-            let row_weak = weak.clone();
+            let row_is_dir = is_dir;
+            let row_abs = absolute_path.clone();
+            let row_rel = relative_path.clone();
+            let row_depth = entry_depth;
             let mut row = if is_renaming {
                 row
             } else if is_dir {
@@ -224,185 +337,48 @@ impl Padu {
                     this.open_right_panel_file(relative_path.clone(), cx);
                 }))
             };
-            row = row.on_key_down(move |event: &KeyDownEvent, window, cx| {
-                if event.keystroke.key == "f10" && event.keystroke.modifiers.shift {
-                    keyboard_menu.open_context_menu(window, cx);
-                    cx.stop_propagation();
-                }
-            });
-            list = list.child(context_menu(
-                row,
-                SharedString::from(format!("right-panel-file-context-{menu_relative}")),
-                &menu,
-                move |_| {
-                    let copy_path = menu_path.clone();
-                    let copy_relative = menu_relative.clone();
-                    let rename_weak = row_weak.clone();
-                    let delete_weak = row_weak.clone();
-                    let new_file_weak = row_weak.clone();
-                    let new_folder_weak = row_weak.clone();
-                    let chat_weak = row_weak.clone();
-                    let mut items = Vec::new();
-
-                    // Add to Chat inserts a textual inline reference. It must not
-                    // stage or upload the file as an attachment.
-                    let chat_relative = if is_dir {
-                        format!("{menu_relative}/")
-                    } else {
-                        menu_relative.clone()
-                    };
-                    items.push(
-                        MenuItem::new(tr!("files.add_to_chat"), move |window, cx| {
-                            let _ = chat_weak.update(cx, |this, cx| {
-                                this.composer.update(cx, |composer, cx| {
-                                    composer.insert_file_reference(&chat_relative, cx);
-                                });
-                                let focus = this.composer.read(cx).focus();
-                                window.focus(&focus, cx);
-                            });
-                        })
-                        .icon("icons/compose.svg"),
-                    );
-
-                    if is_dir {
-                        let parent = menu_path.clone();
-                        let depth = entry_depth + 1;
-                        items.push(
-                            MenuItem::new(tr!("files.new_file"), move |window, cx| {
-                                let _ = new_file_weak.update(cx, |this, cx| {
-                                    this.begin_inline_create(
-                                        false,
-                                        parent.clone(),
-                                        depth,
-                                        window,
-                                        cx,
-                                    );
-                                });
-                            })
-                            .icon("icons/file-add.svg"),
-                        );
-                        let parent = menu_path.clone();
-                        items.push(
-                            MenuItem::new(tr!("files.new_folder"), move |window, cx| {
-                                let _ = new_folder_weak.update(cx, |this, cx| {
-                                    this.begin_inline_create(
-                                        true,
-                                        parent.clone(),
-                                        depth,
-                                        window,
-                                        cx,
-                                    );
-                                });
-                            })
-                            .icon("icons/folder-new.svg"),
-                        );
-                    } else {
-                        let parent = menu_path
-                            .parent()
-                            .map(Path::to_path_buf)
-                            .unwrap_or_else(|| menu_path.clone());
-                        let depth = entry_depth;
-                        items.push(
-                            MenuItem::new(tr!("files.new_file"), move |window, cx| {
-                                let _ = new_file_weak.update(cx, |this, cx| {
-                                    this.begin_inline_create(
-                                        false,
-                                        parent.clone(),
-                                        depth,
-                                        window,
-                                        cx,
-                                    );
-                                });
-                            })
-                            .icon("icons/file-add.svg"),
-                        );
-                        let parent = menu_path
-                            .parent()
-                            .map(Path::to_path_buf)
-                            .unwrap_or_else(|| menu_path.clone());
-                        items.push(
-                            MenuItem::new(tr!("files.new_folder"), move |window, cx| {
-                                let _ = new_folder_weak.update(cx, |this, cx| {
-                                    this.begin_inline_create(
-                                        true,
-                                        parent.clone(),
-                                        depth,
-                                        window,
-                                        cx,
-                                    );
-                                });
-                            })
-                            .icon("icons/folder-new.svg"),
-                        );
-                    }
-                    items.push(
-                        MenuItem::new(tr!("files.copy_path"), {
-                            let copy_path = copy_path.clone();
-                            let copy_weak = row_weak.clone();
-                            move |_, cx| {
-                                let path_string = copy_path.to_string_lossy().into_owned();
-                                let file_name = copy_path
-                                    .file_name()
-                                    .and_then(|n| n.to_str())
-                                    .unwrap_or(&path_string)
-                                    .to_owned();
-                                cx.write_to_clipboard(ClipboardItem::new_string(path_string));
-                                let _ = copy_weak.update(cx, |this, _| {
-                                    this.show_success_toast(tr!(
-                                        "files.copied_path",
-                                        path = file_name
-                                    ));
-                                });
-                            }
-                        })
-                        .icon("icons/copy.svg"),
-                    );
-                    items.push(
-                        MenuItem::new(tr!("files.copy_relative_path"), {
-                            let copy_relative = copy_relative.clone();
-                            let copy_weak = row_weak.clone();
-                            move |_, cx| {
-                                let file_name = Path::new(&copy_relative)
-                                    .file_name()
-                                    .and_then(|n| n.to_str())
-                                    .unwrap_or(&copy_relative)
-                                    .to_owned();
-                                cx.write_to_clipboard(ClipboardItem::new_string(
-                                    copy_relative.clone(),
-                                ));
-                                let _ = copy_weak.update(cx, |this, _| {
-                                    this.show_success_toast(tr!(
-                                        "files.copied_path",
-                                        path = file_name
-                                    ));
-                                });
-                            }
-                        })
-                        .icon("icons/copy.svg"),
-                    );
-                    let source = menu_path.clone();
-                    items.push(
-                        MenuItem::new(tr!("common.rename"), move |window, cx| {
-                            let _ = rename_weak.update(cx, |this, cx| {
-                                this.begin_inline_rename(source.clone(), window, cx);
-                            });
-                        })
-                        .icon("icons/pencil.svg"),
-                    );
-                    let target = menu_path.clone();
-                    items.push(MenuItem::Separator);
-                    items.push(
-                        MenuItem::new(tr!("files.delete"), move |window, cx| {
-                            let _ = delete_weak.update(cx, |this, cx| {
-                                this.confirm_delete_path(target.clone(), window, cx);
-                            });
-                        })
-                        .icon("icons/trash.svg")
-                        .destructive(true),
-                    );
-                    items
-                },
-            ));
+            if !is_renaming {
+                let mouse_abs = row_abs.clone();
+                let mouse_rel = row_rel.clone();
+                let key_abs = row_abs;
+                let key_rel = row_rel;
+                row = row
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                            this.right_panel_files_cursor = Some(index);
+                            let focus =
+                                this.transcript_control_focus("right-panel-working-tree", cx);
+                            window.focus(&focus, cx);
+                            this.open_right_panel_file_context_menu(
+                                row_is_dir,
+                                mouse_abs.clone(),
+                                mouse_rel.clone(),
+                                row_depth,
+                                event.position,
+                                window,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                        if event.keystroke.key == "f10" && event.keystroke.modifiers.shift {
+                            this.right_panel_files_cursor = Some(index);
+                            this.open_right_panel_file_context_menu(
+                                row_is_dir,
+                                key_abs.clone(),
+                                key_rel.clone(),
+                                row_depth,
+                                window.mouse_position(),
+                                window,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }
+                    }));
+            }
+            list = list.child(row);
 
             if !is_root_create {
                 if let Some((is_dir, ref parent_path, create_depth, ref create_input)) =
@@ -604,59 +580,191 @@ impl Padu {
                     ),
             )
             .child({
-                let empty_list = context_menu(
-                    list,
-                    SharedString::from("right-panel-working-tree-empty-context"),
-                    &empty_menu,
-                    move |_| {
-                        let mut items = Vec::new();
-                        if let Some(root) = root_path.clone() {
-                            let root_for_file = root.clone();
-                            let root_for_dir = root.clone();
-                            let weak_file = weak.clone();
-                            let weak_dir = weak.clone();
-                            items.push(
-                                MenuItem::new(tr!("files.new_file"), move |window, cx| {
-                                    let _ = weak_file.update(cx, |this, cx| {
-                                        this.begin_inline_create(
-                                            false,
-                                            root_for_file.clone(),
-                                            0,
-                                            window,
-                                            cx,
-                                        );
-                                    });
-                                })
-                                .icon("icons/file-add.svg"),
-                            );
-                            items.push(
-                                MenuItem::new(tr!("files.new_folder"), move |window, cx| {
-                                    let _ = weak_dir.update(cx, |this, cx| {
-                                        this.begin_inline_create(
-                                            true,
-                                            root_for_dir.clone(),
-                                            0,
-                                            window,
-                                            cx,
-                                        );
-                                    });
-                                })
-                                .icon("icons/folder-new.svg"),
-                            );
-                        }
-                        items
-                    },
+                let empty_root = root_path.clone();
+                let list = list.on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                        this.open_right_panel_empty_context_menu(
+                            empty_root.clone(),
+                            event.position,
+                            window,
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    }),
                 );
                 div()
                     .flex_1()
                     .min_h_0()
                     .relative()
-                    .child(empty_list)
+                    .child(list)
                     .child(scrollbar::vertical(
                         &self.right_panel_files_scroll_handle,
                         &self.right_panel_files_scrollbar,
                     ))
+                    .children(self.right_panel_files_menu.render(
+                        "right-panel-files-context-menu",
+                        |this| &mut this.right_panel_files_menu,
+                        window,
+                        cx,
+                    ))
             })
+    }
+
+    pub(crate) fn open_right_panel_file_context_menu(
+        &mut self,
+        is_dir: bool,
+        absolute_path: PathBuf,
+        relative_path: String,
+        entry_depth: usize,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (items, actions) = right_panel_file_context_menu_items(
+            is_dir,
+            &absolute_path,
+            &relative_path,
+            entry_depth,
+        );
+        let key = RightPanelFilesMenuKey::Entry(relative_path);
+        self.right_panel_files_menu.open(
+            key,
+            Place::At(position),
+            items,
+            move |this, path, window, cx| {
+                if let Some(&index) = path.first() {
+                    if let Some(action) = actions.get(index) {
+                        this.execute_right_panel_files_menu_action(action, window, cx);
+                    }
+                }
+            },
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn open_right_panel_empty_context_menu(
+        &mut self,
+        root_path: Option<PathBuf>,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(root) = root_path else {
+            return;
+        };
+        let (items, actions) = right_panel_empty_context_menu_items(&root);
+        self.right_panel_files_menu.open(
+            RightPanelFilesMenuKey::Empty,
+            Place::At(position),
+            items,
+            move |this, path, window, cx| {
+                if let Some(&index) = path.first() {
+                    if let Some(action) = actions.get(index) {
+                        this.execute_right_panel_files_menu_action(action, window, cx);
+                    }
+                }
+            },
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn open_file_preview_context_menu(
+        &mut self,
+        relative_path: String,
+        selection: TranscriptSelection,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut items = Vec::new();
+        let mut actions = Vec::new();
+
+        let selected = selection.selection.borrow().selected_text();
+        let mut copy_item = Item::action(tr!("menu.copy"));
+        if selected.is_none() {
+            copy_item = copy_item.disabled();
+        }
+        items.push(copy_item);
+        actions.push(RightPanelFilesMenuAction::PreviewCopy(selection.clone()));
+
+        items.push(Item::action(tr!("menu.select_all")));
+        actions.push(RightPanelFilesMenuAction::PreviewSelectAll(selection));
+
+        self.right_panel_files_menu.open(
+            RightPanelFilesMenuKey::Preview(relative_path),
+            Place::At(position),
+            items,
+            move |this, path, window, cx| {
+                if let Some(&index) = path.first() {
+                    if let Some(action) = actions.get(index) {
+                        this.execute_right_panel_files_menu_action(action, window, cx);
+                    }
+                }
+            },
+            window,
+            cx,
+        );
+    }
+
+    fn execute_right_panel_files_menu_action(
+        &mut self,
+        action: &RightPanelFilesMenuAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            RightPanelFilesMenuAction::AddToChat(chat_relative) => {
+                let chat_relative = chat_relative.clone();
+                self.composer.update(cx, |composer, cx| {
+                    composer.insert_file_reference(&chat_relative, cx);
+                });
+                let focus = self.composer.read(cx).focus();
+                window.focus(&focus, cx);
+            }
+            RightPanelFilesMenuAction::NewFile { parent, depth } => {
+                self.begin_inline_create(false, parent.clone(), *depth, window, cx);
+            }
+            RightPanelFilesMenuAction::NewFolder { parent, depth } => {
+                self.begin_inline_create(true, parent.clone(), *depth, window, cx);
+            }
+            RightPanelFilesMenuAction::CopyPath(copy_path) => {
+                let path_string = copy_path.to_string_lossy().into_owned();
+                let file_name = copy_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(&path_string)
+                    .to_owned();
+                cx.write_to_clipboard(ClipboardItem::new_string(path_string));
+                self.show_success_toast(tr!("files.copied_path", path = file_name));
+            }
+            RightPanelFilesMenuAction::CopyRelativePath(copy_relative) => {
+                let file_name = Path::new(copy_relative)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(copy_relative)
+                    .to_owned();
+                cx.write_to_clipboard(ClipboardItem::new_string(copy_relative.clone()));
+                self.show_success_toast(tr!("files.copied_path", path = file_name));
+            }
+            RightPanelFilesMenuAction::Rename(source) => {
+                self.begin_inline_rename(source.clone(), window, cx);
+            }
+            RightPanelFilesMenuAction::Delete(target) => {
+                self.confirm_delete_path(target.clone(), window, cx);
+            }
+            RightPanelFilesMenuAction::PreviewCopy(selection) => {
+                if let Some(selected) = selection.selection.borrow().selected_text() {
+                    cx.write_to_clipboard(ClipboardItem::new_string(selected));
+                }
+            }
+            RightPanelFilesMenuAction::PreviewSelectAll(selection) => {
+                md::render::select_all(selection);
+                cx.refresh_windows();
+            }
+        }
     }
 
     pub(crate) fn right_panel_working_tree_key_down(
@@ -764,6 +872,19 @@ impl Padu {
                 self.confirm_delete_path(entry.absolute_path.clone(), window, cx);
                 cx.stop_propagation();
             }
+            "f10" if event.keystroke.modifiers.shift => {
+                let entry = &entries[current];
+                self.open_right_panel_file_context_menu(
+                    entry.is_dir,
+                    entry.absolute_path.clone(),
+                    entry.relative_path.clone(),
+                    entry.depth,
+                    window.mouse_position(),
+                    window,
+                    cx,
+                );
+                cx.stop_propagation();
+            }
             _ => {}
         }
     }
@@ -794,7 +915,7 @@ impl Padu {
         let is_markdown = file_highlighter_language(&relative_path) == "markdown";
         let preview = is_markdown && self.state.markdown_preview;
         let body = if preview {
-            self.render_file_markdown_preview(&relative_path, &editor_state, cx)
+            self.render_file_markdown_preview(&relative_path, &editor_state, window, cx)
         } else {
             self.render_file_editor_body(
                 &relative_path,
@@ -976,7 +1097,7 @@ impl Padu {
                     .relative()
                     .border_l_1()
                     .border_color(theme.border_strong)
-                    .child(self.render_right_panel_working_tree(Some(&relative_path), cx))
+                    .child(self.render_right_panel_working_tree(Some(&relative_path), window, cx))
                     .child(self.render_panel_resize_handle(
                         "right-panel-file-tree-resize-handle",
                         PanelResizeTarget::FileTree,
@@ -1394,14 +1515,11 @@ impl Padu {
         &mut self,
         relative_path: &str,
         editor_state: &Entity<TextInput>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = Theme::current(cx);
         let palette = MarkdownPalette::from_theme(&theme);
-        let preview_menu = self.menu_handle(
-            SharedString::from(format!("file-preview-{relative_path}-context-menu")),
-            cx,
-        );
         let preview_selection = self.file_preview_selection.clone();
         let mut cache = self.file_preview_markdown.borrow_mut();
         if !matches!(cache.as_ref(), Some((cached, _)) if cached == relative_path) {
@@ -1430,6 +1548,8 @@ impl Padu {
             .h(px(0.0))
         };
 
+        let menu_selection = preview_selection.clone();
+        let preview_path = relative_path.to_owned();
         let preview_surface = div()
             .id(SharedString::from(format!("file-preview-{relative_path}")))
             .size_full()
@@ -1450,32 +1570,20 @@ impl Padu {
             .child(scrollbar::vertical(
                 &self.file_preview_scroll_handle,
                 &self.file_preview_scrollbar,
-            ));
-        let menu_selection = preview_selection.clone();
-        let preview_surface = context_menu(
-            preview_surface,
-            SharedString::from(format!("file-preview-{relative_path}-context")),
-            &preview_menu,
-            move |_| {
-                let mut items = Vec::new();
-                let selected = menu_selection.selection.borrow().selected_text();
-                let copy_selection = selected.clone();
-                items.push(
-                    MenuItem::new(tr!("menu.copy"), move |_, cx| {
-                        if let Some(selected) = copy_selection.clone() {
-                            cx.write_to_clipboard(ClipboardItem::new_string(selected));
-                        }
-                    })
-                    .disabled(selected.is_none()),
-                );
-                let select_selection = menu_selection.clone();
-                items.push(MenuItem::new(tr!("menu.select_all"), move |_, cx| {
-                    md::render::select_all(&select_selection);
-                    cx.refresh_windows();
-                }));
-                items
-            },
-        );
+            ))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    this.open_file_preview_context_menu(
+                        preview_path.clone(),
+                        menu_selection.clone(),
+                        event.position,
+                        window,
+                        cx,
+                    );
+                    cx.stop_propagation();
+                }),
+            );
 
         div()
             .flex_1()
@@ -1483,6 +1591,12 @@ impl Padu {
             .relative()
             .bg(theme.surface)
             .child(preview_surface)
+            .children(self.right_panel_files_menu.render(
+                "right-panel-files-context-menu",
+                |this| &mut this.right_panel_files_menu,
+                window,
+                cx,
+            ))
     }
 
     /// Picks up an external edit to a file the user has not modified here.
