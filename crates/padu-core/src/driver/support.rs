@@ -148,6 +148,13 @@ fn build_opencode_computer_use_config(
             },
         }),
     );
+    mcp.insert(
+        "padu".into(),
+        serde_json::json!({
+            "type": "remote",
+            "url": "http://127.0.0.1:7460/mcp",
+        }),
+    );
     let instructions = root
         .entry("instructions")
         .or_insert_with(|| serde_json::json!([]))

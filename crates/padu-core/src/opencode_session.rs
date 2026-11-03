@@ -143,9 +143,16 @@ impl OpenCodeServer {
         drop(listener);
 
         let mut command = crate::command_env::command(binary);
+        let mut custom_config_content: Option<String> = None;
         for (name, value) in environment {
-            command.env(name, value);
+            if name == "OPENCODE_CONFIG_CONTENT" {
+                custom_config_content = Some(value.clone());
+            } else {
+                command.env(name, value);
+            }
         }
+        let config_content = merge_opencode_padu_mcp_config(custom_config_content.as_deref());
+        command.env("OPENCODE_CONFIG_CONTENT", config_content);
         let command = command
             .args([
                 "serve",
@@ -459,6 +466,38 @@ pub(crate) fn encode_path_segment(value: &str) -> String {
     encoded
 }
 
+fn merge_opencode_padu_mcp_config(existing: Option<&str>) -> String {
+    let env_content = std::env::var("OPENCODE_CONFIG_CONTENT").ok();
+    let raw = existing.or(env_content.as_deref());
+    let mut config: Value = raw
+        .and_then(|content| serde_json::from_str(content).ok())
+        .unwrap_or_else(|| json!({}));
+
+    if !config.is_object() {
+        config = json!({});
+    }
+
+    let root = config.as_object_mut().unwrap();
+    let mcp = root
+        .entry("mcp")
+        .or_insert_with(|| json!({}))
+        .as_object_mut();
+
+    if let Some(mcp) = mcp {
+        if !mcp.contains_key("padu") {
+            mcp.insert(
+                "padu".into(),
+                json!({
+                    "type": "remote",
+                    "url": "http://127.0.0.1:7460/mcp",
+                }),
+            );
+        }
+    }
+
+    serde_json::to_string(&config).unwrap_or_else(|_| "{}".into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -608,5 +647,23 @@ mod tests {
                 None,
             )
             .expect("the test fork should be removed");
+    }
+
+    #[test]
+    fn merges_padu_mcp_into_opencode_config() {
+        let merged = merge_opencode_padu_mcp_config(None);
+        let val: Value = serde_json::from_str(&merged).expect("valid json");
+        assert_eq!(val["mcp"]["padu"]["url"], "http://127.0.0.1:7460/mcp");
+        assert_eq!(val["mcp"]["padu"]["type"], "remote");
+
+        let existing = json!({
+            "mcp": {
+                "other": { "type": "remote", "url": "https://example.com" }
+            }
+        });
+        let merged_with_existing = merge_opencode_padu_mcp_config(Some(&existing.to_string()));
+        let val2: Value = serde_json::from_str(&merged_with_existing).expect("valid json");
+        assert_eq!(val2["mcp"]["other"]["url"], "https://example.com");
+        assert_eq!(val2["mcp"]["padu"]["url"], "http://127.0.0.1:7460/mcp");
     }
 }
