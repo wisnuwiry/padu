@@ -266,7 +266,6 @@ pub struct Browser {
     /// The reload button's right-press menu.
     menu: ContextMenu<Self>,
     _page: Option<Subscription>,
-    occluded: bool,
     address_was_focused: bool,
     address_mouse_down_pos: Option<Point<Pixels>>,
 }
@@ -293,7 +292,6 @@ impl Browser {
             focus: cx.focus_handle(),
             menu: ContextMenu::default(),
             _page: None,
-            occluded: false,
             address_was_focused: false,
             address_mouse_down_pos: None,
         }
@@ -410,17 +408,18 @@ impl Browser {
         }
     }
 
+    /// Update native surface state from the containing panel or window.
+    ///
+    /// Surface occlusion and still-frame snapshot swap are managed natively by
+    /// `bezel-browser` via `ui::cover`, so the browser view and its controls
+    /// remain rendered while context menus or overlays are open.
     pub fn sync_native_state(
         &mut self,
         _logically_active: bool,
         _surface_visible: bool,
-        occluded: bool,
-        cx: &mut Context<Self>,
+        _occluded: bool,
+        _cx: &mut Context<Self>,
     ) {
-        if self.occluded != occluded {
-            self.occluded = occluded;
-            cx.notify();
-        }
     }
 
     pub fn overlay_open(&self, _cx: &App) -> bool {
@@ -599,7 +598,7 @@ impl Focusable for Browser {
 
 impl Render for Browser {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.occluded || clearing(cx) {
+        if clearing(cx) {
             return div().into_any_element();
         }
         let page = self.page(window, cx);
@@ -834,5 +833,25 @@ mod tests {
                 .iter()
                 .any(|b| b.action().as_any().is::<HardReload>())
         );
+    }
+
+    #[gpui::test]
+    fn test_browser_sync_native_state_preserves_surface_when_overlay_open(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            bezel::theme::Theme::install(bezel::theme::Appearance::Dark, cx);
+        });
+
+        let (browser, _) = cx.add_window_view(|_window, cx| {
+            cx.set_global(Browsing::default());
+            Browser::new(1, "https://example.com".into(), "Example".into(), cx)
+        });
+
+        browser.update(cx, |b, cx| {
+            b.sync_native_state(true, true, true, cx);
+        });
+
+        browser.read_with(cx, |b, _cx| {
+            assert_eq!(b.title(), "Example");
+        });
     }
 }
