@@ -1,0 +1,45 @@
+---
+name: browser
+description: Work in the in-app browser through the browser_* / padu_browser_* tools — opening pages, reading them, clicking, and typing. Use before driving a browser tab.
+---
+
+# The in-app browser
+
+The browser is the user's own: the tabs in the project's right panel, signed in
+wherever they are signed in. It reaches pages a plain fetch gets a login wall or
+an empty shell from, and it runs a page's scripts, so a read is what is on
+screen. For an ordinary public page, a plain fetch is cheaper and enough.
+
+Tabs belong to a project. `browser_tabs` (or `padu_browser_tabs`) lists the project's browser tabs; the
+one marked front is the one the user is looking at, and the one you get when you
+name no tab. `browser_open` (or `padu_browser_open`) without a tab brings forward a tab already at that
+address, as it stands and not reloaded, or else opens a new one in front of the
+project's right panel, where the user can watch it and take it over.
+
+Every read starts with its tab id. To go somewhere new in a tab you are working
+in, or to reload it, pass that id to `browser_open` rather than opening another
+tab.
+
+Calling `browser_open` automatically brings up the browser surface in the project's right panel, creating and loading the page immediately. Calling `browser_read`, `browser_click`, etc. operates on the open tab, revealing it in the right panel if hidden.
+
+## Reading and acting
+
+A read gives the page's text and a numbered list of the elements on it that can
+be acted on. `browser_click` and `browser_type` take one of those numbers, and
+both answer with the page as it stands afterwards.
+
+The numbers describe the page you last read. Anything that changes the page —
+your own click, a page that moves on its own, the user taking over — changes
+them. Work from the read that came back last, and read again when you are not
+sure it still holds.
+
+A read already has the whole page's text, up to a limit it marks as truncated.
+Scroll when a page loads more of itself as it goes down, as a feed does, or to
+reach text past that limit.
+
+## The console
+
+`browser_console` gives what a tab's page has logged since the tab opened:
+console calls, uncaught errors and unhandled rejections, each with the frame
+that logged it. Failed loads and other messages the engine writes itself are
+not in it.
