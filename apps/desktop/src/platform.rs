@@ -637,7 +637,7 @@ pub fn titlebar_double_click(window: &Window) {
 }
 
 #[cfg(target_os = "macos")]
-const FROSTED_TINT_ALPHA: f64 = 0.82;
+const FROSTED_TINT_ALPHA: f64 = 0.70;
 
 /// Match Cursor's macOS glass window stack without asking GPUI's transparent
 /// Metal target to blend two translucent quads. The semantic tint is a native
