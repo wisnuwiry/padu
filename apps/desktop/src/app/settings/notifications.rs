@@ -271,28 +271,6 @@ impl Padu {
                     .child(test_button),
             )
             .into_any_element()
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("notifications.test_title")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("notifications.test_desc")),
-                            ),
-                    )
-                    .child(test_button),
-            )
-            .into_any_element()
     }
 
     pub(super) fn set_notifications_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
