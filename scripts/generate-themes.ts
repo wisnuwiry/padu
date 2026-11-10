@@ -15,6 +15,7 @@ interface AccentTokens {
 
 interface SchemeDefinition {
   name: string;
+  tint?: { hue: number; chroma: number };
   light: AccentTokens;
   dark: AccentTokens;
 }
@@ -103,6 +104,7 @@ export interface AccentTokens {
 
 export interface SchemeDefinition {
   name: string;
+  tint?: { hue: number; chroma: number };
   light: AccentTokens;
   dark: AccentTokens;
 }
@@ -418,6 +420,19 @@ function generateRustPalette(config: ThemesConfig): string {
     )
     .join("\n");
 
+  const labelArms = schemeEntries
+    .map(([id, scheme]) => `            ColorScheme::${pascalCase(id)} => "${scheme.name}",`)
+    .join("\n");
+
+  const tintArms = schemeEntries
+    .map(([id, scheme]) => {
+      if (scheme.tint && scheme.tint.chroma > 0.0) {
+        return `            ColorScheme::${pascalCase(id)} => bezel::theme::Tint::new(${scheme.tint.hue.toFixed(3)}, ${scheme.tint.chroma.toFixed(3)}),`;
+      }
+      return `            ColorScheme::${pascalCase(id)} => bezel::theme::Tint::NONE,`;
+    })
+    .join("\n");
+
   const darkTokenArms = schemeEntries
     .map(([id, scheme]) => {
       const accentHex = hexToRustRgb(scheme.dark.accent);
@@ -452,6 +467,18 @@ impl ColorScheme {
     pub const fn as_str(self) -> &'static str {
         match self {
 ${asStrArms}
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+${labelArms}
+        }
+    }
+
+    pub const fn tint(self) -> bezel::theme::Tint {
+        match self {
+${tintArms}
         }
     }
 
