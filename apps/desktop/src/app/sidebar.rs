@@ -277,10 +277,17 @@ struct SessionTooltip {
     title: SharedString,
     project: SharedString,
     host: SharedString,
-    provider: SharedString,
     provider_kind: ProviderKind,
+    model: Option<SharedString>,
+    branch: Option<SharedString>,
+    runtime_mode: Option<SharedString>,
+    runtime_mode_icon: &'static str,
     status_text: Option<SharedString>,
     status: SessionStatus,
+    activity_time: Option<SharedString>,
+    turn_count: usize,
+    context_tokens: Option<String>,
+    goal: Option<SharedString>,
 }
 
 impl SessionTooltip {
@@ -292,126 +299,218 @@ impl SessionTooltip {
 impl Render for SessionTooltip {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::current(cx);
+        let surface_radius = bezel::theme::Theme::surface_radius();
+        let control_radius = bezel::theme::Theme::control_radius();
+        let is_remote_host =
+            self.host.as_ref() != "Local" && self.host.as_ref() != tr!("host.local").as_str();
+
         div().pt(px(4.0)).pl(px(2.0)).child(
             div()
-                .w(px(280.0))
-                .px(px(10.0))
-                .py(px(8.0))
-                .rounded(px(6.0))
-                .border_1()
-                .border_color(theme.border_strong)
-                .bg(theme.raised)
-                .shadow_md()
+                .min_w(px(240.0))
+                .max_w(px(320.0))
+                .px(px(12.0))
+                .py(px(10.0))
+                .rounded(px(surface_radius))
+                .bg(theme.frosted)
+                .shadow_xl()
                 .flex()
                 .flex_col()
-                .gap(px(7.0))
+                .gap(px(8.0))
+                // Prominent title with increased font size
                 .child(
                     div()
-                        .text_size(sp(12.5))
-                        .font_weight(FontWeight::MEDIUM)
-                        .line_height(sp(16.0))
+                        .text_size(sp(14.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .line_height(sp(18.0))
                         .text_color(theme.text)
                         .whitespace_normal()
                         .child(self.title.clone()),
                 )
-                .child(div().w_full().h(px(1.0)).bg(theme.border))
+                // Optional goal / pursuit
+                .when_some(self.goal.clone(), |el, goal| {
+                    el.child(
+                        div()
+                            .flex()
+                            .items_start()
+                            .gap(px(5.0))
+                            .text_size(sp(12.0))
+                            .line_height(sp(15.0))
+                            .text_color(theme.text_secondary)
+                            .child(icon("icons/target.svg", 13.0, theme.accent))
+                            .child(div().flex_1().min_w_0().whitespace_normal().child(goal)),
+                    )
+                })
+                // Primary metadata chips
                 .child(
                     div()
                         .flex()
-                        .flex_col()
+                        .items_center()
                         .gap(px(5.0))
-                        .text_size(sp(11.5))
-                        .line_height(sp(14.0))
-                        .text_color(theme.text_secondary)
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(7.0))
-                                .child(icon(
-                                    provider_icon(self.provider_kind),
-                                    12.0,
-                                    provider_color(&theme, self.provider_kind),
-                                ))
-                                .child(div().text_color(theme.text_tertiary).child(
-                                    SharedString::from(format!("{}:", tr!("sidebar.provider"))),
-                                ))
-                                .child(
-                                    div()
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(theme.text)
-                                        .child(self.provider.clone()),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(7.0))
-                                .child(icon("icons/folder.svg", 12.0, theme.text_tertiary))
-                                .child(div().text_color(theme.text_tertiary).child(
-                                    SharedString::from(format!("{}:", tr!("sidebar.project"))),
-                                ))
-                                .child(
-                                    div()
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(theme.text)
-                                        .child(self.project.clone()),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(7.0))
-                                .child(icon("icons/server.svg", 12.0, theme.text_tertiary))
-                                .child(
-                                    div().text_color(theme.text_tertiary).child(
-                                        SharedString::from(format!("{}:", tr!("sidebar.host"))),
-                                    ),
-                                )
-                                .child(
-                                    div()
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(theme.text)
-                                        .child(self.host.clone()),
-                                ),
-                        )
-                        .when_some(self.status_text.clone(), |el, status_text| {
-                            let status_color = status_color(&theme, self.status);
-                            el.child(
+                        .flex_wrap()
+                        .when_some(self.model.clone(), |row, model| {
+                            row.child(
                                 div()
                                     .flex()
                                     .items_center()
-                                    .gap(px(7.0))
-                                    .when(
-                                        matches!(
-                                            self.status,
-                                            SessionStatus::Working | SessionStatus::Connecting
-                                        ),
-                                        |e| {
-                                            e.child(motion::spin_slow(icon(
-                                                "icons/loader-circle.svg",
-                                                12.0,
-                                                status_color,
-                                            )))
-                                        },
-                                    )
-                                    .when(self.status == SessionStatus::Waiting, |e| {
-                                        e.child(icon("icons/alert.svg", 12.0, status_color))
-                                    })
-                                    .when(self.status == SessionStatus::Failed, |e| {
-                                        e.child(icon("icons/x.svg", 12.0, status_color))
-                                    })
-                                    .child(
-                                        div()
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(status_color)
-                                            .child(status_text),
-                                    ),
+                                    .gap(px(4.0))
+                                    .px(px(6.0))
+                                    .py(px(2.5))
+                                    .rounded(px(control_radius))
+                                    .bg(theme.overlay)
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(icon(
+                                        provider_icon(self.provider_kind),
+                                        11.0,
+                                        provider_color(&theme, self.provider_kind),
+                                    ))
+                                    .child(model),
+                            )
+                        })
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(4.0))
+                                .px(px(6.0))
+                                .py(px(2.5))
+                                .rounded(px(control_radius))
+                                .bg(theme.overlay)
+                                .text_size(sp(11.0))
+                                .text_color(theme.text_secondary)
+                                .child(icon("icons/folder.svg", 11.0, theme.text_tertiary))
+                                .child(self.project.clone()),
+                        )
+                        .when_some(self.branch.clone(), |row, branch| {
+                            row.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(4.0))
+                                    .px(px(6.0))
+                                    .py(px(2.5))
+                                    .rounded(px(control_radius))
+                                    .bg(theme.overlay)
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(icon("icons/git-branch.svg", 11.0, theme.accent))
+                                    .child(branch),
+                            )
+                        })
+                        .when_some(self.runtime_mode.clone(), |row, mode| {
+                            row.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(4.0))
+                                    .px(px(6.0))
+                                    .py(px(2.5))
+                                    .rounded(px(control_radius))
+                                    .bg(theme.overlay)
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(icon(self.runtime_mode_icon, 11.0, theme.text_tertiary))
+                                    .child(mode),
+                            )
+                        })
+                        .when(is_remote_host, |row| {
+                            row.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(4.0))
+                                    .px(px(6.0))
+                                    .py(px(2.5))
+                                    .rounded(px(control_radius))
+                                    .bg(theme.overlay)
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(icon("icons/server.svg", 11.0, theme.text_tertiary))
+                                    .child(self.host.clone()),
                             )
                         }),
-                ),
+                )
+                // Secondary metrics & recency footer
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(10.0))
+                        .text_size(sp(11.0))
+                        .text_color(theme.text_tertiary)
+                        .when_some(self.activity_time.clone(), |row, time| {
+                            row.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(3.5))
+                                    .child(icon("icons/clock.svg", 11.0, theme.text_ghost))
+                                    .child(time),
+                            )
+                        })
+                        .when(self.turn_count > 0, |row| {
+                            let count = self.turn_count;
+                            let label = format!("{count} turn{}", if count == 1 { "" } else { "s" });
+                            row.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(3.5))
+                                    .child(icon("icons/list-checks.svg", 11.0, theme.text_ghost))
+                                    .child(label),
+                            )
+                        })
+                        .when_some(self.context_tokens.clone(), |row, tokens| {
+                            row.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(3.5))
+                                    .child(icon("icons/zap.svg", 11.0, theme.text_ghost))
+                                    .child(tokens),
+                            )
+                        }),
+                )
+                // Live status banner (if active/waiting/failed)
+                .when_some(self.status_text.clone(), |el, status_text| {
+                    let status_color = status_color(&theme, self.status);
+                    el.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(5.0))
+                            .px(px(6.0))
+                            .py(px(3.0))
+                            .rounded(px(control_radius))
+                            .bg(status_color.opacity(0.10))
+                            .text_size(sp(11.0))
+                            .text_color(status_color)
+                            .when(
+                                matches!(
+                                    self.status,
+                                    SessionStatus::Working | SessionStatus::Connecting
+                                ),
+                                |e| {
+                                    e.child(motion::spin_slow(icon(
+                                        "icons/loader-circle.svg",
+                                        11.0,
+                                        status_color,
+                                    )))
+                                },
+                            )
+                            .when(self.status == SessionStatus::Waiting, |e| {
+                                e.child(icon("icons/alert.svg", 11.0, status_color))
+                            })
+                            .when(self.status == SessionStatus::Failed, |e| {
+                                e.child(icon("icons/x.svg", 11.0, status_color))
+                            })
+                            .child(
+                                div()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child(status_text),
+                            ),
+                    )
+                }),
         )
     }
 }
@@ -970,6 +1069,7 @@ impl Padu {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx);
         div()
             .id(id)
             .tab_index(0)
@@ -977,14 +1077,14 @@ impl Padu {
             .h(px(SIDEBAR_ACTION_ROW_HEIGHT))
             .flex_none()
             .px(px(6.0))
-            .rounded(px(7.0))
+            .rounded(px(bezel::theme::Theme::control_radius()))
             .flex()
             .items_center()
             .gap(px(10.0))
             .cursor_pointer()
             .focus_visible(|style| style.border_1().border_color(theme.accent))
-            .hover(|element| element.bg(theme.sidebar_item_background))
-            .active(|element| element.bg(theme.overlay_strong))
+            .hover(|element| element.bg(bezel_theme.element_hover))
+            .active(|element| element.bg(bezel_theme.element_active))
             .child(
                 div()
                     .size(px(20.0))
@@ -1932,6 +2032,7 @@ impl Padu {
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx);
         let collapsed = self.sidebar_collapsed_groups.contains(&group);
         let group_key = group.element_key();
         let group_name = SharedString::from(format!("sidebar-group-header-{group_key}"));
@@ -1980,11 +2081,11 @@ impl Padu {
             .group(group_name)
             .relative()
             .w_full()
-            .rounded(px(6.0))
+            .rounded(px(bezel::theme::Theme::control_radius()))
             .cursor_pointer()
             .focus_visible(|style| style.border_1().border_color(theme.accent))
-            .hover(|style| style.bg(theme.sidebar_item_background))
-            .active(|style| style.bg(theme.overlay_strong))
+            .hover(|style| style.bg(bezel_theme.element_hover))
+            .active(|style| style.bg(bezel_theme.element_active))
             .child(
                 div()
                     .flex_1()
@@ -2449,6 +2550,8 @@ impl Padu {
         let rename_input =
             (self.session_rename == Some(session_id)).then(|| self.session_rename_input.clone());
         let renaming = rename_input.is_some();
+        let control_radius = bezel::theme::Theme::control_radius();
+        let row_group_id = SharedString::from(format!("session-row-{session_id}"));
         let title = if let Some(rename_input) = rename_input {
             div()
                 .id(SharedString::from(format!(
@@ -2462,7 +2565,7 @@ impl Padu {
                 .flex_1()
                 .min_w_0()
                 .px(px(4.0))
-                .rounded(px(4.0))
+                .rounded(px(control_radius))
                 .bg(theme.inset)
                 .flex()
                 .items_center()
@@ -2482,6 +2585,11 @@ impl Padu {
                     theme.text_secondary
                 } else {
                     theme.text
+                })
+                .when(grouped_by_project && !selected, |el| {
+                    el.group_hover(row_group_id.clone(), |style| {
+                        style.text_color(theme.text)
+                    })
                 })
                 .child(SharedString::from(localized_session_title(session)))
                 .into_any_element()
@@ -2517,14 +2625,69 @@ impl Padu {
             .map(Project::display_name)
             .unwrap_or_else(|| tr!("project.no_project_name"));
 
+        let branch = match &session.workspace {
+            SessionWorkspace::Local => None,
+            SessionWorkspace::NewWorktree { base_branch } => base_branch.as_deref(),
+            SessionWorkspace::Worktree { branch, .. } => Some(branch.as_str()),
+        }
+        .filter(|branch| !branch.is_empty())
+        .map(SharedString::from);
+
+        let model = session
+            .model
+            .as_deref()
+            .filter(|model| !model.is_empty())
+            .or_else(|| self.model_for_session(session))
+            .map(|m| {
+                self.provider_probe(session.provider)
+                    .and_then(|probe| probe.models.iter().find(|candidate| candidate.id == m))
+                    .map(|candidate| SharedString::from(candidate.name.clone()))
+                    .unwrap_or_else(|| SharedString::from(m.to_owned()))
+            })
+            .or_else(|| {
+                padu_protocol::model_catalog::fallback_models(session.provider)
+                    .into_iter()
+                    .find(|m| m.is_default)
+                    .map(|m| SharedString::from(m.name))
+            });
+
+        let now = unix_time();
+        let activity_time = session
+            .last_reply_at
+            .map(|ts| SharedString::from(format_time_ago(now.saturating_sub(ts))))
+            .or_else(|| {
+                Some(SharedString::from(format_time_ago(
+                    now.saturating_sub(session.created_at),
+                )))
+            });
+
+        let context_tokens = session
+            .context_usage
+            .as_ref()
+            .map(|u| crate::usage::format_tokens(u.tokens));
+
+        let goal = session
+            .thread_goal
+            .as_ref()
+            .map(|g| g.objective.trim())
+            .filter(|obj| !obj.is_empty())
+            .map(SharedString::from);
+
         let session_tooltip = SessionTooltip {
             title: SharedString::from(localized_session_title(session)),
             project: SharedString::from(project_name),
             host: SharedString::from(self.state.active_host_display_name(&tr!("host.local"))),
-            provider: SharedString::from(session.provider.display_name()),
             provider_kind: session.provider,
+            model,
+            branch,
+            runtime_mode: Some(SharedString::from(session.runtime_mode.label())),
+            runtime_mode_icon: session.runtime_mode.icon(),
             status_text: hover_status_text,
             status: session.status,
+            activity_time,
+            turn_count: session.turns.len(),
+            context_tokens,
+            goal,
         };
 
         let dot = div()
@@ -2534,11 +2697,22 @@ impl Padu {
             .flex()
             .items_center()
             .justify_center()
-            .child(div().w(px(6.0)).h(px(6.0)).rounded_full().bg(if selected {
-                theme.accent
-            } else {
-                theme.text_tertiary
-            }));
+            .child(
+                div()
+                    .w(px(6.0))
+                    .h(px(6.0))
+                    .rounded_full()
+                    .bg(if selected {
+                        theme.accent
+                    } else {
+                        theme.text_tertiary
+                    })
+                    .when(!selected, |dot| {
+                        dot.group_hover(row_group_id.clone(), |style| {
+                            style.bg(theme.text_secondary)
+                        })
+                    }),
+            );
         let row_content = if grouped_by_project {
             div()
                 .flex_1()
@@ -2594,6 +2768,11 @@ impl Padu {
                                 theme.text_tertiary
                             } else {
                                 theme.text_ghost
+                            })
+                            .when(!selected && !session.is_busy(), |el| {
+                                el.group_hover(row_group_id.clone(), |style| {
+                                    style.text_color(theme.text_tertiary)
+                                })
                             })
                             .child(label),
                     )
@@ -2665,14 +2844,31 @@ impl Padu {
                                         .flex()
                                         .items_center()
                                         .justify_center()
-                                        .child(icon("icons/folder.svg", 12.5, theme.text_tertiary)),
+                                        .child(icon(
+                                            "icons/folder.svg",
+                                            12.5,
+                                            if selected {
+                                                theme.text_secondary
+                                            } else {
+                                                theme.text_tertiary
+                                            },
+                                        )),
                                 )
                                 .child(
                                     div()
                                         .flex_1()
                                         .min_w_0()
                                         .truncate()
-                                        .text_color(theme.text_tertiary)
+                                        .text_color(if selected {
+                                            theme.text_secondary
+                                        } else {
+                                            theme.text_tertiary
+                                        })
+                                        .when(!selected, |el| {
+                                            el.group_hover(row_group_id.clone(), |style| {
+                                                style.text_color(theme.text_secondary)
+                                            })
+                                        })
                                         .child(label),
                                 )
                         })
@@ -2686,12 +2882,18 @@ impl Padu {
                                     } else {
                                         theme.text_ghost
                                     })
+                                    .when(!selected && !session.is_busy(), |el| {
+                                        el.group_hover(row_group_id.clone(), |style| {
+                                            style.text_color(theme.text_tertiary)
+                                        })
+                                    })
                                     .child(label),
                             )
                         }),
                 )
         };
 
+        let bezel_theme = bezel::theme::Theme::of(cx);
         let row_focus = self
             .sidebar_session_focuses
             .borrow_mut()
@@ -2699,8 +2901,10 @@ impl Padu {
             .or_insert_with(|| cx.focus_handle())
             .clone();
         let is_menu_open = self.sidebar_session_menu.showing(&session_id);
+        let is_active = selected || is_menu_open;
         let row = div()
             .id(SharedString::from(format!("session-{}", session.id)))
+            .group(row_group_id)
             .w_full()
             .min_w_0()
             .h(px(row_height))
@@ -2709,13 +2913,20 @@ impl Padu {
             .pl(px(left_padding))
             .pr(px(8.0))
             .py(px(row_py))
-            .rounded(px(7.0))
+            .rounded(px(control_radius))
             .cursor_pointer()
-            .when(selected || is_menu_open, |element| {
-                element.bg(theme.sidebar_item_background)
+            .when(is_active, |element| {
+                element
+                    .bg(bezel_theme.card_selected_bg())
+                    .shadow(bezel::theme::card_selected_shadows())
+                    .hover(|el| el.bg(bezel_theme.element_active))
+                    .active(|el| el.bg(bezel_theme.element_active))
             })
-            .hover(|element| element.bg(theme.sidebar_item_background))
-            .active(|element| element.bg(theme.sidebar_item_background))
+            .when(!is_active, |element| {
+                element
+                    .hover(|el| el.bg(bezel_theme.element_hover))
+                    .active(|el| el.bg(bezel_theme.element_active))
+            })
             .child(row_content)
             .when(!renaming, |element| {
                 let right_click_focus = row_focus.clone();
