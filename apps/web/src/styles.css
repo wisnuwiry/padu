@@ -228,7 +228,7 @@
   --term-row-height: 16px;
   width: 100%;
   height: 100%;
-  padding: 8px 10px;
+  padding: 0 10px 8px 0;
   border: 0;
   border-radius: 0;
   box-shadow: none;

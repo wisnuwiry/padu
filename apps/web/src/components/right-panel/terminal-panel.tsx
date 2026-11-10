@@ -87,7 +87,7 @@ export function TerminalPanel({
       {core && (
         <Terminal
           autoResize
-          className="padu-terminal size-full"
+          className="padu-terminal size-full pt-0 pl-0"
           core={core}
           cursorBlink
           ref={ref}

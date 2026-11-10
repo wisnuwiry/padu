@@ -1529,6 +1529,8 @@ pub struct Padu {
     sidebar_group_header_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
     /// Stable keyboard focus for each virtualized project-history reveal row.
     sidebar_show_more_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
+    /// Stable keyboard focus for each virtualized sidebar session row.
+    sidebar_session_focuses: RefCell<HashMap<Uuid, FocusHandle>>,
     sidebar_visible: bool,
     sidebar_width: f32,
     right_panel_visible: bool,
@@ -1637,6 +1639,7 @@ pub struct Padu {
     pub(crate) right_panel_add_menu: bezel::ui::context_menu::ContextMenu<Self>,
     pub(crate) right_panel_files_menu:
         bezel::ui::context_menu::ContextMenu<Self, crate::app::right_panel::RightPanelFilesMenuKey>,
+    pub(crate) sidebar_session_menu: bezel::ui::context_menu::ContextMenu<Self, Uuid>,
     pub(crate) right_panel_tab_reorder:
         bezel::ui::tabs::Reorder<crate::app::right_panel::RightPanelTabId>,
     _keystroke_interceptor: Option<gpui::Subscription>,
@@ -3809,6 +3812,7 @@ impl Padu {
                 sidebar_project_reveal_counts: HashMap::new(),
                 sidebar_group_header_focuses: RefCell::new(HashMap::new()),
                 sidebar_show_more_focuses: RefCell::new(HashMap::new()),
+                sidebar_session_focuses: RefCell::new(HashMap::new()),
                 sidebar_visible,
                 sidebar_width,
                 right_panel_visible,
@@ -3884,6 +3888,7 @@ impl Padu {
                 right_panel_pending_browser_urls: HashMap::new(),
                 right_panel_add_menu: bezel::ui::context_menu::ContextMenu::default(),
                 right_panel_files_menu: bezel::ui::context_menu::ContextMenu::default(),
+                sidebar_session_menu: bezel::ui::context_menu::ContextMenu::default(),
                 right_panel_tab_reorder: bezel::ui::tabs::Reorder::new(),
                 _keystroke_interceptor: None,
                 scene_overlay_enabled,

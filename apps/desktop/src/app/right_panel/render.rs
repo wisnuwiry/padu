@@ -113,7 +113,15 @@ impl Padu {
                 .size_full()
                 .min_h_0()
                 .min_w_0()
-                .p(px(8.0))
+                .ml(
+                    if self.right_panel_fullscreen_active() && !self.sidebar_visible {
+                        px(8.0)
+                    } else {
+                        px(2.0)
+                    },
+                )
+                .mr(px(8.0))
+                .mb(px(8.0))
                 .overflow_hidden()
                 .flex()
                 .flex_col()
@@ -226,6 +234,7 @@ impl Padu {
         self.menus.borrow().values().any(ContextMenuHandle::is_open)
             || self.right_panel_add_menu.is_open()
             || self.right_panel_files_menu.is_open()
+            || self.sidebar_session_menu.is_open()
             || self.command_palette.is_open()
             || self.task_switcher.is_open()
             || self.commit_dialog.is_some()

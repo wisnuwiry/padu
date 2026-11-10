@@ -426,6 +426,9 @@ impl Padu {
         }
         self.session_navigation.remove(session_id);
         self.task_switcher.remove(session_id);
+        self.sidebar_session_focuses
+            .borrow_mut()
+            .remove(&session_id);
         let project_still_used = self
             .state
             .sessions

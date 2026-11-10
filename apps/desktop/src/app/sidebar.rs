@@ -1,11 +1,62 @@
+use bezel::ui::{context_menu::Place, icons::Icon, menu::Item};
 use chrono::{Datelike as _, Local, NaiveDate};
-use gpui::{KeyBinding, actions};
+use gpui::{KeyBinding, Point, actions};
 
 use super::*;
 use crate::app::right_panel::EmptyStateCardAction;
 use padu_client::sidebar as daemon_sidebar;
 
 actions!(padu_sidebar, [CancelSessionRename]);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SidebarSessionMenuAction {
+    TogglePin(bool),
+    Archive,
+    Rename,
+    Remove,
+}
+
+pub(crate) fn sidebar_session_context_menu_items(
+    is_pinned: bool,
+    is_busy: bool,
+) -> (Vec<Item>, Vec<Option<SidebarSessionMenuAction>>) {
+    let mut items = Vec::new();
+    let mut actions = Vec::new();
+
+    items.push(
+        Item::action(if is_pinned {
+            tr!("session.unpin")
+        } else {
+            tr!("session.pin")
+        })
+        .with_icon(Icon::asset("icons/pin.svg")),
+    );
+    actions.push(Some(SidebarSessionMenuAction::TogglePin(!is_pinned)));
+
+    let archive_item =
+        Item::action(tr!("session.archive")).with_icon(Icon::asset("icons/archive.svg"));
+    let archive_item = if is_busy {
+        archive_item.disabled()
+    } else {
+        archive_item
+    };
+    items.push(archive_item);
+    actions.push(Some(SidebarSessionMenuAction::Archive));
+
+    items.push(Item::Separator);
+    actions.push(None);
+
+    items.push(Item::action(tr!("common.rename")).with_icon(Icon::asset("icons/pencil.svg")));
+    actions.push(Some(SidebarSessionMenuAction::Rename));
+
+    items.push(Item::Separator);
+    actions.push(None);
+
+    items.push(Item::action(tr!("common.remove")).with_icon(Icon::asset("icons/trash.svg")));
+    actions.push(Some(SidebarSessionMenuAction::Remove));
+
+    (items, actions)
+}
 
 const SESSION_RENAME_PARENT_CONTEXT: &str = "SessionRename";
 const SESSION_RENAME_FIELD_CONTEXT: &str = "SessionRename > TextInput";
@@ -1554,7 +1605,7 @@ impl Padu {
     pub(super) fn render_sidebar(
         &self,
         width: f32,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = Theme::current(cx);
@@ -1643,6 +1694,12 @@ impl Padu {
                     }),
             )
             .child(self.render_sidebar_footer(cx))
+            .children(self.sidebar_session_menu.render(
+                "sidebar-session-context-menu",
+                |this| &mut this.sidebar_session_menu,
+                window,
+                cx,
+            ))
     }
 
     /// Keep a newly selected task visible without disturbing the sidebar when
@@ -2308,6 +2365,53 @@ impl Padu {
         cx.notify();
     }
 
+    pub(super) fn open_sidebar_session_context_menu(
+        &mut self,
+        session_id: Uuid,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return;
+        };
+        let is_pinned = session.pinned_at.is_some();
+        let is_busy = session.is_busy();
+        let (items, actions) = sidebar_session_context_menu_items(is_pinned, is_busy);
+
+        self.sidebar_session_menu.open(
+            session_id,
+            Place::At(position),
+            items,
+            move |this, path, window, cx| {
+                if let Some(&index) = path.first() {
+                    match actions.get(index).copied().flatten() {
+                        Some(SidebarSessionMenuAction::TogglePin(pin)) => {
+                            this.set_session_pinned(session_id, pin, cx);
+                        }
+                        Some(SidebarSessionMenuAction::Archive) => {
+                            this.set_session_archived(session_id, true, cx);
+                        }
+                        Some(SidebarSessionMenuAction::Rename) => {
+                            this.begin_session_rename(session_id, window, cx);
+                        }
+                        Some(SidebarSessionMenuAction::Remove) => {
+                            this.confirm_delete_session(session_id, window, cx);
+                        }
+                        None => {}
+                    }
+                }
+            },
+            window,
+            cx,
+        );
+    }
+
     fn render_sidebar_session_item(&self, session_id: Uuid, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let Some(session) = self
@@ -2588,10 +2692,13 @@ impl Padu {
                 )
         };
 
-        let padu = cx.entity().downgrade();
-        let menu = self.menu_handle(format!("session-{session_id}"), cx);
-        let row_focus = menu.trigger_focus_handle().clone();
-        let keyboard_menu = menu.clone();
+        let row_focus = self
+            .sidebar_session_focuses
+            .borrow_mut()
+            .entry(session_id)
+            .or_insert_with(|| cx.focus_handle())
+            .clone();
+        let is_menu_open = self.sidebar_session_menu.showing(&session_id);
         let row = div()
             .id(SharedString::from(format!("session-{}", session.id)))
             .w_full()
@@ -2604,18 +2711,32 @@ impl Padu {
             .py(px(row_py))
             .rounded(px(7.0))
             .cursor_pointer()
-            .when(selected, |element| {
+            .when(selected || is_menu_open, |element| {
                 element.bg(theme.sidebar_item_background)
             })
             .hover(|element| element.bg(theme.sidebar_item_background))
             .active(|element| element.bg(theme.sidebar_item_background))
             .child(row_content)
             .when(!renaming, |element| {
+                let right_click_focus = row_focus.clone();
                 element
                     .tooltip(move |window, cx| session_tooltip.clone().build(window, cx))
                     .track_focus(&row_focus)
                     .tab_index(0)
                     .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                            window.focus(&right_click_focus, cx);
+                            this.open_sidebar_session_context_menu(
+                                session_id,
+                                event.position,
+                                window,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    )
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                         let key = event.keystroke.key.as_str();
                         if key == "down" {
@@ -2643,7 +2764,12 @@ impl Padu {
                             this.confirm_delete_session(session_id, window, cx);
                             cx.stop_propagation();
                         } else if key == "f10" && event.keystroke.modifiers.shift {
-                            keyboard_menu.open_context_menu(window, cx);
+                            this.open_sidebar_session_context_menu(
+                                session_id,
+                                window.mouse_position(),
+                                window,
+                                cx,
+                            );
                             cx.stop_propagation();
                         }
                     }))
@@ -2662,58 +2788,7 @@ impl Padu {
                 }))
                 .into_any_element()
         } else {
-            let is_pinned = session.pinned_at.is_some();
-            let is_busy = session.is_busy();
-            context_menu(
-                div().w_full().child(row),
-                SharedString::from(format!("session-menu-{session_id}")),
-                &menu,
-                move |_| {
-                    let rename_padu = padu.clone();
-                    let remove_padu = padu.clone();
-                    let pin_padu = padu.clone();
-                    let archive_padu = padu.clone();
-                    vec![
-                        MenuItem::new(
-                            if is_pinned {
-                                tr!("session.unpin")
-                            } else {
-                                tr!("session.pin")
-                            },
-                            move |_, cx| {
-                                let _ = pin_padu.update(cx, |padu, cx| {
-                                    padu.set_session_pinned(session_id, !is_pinned, cx);
-                                });
-                            },
-                        )
-                        .icon("icons/pin.svg"),
-                        MenuItem::new(tr!("session.archive"), move |_, cx| {
-                            if !is_busy {
-                                let _ = archive_padu.update(cx, |padu, cx| {
-                                    padu.set_session_archived(session_id, true, cx);
-                                });
-                            }
-                        })
-                        .icon("icons/archive.svg")
-                        .disabled(is_busy),
-                        MenuItem::Separator,
-                        MenuItem::new(tr!("common.rename"), move |window, cx| {
-                            let _ = rename_padu.update(cx, |padu, cx| {
-                                padu.begin_session_rename(session_id, window, cx);
-                            });
-                        })
-                        .icon("icons/pencil.svg"),
-                        MenuItem::Separator,
-                        MenuItem::new(tr!("common.remove"), move |window, cx| {
-                            let _ = remove_padu.update(cx, |padu, cx| {
-                                padu.confirm_delete_session(session_id, window, cx)
-                            });
-                        })
-                        .icon("icons/trash.svg")
-                        .destructive(true),
-                    ]
-                },
-            )
+            row.into_any_element()
         };
 
         div()
@@ -3348,5 +3423,36 @@ mod tests {
             - offset.offset_in_item;
         assert_eq!(visible_height, px(400.0));
         assert_eq!(sidebar_session_row_index(&rows, Uuid::from_u128(41)), None);
+    }
+
+    #[test]
+    fn sidebar_session_context_menu_items_structure() {
+        let (unpinned_items, unpinned_actions) = sidebar_session_context_menu_items(false, false);
+        assert_eq!(unpinned_items.len(), 6);
+        assert_eq!(unpinned_actions.len(), 6);
+        assert_eq!(
+            unpinned_actions[0],
+            Some(SidebarSessionMenuAction::TogglePin(true))
+        );
+        assert_eq!(unpinned_actions[1], Some(SidebarSessionMenuAction::Archive));
+        assert!(unpinned_items[1].selectable());
+        assert_eq!(unpinned_items[2], Item::Separator);
+        assert_eq!(unpinned_actions[2], None);
+        assert_eq!(unpinned_actions[3], Some(SidebarSessionMenuAction::Rename));
+        assert_eq!(unpinned_items[4], Item::Separator);
+        assert_eq!(unpinned_actions[4], None);
+        assert_eq!(unpinned_actions[5], Some(SidebarSessionMenuAction::Remove));
+
+        let (pinned_busy_items, pinned_busy_actions) =
+            sidebar_session_context_menu_items(true, true);
+        assert_eq!(
+            pinned_busy_actions[0],
+            Some(SidebarSessionMenuAction::TogglePin(false))
+        );
+        assert_eq!(
+            pinned_busy_actions[1],
+            Some(SidebarSessionMenuAction::Archive)
+        );
+        assert!(!pinned_busy_items[1].selectable());
     }
 }
