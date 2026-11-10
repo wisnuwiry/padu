@@ -59,7 +59,7 @@ use crate::persistence::{
 use crate::query::{Query, QueryCache};
 use crate::review_diff::{Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};
 use crate::terminal::TerminalView;
-use crate::theme::{Theme, ThemePreference, sp};
+use crate::theme::{ColorScheme, Theme, ThemePreference, sp};
 pub(crate) use crate::ui::RestrictScrollExt;
 use crate::ui::text_field::TextField;
 use crate::ui::{

@@ -367,7 +367,6 @@ impl Padu {
 
     pub(super) fn render_daemon_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
-        let bezel_theme = bezel::theme::Theme::of(cx);
         if self.daemon.is_remote() {
             let active_host = self
                 .state
@@ -378,7 +377,7 @@ impl Padu {
                 .map(|h| h.display_name().to_string())
                 .unwrap_or_else(|| self.daemon_hostname.clone());
 
-            let active_banner = bezel_theme
+            let active_banner = bezel::theme::Theme::of(cx)
                 .group_box()
                 .w_full()
                 .px(px(20.0))
@@ -504,13 +503,21 @@ impl Padu {
                     this.regenerate_daemon_token(cx);
                 }));
 
+        let remote_hosts_section = self.render_remote_hosts_section(cx);
+        let qr_section = if enabled {
+            Some(self.render_daemon_qr_section(&token, &theme, cx))
+        } else {
+            None
+        };
+        let bezel_theme = bezel::theme::Theme::of(cx).clone();
+
         div()
             .mt(px(15.0))
             .w_full()
             .flex()
             .flex_col()
             .gap(px(12.0))
-            .child(self.render_remote_hosts_section(cx))
+            .child(remote_hosts_section)
             .child(
                 bezel_theme
                     .group_box()
@@ -788,7 +795,7 @@ impl Padu {
                                     ),
                             )
                         })
-                        .child(self.render_daemon_qr_section(&token, &theme, cx))
+                        .children(qr_section)
                         .child(
                             div()
                                 .mt(px(10.0))

@@ -1,6 +1,7 @@
 use std::cell::Cell;
 
 use super::*;
+use crate::theme::ColorScheme;
 use crate::ui::Switch;
 use crate::ui::button::{Button, ButtonRole, ButtonStyle};
 use bezel::ui::combobox::{Combobox, ComboboxEvent};
@@ -489,7 +490,7 @@ fn render_color_scheme_section(
     theme: Theme,
     selected_scheme: ColorScheme,
     weak: gpui::WeakEntity<Padu>,
-    cx: &mut Context<Padu>,
+    _cx: &mut Context<Padu>,
 ) -> AnyElement {
     let swatches = ColorScheme::ALL.into_iter().map(|scheme| {
         let is_selected = scheme == selected_scheme;
@@ -683,6 +684,7 @@ fn render_code_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) -> Any
 }
 
 fn render_sidebar_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) -> AnyElement {
+    let bezel_theme = bezel::theme::Theme::of(cx);
     let show_provider = padu.state.sidebar_show_provider;
     let weak = cx.entity().downgrade();
     let toggle =

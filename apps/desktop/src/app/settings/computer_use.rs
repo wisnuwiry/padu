@@ -6,7 +6,7 @@ use bezel::ui::widgets::Scaffolding;
 impl Padu {
     pub(super) fn render_computer_use_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
-        let bezel_theme = bezel::theme::Theme::of(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx).clone();
         let enabled = self.state.computer_use_enabled;
         let permissions = self.computer_permissions.clone();
         let pending = self.computer_permission_request_pending;

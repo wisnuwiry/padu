@@ -47,7 +47,6 @@ impl Padu {
         archived.sort_by_key(|session| std::cmp::Reverse(session.archived_at.unwrap_or_default()));
         let empty = archived.is_empty();
         let has_query = !query.is_empty();
-        let total_count = archived.len();
         let mut group = bezel_theme.group_box().mt(px(16.0)).w_full();
         for (index, session) in archived.into_iter().enumerate() {
             if index > 0 {

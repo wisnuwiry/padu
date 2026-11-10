@@ -97,6 +97,14 @@ pub struct Theme {
 }
 
 impl Theme {
+    pub fn control_radius() -> f32 {
+        bezel::theme::Theme::control_radius()
+    }
+
+    pub fn surface_radius() -> f32 {
+        bezel::theme::Theme::surface_radius()
+    }
+
     pub fn current(cx: &App) -> Self {
         if cx.has_global::<ActivePaduTheme>() {
             cx.global::<ActivePaduTheme>().theme
@@ -207,13 +215,16 @@ impl Theme {
 #[derive(Clone, Copy)]
 pub struct ActivePaduTheme {
     pub theme: Theme,
+    #[allow(dead_code)]
     pub scheme: ColorScheme,
+    #[allow(dead_code)]
     pub preference: ThemePreference,
 }
 
 impl Global for ActivePaduTheme {}
 
 impl ColorScheme {
+    #[allow(dead_code)]
     pub fn current(cx: &App) -> Self {
         if cx.has_global::<ActivePaduTheme>() {
             cx.global::<ActivePaduTheme>().scheme
@@ -294,6 +305,7 @@ pub fn apply_theme(
     window.refresh();
 }
 
+#[allow(dead_code)]
 pub fn apply_theme_preference(preference: ThemePreference, window: &mut Window, cx: &mut App) {
     let scheme = ColorScheme::current(cx);
     apply_theme(preference, scheme, window, cx);

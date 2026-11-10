@@ -6,8 +6,7 @@ use bezel::ui::widgets::Scaffolding;
 impl Padu {
     pub(super) fn render_providers_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
-        let bezel_theme = bezel::theme::Theme::of(cx);
-        let control_radius = bezel::theme::Theme::control_radius();
+        let control_radius = Theme::control_radius();
         let checking = self.provider_detection_remaining > 0;
         let checked_label = self
             .provider_detection_checked_at
@@ -361,7 +360,7 @@ impl Padu {
             );
         }
 
-        bezel_theme
+        bezel::theme::Theme::of(cx)
             .group_box()
             .mt(px(20.0))
             .w_full()
