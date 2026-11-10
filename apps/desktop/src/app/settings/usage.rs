@@ -16,6 +16,7 @@ use crate::usage_history::{
     self, MONTHLY_WINDOW, MonthSlice, PricingStatus, ProjectSlice, ProviderDay, UsageHistory,
     UsageProvider, UsageWindow, WINDOW_CHOICES,
 };
+use bezel::ui::widgets::Scaffolding;
 
 /// Rendered chart height, matching T3's `h-56` plot.
 const CHART_HEIGHT: f32 = 224.0;
@@ -1139,13 +1140,13 @@ impl Padu {
                 .into_any_element()
         };
 
-        div()
+        let bezel_theme = bezel::theme::Theme::of(cx);
+        bezel_theme
+            .group_box()
             .mt(px(20.0))
             .flex_1()
             .min_h_0()
             .pb(px(8.0))
-            .rounded(px(13.0))
-            .bg(theme.raised)
             .flex()
             .flex_col()
             .child(
@@ -2010,7 +2011,7 @@ fn usage_skeleton(view: UsageViewMode, theme: &Theme) -> AnyElement {
             let mut card = div()
                 .mt(px(20.0))
                 .px(px(20.0))
-                .rounded(px(13.0))
+                .rounded(px(Theme::surface_radius()))
                 .bg(theme.raised)
                 .flex()
                 .flex_col()
@@ -2457,13 +2458,13 @@ fn usage_month_list(
         ));
     }
 
-    div()
+    let bezel_theme = bezel::theme::Theme::of(cx);
+    bezel_theme
+        .group_box()
         .mt(px(20.0))
         .flex_1()
         .min_h_0()
         .pb(px(8.0))
-        .rounded(px(13.0))
-        .bg(theme.raised)
         .flex()
         .flex_col()
         .child(

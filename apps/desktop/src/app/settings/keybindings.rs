@@ -1,8 +1,10 @@
 use super::*;
+use bezel::ui::widgets::Scaffolding;
 
 impl Padu {
     pub(super) fn render_keybindings_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx);
 
         let sections: &[(&str, &[(&str, &str, &str)])] = &[
             (
@@ -334,13 +336,7 @@ impl Padu {
             }
             matched_any = true;
 
-            let mut section_card = div()
-                .w_full()
-                .flex()
-                .flex_col()
-                .rounded(px(13.0))
-                .overflow_hidden()
-                .bg(theme.raised);
+            let mut section_card = bezel_theme.group_box().w_full();
 
             for (index, (title_key, desc_key, shortcut)) in matching_shortcuts.iter().enumerate() {
                 if index > 0 {
@@ -382,7 +378,7 @@ impl Padu {
                             .h(px(24.0))
                             .min_w(px(32.0))
                             .px(px(8.0))
-                            .rounded(px(6.0))
+                            .rounded(px(Theme::control_radius()))
                             .border_1()
                             .border_color(theme.border_strong)
                             .bg(theme.surface)

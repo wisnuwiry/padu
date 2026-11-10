@@ -9,7 +9,7 @@ use padu_client::transport::{
 use super::*;
 use crate::ui::Switch;
 use crate::ui::button::{Button, ButtonStyle};
-use bezel::ui::widgets::Controls;
+use bezel::ui::widgets::{Controls, Scaffolding};
 
 /// Edge length, in pixels, of the credentials card's QR code.
 const DAEMON_QR_PX: u32 = 180;
@@ -51,14 +51,14 @@ fn qr_input_row(label: String, input: Entity<TextInput>, theme: &Theme) -> Div {
 impl Padu {
     fn render_remote_hosts_section(&self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx);
         let hosts = &self.state.hosts;
         let active_host_id = self.state.active_host_id.as_deref();
 
-        div()
+        bezel_theme
+            .group_box()
             .px(px(20.0))
             .py(px(16.0))
-            .rounded(px(13.0))
-            .bg(theme.raised)
             .child(
                 div()
                     .flex()
@@ -367,6 +367,7 @@ impl Padu {
 
     pub(super) fn render_daemon_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx);
         if self.daemon.is_remote() {
             let active_host = self
                 .state
@@ -377,13 +378,11 @@ impl Padu {
                 .map(|h| h.display_name().to_string())
                 .unwrap_or_else(|| self.daemon_hostname.clone());
 
-            let active_banner = div()
+            let active_banner = bezel_theme
+                .group_box()
                 .w_full()
                 .px(px(20.0))
                 .py(px(16.0))
-                .rounded(px(13.0))
-                .bg(theme.raised)
-                .border_1()
                 .border_color(theme.accent.opacity(0.4))
                 .flex()
                 .items_center()
@@ -513,12 +512,11 @@ impl Padu {
             .gap(px(12.0))
             .child(self.render_remote_hosts_section(cx))
             .child(
-                div()
+                bezel_theme
+                    .group_box()
                     .min_h(px(66.0))
                     .px(px(20.0))
                     .py(px(13.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
                     .flex()
                     .items_center()
                     .gap(px(24.0))
@@ -574,11 +572,10 @@ impl Padu {
             )
             .when(enabled, |column| {
                 column.child(
-                    div()
+                    bezel_theme
+                        .group_box()
                         .px(px(20.0))
                         .py(px(15.0))
-                        .rounded(px(13.0))
-                        .bg(theme.raised)
                         .child(
                             div()
                                 .text_size(sp(13.5))
@@ -719,11 +716,10 @@ impl Padu {
             })
             .when(enabled, |column| {
                 column.child(
-                    div()
+                    bezel_theme
+                        .group_box()
                         .px(px(20.0))
                         .py(px(15.0))
-                        .rounded(px(13.0))
-                        .bg(theme.raised)
                         .child(
                             div()
                                 .text_size(sp(13.5))

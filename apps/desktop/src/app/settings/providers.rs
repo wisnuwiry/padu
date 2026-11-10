@@ -1,10 +1,13 @@
 use super::*;
 use crate::ui::Switch;
 use crate::ui::button::{Button, ButtonRole, ButtonStyle};
+use bezel::ui::widgets::Scaffolding;
 
 impl Padu {
     pub(super) fn render_providers_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx);
+        let control_radius = bezel::theme::Theme::control_radius();
         let checking = self.provider_detection_remaining > 0;
         let checked_label = self
             .provider_detection_checked_at
@@ -330,7 +333,7 @@ impl Padu {
                     .py(px(11.0))
                     .px(px(6.0))
                     .mx(px(-6.0))
-                    .rounded(px(7.0))
+                    .rounded(px(control_radius))
                     .flex()
                     .flex_col()
                     .when(index + 1 != provider_count, |element| {
@@ -358,13 +361,12 @@ impl Padu {
             );
         }
 
-        div()
-            .mt(px(15.0))
+        bezel_theme
+            .group_box()
+            .mt(px(20.0))
             .w_full()
             .px(px(20.0))
-            .py(px(14.0))
-            .rounded(px(13.0))
-            .bg(theme.raised)
+            .py(px(16.0))
             .child(
                 div()
                     .flex()
