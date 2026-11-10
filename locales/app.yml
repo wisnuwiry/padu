@@ -985,6 +985,24 @@ settings.theme_light:
   en: Light
 settings.theme_dark:
   en: Dark
+settings.color_scheme:
+  en: Color scheme
+settings.color_scheme_description:
+  en: Choose an accent color for interactive controls and highlights
+settings.color_scheme_purple:
+  en: Purple
+settings.color_scheme_blue:
+  en: Blue
+settings.color_scheme_green:
+  en: Green
+settings.color_scheme_amber:
+  en: Amber
+settings.color_scheme_coral:
+  en: Coral
+settings.color_scheme_rose:
+  en: Rose
+settings.color_scheme_neutral:
+  en: Neutral
 settings.sidebar:
   en: Sidebar
 settings.sidebar_description:

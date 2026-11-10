@@ -431,6 +431,15 @@ settings.code_word_wrap_description: 横スクロールせずに長い行を折�
 settings.theme_system: システム
 settings.theme_light: ライト
 settings.theme_dark: ダーク
+settings.color_scheme: 配色
+settings.color_scheme_description: コントロールやハイライトのアクセントカラーを選択します
+settings.color_scheme_purple: パープル
+settings.color_scheme_blue: ブルー
+settings.color_scheme_green: グリーン
+settings.color_scheme_amber: アンバー
+settings.color_scheme_coral: コーラル
+settings.color_scheme_rose: ローズ
+settings.color_scheme_neutral: ニュートラル
 settings.sidebar: サイドバー
 settings.sidebar_description: サイドバーの表示と会話リストをカスタマイズします
 settings.sidebar_show_provider: プロバイダーを表示

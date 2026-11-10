@@ -2058,6 +2058,14 @@ fn migrate_legacy_projectless_projects(
 }
 
 impl Padu {
+    pub(crate) fn color_scheme(&self) -> ColorScheme {
+        self.state
+            .color_scheme
+            .as_deref()
+            .and_then(ColorScheme::parse)
+            .unwrap_or_default()
+    }
+
     /// Changes the primary workspace without allowing individual pages to
     /// duplicate route-reset logic. Page-local entities remain alive while
     /// another workspace is visible.
@@ -2802,7 +2810,12 @@ impl Padu {
                 window.display(cx).and_then(|display| display.uuid().ok()),
             ));
         }
-        crate::theme::apply_theme_preference(state.theme, window, cx);
+        let initial_scheme = state
+            .color_scheme
+            .as_deref()
+            .and_then(ColorScheme::parse)
+            .unwrap_or_default();
+        crate::theme::apply_theme(state.theme, initial_scheme, window, cx);
         crate::platform::set_sidebar_material_width(window, sidebar_width);
         let mut onboarding = onboarding::OnboardingState::new(cx);
         if !state.has_completed_onboarding {
@@ -3092,7 +3105,7 @@ impl Padu {
 
             cx.observe_window_appearance(window, |this: &mut Self, window, cx| {
                 if this.state.theme == ThemePreference::System {
-                    crate::theme::apply_theme_preference(this.state.theme, window, cx);
+                    crate::theme::apply_theme(this.state.theme, this.color_scheme(), window, cx);
                     cx.notify();
                 }
             })

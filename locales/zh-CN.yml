@@ -427,6 +427,15 @@ settings.code_word_wrap_description: 折行显示长行，而不是横向滚动
 settings.theme_system: 跟随系统
 settings.theme_light: 浅色
 settings.theme_dark: 深色
+settings.color_scheme: 配色方案
+settings.color_scheme_description: 选择交互控件和高亮显示的强调色
+settings.color_scheme_purple: 紫色
+settings.color_scheme_blue: 蓝色
+settings.color_scheme_green: 绿色
+settings.color_scheme_amber: 琥珀色
+settings.color_scheme_coral: 珊瑚色
+settings.color_scheme_rose: 玫瑰红
+settings.color_scheme_neutral: 中性灰
 settings.sidebar: 侧边栏
 settings.sidebar_description: 自定义侧边栏外观和会话列表
 settings.sidebar_show_provider: 显示提供商

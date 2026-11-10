@@ -4,7 +4,7 @@ use super::*;
 use crate::ui::Switch;
 use crate::ui::button::{Button, ButtonRole, ButtonStyle};
 use bezel::ui::combobox::{Combobox, ComboboxEvent};
-use bezel::ui::widgets::{Controls, SliderDrag, slider_fraction};
+use bezel::ui::widgets::{Controls, Scaffolding, SliderDrag, slider_fraction};
 use gpui::{Bounds, DragMoveEvent, ElementId, MouseButton, MouseDownEvent, SharedString, canvas};
 
 fn font_size_label(size: f32) -> String {
@@ -40,7 +40,7 @@ fn render_background_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) 
         .aspect_ratio(188.0 / 142.0)
         .min_h(px(240.0))
         .overflow_hidden()
-        .rounded(px(8.0))
+        .rounded(px(Theme::control_radius()))
         .bg(theme.surface)
         .border_1()
         .border_color(theme.border)
@@ -49,7 +49,7 @@ fn render_background_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) 
                 image.clone(),
                 settings,
                 &theme,
-                Some(px(8.0)),
+                Some(px(Theme::control_radius())),
             ),
         )
         .child(
@@ -86,12 +86,10 @@ fn render_background_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) 
         })
         .into_any_element()
     });
-    div()
+    bezel_theme
+        .group_box()
         .mt(px(15.0))
         .w_full()
-        .rounded(px(13.0))
-        .overflow_hidden()
-        .bg(theme.raised)
         .px(px(20.0))
         .py(px(16.0))
         .flex()
@@ -474,6 +472,115 @@ fn render_theme_section(
         .into_any_element()
 }
 
+fn scheme_label(scheme: ColorScheme) -> SharedString {
+    match scheme {
+        ColorScheme::Purple => tr!("settings.color_scheme_purple"),
+        ColorScheme::Blue => tr!("settings.color_scheme_blue"),
+        ColorScheme::Green => tr!("settings.color_scheme_green"),
+        ColorScheme::Amber => tr!("settings.color_scheme_amber"),
+        ColorScheme::Coral => tr!("settings.color_scheme_coral"),
+        ColorScheme::Rose => tr!("settings.color_scheme_rose"),
+        ColorScheme::Neutral => tr!("settings.color_scheme_neutral"),
+    }
+    .into()
+}
+
+fn render_color_scheme_section(
+    theme: Theme,
+    selected_scheme: ColorScheme,
+    weak: gpui::WeakEntity<Padu>,
+    cx: &mut Context<Padu>,
+) -> AnyElement {
+    let swatches = ColorScheme::ALL.into_iter().map(|scheme| {
+        let is_selected = scheme == selected_scheme;
+        let (dark_accent, _) = scheme.dark_tokens();
+        let (light_accent, _) = scheme.light_tokens();
+        let accent_color = if theme.is_dark {
+            dark_accent
+        } else {
+            light_accent
+        };
+        let weak_click = weak.clone();
+        let weak_key = weak.clone();
+        let scheme_name = scheme_label(scheme);
+
+        div()
+            .id(SharedString::from(format!("color-scheme-{}", scheme.as_str())))
+            .tab_index(0)
+            .cursor_pointer()
+            .tooltip(Tooltip::text(scheme_name))
+            .size(px(26.0))
+            .p(px(2.0))
+            .rounded_full()
+            .border_2()
+            .when(is_selected, |el| el.border_color(accent_color))
+            .when(!is_selected, |el| {
+                el.border_color(gpui::transparent_black())
+                    .hover(|el| el.border_color(theme.border_strong))
+            })
+            .focus_visible(|style| style.border_color(theme.accent))
+            .on_click(move |_, window, cx| {
+                let _ = weak_click.update(cx, |this, cx| {
+                    this.set_color_scheme(scheme, window, cx);
+                });
+            })
+            .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    let _ = weak_key.update(cx, |this, cx| {
+                        this.set_color_scheme(scheme, window, cx);
+                    });
+                    cx.stop_propagation();
+                }
+            })
+            .child(
+                div()
+                    .size_full()
+                    .rounded_full()
+                    .bg(accent_color),
+            )
+    });
+
+    div()
+        .w_full()
+        .min_h(px(60.0))
+        .px(px(20.0))
+        .py(px(14.0))
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(24.0))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .child(
+                    div()
+                        .text_size(sp(13.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(tr!("settings.color_scheme")),
+                )
+                .child(
+                    div()
+                        .mt(px(5.0))
+                        .text_size(sp(12.5))
+                        .line_height(sp(18.0))
+                        .text_color(theme.text_secondary)
+                        .child(tr!("settings.color_scheme_description")),
+                ),
+        )
+        .child(
+            div()
+                .flex_none()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(8.0))
+                .children(swatches),
+        )
+        .into_any_element()
+}
+
 /// One label/description row of a settings card, with its control on the end.
 fn code_setting_row(title: String, description: String, control: AnyElement, theme: Theme) -> Div {
     div()
@@ -533,12 +640,10 @@ fn render_code_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) -> Any
         let _ = weak.update(cx, |this, cx| this.set_code_word_wrap(wrap, cx));
     });
 
-    div()
+    bezel_theme
+        .group_box()
         .mt(px(15.0))
         .w_full()
-        .rounded(px(13.0))
-        .overflow_hidden()
-        .bg(theme.raised)
         .child(
             div()
                 .w_full()
@@ -585,12 +690,10 @@ fn render_sidebar_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) -> 
             let _ = weak.update(cx, |this, cx| this.set_sidebar_show_provider(show, cx));
         });
 
-    div()
+    bezel_theme
+        .group_box()
         .mt(px(15.0))
         .w_full()
-        .rounded(px(13.0))
-        .overflow_hidden()
-        .bg(theme.raised)
         .child(
             div()
                 .w_full()
@@ -671,15 +774,13 @@ impl Padu {
             },
         );
 
-        let appearance_card = div()
+        let appearance_card = bezel_theme
+            .group_box()
             .mt(px(15.0))
             .w_full()
-            .flex()
-            .flex_col()
-            .rounded(px(13.0))
-            .overflow_hidden()
-            .bg(theme.raised)
-            .child(render_theme_section(theme, selected_theme, theme_weak, cx))
+            .child(render_theme_section(theme, selected_theme, theme_weak.clone(), cx))
+            .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+            .child(render_color_scheme_section(theme, self.color_scheme(), theme_weak, cx))
             .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
             .child(
                 div()
@@ -840,7 +941,22 @@ impl Padu {
             return;
         }
         self.state.theme = preference;
-        crate::theme::apply_theme_preference(preference, window, cx);
+        crate::theme::apply_theme(preference, self.color_scheme(), window, cx);
+        self.save();
+        cx.notify();
+    }
+
+    fn set_color_scheme(
+        &mut self,
+        scheme: ColorScheme,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.color_scheme() == scheme {
+            return;
+        }
+        self.state.color_scheme = Some(scheme.as_str().to_string());
+        crate::theme::apply_theme(self.state.theme, scheme, window, cx);
         self.save();
         cx.notify();
     }

@@ -99,7 +99,7 @@ pub struct Theme {
 impl Theme {
     pub fn current(cx: &App) -> Self {
         if cx.has_global::<ActivePaduTheme>() {
-            cx.global::<ActivePaduTheme>().0
+            cx.global::<ActivePaduTheme>().theme
         } else {
             Self::dark()
         }
@@ -121,7 +121,7 @@ impl Theme {
             sidebar: rgb(0x181818).into(),
             frosted: rgb(0x181818).into(),
             sidebar_drag_background: rgb(0x181818).into(),
-            sidebar_item_background: hsla(0.0, 0.0, 0.941, 0.06),
+            sidebar_item_background: hsla(0.0, 0.0, 1.0, 0.08),
             surface: rgb(0x1A1A1A).into(),
             raised: rgb(0x232323).into(),
             composer: rgb(0x212121).into(),
@@ -166,7 +166,7 @@ impl Theme {
             sidebar: rgb(0xF3F3F3).into(),
             frosted: rgb(0xF3F3F3).into(),
             sidebar_drag_background: rgb(0xF3F3F3).into(),
-            sidebar_item_background: hsla(0.0, 0.0, 0.078, 0.06),
+            sidebar_item_background: hsla(0.0, 0.0, 0.0, 0.04),
             surface: rgb(0xF6F5F6).into(),
             raised: rgb(0xECECEC).into(),
             composer: rgb(0xFFFFFF).into(),
@@ -205,20 +205,43 @@ impl Theme {
 }
 
 #[derive(Clone, Copy)]
-struct ActivePaduTheme(Theme);
+pub struct ActivePaduTheme {
+    pub theme: Theme,
+    pub scheme: ColorScheme,
+    pub preference: ThemePreference,
+}
 
 impl Global for ActivePaduTheme {}
 
+impl ColorScheme {
+    pub fn current(cx: &App) -> Self {
+        if cx.has_global::<ActivePaduTheme>() {
+            cx.global::<ActivePaduTheme>().scheme
+        } else {
+            Self::default()
+        }
+    }
+}
+
 /// Publish the resolved palette. [`Theme::current`] reads it back from the
 /// global, which is how every view gets its colors.
-fn set_active_theme(theme: Theme, cx: &mut App) {
-    cx.set_global(ActivePaduTheme(theme));
+fn set_active_theme(
+    theme: Theme,
+    scheme: ColorScheme,
+    preference: ThemePreference,
+    cx: &mut App,
+) {
+    cx.set_global(ActivePaduTheme {
+        theme,
+        scheme,
+        preference,
+    });
 }
 
 use bezel::theme::AppExt as _;
-use bezel::theme::{Brand, Tint};
+use bezel::theme::Brand;
 
-pub fn sync_bezel_brand(preference: ThemePreference, cx: &mut App) {
+pub fn sync_bezel_brand(preference: ThemePreference, scheme: ColorScheme, cx: &mut App) {
     let mode = match preference {
         ThemePreference::System => bezel::theme::appearance::AppearanceMode::System,
         ThemePreference::Light => bezel::theme::appearance::AppearanceMode::Light,
@@ -226,7 +249,7 @@ pub fn sync_bezel_brand(preference: ThemePreference, cx: &mut App) {
     };
     cx.set_appearance_mode(mode);
     let mut brand = Brand::default();
-    brand.accent = Tint::new(276.935, 0.182);
+    brand.accent = scheme.tint();
     brand.radius = 8.0;
     cx.set_brand(brand);
 }
@@ -234,29 +257,44 @@ pub fn sync_bezel_brand(preference: ThemePreference, cx: &mut App) {
 /// Resolve and publish the startup palette, before any window exists.
 pub fn init(cx: &mut App) {
     bezel::theme::appearance::init(bezel::theme::appearance::AppearanceMode::System, cx);
-    sync_bezel_brand(ThemePreference::System, cx);
+    let scheme = ColorScheme::default();
+    let preference = ThemePreference::System;
+    sync_bezel_brand(preference, scheme, cx);
 
     let system_appearance = cx.window_appearance();
-    let theme = if resolves_to_dark(ThemePreference::System, system_appearance) {
-        Theme::dark()
+    let is_dark = resolves_to_dark(preference, system_appearance);
+    let theme = if is_dark {
+        Theme::dark_with_scheme(scheme)
     } else {
-        Theme::light()
+        Theme::light_with_scheme(scheme)
     };
-    set_active_theme(theme, cx);
+    set_active_theme(theme, scheme, preference, cx);
 }
 
-pub fn apply_theme_preference(preference: ThemePreference, window: &mut Window, cx: &mut App) {
-    sync_bezel_brand(preference, cx);
+pub fn apply_theme(
+    preference: ThemePreference,
+    scheme: ColorScheme,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    sync_bezel_brand(preference, scheme, cx);
     crate::platform::set_window_appearance(window, native_override(preference));
     let is_dark = resolves_to_dark(preference, cx.window_appearance());
     set_active_theme(
         if is_dark {
-            Theme::dark()
+            Theme::dark_with_scheme(scheme)
         } else {
-            Theme::light()
+            Theme::light_with_scheme(scheme)
         },
+        scheme,
+        preference,
         cx,
     );
     crate::platform::configure_sidebar_material(window, is_dark);
     window.refresh();
+}
+
+pub fn apply_theme_preference(preference: ThemePreference, window: &mut Window, cx: &mut App) {
+    let scheme = ColorScheme::current(cx);
+    apply_theme(preference, scheme, window, cx);
 }

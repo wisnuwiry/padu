@@ -426,6 +426,15 @@ settings.code_word_wrap_description: Bungkus baris panjang alih-alih menggulir s
 settings.theme_system: Sistem
 settings.theme_light: Terang
 settings.theme_dark: Gelap
+settings.color_scheme: Skema warna
+settings.color_scheme_description: Pilih warna aksen untuk kontrol interaktif dan sorotan
+settings.color_scheme_purple: Ungu
+settings.color_scheme_blue: Biru
+settings.color_scheme_green: Hijau
+settings.color_scheme_amber: Amber
+settings.color_scheme_coral: Koral
+settings.color_scheme_rose: Mawar
+settings.color_scheme_neutral: Netral
 settings.sidebar: Bilah sisi
 settings.sidebar_description: Sesuaikan tampilan bilah sisi dan daftar percakapan
 settings.sidebar_show_provider: Tampilkan penyedia
