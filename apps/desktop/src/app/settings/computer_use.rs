@@ -1,10 +1,12 @@
 use super::*;
 use crate::ui::Switch;
 use crate::ui::button::{Button, ButtonRole, ButtonStyle};
+use bezel::ui::widgets::Scaffolding;
 
 impl Padu {
     pub(super) fn render_computer_use_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx);
         let enabled = self.state.computer_use_enabled;
         let permissions = self.computer_permissions.clone();
         let pending = self.computer_permission_request_pending;
@@ -37,9 +39,9 @@ impl Padu {
                                 .w(px(32.0))
                                 .h(px(32.0))
                                 .flex_none()
-                                .rounded(px(7.0))
+                                .rounded(px(Theme::control_radius()))
                                 .when_some(app_icon, |element, app_icon| {
-                                    element.child(img(app_icon).size_full().rounded(px(7.0)))
+                                    element.child(img(app_icon).size_full().rounded(px(Theme::control_radius())))
                                 }),
                         )
                         .child(
@@ -80,17 +82,17 @@ impl Padu {
         }
 
         div()
-            .mt(px(15.0))
+            .pt(px(20.0))
             .w_full()
             .flex()
             .flex_col()
-            .gap(px(12.0))
+            .gap(px(16.0))
             .child(
-                div()
+                bezel_theme
+                    .group_box()
+                    .w_full()
                     .px(px(20.0))
                     .py(px(14.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
                     .flex()
                     .items_center()
                     .gap(px(20.0))
@@ -126,11 +128,11 @@ impl Padu {
                     }),
             )
             .child(
-                div()
+                bezel_theme
+                    .group_box()
+                    .w_full()
                     .px(px(20.0))
                     .py(px(14.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
                     .child(
                         div()
                             .text_size(sp(13.5))
@@ -183,11 +185,11 @@ impl Padu {
                     ),
             )
             .child(
-                div()
+                bezel_theme
+                    .group_box()
+                    .w_full()
                     .px(px(20.0))
                     .py(px(14.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
                     .child(
                         div()
                             .text_size(sp(13.5))

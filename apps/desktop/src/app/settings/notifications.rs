@@ -2,10 +2,12 @@ use super::*;
 use crate::platform::NotificationPermissionStatus;
 use crate::ui::Switch;
 use crate::ui::button::{Button, ButtonStyle};
+use bezel::ui::widgets::Scaffolding;
 
 impl Padu {
     pub(super) fn render_notifications_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx);
         let notifications_enabled = self.state.notifications_enabled;
         let sound_enabled = self.state.notification_sound_enabled;
         let permission = self.notification_permission;
@@ -16,7 +18,7 @@ impl Padu {
                 let badge = div()
                     .px(px(8.0))
                     .py(px(3.0))
-                    .rounded(px(6.0))
+                    .rounded(px(Theme::control_radius()))
                     .bg(theme.success.opacity(0.12))
                     .flex()
                     .items_center()
@@ -33,7 +35,7 @@ impl Padu {
                 let badge = div()
                     .px(px(8.0))
                     .py(px(3.0))
-                    .rounded(px(6.0))
+                    .rounded(px(Theme::control_radius()))
                     .bg(theme.danger.opacity(0.12))
                     .text_size(sp(12.5))
                     .font_weight(FontWeight::MEDIUM)
@@ -55,7 +57,7 @@ impl Padu {
                 let badge = div()
                     .px(px(8.0))
                     .py(px(3.0))
-                    .rounded(px(6.0))
+                    .rounded(px(Theme::control_radius()))
                     .bg(theme.warning.opacity(0.12))
                     .text_size(sp(12.5))
                     .font_weight(FontWeight::MEDIUM)
@@ -77,7 +79,7 @@ impl Padu {
                 let badge = div()
                     .px(px(8.0))
                     .py(px(3.0))
-                    .rounded(px(6.0))
+                    .rounded(px(Theme::control_radius()))
                     .bg(theme.overlay)
                     .text_size(sp(12.5))
                     .text_color(theme.text_tertiary)
@@ -120,19 +122,18 @@ impl Padu {
             }));
 
         div()
-            .mt(px(15.0))
+            .pt(px(20.0))
             .w_full()
             .flex()
             .flex_col()
-            .gap(px(12.0))
+            .gap(px(16.0))
             // Permission status card
             .child(
-                div()
+                bezel_theme
+                    .group_box()
                     .w_full()
                     .px(px(20.0))
                     .py(px(15.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
                     .flex()
                     .items_center()
                     .gap(px(24.0))
@@ -166,88 +167,110 @@ impl Padu {
                             .children(permission_action),
                     ),
             )
-            // Task completion toggle
+            // Notification preferences group
             .child(
-                div()
+                bezel_theme
+                    .group_box()
                     .w_full()
-                    .min_h(px(60.0))
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
                     .child(
                         div()
-                            .flex_1()
-                            .min_w_0()
+                            .w_full()
+                            .min_h(px(60.0))
+                            .px(px(20.0))
+                            .py(px(12.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(24.0))
                             .child(
                                 div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("notifications.task_completion")),
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(
+                                        div()
+                                            .text_size(sp(13.5))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(theme.text)
+                                            .child(tr!("notifications.task_completion")),
+                                    )
+                                    .child(
+                                        div()
+                                            .mt(px(5.0))
+                                            .text_size(sp(12.5))
+                                            .line_height(sp(18.0))
+                                            .text_color(theme.text_secondary)
+                                            .child(tr!("notifications.task_completion_desc")),
+                                    ),
                             )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("notifications.task_completion_desc")),
-                            ),
+                            .child(notifications_toggle),
                     )
-                    .child(notifications_toggle),
-            )
-            // Sound toggle + preview
-            .child(
-                div()
-                    .w_full()
-                    .min_h(px(60.0))
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
+                    .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
                     .child(
                         div()
-                            .flex_1()
-                            .min_w_0()
+                            .w_full()
+                            .min_h(px(60.0))
+                            .px(px(20.0))
+                            .py(px(12.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(24.0))
                             .child(
                                 div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("notifications.sound")),
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(
+                                        div()
+                                            .text_size(sp(13.5))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(theme.text)
+                                            .child(tr!("notifications.sound")),
+                                    )
+                                    .child(
+                                        div()
+                                            .mt(px(5.0))
+                                            .text_size(sp(12.5))
+                                            .line_height(sp(18.0))
+                                            .text_color(theme.text_secondary)
+                                            .child(tr!("notifications.sound_desc")),
+                                    ),
                             )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("notifications.sound_desc")),
-                            ),
-                    )
-                    .child(preview_button)
-                    .child(sound_toggle),
+                            .child(preview_button)
+                            .child(sound_toggle),
+                    ),
             )
             // Test notification
             .child(
-                div()
+                bezel_theme
+                    .group_box()
                     .w_full()
                     .px(px(20.0))
                     .py(px(15.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
                     .flex()
                     .items_center()
                     .justify_between()
                     .gap(px(24.0))
                     .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .text_size(sp(13.5))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text)
+                                    .child(tr!("notifications.test_title")),
+                            )
+                            .child(
+                                div()
+                                    .mt(px(5.0))
+                                    .text_size(sp(12.5))
+                                    .line_height(sp(18.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!("notifications.test_desc")),
+                            ),
+                    )
+                    .child(test_button),
+            )
+            .into_any_element()
                         div()
                             .flex_1()
                             .min_w_0()

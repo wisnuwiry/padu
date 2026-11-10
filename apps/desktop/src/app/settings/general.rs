@@ -1,10 +1,12 @@
 use super::*;
 use crate::ui::Switch;
 use crate::ui::button::{Button, ButtonStyle};
+use bezel::ui::widgets::Scaffolding;
 
 impl Padu {
     pub(super) fn render_general_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx);
         let updater_available = cx
             .try_global::<crate::updater::UpdaterState>()
             .is_some_and(|updater| updater.0.is_some());
@@ -15,14 +17,16 @@ impl Padu {
                 let _ = weak.update(cx, |this, cx| this.set_analytics_enabled(enabled, cx));
             });
         div()
+            .pt(px(20.0))
+            .flex()
+            .flex_col()
+            .gap(px(16.0))
             .child(
-                div()
-                    .mt(px(15.0))
+                bezel_theme
+                    .group_box()
                     .w_full()
                     .px(px(20.0))
                     .py(px(14.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
                     .child(
                         div()
                             .text_size(sp(13.5))
@@ -40,93 +44,92 @@ impl Padu {
                     ),
             )
             .child(
-                div()
-                    .mt(px(15.0))
+                bezel_theme
+                    .group_box()
                     .w_full()
-                    .min_h(px(60.0))
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
                     .child(
                         div()
-                            .flex_1()
-                            .min_w_0()
+                            .w_full()
+                            .min_h(px(60.0))
+                            .px(px(20.0))
+                            .py(px(12.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(24.0))
                             .child(
                                 div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("settings.share_anonymous_usage_data")),
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(
+                                        div()
+                                            .text_size(sp(13.5))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(theme.text)
+                                            .child(tr!("settings.share_anonymous_usage_data")),
+                                    )
+                                    .child(
+                                        div()
+                                            .mt(px(5.0))
+                                            .text_size(sp(12.5))
+                                            .line_height(sp(18.0))
+                                            .text_color(theme.text_secondary)
+                                            .child(tr!("settings.share_anonymous_usage_data_description")),
+                                    ),
                             )
+                            .child(analytics_toggle),
+                    )
+                    .when(updater_available, |group| {
+                        let enabled = self.automatic_updates_enabled;
+                        let weak = cx.entity().downgrade();
+                        let toggle = Switch::new("automatic-updates-toggle", enabled).on_toggle(
+                            move |enabled, _, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.set_automatic_updates_enabled(enabled, cx)
+                                });
+                            },
+                        );
+                        group
+                            .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
                             .child(
                                 div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("settings.share_anonymous_usage_data_description")),
-                            ),
-                    )
-                    .child(analytics_toggle),
+                                    .w_full()
+                                    .min_h(px(60.0))
+                                    .px(px(20.0))
+                                    .py(px(12.0))
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(24.0))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .child(
+                                                div()
+                                                    .text_size(sp(13.5))
+                                                    .font_weight(FontWeight::MEDIUM)
+                                                    .text_color(theme.text)
+                                                    .child(tr!("settings.automatic_updates")),
+                                            )
+                                            .child(
+                                                div()
+                                                    .mt(px(5.0))
+                                                    .text_size(sp(12.5))
+                                                    .line_height(sp(18.0))
+                                                    .text_color(theme.text_secondary)
+                                                    .child(tr!("settings.automatic_updates_description")),
+                                            ),
+                                    )
+                                    .child(toggle),
+                            )
+                    }),
             )
-            .when(updater_available, |column| {
-                let enabled = self.automatic_updates_enabled;
-                let weak = cx.entity().downgrade();
-                let toggle = Switch::new("automatic-updates-toggle", enabled).on_toggle(
-                    move |enabled, _, cx| {
-                        let _ = weak.update(cx, |this, cx| {
-                            this.set_automatic_updates_enabled(enabled, cx)
-                        });
-                    },
-                );
-                column.child(
-                    div()
-                        .mt(px(15.0))
-                        .w_full()
-                        .min_h(px(60.0))
-                        .px(px(20.0))
-                        .py(px(12.0))
-                        .rounded(px(13.0))
-                        .bg(theme.raised)
-                        .flex()
-                        .items_center()
-                        .gap(px(24.0))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .child(
-                                    div()
-                                        .text_size(sp(13.5))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(theme.text)
-                                        .child(tr!("settings.automatic_updates")),
-                                )
-                                .child(
-                                    div()
-                                        .mt(px(5.0))
-                                        .text_size(sp(12.5))
-                                        .line_height(sp(18.0))
-                                        .text_color(theme.text_secondary)
-                                        .child(tr!("settings.automatic_updates_description")),
-                                ),
-                        )
-                        .child(toggle),
-                )
-            })
             .child(
-                div()
-                    .mt(px(15.0))
+                bezel_theme
+                    .group_box()
                     .w_full()
                     .min_h(px(60.0))
                     .px(px(20.0))
                     .py(px(12.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
                     .flex()
                     .items_center()
                     .gap(px(24.0))

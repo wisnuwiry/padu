@@ -1,9 +1,11 @@
 use super::*;
 use crate::ui::button::{Button, ButtonStyle};
+use bezel::ui::widgets::Scaffolding;
 
 impl Padu {
     pub(super) fn render_about_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx);
         let version = env!("CARGO_PKG_VERSION");
         let status = self.updater_status;
         let is_checking = self.updater_checking;
@@ -11,18 +13,17 @@ impl Padu {
         let is_loading = is_checking || is_updating;
 
         div()
+            .pt(px(20.0))
             .flex()
             .flex_col()
-            .gap(px(12.0))
+            .gap(px(16.0))
             // Unified About + Version + Updates Card
             .child(
-                div()
-                    .mt(px(15.0))
+                bezel_theme
+                    .group_box()
                     .w_full()
                     .px(px(20.0))
                     .py(px(18.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
                     .flex()
                     .items_center()
                     .justify_between()
@@ -38,7 +39,7 @@ impl Padu {
                                 div()
                                     .w(px(60.0))
                                     .h(px(60.0))
-                                    .rounded(px(15.0))
+                                    .rounded(px(Theme::surface_radius()))
                                     .bg(gpui::black())
                                     .border_1()
                                     .border_color(theme.border)
@@ -68,7 +69,7 @@ impl Padu {
                                                 div()
                                                     .px(px(6.0))
                                                     .py(px(1.5))
-                                                    .rounded(px(5.0))
+                                                    .rounded(px(Theme::control_radius()))
                                                     .bg(theme.surface)
                                                     .border_1()
                                                     .border_color(theme.border)
