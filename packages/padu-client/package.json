@@ -9,6 +9,7 @@
     "./transcript-presentation": "./src/transcript-presentation.ts",
     "./composer-preferences": "./src/composer-preferences.ts",
     "./provider-probe-cache": "./src/provider-probe-cache.ts",
+    "./theme": "./src/theme.ts",
     "./protocol": "./src/generated/index.ts"
   },
   "scripts": {

@@ -5,10 +5,15 @@ import { MarkdownView } from '@/components/markdown-view'
 import { PaduIcon } from '@/components/padu-icon'
 import {
   CODE_WORD_WRAP_KEY,
+  COLOR_SCHEME_IDS,
+  COLOR_SCHEME_KEY,
+  applyColorSchemeChoice,
   applyThemeChoice,
+  readColorSchemeChoice,
   readThemeChoice,
   type ThemeChoice,
 } from '@/lib/appearance'
+import { COLOR_SCHEMES, DEFAULT_COLOR_SCHEME, type ColorSchemeId } from '@padu/client'
 import {
   APP_LANGUAGES,
   languageLabel,
@@ -32,6 +37,9 @@ export function AppearanceSettings() {
   const [theme, setTheme] = useState<ThemeChoice>(() => typeof window === 'undefined'
     ? 'system'
     : readThemeChoice(window.localStorage))
+  const [colorScheme, setColorScheme] = useState<ColorSchemeId>(() => typeof window === 'undefined'
+    ? DEFAULT_COLOR_SCHEME
+    : readColorSchemeChoice(window.localStorage))
   const background = useConversationBackground()
   const opacityPercent = Math.round(background.opacity * 100)
   const heightPercent = Math.round(background.heightPercent)
@@ -44,6 +52,11 @@ export function AppearanceSettings() {
     systemAppearance.addEventListener('change', apply)
     return () => systemAppearance.removeEventListener('change', apply)
   }, [theme])
+
+  useEffect(() => {
+    applyColorSchemeChoice(document.documentElement, colorScheme)
+    window.localStorage.setItem(COLOR_SCHEME_KEY, colorScheme)
+  }, [colorScheme])
   return (
     <>
     <div className="mt-[15px] w-full overflow-hidden rounded-[13px] bg-[var(--raised)]">
@@ -77,6 +90,41 @@ export function AppearanceSettings() {
                 <span className="mt-2 block text-[12px] font-medium text-foreground">
                   {t(`settings.theme_${choice}`)}
                 </span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+      <div className="mx-5 border-t" />
+      <div className="flex min-h-[60px] items-center justify-between gap-6 px-5 py-3">
+        <SettingText
+          title={t('settings.color_scheme')}
+          description={t('settings.color_scheme_description')}
+        />
+        <div className="flex items-center gap-2">
+          {COLOR_SCHEME_IDS.map((schemeId) => {
+            const def = COLOR_SCHEMES[schemeId]
+            const isSelected = schemeId === colorScheme
+            const accentColor = def.light.accent
+            return (
+              <button
+                key={schemeId}
+                type="button"
+                aria-pressed={isSelected}
+                aria-label={t(`settings.color_scheme_${schemeId}` as any)}
+                title={t(`settings.color_scheme_${schemeId}` as any)}
+                className={cn(
+                  'relative h-6 w-6 rounded-full border-2 transition-all p-0.5 outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  isSelected
+                    ? 'border-ring ring-1 ring-ring'
+                    : 'border-transparent hover:border-[var(--border-strong)]',
+                )}
+                onClick={() => setColorScheme(schemeId)}
+              >
+                <span
+                  className="block h-full w-full rounded-full"
+                  style={{ backgroundColor: accentColor }}
+                />
               </button>
             )
           })}
