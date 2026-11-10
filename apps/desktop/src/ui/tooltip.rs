@@ -2,21 +2,21 @@
 //!
 //! GPUI already owns tooltip *behaviour* — hover timing, placement, dismissal —
 //! through `InteractiveElement::tooltip`, which asks only for a view to render.
-//! This is that view, and nothing more.
+//! This wraps Bezel's native `Tooltip` component so the entire app renders
+//! consistent Bezel tooltips.
 
 use gpui::{
-    AnyView, App, AppContext, FontWeight, IntoElement, ParentElement, Render, SharedString, Styled,
-    Window, div, prelude::*, px,
+    AnyElement, AnyView, App, AppContext, Empty, IntoElement, Render, SharedString, Window, div,
 };
 
-use crate::theme::{Theme, sp};
-
-/// A single-line hint.
+/// A single-line hint backed by Bezel's tooltip.
+#[derive(Clone)]
 pub struct Tooltip {
     label: SharedString,
     shortcut: Option<SharedString>,
 }
 
+#[allow(dead_code)]
 impl Tooltip {
     pub fn new(label: impl Into<SharedString>) -> Self {
         Self {
@@ -31,17 +31,30 @@ impl Tooltip {
     }
 
     /// Build the view GPUI's `.tooltip(..)` expects.
-    pub fn build(self, _window: &mut Window, cx: &mut App) -> AnyView {
-        cx.new(|_| self).into()
+    pub fn build(self, window: &mut Window, cx: &mut App) -> AnyView {
+        if self.label.trim().is_empty() {
+            return cx.new(|_| Empty).into();
+        }
+        if let Some(shortcut) = self.shortcut {
+            bezel::ui::tooltip::Tooltip::with_keystroke(self.label, shortcut, window, cx)
+        } else {
+            bezel::ui::tooltip::Tooltip::text(self.label, window, cx)
+        }
     }
 
     /// Shorthand for the overwhelmingly common case:
     /// `.tooltip(Tooltip::text("Copy message"))`.
     pub fn text(
         label: impl Into<SharedString>,
-    ) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
+    ) -> impl Fn(&mut Window, &mut App) -> AnyView + Clone + 'static {
         let label = label.into();
-        move |window, cx| Tooltip::new(label.clone()).build(window, cx)
+        move |window, cx| {
+            if label.trim().is_empty() {
+                cx.new(|_| Empty).into()
+            } else {
+                bezel::ui::tooltip::Tooltip::text(label.clone(), window, cx)
+            }
+        }
     }
 
     /// Shorthand for tooltips with a keyboard shortcut badge:
@@ -49,54 +62,63 @@ impl Tooltip {
     pub fn with_shortcut(
         label: impl Into<SharedString>,
         shortcut: impl Into<SharedString>,
-    ) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
+    ) -> impl Fn(&mut Window, &mut App) -> AnyView + Clone + 'static {
         let label = label.into();
         let shortcut = shortcut.into();
         move |window, cx| {
-            Tooltip::new(label.clone())
-                .shortcut(shortcut.clone())
-                .build(window, cx)
+            if label.trim().is_empty() {
+                cx.new(|_| Empty).into()
+            } else {
+                bezel::ui::tooltip::Tooltip::with_keystroke(
+                    label.clone(),
+                    shortcut.clone(),
+                    window,
+                    cx,
+                )
+            }
         }
+    }
+
+    /// Tooltip bound directly to an action.
+    pub fn for_action(
+        text: impl Into<SharedString>,
+        action: &dyn gpui::Action,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> AnyView {
+        bezel::ui::tooltip::Tooltip::for_action(text, action, window, cx)
+    }
+
+    /// Tooltip bound directly to an action within a specific context.
+    pub fn for_action_in(
+        text: impl Into<SharedString>,
+        action: &dyn gpui::Action,
+        context: &str,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> AnyView {
+        bezel::ui::tooltip::Tooltip::for_action_in(text, action, context, window, cx)
+    }
+
+    /// The card a tooltip paints, for a hover drawn inside another view.
+    pub fn card(
+        text: impl Into<SharedString>,
+        keystroke: Option<SharedString>,
+        cx: &App,
+    ) -> AnyElement {
+        let text = text.into();
+        if text.trim().is_empty() {
+            return div().into_any_element();
+        }
+        bezel::ui::tooltip::Tooltip::card(text, keystroke, cx)
     }
 }
 
 impl Render for Tooltip {
     fn render(&mut self, _window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
         if self.label.trim().is_empty() {
-            return div();
+            return div().into_any_element();
         }
-        let theme = Theme::current(cx);
-        // The outer wrapper is transparent and only offsets the card from the
-        // cursor; the shadow needs a parent that does not clip it.
-        div().pt(px(4.0)).pl(px(2.0)).child(
-            div()
-                .px(px(7.0))
-                .py(px(4.0))
-                .rounded(px(6.0))
-                .border_1()
-                .border_color(theme.border_strong)
-                .bg(theme.raised)
-                .shadow_md()
-                .flex()
-                .items_center()
-                .gap(px(8.0))
-                .text_size(sp(12.5))
-                .line_height(sp(15.0))
-                .text_color(theme.text_secondary)
-                .child(self.label.clone())
-                .when_some(self.shortcut.clone(), |row, shortcut| {
-                    row.child(
-                        div()
-                            .px(px(4.0))
-                            .py(px(1.0))
-                            .rounded(px(4.0))
-                            .bg(theme.overlay_strong)
-                            .text_size(sp(11.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text_tertiary)
-                            .child(shortcut),
-                    )
-                }),
-        )
+        bezel::ui::tooltip::Tooltip::card(self.label.clone(), self.shortcut.clone(), cx)
     }
 }
