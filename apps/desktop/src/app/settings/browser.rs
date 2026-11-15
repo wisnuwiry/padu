@@ -3,13 +3,13 @@
 use super::*;
 use crate::browser::Browsing;
 use crate::theme::sp;
+use crate::ui::Switch;
 use crate::ui::button::{Button, ButtonRole, ButtonStyle};
 use ::browser::{DataStore, Usage};
 use bezel::{
-    gpui::{AnyElement, Context, Div, Task, div, px},
-    theme::Theme as BezelTheme,
+    gpui::{AnyElement, Context, Task, div, px},
     ui::combobox::{Combobox, ComboboxEvent},
-    ui::widgets::Controls as _,
+    ui::widgets::Scaffolding,
 };
 
 #[derive(Default)]
@@ -21,32 +21,41 @@ pub(crate) struct BrowserData {
 
 impl Padu {
     pub(super) fn render_browser_settings(&self, cx: &mut Context<Self>) -> AnyElement {
-        let bezel_theme = BezelTheme::of(cx).clone();
+        let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx).clone();
         let browsing = cx.try_global::<Browsing>().cloned().unwrap_or_default();
         div()
             .pt(px(20.0))
             .flex()
             .flex_col()
-            .gap(px(20.0))
+            .gap(px(16.0))
             .child(
                 bezel_theme
                     .group_box()
+                    .w_full()
                     .child(self.render_browser_engine_row(&browsing, cx))
+                    .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
                     .child(self.render_browser_home_row(&browsing, cx)),
             )
             .child(
                 bezel_theme
                     .group_box()
+                    .w_full()
                     .child(self.render_browser_agents_read_row(&browsing, cx))
+                    .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
                     .child(self.render_browser_agents_act_row(&browsing, cx))
+                    .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
                     .child(self.render_browser_agents_blocked_row(&browsing, cx)),
             )
             .child(
                 bezel_theme
                     .group_box()
+                    .w_full()
                     .child(self.render_browser_keep_signed_in_row(&browsing, cx))
                     .when(browsing.keep_signed_in, |group| {
-                        group.child(self.render_browser_clear_row(cx))
+                        group
+                            .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+                            .child(self.render_browser_clear_row(cx))
                     }),
             )
             .into_any_element()
@@ -54,90 +63,110 @@ impl Padu {
 
     /// Select search engine with custom options.
     fn render_browser_engine_row(&self, browsing: &Browsing, cx: &mut Context<Self>) -> AnyElement {
-        let bezel_theme = BezelTheme::of(cx).clone();
+        let theme = Theme::current(cx);
         if self.adding_custom_engine {
-            return bezel_theme
-                .card_row(false)
+            return div()
+                .w_full()
+                .min_h(px(60.0))
+                .px(px(20.0))
+                .py(px(14.0))
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
                 .child(
                     div()
-                        .flex_1()
-                        .min_w_0()
+                        .text_size(sp(13.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(tr!("settings.browser_add_search_engine")),
+                )
+                .child(
+                    div()
+                        .text_size(sp(12.5))
+                        .line_height(sp(18.0))
+                        .text_color(theme.text_secondary)
+                        .child(tr!("settings.browser_add_search_engine_hint")),
+                )
+                .child(
+                    div()
                         .flex()
-                        .flex_col()
+                        .items_center()
                         .gap(px(8.0))
-                        .child(bezel_theme.row_title(tr!("settings.browser_add_search_engine")))
                         .child(
                             div()
-                                .text_size(sp(12.5))
-                                .text_color(bezel_theme.text_muted)
-                                .child(tr!("settings.browser_add_search_engine_hint")),
+                                .w(px(160.0))
+                                .child(self.custom_engine_name_input.clone()),
+                        )
+                        .child(div().flex_1().child(self.custom_engine_url_input.clone()))
+                        .child(
+                            Button::new("browser-custom-engine-save", tr!("common.save"))
+                                .button_style(ButtonStyle::Prominent)
+                                .on_press(cx.listener(|this, _, _, cx| {
+                                    let name = this
+                                        .custom_engine_name_input
+                                        .read(cx)
+                                        .content()
+                                        .trim()
+                                        .to_owned();
+                                    let url = this
+                                        .custom_engine_url_input
+                                        .read(cx)
+                                        .content()
+                                        .trim()
+                                        .to_owned();
+                                    if !name.is_empty() && !url.is_empty() {
+                                        this.add_custom_search_engine(name, url, cx);
+                                    }
+                                    this.adding_custom_engine = false;
+                                    cx.notify();
+                                })),
                         )
                         .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(8.0))
-                                .child(
-                                    div()
-                                        .w(px(160.0))
-                                        .child(self.custom_engine_name_input.clone()),
-                                )
-                                .child(div().flex_1().child(self.custom_engine_url_input.clone()))
-                                .child(
-                                    Button::new("browser-custom-engine-save", tr!("common.save"))
-                                        .button_style(ButtonStyle::Prominent)
-                                        .on_press(cx.listener(|this, _, _, cx| {
-                                            let name = this
-                                                .custom_engine_name_input
-                                                .read(cx)
-                                                .content()
-                                                .trim()
-                                                .to_owned();
-                                            let url = this
-                                                .custom_engine_url_input
-                                                .read(cx)
-                                                .content()
-                                                .trim()
-                                                .to_owned();
-                                            if !name.is_empty() && !url.is_empty() {
-                                                this.add_custom_search_engine(name, url, cx);
-                                            }
-                                            this.adding_custom_engine = false;
-                                            cx.notify();
-                                        })),
-                                )
-                                .child(
-                                    Button::new(
-                                        "browser-custom-engine-cancel",
-                                        tr!("common.cancel"),
-                                    )
-                                    .button_style(ButtonStyle::Ghost)
-                                    .on_press(cx.listener(
-                                        |this, _, _, cx| {
-                                            this.adding_custom_engine = false;
-                                            this.browser_search_combobox =
-                                                Self::create_browser_search_combobox(cx);
-                                            cx.notify();
-                                        },
-                                    )),
-                                ),
+                            Button::new("browser-custom-engine-cancel", tr!("common.cancel"))
+                                .button_style(ButtonStyle::Ghost)
+                                .on_press(cx.listener(|this, _, _, cx| {
+                                    this.adding_custom_engine = false;
+                                    this.browser_search_combobox =
+                                        Self::create_browser_search_combobox(cx);
+                                    cx.notify();
+                                })),
                         ),
                 )
                 .into_any_element();
         }
 
         let engine_name = browsing.engine_name_for_search();
-        bezel_theme
-            .card_row(false)
-            .child(labelled(
-                &bezel_theme,
-                tr!("settings.browser_search_engine"),
-                tr!(
-                    "settings.browser_search_engine_description",
-                    engine = &engine_name
-                ),
-                false,
-            ))
+        div()
+            .w_full()
+            .min_h(px(60.0))
+            .px(px(20.0))
+            .py(px(12.0))
+            .flex()
+            .items_center()
+            .gap(px(24.0))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!("settings.browser_search_engine")),
+                    )
+                    .child(
+                        div()
+                            .mt(px(5.0))
+                            .text_size(sp(12.5))
+                            .line_height(sp(18.0))
+                            .text_color(theme.text_secondary)
+                            .child(tr!(
+                                "settings.browser_search_engine_description",
+                                engine = &engine_name
+                            )),
+                    ),
+            )
             .child(
                 div()
                     .w(px(200.0))
@@ -224,65 +253,82 @@ impl Padu {
     }
 
     fn render_browser_home_row(&self, browsing: &Browsing, cx: &mut Context<Self>) -> AnyElement {
-        let bezel_theme = BezelTheme::of(cx).clone();
+        let theme = Theme::current(cx);
         if self.editing_browser_home {
-            return bezel_theme
-                .card_row(false)
+            return div()
+                .w_full()
+                .min_h(px(60.0))
+                .px(px(20.0))
+                .py(px(14.0))
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
                 .child(
                     div()
-                        .flex_1()
-                        .min_w_0()
+                        .text_size(sp(13.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(tr!("settings.browser_home")),
+                )
+                .child(
+                    div()
                         .flex()
-                        .flex_col()
+                        .items_center()
                         .gap(px(8.0))
-                        .child(bezel_theme.row_title(tr!("settings.browser_home")))
+                        .child(div().flex_1().child(self.browser_home_input.clone()))
                         .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(8.0))
-                                .child(div().flex_1().child(self.browser_home_input.clone()))
-                                .child(
-                                    Button::new("browser-home-save", tr!("common.save"))
-                                        .button_style(ButtonStyle::Prominent)
-                                        .on_press(cx.listener(|this, _, _, cx| {
-                                            let typed = this
-                                                .browser_home_input
-                                                .read(cx)
-                                                .content()
-                                                .to_owned();
-                                            this.save_browser_home(&typed, cx);
-                                            this.editing_browser_home = false;
-                                            cx.notify();
-                                        })),
-                                )
-                                .child(
-                                    Button::new("browser-home-cancel", tr!("common.cancel"))
-                                        .button_style(ButtonStyle::Ghost)
-                                        .on_press(cx.listener(|this, _, _, cx| {
-                                            this.editing_browser_home = false;
-                                            cx.notify();
-                                        })),
-                                ),
+                            Button::new("browser-home-save", tr!("common.save"))
+                                .button_style(ButtonStyle::Prominent)
+                                .on_press(cx.listener(|this, _, _, cx| {
+                                    let typed =
+                                        this.browser_home_input.read(cx).content().to_owned();
+                                    this.save_browser_home(&typed, cx);
+                                    this.editing_browser_home = false;
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            Button::new("browser-home-cancel", tr!("common.cancel"))
+                                .button_style(ButtonStyle::Ghost)
+                                .on_press(cx.listener(|this, _, _, cx| {
+                                    this.editing_browser_home = false;
+                                    cx.notify();
+                                })),
                         ),
                 )
                 .into_any_element();
         }
 
         let home = browsing.home.clone();
-        bezel_theme
-            .card_row(false)
-            .child(labelled(
-                &bezel_theme,
-                tr!("settings.browser_home"),
-                div().child(tr!("settings.browser_home_description")).child(
-                    div()
-                        .mt(px(2.0))
-                        .text_color(bezel_theme.text)
-                        .child(home.clone()),
-                ),
-                false,
-            ))
+        div()
+            .w_full()
+            .min_h(px(60.0))
+            .px(px(20.0))
+            .py(px(12.0))
+            .flex()
+            .items_center()
+            .gap(px(24.0))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!("settings.browser_home")),
+                    )
+                    .child(
+                        div()
+                            .mt(px(5.0))
+                            .text_size(sp(12.5))
+                            .line_height(sp(18.0))
+                            .text_color(theme.text_secondary)
+                            .child(tr!("settings.browser_home_description"))
+                            .child(div().mt(px(2.0)).text_color(theme.text).child(home.clone())),
+                    ),
+            )
             .child(
                 Button::new("browser-home-change", tr!("common.change"))
                     .button_style(ButtonStyle::Ghost)
@@ -305,19 +351,43 @@ impl Padu {
         browsing: &Browsing,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let theme = Theme::current(cx);
         let on = browsing.agents_read;
-        self.browser_switch_row(
-            "browser-agents-read",
-            tr!("settings.browser_agents_read"),
-            tr!("settings.browser_agents_read_description"),
-            on,
-            true,
-            false,
-            cx,
-            move |this, cx| {
-                this.set_browser_agents_read(!on, cx);
-            },
-        )
+        let weak = cx.entity().downgrade();
+        let toggle = Switch::new("browser-agents-read", on).on_toggle(move |enabled, _, cx| {
+            let _ = weak.update(cx, |this, cx| this.set_browser_agents_read(enabled, cx));
+        });
+
+        div()
+            .w_full()
+            .min_h(px(60.0))
+            .px(px(20.0))
+            .py(px(12.0))
+            .flex()
+            .items_center()
+            .gap(px(24.0))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!("settings.browser_agents_read")),
+                    )
+                    .child(
+                        div()
+                            .mt(px(5.0))
+                            .text_size(sp(12.5))
+                            .line_height(sp(18.0))
+                            .text_color(theme.text_secondary)
+                            .child(tr!("settings.browser_agents_read_description")),
+                    ),
+            )
+            .child(toggle)
+            .into_any_element()
     }
 
     /// Read only while [`Self::render_browser_agents_read_row`] is on.
@@ -326,22 +396,50 @@ impl Padu {
         browsing: &Browsing,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let theme = Theme::current(cx);
         let on = browsing.agents_act;
         let disabled = !browsing.agents_read;
-        self.browser_switch_row(
-            "browser-agents-act",
-            tr!("settings.browser_agents_act"),
-            tr!("settings.browser_agents_act_description"),
-            on && !disabled,
-            false,
-            disabled,
-            cx,
-            move |this, cx| {
-                if !disabled {
-                    this.set_browser_agents_act(!on, cx);
-                }
-            },
-        )
+        let weak = cx.entity().downgrade();
+        let toggle = Switch::new("browser-agents-act", on && !disabled)
+            .enabled(!disabled)
+            .on_toggle(move |enabled, _, cx| {
+                let _ = weak.update(cx, |this, cx| {
+                    if !disabled {
+                        this.set_browser_agents_act(enabled, cx);
+                    }
+                });
+            });
+
+        div()
+            .w_full()
+            .min_h(px(60.0))
+            .px(px(20.0))
+            .py(px(12.0))
+            .flex()
+            .items_center()
+            .gap(px(24.0))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!("settings.browser_agents_act")),
+                    )
+                    .child(
+                        div()
+                            .mt(px(5.0))
+                            .text_size(sp(12.5))
+                            .line_height(sp(18.0))
+                            .text_color(theme.text_secondary)
+                            .child(tr!("settings.browser_agents_act_description")),
+                    ),
+            )
+            .child(toggle)
+            .into_any_element()
     }
 
     fn render_browser_agents_blocked_row(
@@ -349,69 +447,89 @@ impl Padu {
         browsing: &Browsing,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let bezel_theme = BezelTheme::of(cx).clone();
+        let theme = Theme::current(cx);
         let blocked_str = browsing.agents_blocked.join(", ");
         if self.editing_browser_blocked {
-            return bezel_theme
-                .card_row(false)
+            return div()
+                .w_full()
+                .min_h(px(60.0))
+                .px(px(20.0))
+                .py(px(14.0))
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
                 .child(
                     div()
-                        .flex_1()
-                        .min_w_0()
+                        .text_size(sp(13.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(tr!("settings.browser_blocked")),
+                )
+                .child(
+                    div()
                         .flex()
-                        .flex_col()
+                        .items_center()
                         .gap(px(8.0))
-                        .child(bezel_theme.row_title(tr!("settings.browser_blocked")))
+                        .child(div().flex_1().child(self.browser_blocked_input.clone()))
                         .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(8.0))
-                                .child(div().flex_1().child(self.browser_blocked_input.clone()))
-                                .child(
-                                    Button::new("browser-blocked-save", tr!("common.save"))
-                                        .button_style(ButtonStyle::Prominent)
-                                        .on_press(cx.listener(|this, _, _, cx| {
-                                            let typed = this
-                                                .browser_blocked_input
-                                                .read(cx)
-                                                .content()
-                                                .to_owned();
-                                            this.save_browser_blocked(&typed, cx);
-                                            this.editing_browser_blocked = false;
-                                            cx.notify();
-                                        })),
-                                )
-                                .child(
-                                    Button::new("browser-blocked-cancel", tr!("common.cancel"))
-                                        .button_style(ButtonStyle::Ghost)
-                                        .on_press(cx.listener(|this, _, _, cx| {
-                                            this.editing_browser_blocked = false;
-                                            cx.notify();
-                                        })),
-                                ),
+                            Button::new("browser-blocked-save", tr!("common.save"))
+                                .button_style(ButtonStyle::Prominent)
+                                .on_press(cx.listener(|this, _, _, cx| {
+                                    let typed =
+                                        this.browser_blocked_input.read(cx).content().to_owned();
+                                    this.save_browser_blocked(&typed, cx);
+                                    this.editing_browser_blocked = false;
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            Button::new("browser-blocked-cancel", tr!("common.cancel"))
+                                .button_style(ButtonStyle::Ghost)
+                                .on_press(cx.listener(|this, _, _, cx| {
+                                    this.editing_browser_blocked = false;
+                                    cx.notify();
+                                })),
                         ),
                 )
                 .into_any_element();
         }
 
         let current = blocked_str.clone();
-        bezel_theme
-            .card_row(false)
-            .child(labelled(
-                &bezel_theme,
-                tr!("settings.browser_blocked"),
+        div()
+            .w_full()
+            .min_h(px(60.0))
+            .px(px(20.0))
+            .py(px(12.0))
+            .flex()
+            .items_center()
+            .gap(px(24.0))
+            .child(
                 div()
-                    .child(tr!("settings.browser_blocked_description"))
-                    .child(div().mt(px(2.0)).text_color(bezel_theme.text).child(
-                        if blocked_str.is_empty() {
-                            tr!("settings.browser_blocked_none").to_string()
-                        } else {
-                            blocked_str
-                        },
-                    )),
-                false,
-            ))
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!("settings.browser_blocked")),
+                    )
+                    .child(
+                        div()
+                            .mt(px(5.0))
+                            .text_size(sp(12.5))
+                            .line_height(sp(18.0))
+                            .text_color(theme.text_secondary)
+                            .child(tr!("settings.browser_blocked_description"))
+                            .child(div().mt(px(2.0)).text_color(theme.text).child(
+                                if blocked_str.is_empty() {
+                                    tr!("settings.browser_blocked_none").to_string()
+                                } else {
+                                    blocked_str
+                                },
+                            )),
+                    ),
+            )
             .child(
                 Button::new("browser-blocked-change", tr!("common.change"))
                     .button_style(ButtonStyle::Ghost)
@@ -434,23 +552,49 @@ impl Padu {
         browsing: &Browsing,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let theme = Theme::current(cx);
         let on = browsing.keep_signed_in;
-        self.browser_switch_row(
-            "browser-keep",
-            tr!("settings.browser_keep_signed_in"),
-            tr!("settings.browser_keep_signed_in_description"),
-            on,
-            true,
-            false,
-            cx,
-            move |this, cx| {
-                this.set_browser_keep_signed_in(!on, cx);
-            },
-        )
+        let weak = cx.entity().downgrade();
+        let toggle = Switch::new("browser-keep", on).on_toggle(move |enabled, _, cx| {
+            let _ = weak.update(cx, |this, cx| {
+                this.set_browser_keep_signed_in(enabled, cx);
+            });
+        });
+
+        div()
+            .w_full()
+            .min_h(px(60.0))
+            .px(px(20.0))
+            .py(px(12.0))
+            .flex()
+            .items_center()
+            .gap(px(24.0))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!("settings.browser_keep_signed_in")),
+                    )
+                    .child(
+                        div()
+                            .mt(px(5.0))
+                            .text_size(sp(12.5))
+                            .line_height(sp(18.0))
+                            .text_color(theme.text_secondary)
+                            .child(tr!("settings.browser_keep_signed_in_description")),
+                    ),
+            )
+            .child(toggle)
+            .into_any_element()
     }
 
     fn render_browser_clear_row(&self, cx: &mut Context<Self>) -> AnyElement {
-        let bezel_theme = BezelTheme::of(cx).clone();
+        let theme = Theme::current(cx);
         let clearing = crate::browser::clearing(cx);
         let note = if clearing {
             tr!("settings.browser_clearing").to_string()
@@ -473,14 +617,34 @@ impl Padu {
             format!("{amount} {}", tr!("settings.browser_clear_footer"))
         };
 
-        bezel_theme
-            .card_row(false)
-            .child(labelled(
-                &bezel_theme,
-                tr!("settings.browser_data"),
-                note,
-                false,
-            ))
+        div()
+            .w_full()
+            .min_h(px(60.0))
+            .px(px(20.0))
+            .py(px(12.0))
+            .flex()
+            .items_center()
+            .gap(px(24.0))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!("settings.browser_data")),
+                    )
+                    .child(
+                        div()
+                            .mt(px(5.0))
+                            .text_size(sp(12.5))
+                            .line_height(sp(18.0))
+                            .text_color(theme.text_secondary)
+                            .child(note),
+                    ),
+            )
             .child(
                 Button::new(
                     "browser-clear",
@@ -496,37 +660,6 @@ impl Padu {
                 .on_press(cx.listener(|this, _, _, cx| {
                     this.clear_browsing_data(cx);
                 })),
-            )
-            .into_any_element()
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn browser_switch_row(
-        &self,
-        id: &'static str,
-        title: impl Into<SharedString>,
-        blurb: impl Into<SharedString>,
-        on: bool,
-        first: bool,
-        disabled: bool,
-        cx: &Context<Self>,
-        flip: impl Fn(&mut Self, &mut Context<Self>) + 'static,
-    ) -> AnyElement {
-        let bezel_theme = BezelTheme::of(cx).clone();
-        bezel_theme
-            .card_row(first)
-            .child(labelled(&bezel_theme, title, blurb.into(), false))
-            .child(
-                div()
-                    .id(id)
-                    .when(!disabled, |d| {
-                        d.cursor_pointer()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                flip(this, cx);
-                            }))
-                    })
-                    .when(disabled, |d| d.opacity(0.5))
-                    .child(bezel_theme.toggle(on)),
             )
             .into_any_element()
     }
@@ -703,28 +836,4 @@ impl Padu {
         cx.set_global(browsing);
         cx.notify();
     }
-}
-
-/// A row's title over a line of explanation, filling the row's free width.
-fn labelled(
-    theme: &BezelTheme,
-    title: impl Into<SharedString>,
-    blurb: impl IntoElement,
-    truncate: bool,
-) -> Div {
-    div()
-        .flex_1()
-        .min_w_0()
-        .flex()
-        .flex_col()
-        .child(theme.row_title(title))
-        .child(
-            div()
-                .mt(px(4.0))
-                .when(truncate, |el| el.truncate())
-                .text_size(sp(12.5))
-                .line_height(sp(17.0))
-                .text_color(theme.text_muted)
-                .child(blurb),
-        )
 }
