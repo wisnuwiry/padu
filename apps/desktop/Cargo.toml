@@ -13,6 +13,7 @@ blake3 = "1.8"
 chrono = "0.4"
 crossbeam-channel = "0.5"
 dirs = "7.0"
+image = "0.25"
 bezel = "0.2.22"
 browser = { package = "bezel-browser", version = "0.2.22" }
 gpui = { package = "bezel-gpui", version = "0.3.21" }

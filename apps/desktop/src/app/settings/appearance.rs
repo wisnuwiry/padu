@@ -7,6 +7,7 @@ use crate::ui::{Switch, slider};
 use bezel::ui::combobox::{Combobox, ComboboxEvent};
 use bezel::ui::widgets::{Controls, Scaffolding, SliderDrag, slider_fraction};
 use gpui::{Bounds, DragMoveEvent, ElementId, MouseButton, MouseDownEvent, SharedString, canvas};
+use padu_client::persistence::ConversationBackgroundEffect;
 
 fn font_size_label(size: f32) -> String {
     if size.fract() == 0.0 {
@@ -135,7 +136,21 @@ fn render_background_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) 
                                 });
                             }
                         },
-                    )),
+                    ))
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .gap(px(4.0))
+                            .child(
+                                div()
+                                    .text_size(sp(12.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!("settings.background_effect")),
+                            )
+                            .child(padu.background_effect_combobox.clone()),
+                    ),
             )
             .child(
                 div()
@@ -997,6 +1012,7 @@ impl Padu {
         self.state.theme = preference;
         crate::theme::apply_theme(preference, self.color_scheme(), window, cx);
         self.save();
+        self.refresh_conversation_background_effect(cx);
         cx.notify();
     }
 
@@ -1049,6 +1065,50 @@ impl Padu {
         combobox
     }
 
+    pub(crate) fn create_background_effect_combobox(
+        effect: ConversationBackgroundEffect,
+        cx: &mut Context<Self>,
+    ) -> Entity<Combobox> {
+        let items = ConversationBackgroundEffect::ALL
+            .into_iter()
+            .map(|effect| match effect {
+                ConversationBackgroundEffect::None => {
+                    SharedString::from(tr!("settings.background_effect_none"))
+                }
+                ConversationBackgroundEffect::Dither => {
+                    SharedString::from(tr!("settings.background_effect_dither"))
+                }
+                ConversationBackgroundEffect::Ascii => {
+                    SharedString::from(tr!("settings.background_effect_ascii"))
+                }
+            })
+            .collect::<Vec<_>>();
+        let selected_index = ConversationBackgroundEffect::ALL
+            .into_iter()
+            .position(|e| e == effect);
+        let combobox = cx.new(|cx| {
+            let mut combo = Combobox::new(items, tr!("settings.background_effect"), cx);
+            if let Some(index) = selected_index {
+                combo = combo.with_selection(index);
+            }
+            combo
+        });
+
+        cx.subscribe(
+            &combobox,
+            |this: &mut Self, _, event: &ComboboxEvent, cx| match event {
+                ComboboxEvent::Selected(index) => {
+                    if let Some(&effect) = ConversationBackgroundEffect::ALL.get(*index) {
+                        this.set_conversation_background_effect(effect, cx);
+                    }
+                }
+            },
+        )
+        .detach();
+
+        combobox
+    }
+
     pub(crate) fn set_language(
         &mut self,
         language: crate::i18n::AppLanguage,
@@ -1062,6 +1122,8 @@ impl Padu {
         self.state.language = language;
         crate::i18n::set_language(language);
         self.language_combobox = Self::create_language_combobox(language, cx);
+        self.background_effect_combobox =
+            Self::create_background_effect_combobox(self.state.conversation_background.effect, cx);
 
         self.composer.update(cx, |input, cx| {
             input.set_placeholder(tr!("input.do_anything"), cx)

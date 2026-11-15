@@ -1318,6 +1318,7 @@ pub struct Padu {
     pub(crate) custom_engine_url_input: Entity<TextInput>,
     keybindings_search: Entity<TextInput>,
     language_combobox: Entity<bezel::ui::combobox::Combobox>,
+    pub(crate) background_effect_combobox: Entity<bezel::ui::combobox::Combobox>,
     daemon_port_input: Entity<TextInput>,
     daemon_origin_inputs: Vec<Entity<TextInput>>,
     daemon_reconfigure_pending: bool,
@@ -1593,6 +1594,7 @@ pub struct Padu {
     /// desktop never creates another attachment file.
     remote_images: RefCell<HashMap<String, RemoteImageState>>,
     conversation_background_image: RefCell<Option<Arc<gpui::Image>>>,
+    conversation_background_raw: RefCell<Option<(gpui::ImageFormat, Arc<Vec<u8>>)>>,
     conversation_background_generation: Cell<u64>,
     /// Coalesced edge trigger for provider and background result queues. The
     /// payloads stay in their typed channels; this channel only wakes the UI.
@@ -1802,6 +1804,11 @@ pub struct Padu {
     notes_layout: notes::NotesLayout,
     notes_turn_open: bool,
     notes_list_collapsed: bool,
+    notes_heading_indicator_visible: bool,
+    notes_heading_rail: Entity<notes::NotesHeadingRail>,
+    notes_heading_rail_reset_generation: Cell<u64>,
+    notes_headings_cache: RefCell<Rc<Vec<notes::NoteHeadingItem>>>,
+    notes_headings_fingerprint: Cell<Option<u64>>,
     notes_split_ratio: f32,
     notes_save_generation: u64,
     notes_loaded: bool,
@@ -2825,9 +2832,13 @@ impl Padu {
                 .clear_on_escape()
                 .placeholder(tr!("settings.browser_engine_url_placeholder"))
         });
+        let notes_editor_scroll_handle = ScrollHandle::new();
+        let notes_editor_scrollbar = ScrollbarState::new();
         let notes_title =
             cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("notes.title_placeholder")));
-        let notes_body = cx.new(|cx| bezel_editor::Editor::new("", cx));
+        let notes_body = cx.new(|cx| {
+            bezel_editor::Editor::new("", cx).with_scroll(notes_editor_scroll_handle.clone())
+        });
         let notes_code_body = cx.new(|cx| {
             TextInput::new(window, cx)
                 .multi_line()
@@ -2900,6 +2911,7 @@ impl Padu {
         let right_panel_diff_filter =
             cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("diff.filter_files")));
         let navigation_rail = cx.new(|_| ConversationNavigationRail::new());
+        let notes_heading_rail = cx.new(|_| notes::NotesHeadingRail::new());
         let sidebar_pane = PaduPane::new(Padu::sidebar_pane_content, cx);
         let transcript_pane = PaduPane::new(Padu::transcript_pane_content, cx);
         let right_panel_pane = PaduPane::new(Padu::right_panel_pane_content, cx);
@@ -3192,6 +3204,8 @@ impl Padu {
 
         let entity = cx.new(|cx| {
             let language_combobox = Self::create_language_combobox(state.language, cx);
+            let background_effect_combobox =
+                Self::create_background_effect_combobox(state.conversation_background.effect, cx);
             let browser_search_combobox = Self::create_browser_search_combobox(cx);
             let settings_focus = cx.focus_handle();
             let onboarding_add_project_focus = cx.focus_handle();
@@ -3794,6 +3808,7 @@ impl Padu {
                 custom_engine_url_input,
                 keybindings_search,
                 language_combobox,
+                background_effect_combobox,
                 daemon_port_input,
                 daemon_origin_inputs,
                 daemon_reconfigure_pending: false,
@@ -3931,6 +3946,7 @@ impl Padu {
                 note_preview_generation: 0,
                 remote_images: RefCell::new(HashMap::new()),
                 conversation_background_image: RefCell::new(None),
+                conversation_background_raw: RefCell::new(None),
                 conversation_background_generation: Cell::new(0),
                 event_wake_tx,
                 task_state_sync_tx,
@@ -3999,8 +4015,8 @@ impl Padu {
                 file_preview_selection: TranscriptSelection::default(),
                 file_preview_scroll_handle: ScrollHandle::new(),
                 file_preview_scrollbar: ScrollbarState::new(),
-                notes_editor_scroll_handle: ScrollHandle::new(),
-                notes_editor_scrollbar: ScrollbarState::new(),
+                notes_editor_scroll_handle,
+                notes_editor_scrollbar,
                 right_panel_pending_tab_reveal: None,
                 right_panel_pending_terminal_focus: None,
                 right_panel_expanded_paths: HashSet::new(),
@@ -4184,6 +4200,11 @@ impl Padu {
                 menus: RefCell::new(HashMap::new()),
                 navigation_rail: navigation_rail.clone(),
                 navigation_rail_reset_generation: Cell::new(0),
+                notes_heading_indicator_visible: true,
+                notes_heading_rail: notes_heading_rail.clone(),
+                notes_heading_rail_reset_generation: Cell::new(0),
+                notes_headings_cache: RefCell::new(Rc::new(Vec::new())),
+                notes_headings_fingerprint: Cell::new(None),
                 sidebar_pane: sidebar_pane.clone(),
                 transcript_pane: transcript_pane.clone(),
                 right_panel_pane: right_panel_pane.clone(),
@@ -4198,6 +4219,7 @@ impl Padu {
             }
         });
         navigation_rail.update(cx, |rail, _| rail.set_padu(entity.downgrade()));
+        notes_heading_rail.update(cx, |rail, _| rail.set_padu(entity.downgrade()));
         for pane in [
             &sidebar_pane,
             &transcript_pane,
