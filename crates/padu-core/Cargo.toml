@@ -35,7 +35,7 @@ trash = "5.2.6"
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 url = "2"
 uuid = { version = "1.18", features = ["v4", "serde"] }
-zip = { version = "8", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 padu-protocol = { path = "../padu-protocol" }
 
 [target.'cfg(unix)'.dependencies]
