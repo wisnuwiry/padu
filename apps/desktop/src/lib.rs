@@ -56,11 +56,11 @@ pub use padu_client::{
 };
 
 use gpui::{
-    App, Application, Bounds, KeyBinding, Menu, MenuItem, TitlebarOptions,
-    WindowBackgroundAppearance, WindowBounds, WindowOptions, actions, point, px, size,
+    App, Application, KeyBinding, Menu, MenuItem, TitlebarOptions, WindowBackgroundAppearance,
+    WindowOptions, actions, point, px, size,
 };
 
-use crate::app::Padu;
+use crate::app::{MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, Padu, restored_window_placement};
 use crate::identity::{APP_ID, APP_NAME};
 actions!(
     padu,
@@ -126,69 +126,6 @@ actions!(
         WebviewSelectAll
     ]
 );
-
-const DEFAULT_WINDOW_WIDTH: f32 = 1380.0;
-const DEFAULT_WINDOW_HEIGHT: f32 = 880.0;
-const MIN_WINDOW_WIDTH: f32 = 980.0;
-const MIN_WINDOW_HEIGHT: f32 = 680.0;
-/// How much titlebar must stay on the display for the window to be dragged
-/// back by hand.
-const TITLEBAR_GRAB_WIDTH: f32 = 160.0;
-const TITLEBAR_GRAB_HEIGHT: f32 = 22.0;
-
-/// Reopen the main window where the user last left it, on the display it was
-/// left on. GPUI window bounds are display-relative, so the persisted frame is
-/// anchored by resolving the saved display UUID against the connected
-/// displays — Zed's scheme — and `display_id` rides along in `WindowOptions`.
-/// When that display is gone the same offsets re-anchor on the primary
-/// display, and the origin is clamped so the titlebar stays grabbable after
-/// any display change.
-fn restored_window_placement(cx: &App) -> (WindowBounds, Option<gpui::DisplayId>) {
-    let centered = |cx: &App| {
-        (
-            WindowBounds::Windowed(Bounds::centered(
-                None,
-                size(px(DEFAULT_WINDOW_WIDTH), px(DEFAULT_WINDOW_HEIGHT)),
-                cx,
-            )),
-            None,
-        )
-    };
-    let Some(saved) = crate::persistence::load_window_state().filter(|saved| {
-        [saved.x, saved.y, saved.width, saved.height]
-            .iter()
-            .all(|value| value.is_finite())
-    }) else {
-        return centered(cx);
-    };
-    let display = saved.display.and_then(|uuid| {
-        cx.displays()
-            .into_iter()
-            .find(|display| display.uuid().ok() == Some(uuid))
-    });
-    let display_id = display.as_ref().map(|display| display.id());
-    let Some(anchor) = display.or_else(|| cx.primary_display()) else {
-        return centered(cx);
-    };
-    let anchor_size = anchor.bounds().size;
-    let width = saved.width.max(MIN_WINDOW_WIDTH);
-    let height = saved.height.max(MIN_WINDOW_HEIGHT);
-    let x = saved.x.clamp(
-        TITLEBAR_GRAB_WIDTH - width,
-        (f32::from(anchor_size.width) - TITLEBAR_GRAB_WIDTH).max(0.0),
-    );
-    let y = saved.y.clamp(
-        0.0,
-        (f32::from(anchor_size.height) - TITLEBAR_GRAB_HEIGHT).max(0.0),
-    );
-    let bounds = Bounds::new(point(px(x), px(y)), size(px(width), px(height)));
-    let window_bounds = if saved.maximized {
-        WindowBounds::Maximized(bounds)
-    } else {
-        WindowBounds::Windowed(bounds)
-    };
-    (window_bounds, display_id)
-}
 
 trait PaduApplicationExt {
     fn with_main_window_reopen(self) -> Self;

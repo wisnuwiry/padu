@@ -5,13 +5,15 @@ use super::composer::{
 use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
 use super::settings::visible_settings_pages;
 use super::{
-    ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation, EscapeStopPress, EscapeStopTarget,
+    DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH, ESCAPE_STOP_CONFIRMATION_TIMEOUT,
+    EscapeStopConfirmation, EscapeStopPress, EscapeStopTarget, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH,
     NAVIGATION_RAIL_TICK_HEIGHT, NAVIGATION_RAIL_TURN_HEIGHT, PendingUserInput, SessionNavigation,
     StreamDeltaKind, TranscriptRowKind::*, active_navigation_turn_index,
     append_text_delta_to_session, assistant_response_footer, assistant_response_footer_index,
-    assistant_response_footer_time, compact_driver_error, disclosure_leading_space, fenced_code,
-    fitted_file_tree_width, fitted_panel_widths, folded_transcript_row_kinds,
-    format_worked_duration, format_working_elapsed, maintain_transcript_anchor, message_opens_turn,
+    assistant_response_footer_time, clamp_window_bounds_to_display, compact_driver_error,
+    compute_default_window_bounds, disclosure_leading_space, fenced_code, fitted_file_tree_width,
+    fitted_panel_widths, folded_transcript_row_kinds, format_worked_duration,
+    format_working_elapsed, maintain_transcript_anchor, message_opens_turn,
     message_starts_followup_turn, navigation_preview_snippet, navigation_rail_fade_visibility,
     navigation_rail_height, navigation_rail_scale, paused_toast_duration, pop_stream_batch,
     push_transcript_activity, response_footer_message_index, response_row_turn_id,
@@ -531,6 +533,91 @@ fn hidden_panels_do_not_consume_layout_width() {
 
     assert_eq!(sidebar, 0.0);
     assert_eq!(right_panel, 620.0);
+}
+
+#[test]
+fn panel_widths_preserve_main_content_at_minimum_window_width() {
+    let (sidebar, right_panel) = fitted_panel_widths(MIN_WINDOW_WIDTH, true, true, 420.0, 720.0);
+
+    assert_eq!(sidebar, 200.0);
+    assert_eq!(right_panel, 280.0);
+    assert_eq!(MIN_WINDOW_WIDTH - sidebar - right_panel, 360.0);
+}
+
+#[test]
+fn default_window_bounds_fits_within_various_display_resolutions() {
+    use crate::persistence::PersistedWindowState;
+    use gpui::{Bounds, point, size};
+
+    // 1. Standard 1080p display at 100% scale (visible 1920x1040)
+    let display_1080p = Bounds::new(point(px(0.0), px(0.0)), size(px(1920.0), px(1040.0)));
+    let bounds_1080p = compute_default_window_bounds(display_1080p);
+    assert_eq!(f32::from(bounds_1080p.size.width), DEFAULT_WINDOW_WIDTH);
+    assert_eq!(f32::from(bounds_1080p.size.height), DEFAULT_WINDOW_HEIGHT);
+    assert!(f32::from(bounds_1080p.origin.x) > 0.0);
+    assert!(f32::from(bounds_1080p.origin.y) > 0.0);
+    assert!(f32::from(bounds_1080p.origin.x + bounds_1080p.size.width) <= 1920.0);
+    assert!(f32::from(bounds_1080p.origin.y + bounds_1080p.size.height) <= 1040.0);
+
+    // 2. Windows 1080p display at 150% scaling (visible 1280x688)
+    let display_win_150 = Bounds::new(point(px(0.0), px(0.0)), size(px(1280.0), px(688.0)));
+    let bounds_win_150 = compute_default_window_bounds(display_win_150);
+    assert!(f32::from(bounds_win_150.size.width) <= 1280.0);
+    assert!(f32::from(bounds_win_150.size.height) <= 688.0);
+    assert!(f32::from(bounds_win_150.origin.x) >= 0.0);
+    assert!(f32::from(bounds_win_150.origin.y) >= 0.0);
+    assert!(f32::from(bounds_win_150.origin.x + bounds_win_150.size.width) <= 1280.0);
+    assert!(f32::from(bounds_win_150.origin.y + bounds_win_150.size.height) <= 688.0);
+
+    // 3. 1366x768 laptop screen (visible 1366x728)
+    let display_768p = Bounds::new(point(px(0.0), px(0.0)), size(px(1366.0), px(728.0)));
+    let bounds_768p = compute_default_window_bounds(display_768p);
+    assert!(f32::from(bounds_768p.size.width) <= 1366.0);
+    assert!(f32::from(bounds_768p.size.height) <= 728.0);
+    assert!(f32::from(bounds_768p.origin.x) >= 0.0);
+    assert!(f32::from(bounds_768p.origin.y) >= 0.0);
+    assert!(f32::from(bounds_768p.origin.x + bounds_768p.size.width) <= 1366.0);
+    assert!(f32::from(bounds_768p.origin.y + bounds_768p.size.height) <= 728.0);
+
+    // 4. Compact 1024x768 screen (visible 1024x728)
+    let display_1024 = Bounds::new(point(px(0.0), px(0.0)), size(px(1024.0), px(728.0)));
+    let bounds_1024 = compute_default_window_bounds(display_1024);
+    assert!(f32::from(bounds_1024.size.width) <= 1024.0);
+    assert!(f32::from(bounds_1024.size.height) <= 728.0);
+    assert!(f32::from(bounds_1024.size.width) >= MIN_WINDOW_WIDTH);
+    assert!(f32::from(bounds_1024.size.height) >= MIN_WINDOW_HEIGHT);
+    assert!(f32::from(bounds_1024.origin.x) >= 0.0);
+    assert!(f32::from(bounds_1024.origin.y) >= 0.0);
+
+    // 5. Clamping legacy oversized saved state (1380x880) resets to display bounds
+    let legacy_saved = PersistedWindowState {
+        x: 0.0,
+        y: 0.0,
+        width: 1380.0,
+        height: 880.0,
+        maximized: false,
+        display: None,
+    };
+    let clamped_legacy = clamp_window_bounds_to_display(&legacy_saved, display_win_150);
+    assert!(f32::from(clamped_legacy.size.width) <= 1280.0);
+    assert!(f32::from(clamped_legacy.size.height) <= 688.0);
+    assert!(f32::from(clamped_legacy.origin.x + clamped_legacy.size.width) <= 1280.0);
+    assert!(f32::from(clamped_legacy.origin.y + clamped_legacy.size.height) <= 688.0);
+
+    // 6. Valid user custom size within display is preserved
+    let custom_saved = PersistedWindowState {
+        x: 40.0,
+        y: 30.0,
+        width: 1000.0,
+        height: 600.0,
+        maximized: false,
+        display: None,
+    };
+    let clamped_custom = clamp_window_bounds_to_display(&custom_saved, display_win_150);
+    assert_eq!(f32::from(clamped_custom.size.width), 1000.0);
+    assert_eq!(f32::from(clamped_custom.size.height), 600.0);
+    assert_eq!(f32::from(clamped_custom.origin.x), 40.0);
+    assert_eq!(f32::from(clamped_custom.origin.y), 30.0);
 }
 
 #[test]

@@ -15,7 +15,7 @@ use gpui::{
     MouseUpEvent, NavigationDirection, ObjectFit, PathPromptOptions, Pixels, Render, ScrollHandle,
     SharedString, Stateful, StyleRefinement, TextRun, WeakEntity, Window, WindowBounds, canvas,
     div, ease_out_quint, fill, font, img, linear_color_stop, linear_gradient, list, point,
-    prelude::*, pulsating_between, px, rgb,
+    prelude::*, pulsating_between, px, rgb, size,
 };
 use uuid::Uuid;
 
@@ -84,6 +84,10 @@ const TRAFFIC_LIGHT_CLEARANCE: f32 = 86.0;
 #[cfg(not(target_os = "macos"))]
 const TRAFFIC_LIGHT_CLEARANCE: f32 = 8.0;
 const CONTENT_MAX_WIDTH: f32 = 720.0;
+pub const DEFAULT_WINDOW_WIDTH: f32 = 1120.0;
+pub const DEFAULT_WINDOW_HEIGHT: f32 = 700.0;
+pub const MIN_WINDOW_WIDTH: f32 = 840.0;
+pub const MIN_WINDOW_HEIGHT: f32 = 560.0;
 /// Menu-registry id of the composer's model picker, shared by its render site
 /// and the primary-modifier `/` toggle action.
 const MODEL_PICKER_MENU_ID: &str = "provider-model-picker";
@@ -498,6 +502,135 @@ fn persisted_window_state(
     }
 }
 
+/// Compute default window bounds that fit comfortably within the target display's
+/// visible bounds, scaled down on compact displays so the window never overflows
+/// the active screen or taskbar on any operating system.
+pub fn compute_default_window_bounds(visible_bounds: Bounds<Pixels>) -> Bounds<Pixels> {
+    let visible_size = visible_bounds.size;
+    let visible_width = f32::from(visible_size.width);
+    let visible_height = f32::from(visible_size.height);
+
+    let max_target_width = (visible_width * 0.90).max(MIN_WINDOW_WIDTH.min(visible_width));
+    let max_target_height = (visible_height * 0.88).max(MIN_WINDOW_HEIGHT.min(visible_height));
+
+    let width = DEFAULT_WINDOW_WIDTH
+        .min(max_target_width)
+        .min(visible_width);
+    let height = DEFAULT_WINDOW_HEIGHT
+        .min(max_target_height)
+        .min(visible_height);
+
+    let window_size = size(px(width), px(height));
+    Bounds::centered_at(visible_bounds.center(), window_size)
+}
+
+pub fn default_window_bounds(display: Option<&dyn gpui::PlatformDisplay>) -> Bounds<Pixels> {
+    let Some(display) = display else {
+        return Bounds::new(
+            point(px(0.0), px(0.0)),
+            size(px(DEFAULT_WINDOW_WIDTH), px(DEFAULT_WINDOW_HEIGHT)),
+        );
+    };
+    compute_default_window_bounds(display.visible_bounds())
+}
+
+/// Clamp saved window bounds to the target display's visible bounds.
+/// If saved bounds match previous oversized defaults or overflow the screen,
+/// re-center with responsive default bounds sized for the active display.
+pub fn clamp_window_bounds_to_display(
+    saved: &PersistedWindowState,
+    visible_bounds: Bounds<Pixels>,
+) -> Bounds<Pixels> {
+    let visible_size = visible_bounds.size;
+    let visible_width = f32::from(visible_size.width);
+    let visible_height = f32::from(visible_size.height);
+
+    let is_legacy_oversized = saved.width >= 1380.0 && saved.height >= 880.0;
+    let exceeds_screen = saved.width >= visible_width || saved.height >= visible_height;
+
+    if is_legacy_oversized || exceeds_screen {
+        compute_default_window_bounds(visible_bounds)
+    } else {
+        let max_w = visible_width;
+        let max_h = visible_height;
+        let min_w = MIN_WINDOW_WIDTH.min(max_w);
+        let min_h = MIN_WINDOW_HEIGHT.min(max_h);
+
+        let width = saved.width.min(max_w).max(min_w);
+        let height = saved.height.min(max_h).max(min_h);
+
+        let min_x = f32::from(visible_bounds.origin.x);
+        let max_x = (min_x + visible_width - width).max(min_x);
+        let min_y = f32::from(visible_bounds.origin.y);
+        let max_y = (min_y + visible_height - height).max(min_y);
+
+        let x = saved.x.clamp(min_x, max_x);
+        let y = saved.y.clamp(min_y, max_y);
+
+        Bounds::new(point(px(x), px(y)), size(px(width), px(height)))
+    }
+}
+
+/// Reopen the main window where the user last left it, on the display it was
+/// left on. GPUI window bounds are display-relative, so the persisted frame is
+/// anchored by resolving the saved display UUID against the connected
+/// displays — Zed's scheme — and `display_id` rides along in `WindowOptions`.
+/// When that display is gone the same offsets re-anchor on the primary
+/// display, and dimensions/positions are clamped so the window never overflows
+/// the display on any OS.
+pub fn restored_window_placement(cx: &App) -> (WindowBounds, Option<gpui::DisplayId>) {
+    let displays = cx.displays();
+    let primary = cx.primary_display();
+
+    let saved_state = crate::persistence::load_window_state().filter(|saved| {
+        [saved.x, saved.y, saved.width, saved.height]
+            .iter()
+            .all(|value| value.is_finite())
+    });
+
+    let (anchor, saved) = match saved_state {
+        Some(saved) => {
+            let matched_display = saved.display.and_then(|uuid| {
+                displays
+                    .iter()
+                    .find(|d| d.uuid().ok() == Some(uuid))
+                    .cloned()
+            });
+            let anchor = matched_display.or_else(|| primary.clone());
+            (anchor, Some(saved))
+        }
+        None => (primary.clone(), None),
+    };
+
+    let Some(anchor) = anchor else {
+        return (
+            WindowBounds::Windowed(Bounds::new(
+                point(px(0.0), px(0.0)),
+                size(px(DEFAULT_WINDOW_WIDTH), px(DEFAULT_WINDOW_HEIGHT)),
+            )),
+            None,
+        );
+    };
+
+    let display_id = Some(anchor.id());
+    let (bounds, maximized) = if let Some(saved) = saved {
+        (
+            clamp_window_bounds_to_display(&saved, anchor.visible_bounds()),
+            saved.maximized,
+        )
+    } else {
+        (default_window_bounds(Some(anchor.as_ref())), false)
+    };
+
+    let window_bounds = if maximized {
+        WindowBounds::Maximized(bounds)
+    } else {
+        WindowBounds::Windowed(bounds)
+    };
+
+    (window_bounds, display_id)
+}
+
 fn fitted_file_tree_width(panel_width: f32, file_tree_width: f32) -> f32 {
     let maximum = FILE_TREE_MAX_WIDTH
         .min(panel_width - FILE_EDITOR_MIN_WIDTH)
@@ -900,22 +1033,22 @@ fn traits_choice(theme: Theme, label: String, is_default: bool, selected: bool) 
     })
 }
 
-#[derive(Clone, Copy, Debug)]
-struct UserMessageAction {
-    session_id: Uuid,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct UserMessageAction {
+    pub(crate) session_id: Uuid,
     /// The prompt that opened the turn. A turn can hold several user messages
     /// once a steer lands in it, and only the opening one is a rewind
     /// boundary, so this is what the editor and the rewind both address.
-    message_id: Uuid,
-    turn_count: usize,
+    pub(crate) message_id: Uuid,
+    pub(crate) turn_count: usize,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct AssistantMessageAction {
-    session_id: Uuid,
-    turn_count: usize,
-    enabled: bool,
-    preparing: bool,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct AssistantMessageAction {
+    pub(crate) session_id: Uuid,
+    pub(crate) turn_count: usize,
+    pub(crate) enabled: bool,
+    pub(crate) preparing: bool,
 }
 
 #[derive(Clone)]
@@ -1640,6 +1773,7 @@ pub struct Padu {
     pub(crate) right_panel_files_menu:
         bezel::ui::context_menu::ContextMenu<Self, crate::app::right_panel::RightPanelFilesMenuKey>,
     pub(crate) sidebar_session_menu: bezel::ui::context_menu::ContextMenu<Self, Uuid>,
+    pub(crate) chat_message_menu: bezel::ui::context_menu::ContextMenu<Self, Uuid>,
     pub(crate) right_panel_tab_reorder:
         bezel::ui::tabs::Reorder<crate::app::right_panel::RightPanelTabId>,
     _keystroke_interceptor: Option<gpui::Subscription>,
@@ -3902,6 +4036,7 @@ impl Padu {
                 right_panel_add_menu: bezel::ui::context_menu::ContextMenu::default(),
                 right_panel_files_menu: bezel::ui::context_menu::ContextMenu::default(),
                 sidebar_session_menu: bezel::ui::context_menu::ContextMenu::default(),
+                chat_message_menu: bezel::ui::context_menu::ContextMenu::default(),
                 right_panel_tab_reorder: bezel::ui::tabs::Reorder::new(),
                 _keystroke_interceptor: None,
                 scene_overlay_enabled,
