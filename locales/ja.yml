@@ -1444,6 +1444,7 @@ transcript.scroll_to_bottom: 一番下へスクロール
 transcript.conversation_turns: 会話ターン
 transcript.turn_label: "ターン %{number}：%{prompt}"
 transcript.edit_message: メッセージを編集
+transcript.message_actions: メッセージの操作
 
 duration.second: "%{count} 秒"
 duration.seconds: "%{count} 秒"

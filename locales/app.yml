@@ -2982,6 +2982,8 @@ transcript.turn_label:
   en: "Turn %{number}: %{prompt}"
 transcript.edit_message:
   en: Edit message
+transcript.message_actions:
+  en: Message actions
 
 duration.second:
   en: "%{count} second"

@@ -393,6 +393,12 @@ impl Render for Padu {
                 .children(task_switcher)
                 .children(onboarding_modal)
                 .children(whats_new_modal)
+                .children(self.chat_message_menu.render(
+                    "chat-message-context-menu",
+                    |this| &mut this.chat_message_menu,
+                    window,
+                    cx,
+                ))
                 .into_any_element();
             return self.render_window_frame(content, window, cx);
         }
@@ -629,6 +635,12 @@ impl Render for Padu {
             .children(task_switcher)
             .children(onboarding_modal)
             .children(whats_new_modal)
+            .children(self.chat_message_menu.render(
+                "chat-message-context-menu",
+                |this| &mut this.chat_message_menu,
+                window,
+                cx,
+            ))
             .into_any_element();
 
         self.render_window_frame(content, window, cx)

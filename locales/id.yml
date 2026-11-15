@@ -1391,6 +1391,7 @@ transcript.scroll_to_bottom: Gulir ke bawah
 transcript.conversation_turns: Putaran percakapan
 transcript.turn_label: "Putaran %{number}: %{prompt}"
 transcript.edit_message: Edit pesan
+transcript.message_actions: Tindakan pesan
 duration.second: "%{count} detik"
 duration.seconds: "%{count} detik"
 duration.minute: "%{count} menit"

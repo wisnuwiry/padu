@@ -235,6 +235,7 @@ impl Padu {
             || self.right_panel_add_menu.is_open()
             || self.right_panel_files_menu.is_open()
             || self.sidebar_session_menu.is_open()
+            || self.chat_message_menu.is_open()
             || self.command_palette.is_open()
             || self.task_switcher.is_open()
             || self.commit_dialog.is_some()

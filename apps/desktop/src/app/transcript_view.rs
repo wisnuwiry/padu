@@ -1,6 +1,12 @@
 use super::right_panel::{DiffRowStyle, render_diff_code_row};
 use super::*;
 use base64::Engine as _;
+use bezel::ui::{
+    context_menu::{ContextMenu, Place},
+    icons::Icon,
+    menu::Item,
+};
+use gpui::Point;
 
 const CHANGED_FILES_PREVIEW_LIMIT: usize = 3;
 /// Keep one virtualized transcript row bounded even when a generator touches
@@ -1248,6 +1254,210 @@ impl Padu {
             preparing: pending_turn == Some(turn.turn_count),
         })
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum ChatMessageMenuAction {
+    CopySelection(String),
+    CopyMessage(Uuid, String),
+    AddToNote(String),
+    CopyToComposer(String),
+    CopyCode(String),
+    RevertToHere(UserMessageAction),
+    ForkTask { session_id: Uuid, turn_count: usize },
+}
+
+impl Padu {
+    pub(crate) fn chat_message_context_menu_items(
+        &self,
+        message_id: Uuid,
+    ) -> Option<(Vec<Item>, Vec<Option<ChatMessageMenuAction>>)> {
+        let session = self.selected_session()?;
+        let message_index = session.messages.iter().position(|m| m.id == message_id)?;
+        let message = &session.messages[message_index];
+        let role = message.role;
+        let copy_content = if role == MessageRole::Assistant {
+            self.assistant_response_footer_cached(message_index)
+                .0
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| message.visible_content().to_owned())
+        } else {
+            message.visible_content().to_owned()
+        };
+        let user_message_action = self.user_message_action_for_message(message_index);
+        let assistant_message_action = self.assistant_message_action_for_message(message_index);
+        let selection = self.transcript_selection.selection.borrow().selected_text();
+
+        let mut items = Vec::new();
+        let mut actions = Vec::new();
+
+        if let Some(selected) = selection {
+            items.push(
+                Item::action(tr!("common.copy_selection")).with_icon(Icon::asset("icons/copy.svg")),
+            );
+            actions.push(Some(ChatMessageMenuAction::CopySelection(selected)));
+        }
+
+        items.push(
+            Item::action(tr!("common.copy_message_title")).with_icon(Icon::asset("icons/copy.svg")),
+        );
+        actions.push(Some(ChatMessageMenuAction::CopyMessage(
+            message_id,
+            copy_content.clone(),
+        )));
+
+        items.push(
+            Item::action(tr!("notes.add_to_note")).with_icon(Icon::asset("icons/note-add.svg")),
+        );
+        actions.push(Some(ChatMessageMenuAction::AddToNote(copy_content.clone())));
+
+        if role == MessageRole::User && user_message_action.is_none() {
+            items.push(
+                Item::action(tr!("common.copy_to_composer"))
+                    .with_icon(Icon::asset("icons/compose.svg")),
+            );
+            actions.push(Some(ChatMessageMenuAction::CopyToComposer(
+                copy_content.clone(),
+            )));
+        }
+
+        if let Some(code) = fenced_code(&copy_content) {
+            items.push(
+                Item::action(tr!("common.copy_code")).with_icon(Icon::asset("icons/copy.svg")),
+            );
+            actions.push(Some(ChatMessageMenuAction::CopyCode(code)));
+        }
+
+        if let Some(action) = user_message_action {
+            items.push(Item::Separator);
+            actions.push(None);
+            items.push(
+                Item::action(tr!("session.revert_to_here_title"))
+                    .with_icon(Icon::asset("icons/rewind.svg")),
+            );
+            actions.push(Some(ChatMessageMenuAction::RevertToHere(action)));
+        }
+
+        if let Some(action) = assistant_message_action {
+            items.push(Item::Separator);
+            actions.push(None);
+            let mut fork_item = Item::action(if action.enabled {
+                tr!("session.fork_task_title")
+            } else {
+                tr!("session.forking_task_title")
+            })
+            .with_icon(Icon::asset("icons/fork.svg"));
+            if !action.enabled {
+                fork_item = fork_item.disabled();
+            }
+            items.push(fork_item);
+            actions.push(Some(ChatMessageMenuAction::ForkTask {
+                session_id: action.session_id,
+                turn_count: action.turn_count,
+            }));
+        }
+
+        Some((items, actions))
+    }
+
+    pub(crate) fn open_chat_message_context_menu(
+        &mut self,
+        message_id: Uuid,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((items, actions)) = self.chat_message_context_menu_items(message_id) else {
+            return;
+        };
+
+        self.chat_message_menu.open(
+            message_id,
+            Place::At(position),
+            items,
+            move |this, path, window, cx| {
+                if let Some(&index) = path.first() {
+                    if let Some(action) = actions.get(index).and_then(|a| a.as_ref()) {
+                        this.execute_chat_message_menu_action(action, window, cx);
+                    }
+                }
+            },
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn toggle_chat_message_context_menu(
+        &mut self,
+        message_id: Uuid,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        ContextMenu::toggle(
+            self,
+            |this| &mut this.chat_message_menu,
+            message_id,
+            Place::At(position),
+            move |this, _, _| {
+                let (items, actions) = this
+                    .chat_message_context_menu_items(message_id)
+                    .unwrap_or_default();
+                let choose = move |this: &mut Padu,
+                                   path: &[usize],
+                                   window: &mut Window,
+                                   cx: &mut Context<Padu>| {
+                    if let Some(&index) = path.first() {
+                        if let Some(action) = actions.get(index).and_then(|a| a.as_ref()) {
+                            this.execute_chat_message_menu_action(action, window, cx);
+                        }
+                    }
+                };
+                (items, choose)
+            },
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn execute_chat_message_menu_action(
+        &mut self,
+        action: &ChatMessageMenuAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            ChatMessageMenuAction::CopySelection(selected) => {
+                cx.write_to_clipboard(ClipboardItem::new_string(selected.clone()));
+            }
+            ChatMessageMenuAction::CopyMessage(message_id, content) => {
+                cx.write_to_clipboard(ClipboardItem::new_string(content.clone()));
+                self.show_message_copied(*message_id, cx);
+            }
+            ChatMessageMenuAction::AddToNote(content) => {
+                self.add_content_to_new_note(content, cx);
+            }
+            ChatMessageMenuAction::CopyToComposer(content) => {
+                self.composer.update(cx, |composer, cx| {
+                    composer.set_content(content.clone(), cx);
+                });
+                let focus_handle = self.composer.read(cx).focus();
+                window.focus(&focus_handle, cx);
+            }
+            ChatMessageMenuAction::CopyCode(code) => {
+                cx.write_to_clipboard(ClipboardItem::new_string(code.clone()));
+            }
+            ChatMessageMenuAction::RevertToHere(action) => {
+                self.begin_message_edit(*action, window, cx);
+            }
+            ChatMessageMenuAction::ForkTask {
+                session_id,
+                turn_count,
+            } => {
+                self.fork_session_from_response(*session_id, *turn_count, cx);
+            }
+        }
+    }
 
     /// `metrics` rescaled to the user's UI and code font size settings, and
     /// carrying the code word-wrap setting for fenced code blocks.
@@ -1328,7 +1538,6 @@ impl Padu {
     ) -> AnyElement {
         let theme = Theme::current(cx);
         let palette = MarkdownPalette::from_theme(&theme);
-        let composer = self.composer.clone();
         let padu = cx.entity().downgrade();
         // Both from the cache `sync_transcript_rows` refreshed at the top of
         // this frame. Recomputing the row list here would rebuild the whole
@@ -1405,7 +1614,6 @@ impl Padu {
                         })
                         .collect();
                     let attachments_can_reveal = !self.daemon.is_remote();
-                    let menu = self.menu_handle(format!("message-{}", message.id), cx);
                     let metrics =
                         self.scaled_markdown_metrics(if message.role == MessageRole::User {
                             MarkdownMetrics::USER_MESSAGE
@@ -1432,6 +1640,7 @@ impl Padu {
                             view.set_text(message.visible_content(), message.streaming);
                             &*view
                         });
+                    let is_menu_open = self.chat_message_menu.showing(&message.id);
                     let rendered = render_message(
                         MessageRender {
                             theme: &theme,
@@ -1447,9 +1656,8 @@ impl Padu {
                             attachments_can_reveal,
                             markdown: view,
                             ctx: &ctx,
-                            menu,
+                            is_menu_open,
                             padu,
-                            composer,
                         },
                         cx,
                     );
@@ -1560,6 +1768,7 @@ impl Padu {
         if let Some(changed_files) = self.render_changed_files_row(turn_id, theme, cx) {
             column = column.child(div().w_full().mb(px(3.0)).child(changed_files));
         }
+        let is_menu_open = self.chat_message_menu.showing(&message.id);
         column
             .child(render_message_footer(
                 theme,
@@ -1568,10 +1777,11 @@ impl Padu {
                 copy_content,
                 copied,
                 group_name,
-                force_visible,
+                force_visible || is_menu_open,
                 false,
                 action,
                 None,
+                is_menu_open,
                 cx.entity().downgrade(),
             ))
             .into_any_element()
@@ -3326,5 +3536,47 @@ mod live_reasoning_window_tests {
     fn window_below_the_threshold_keeps_the_cached_start() {
         let content = "a".repeat(LIVE_REASONING_WINDOW_MAX);
         assert_eq!(live_reasoning_window_anchor(7, &content), 7);
+    }
+}
+
+#[cfg(test)]
+mod chat_message_menu_tests {
+    use super::*;
+
+    #[test]
+    fn chat_message_menu_action_variants_and_equality() {
+        let msg_id = Uuid::new_v4();
+        let session_id = Uuid::new_v4();
+        let action1 = ChatMessageMenuAction::CopyMessage(msg_id, "hello".into());
+        let action2 = ChatMessageMenuAction::CopyMessage(msg_id, "hello".into());
+        let action3 = ChatMessageMenuAction::AddToNote("hello".into());
+        let user_act = UserMessageAction {
+            session_id,
+            message_id: msg_id,
+            turn_count: 2,
+        };
+        let fork_act = ChatMessageMenuAction::ForkTask {
+            session_id,
+            turn_count: 3,
+        };
+        let revert_act = ChatMessageMenuAction::RevertToHere(user_act);
+
+        assert_eq!(action1, action2);
+        assert_ne!(action1, action3);
+        assert_eq!(
+            revert_act,
+            ChatMessageMenuAction::RevertToHere(UserMessageAction {
+                session_id,
+                message_id: msg_id,
+                turn_count: 2,
+            })
+        );
+        assert_eq!(
+            fork_act,
+            ChatMessageMenuAction::ForkTask {
+                session_id,
+                turn_count: 3,
+            }
+        );
     }
 }
