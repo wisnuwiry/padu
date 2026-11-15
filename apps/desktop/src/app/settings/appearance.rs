@@ -2,11 +2,11 @@ use std::cell::Cell;
 
 use super::*;
 use crate::theme::ColorScheme;
-use crate::ui::Switch;
 use crate::ui::button::{Button, ButtonRole, ButtonStyle};
+use crate::ui::Switch;
 use bezel::ui::combobox::{Combobox, ComboboxEvent};
-use bezel::ui::widgets::{Controls, Scaffolding, SliderDrag, slider_fraction};
-use gpui::{Bounds, DragMoveEvent, ElementId, MouseButton, MouseDownEvent, SharedString, canvas};
+use bezel::ui::widgets::{slider_fraction, Controls, Scaffolding, SliderDrag};
+use gpui::{canvas, Bounds, DragMoveEvent, ElementId, MouseButton, MouseDownEvent, SharedString};
 
 fn font_size_label(size: f32) -> String {
     if size.fract() == 0.0 {
@@ -20,73 +20,171 @@ fn render_background_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) 
     let bezel_theme = bezel::theme::Theme::of(cx);
     let settings = &padu.state.conversation_background;
     let image = padu.conversation_background_image();
+    let has_image = settings.image_path.is_some();
     let weak = cx.entity().downgrade();
-    let choose = Button::new(
-        "conversation-background-choose",
-        tr!("settings.background_choose"),
-    )
-    .button_style(ButtonStyle::Ghost)
-    .icon("icons/folder-open.svg")
-    .on_press({
-        let weak = weak.clone();
-        move |_, _, cx| {
-            let _ = weak.update(cx, |this, cx| this.choose_conversation_background(cx));
-        }
-    });
-    let opacity = (settings.opacity * 100.0).round() as i32;
-    let height = settings.height_percent.round() as i32;
-    let preview = div()
-        .relative()
-        .w_full()
-        .aspect_ratio(188.0 / 142.0)
-        .min_h(px(240.0))
-        .overflow_hidden()
-        .rounded(px(Theme::control_radius()))
-        .bg(theme.surface)
-        .border_1()
-        .border_color(theme.border)
-        .children(
-            crate::app::conversation_background::render_conversation_background(
-                image.clone(),
-                settings,
-                &theme,
-                Some(px(Theme::control_radius())),
-            ),
+
+    let body = if has_image {
+        let opacity = (settings.opacity * 100.0).round() as i32;
+        let height = settings.height_percent.round() as i32;
+        let change = Button::new(
+            "conversation-background-choose",
+            tr!("settings.background_choose"),
         )
-        .child(
-            div()
-                .relative()
-                .h_full()
-                .p(px(16.0))
-                .flex()
-                .flex_col()
-                .justify_end()
-                .gap(px(3.0))
-                .child(render_preview_message(
-                    MessageRole::User,
-                    tr!("settings.background_preview_user"),
-                    &theme,
-                ))
-                .child(render_preview_message(
-                    MessageRole::Assistant,
-                    tr!("settings.background_preview_assistant"),
-                    &theme,
-                )),
-        );
-    let remove = settings.image_path.as_ref().map(|_| {
-        let weak = cx.entity().downgrade();
-        Button::new(
+        .button_style(ButtonStyle::Ghost)
+        .icon("icons/folder-open.svg")
+        .on_press({
+            let weak = weak.clone();
+            move |_, _, cx| {
+                let _ = weak.update(cx, |this, cx| this.choose_conversation_background(cx));
+            }
+        });
+        let remove = Button::new(
             "conversation-background-remove",
             tr!("settings.background_remove"),
         )
         .button_style(ButtonStyle::Ghost)
         .role(ButtonRole::Destructive)
         .icon("icons/trash.svg")
-        .on_press(move |_, _, cx| {
-            let _ = weak.update(cx, |this, cx| this.clear_conversation_background(cx));
-        })
-        .into_any_element()
-    });
+        .on_press({
+            let weak = weak.clone();
+            move |_, _, cx| {
+                let _ = weak.update(cx, |this, cx| this.clear_conversation_background(cx));
+            }
+        });
+        let preview = div()
+            .relative()
+            .w_full()
+            .aspect_ratio(188.0 / 142.0)
+            .min_h(px(240.0))
+            .overflow_hidden()
+            .rounded(px(Theme::control_radius()))
+            .bg(theme.surface)
+            .border_1()
+            .border_color(theme.border)
+            .children(
+                crate::app::conversation_background::render_conversation_background(
+                    image.clone(),
+                    settings,
+                    &theme,
+                    Some(px(Theme::control_radius())),
+                ),
+            )
+            .child(
+                div()
+                    .relative()
+                    .h_full()
+                    .p(px(16.0))
+                    .flex()
+                    .flex_col()
+                    .justify_end()
+                    .gap(px(3.0))
+                    .child(render_preview_message(
+                        MessageRole::User,
+                        tr!("settings.background_preview_user"),
+                        &theme,
+                    ))
+                    .child(render_preview_message(
+                        MessageRole::Assistant,
+                        tr!("settings.background_preview_assistant"),
+                        &theme,
+                    )),
+            );
+
+        div()
+            .w_full()
+            .flex()
+            .items_start()
+            .gap(px(16.0))
+            .child(
+                div()
+                    .w(px(190.0))
+                    .flex_none()
+                    .flex()
+                    .flex_col()
+                    .gap(px(12.0))
+                    .child(background_adjuster(
+                        "background-opacity",
+                        tr!("settings.background_opacity"),
+                        opacity as f32,
+                        0.0,
+                        100.0,
+                        theme,
+                        bezel_theme,
+                        {
+                            let weak = cx.entity().downgrade();
+                            move |value, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.set_conversation_background_opacity(value / 100.0, cx)
+                                });
+                            }
+                        },
+                    ))
+                    .child(background_adjuster(
+                        "background-height",
+                        tr!("settings.background_height"),
+                        height as f32,
+                        20.0,
+                        100.0,
+                        theme,
+                        bezel_theme,
+                        {
+                            let weak = cx.entity().downgrade();
+                            move |value, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.set_conversation_background_height(value, cx)
+                                });
+                            }
+                        },
+                    )),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(10.0))
+                    .child(preview)
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(change.flex_1().w_full())
+                            .child(remove.flex_1().w_full()),
+                    ),
+            )
+            .into_any_element()
+    } else {
+        let upload = Button::new(
+            "conversation-background-choose",
+            tr!("settings.background_choose"),
+        )
+        .button_style(ButtonStyle::Ghost)
+        .icon("icons/folder-open.svg")
+        .on_press({
+            let weak = weak.clone();
+            move |_, _, cx| {
+                let _ = weak.update(cx, |this, cx| this.choose_conversation_background(cx));
+            }
+        });
+
+        div()
+            .id("conversation-background-empty")
+            .w_full()
+            .min_h(px(160.0))
+            .rounded(px(Theme::control_radius()))
+            .bg(theme.surface)
+            .border_1()
+            .border_color(theme.border)
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(upload)
+            .into_any_element()
+    };
+
     bezel_theme
         .group_box()
         .mt(px(15.0))
@@ -116,59 +214,7 @@ fn render_background_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) 
                         .child(tr!("settings.background_description")),
                 ),
         )
-        .child(
-            div()
-                .w_full()
-                .flex()
-                .items_start()
-                .gap(px(16.0))
-                .child(
-                    div()
-                        .w(px(190.0))
-                        .flex_none()
-                        .flex()
-                        .flex_col()
-                        .gap(px(12.0))
-                        .child(choose)
-                        .children(remove)
-                        .child(div().w_full().h(px(1.0)).my(px(2.0)).bg(theme.border))
-                        .child(background_adjuster(
-                            "background-opacity",
-                            tr!("settings.background_opacity"),
-                            opacity as f32,
-                            0.0,
-                            100.0,
-                            theme,
-                            bezel_theme,
-                            {
-                                let weak = cx.entity().downgrade();
-                                move |value, cx| {
-                                    let _ = weak.update(cx, |this, cx| {
-                                        this.set_conversation_background_opacity(value / 100.0, cx)
-                                    });
-                                }
-                            },
-                        ))
-                        .child(background_adjuster(
-                            "background-height",
-                            tr!("settings.background_height"),
-                            height as f32,
-                            20.0,
-                            100.0,
-                            theme,
-                            bezel_theme,
-                            {
-                                let weak = cx.entity().downgrade();
-                                move |value, cx| {
-                                    let _ = weak.update(cx, |this, cx| {
-                                        this.set_conversation_background_height(value, cx)
-                                    });
-                                }
-                            },
-                        )),
-                )
-                .child(div().flex_1().min_w_0().child(preview)),
-        )
+        .child(body)
         .into_any_element()
 }
 
@@ -506,7 +552,10 @@ fn render_color_scheme_section(
         let scheme_name = scheme_label(scheme);
 
         div()
-            .id(SharedString::from(format!("color-scheme-{}", scheme.as_str())))
+            .id(SharedString::from(format!(
+                "color-scheme-{}",
+                scheme.as_str()
+            )))
             .tab_index(0)
             .cursor_pointer()
             .tooltip(Tooltip::text(scheme_name))
@@ -533,12 +582,7 @@ fn render_color_scheme_section(
                     cx.stop_propagation();
                 }
             })
-            .child(
-                div()
-                    .size_full()
-                    .rounded_full()
-                    .bg(accent_color),
-            )
+            .child(div().size_full().rounded_full().bg(accent_color))
     });
 
     div()
@@ -780,9 +824,19 @@ impl Padu {
             .group_box()
             .mt(px(15.0))
             .w_full()
-            .child(render_theme_section(theme, selected_theme, theme_weak.clone(), cx))
+            .child(render_theme_section(
+                theme,
+                selected_theme,
+                theme_weak.clone(),
+                cx,
+            ))
             .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
-            .child(render_color_scheme_section(theme, self.color_scheme(), theme_weak, cx))
+            .child(render_color_scheme_section(
+                theme,
+                self.color_scheme(),
+                theme_weak,
+                cx,
+            ))
             .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
             .child(
                 div()
