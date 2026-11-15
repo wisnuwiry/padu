@@ -212,6 +212,19 @@ export function AppearanceSettings() {
             </span>
             <input aria-label={t('settings.background_height')} className="padu-slider w-full cursor-pointer" max="100" min="20" step="1" style={{ '--slider-progress': `${((heightPercent - 20) / 80) * 100}%` } as CSSProperties} type="range" value={heightPercent} onChange={(event) => updateConversationBackground({ heightPercent: Number(event.target.value) })} />
           </label>
+          <div className="space-y-1 text-xs">
+            <span className="text-[var(--text-secondary)]">{t('settings.background_effect')}</span>
+            <select
+              aria-label={t('settings.background_effect')}
+              className="w-full rounded-md border border-[var(--border)] bg-[var(--inset)] px-2.5 py-1.5 text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              value={background.effect || 'none'}
+              onChange={(e) => updateConversationBackground({ effect: e.target.value as any })}
+            >
+              <option value="none">{t('settings.background_effect_none')}</option>
+              <option value="dither">{t('settings.background_effect_dither')}</option>
+              <option value="ascii">{t('settings.background_effect_ascii')}</option>
+            </select>
+          </div>
         </div>
         <div className="flex flex-1 min-w-0 flex-col gap-2.5">
           <div className="@container relative aspect-[188/142] min-h-[240px] min-w-0 w-full overflow-hidden rounded-lg border bg-[var(--inset)]">
@@ -222,7 +235,7 @@ export function AppearanceSettings() {
                 'absolute inset-x-0 top-0 w-full object-cover object-top rounded-t-lg',
                 heightPercent >= 99 && 'rounded-b-lg',
               )}
-              src={background.imageUrl}
+              src={background.processedImageUrl || background.imageUrl}
               style={{ height: heightPercent >= 99 ? '100%' : `${heightPercent}%`, opacity: background.opacity }}
             />
             {heightPercent < 99 && (

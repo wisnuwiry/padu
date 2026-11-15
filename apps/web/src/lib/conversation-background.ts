@@ -1,10 +1,14 @@
 import { useSyncExternalStore } from 'react'
 
+export type ConversationBackgroundEffect = 'none' | 'dither' | 'ascii'
+
 export type ConversationBackground = {
   imageUrl: string | null
+  processedImageUrl: string | null
   fileName: string | null
   opacity: number
   heightPercent: number
+  effect: ConversationBackgroundEffect
   loading: boolean
 }
 
@@ -14,9 +18,11 @@ const STORE_NAME = 'conversation-background'
 const IMAGE_KEY = 'image'
 const defaults: ConversationBackground = {
   imageUrl: null,
+  processedImageUrl: null,
   fileName: null,
   opacity: 0.18,
   heightPercent: 50,
+  effect: 'none',
   loading: true,
 }
 
@@ -25,6 +31,10 @@ const listeners = new Set<() => void>()
 let objectUrl: string | null = null
 let generation = 0
 let mutationQueue: Promise<void> = Promise.resolve()
+
+function sanitizeEffect(effect: unknown): ConversationBackgroundEffect {
+  return effect === 'dither' || effect === 'ascii' ? effect : 'none'
+}
 
 function readSettings(): ConversationBackground {
   if (typeof window === 'undefined') return defaults
@@ -35,6 +45,7 @@ function readSettings(): ConversationBackground {
     return {
       ...defaults,
       ...parsed,
+      effect: sanitizeEffect(parsed.effect),
       opacity: clamp(Number(parsed.opacity ?? defaults.opacity), 0, 1, defaults.opacity),
       heightPercent: clamp(Number(parsed.heightPercent ?? defaults.heightPercent), 20, 100, defaults.heightPercent),
       loading: true,
@@ -68,9 +79,11 @@ function emit() {
   for (const listener of listeners) listener()
 }
 
-function saveSettings(next: Partial<ConversationBackground>) {  snapshot = {
+function saveSettings(next: Partial<ConversationBackground>) {
+  snapshot = {
     ...snapshot,
     ...next,
+    effect: next.effect ?? snapshot.effect,
     opacity: clamp(next.opacity ?? snapshot.opacity, 0, 1, defaults.opacity),
     heightPercent: clamp(next.heightPercent ?? snapshot.heightPercent, 20, 100, defaults.heightPercent),
     loading: false,
@@ -81,12 +94,139 @@ function saveSettings(next: Partial<ConversationBackground>) {  snapshot = {
         fileName: snapshot.fileName,
         opacity: snapshot.opacity,
         heightPercent: snapshot.heightPercent,
+        effect: snapshot.effect,
       }))
     }
   } catch {
   } finally {
     emit()
   }
+}
+
+function processDither(img: HTMLImageElement): string {
+  const targetW = Math.min(360, img.naturalWidth || 360)
+  const targetH = Math.max(1, Math.round(((img.naturalHeight || 240) / (img.naturalWidth || 360)) * targetW))
+  const canvas = document.createElement('canvas')
+  canvas.width = targetW
+  canvas.height = targetH
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return ''
+  ctx.drawImage(img, 0, 0, targetW, targetH)
+  const imgData = ctx.getImageData(0, 0, targetW, targetH)
+  const data = imgData.data
+  const bayer = [
+    [0 / 64, 32 / 64, 8 / 64, 40 / 64, 2 / 64, 34 / 64, 10 / 64, 42 / 64],
+    [48 / 64, 16 / 64, 56 / 64, 24 / 64, 50 / 64, 18 / 64, 58 / 64, 26 / 64],
+    [12 / 64, 44 / 64, 4 / 64, 36 / 64, 14 / 64, 46 / 64, 6 / 64, 38 / 64],
+    [60 / 64, 28 / 64, 52 / 64, 20 / 64, 62 / 64, 30 / 64, 54 / 64, 22 / 64],
+    [3 / 64, 35 / 64, 11 / 64, 43 / 64, 1 / 64, 33 / 64, 9 / 64, 41 / 64],
+    [51 / 64, 19 / 64, 59 / 64, 27 / 64, 49 / 64, 17 / 64, 57 / 64, 25 / 64],
+    [15 / 64, 47 / 64, 7 / 64, 39 / 64, 13 / 64, 45 / 64, 5 / 64, 37 / 64],
+    [63 / 64, 31 / 64, 55 / 64, 23 / 64, 61 / 64, 29 / 64, 53 / 64, 21 / 64],
+  ]
+  const step = 36
+  for (let y = 0; y < targetH; y++) {
+    for (let x = 0; x < targetW; x++) {
+      const idx = (y * targetW + x) * 4
+      if (data[idx + 3] < 10) continue
+      const bayerVal = bayer[y % 8][x % 8] - 0.5
+      const spread = bayerVal * 48
+      data[idx] = Math.min(255, Math.max(0, Math.round((data[idx] + spread) / step) * step))
+      data[idx + 1] = Math.min(255, Math.max(0, Math.round((data[idx + 1] + spread) / step) * step))
+      data[idx + 2] = Math.min(255, Math.max(0, Math.round((data[idx + 2] + spread) / step) * step))
+    }
+  }
+  ctx.putImageData(imgData, 0, 0)
+  return canvas.toDataURL('image/png')
+}
+
+const ASCII_GLYPHS_8X8 = [
+  [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+  [0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x18, 0x00],
+  [0x00, 0x18, 0x18, 0x00, 0x00, 0x18, 0x18, 0x00],
+  [0x00, 0x00, 0x00, 0x7E, 0x7E, 0x00, 0x00, 0x00],
+  [0x00, 0x18, 0x18, 0x7E, 0x7E, 0x18, 0x18, 0x00],
+  [0x00, 0x66, 0x3C, 0xFF, 0x3C, 0x66, 0x00, 0x00],
+  [0x00, 0x63, 0x66, 0x0C, 0x18, 0x33, 0x63, 0x00],
+  [0x24, 0x7E, 0x24, 0x24, 0x7E, 0x24, 0x00, 0x00],
+]
+
+function processAscii(img: HTMLImageElement): string {
+  const cols = Math.min(60, Math.max(30, Math.round((img.naturalWidth || 480) / 8)))
+  const rows = Math.max(1, Math.round(((img.naturalHeight || 270) / (img.naturalWidth || 480)) * cols))
+
+  const sampleCanvas = document.createElement('canvas')
+  sampleCanvas.width = cols
+  sampleCanvas.height = rows
+  const sampleCtx = sampleCanvas.getContext('2d')
+  if (!sampleCtx) return ''
+  sampleCtx.drawImage(img, 0, 0, cols, rows)
+  const sampleData = sampleCtx.getImageData(0, 0, cols, rows).data
+
+  const outCanvas = document.createElement('canvas')
+  outCanvas.width = cols * 8
+  outCanvas.height = rows * 8
+  const outCtx = outCanvas.getContext('2d')
+  if (!outCtx) return ''
+  const outImgData = outCtx.createImageData(cols * 8, rows * 8)
+  const outData = outImgData.data
+
+  for (let cy = 0; cy < rows; cy++) {
+    for (let cx = 0; cx < cols; cx++) {
+      const sampleIdx = (cy * cols + cx) * 4
+      const r = sampleData[sampleIdx]
+      const g = sampleData[sampleIdx + 1]
+      const b = sampleData[sampleIdx + 2]
+      const a = sampleData[sampleIdx + 3]
+      if (a < 10) continue
+
+      const luma = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+      const glyphIdx = Math.min(7, Math.max(0, Math.round(luma * 7)))
+      const glyph = ASCII_GLYPHS_8X8[glyphIdx]
+
+      const bgR = Math.round(r * 0.18)
+      const bgG = Math.round(g * 0.18)
+      const bgB = Math.round(b * 0.18)
+
+      for (let gy = 0; gy < 8; gy++) {
+        const rowBits = glyph[gy]
+        for (let gx = 0; gx < 8; gx++) {
+          const isFg = ((rowBits >> (7 - gx)) & 1) !== 0
+          const outIdx = ((cy * 8 + gy) * (cols * 8) + (cx * 8 + gx)) * 4
+          outData[outIdx] = isFg ? r : bgR
+          outData[outIdx + 1] = isFg ? g : bgG
+          outData[outIdx + 2] = isFg ? b : bgB
+          outData[outIdx + 3] = 255
+        }
+      }
+    }
+  }
+  outCtx.putImageData(outImgData, 0, 0)
+  return outCanvas.toDataURL('image/png')
+}
+
+async function processEffects(url: string | null) {
+  if (typeof window === 'undefined' || !url) {
+    snapshot = { ...snapshot, processedImageUrl: null }
+    emit()
+    return
+  }
+  if (snapshot.effect === 'none') {
+    snapshot = { ...snapshot, processedImageUrl: null }
+    emit()
+    return
+  }
+  const img = new Image()
+  img.crossOrigin = 'anonymous'
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve()
+    img.onerror = () => reject()
+    img.src = url
+  }).catch(() => {})
+
+  const processed = snapshot.effect === 'dither' ? processDither(img) : processAscii(img)
+  snapshot = { ...snapshot, processedImageUrl: processed }
+  emit()
 }
 
 function openDatabase(): Promise<IDBDatabase> {
@@ -138,10 +278,11 @@ export async function loadConversationBackground() {
     if (currentGeneration !== generation) return
     replaceObjectUrl(blob ? URL.createObjectURL(blob) : null)
     snapshot = { ...snapshot, imageUrl: objectUrl, loading: false }
+    if (objectUrl) void processEffects(objectUrl)
   } catch {
     if (currentGeneration !== generation) return
     replaceObjectUrl(null)
-    snapshot = { ...snapshot, imageUrl: null, loading: false }
+    snapshot = { ...snapshot, imageUrl: null, processedImageUrl: null, loading: false }
   }
   emit()
 }
@@ -188,6 +329,7 @@ export async function chooseConversationBackground(file: File) {
     }
     replaceObjectUrl(nextUrl)
     saveSettings({ imageUrl: objectUrl, fileName: file.name })
+    void processEffects(nextUrl)
   })
 }
 
@@ -197,11 +339,15 @@ export async function clearConversationBackground() {
     await writeImage(null)
     replaceObjectUrl(null)
     saveSettings({ imageUrl: null, fileName: null })
+    void processEffects(null)
   })
 }
 
-export function updateConversationBackground(settings: Partial<Pick<ConversationBackground, 'opacity' | 'heightPercent'>>) {
+export function updateConversationBackground(settings: Partial<Pick<ConversationBackground, 'opacity' | 'heightPercent' | 'effect'>>) {
   saveSettings(settings)
+  if (settings.effect !== undefined && snapshot.imageUrl) {
+    void processEffects(snapshot.imageUrl)
+  }
 }
 
 export function subscribeConversationBackground(listener: () => void) {

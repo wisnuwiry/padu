@@ -94,6 +94,7 @@ export function ConversationBackgroundLayer() {
   const background = useConversationBackground()
   if (!background.imageUrl || background.loading) return null
   const isFullHeight = background.heightPercent >= 99
+  const imageSrc = background.processedImageUrl || background.imageUrl
   return (
     <>
       <img
@@ -104,8 +105,11 @@ export function ConversationBackgroundLayer() {
           isFullHeight && 'rounded-b-[inherit]',
         )}
         draggable={false}
-        src={background.imageUrl}
-        style={{ height: isFullHeight ? '100%' : `${background.heightPercent}%`, opacity: background.opacity }}
+        src={imageSrc}
+        style={{
+          height: isFullHeight ? '100%' : `${background.heightPercent}%`,
+          opacity: background.opacity,
+        }}
       />
       {!isFullHeight && (
         <div
