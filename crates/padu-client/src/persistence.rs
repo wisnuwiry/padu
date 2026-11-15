@@ -39,12 +39,35 @@ pub const DEFAULT_RIGHT_PANEL_WIDTH: f32 = 460.0;
 pub const DEFAULT_BACKGROUND_OPACITY: f32 = 0.18;
 pub const DEFAULT_BACKGROUND_HEIGHT: f32 = 50.0;
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConversationBackgroundEffect {
+    #[default]
+    None,
+    Dither,
+    Ascii,
+}
+
+impl ConversationBackgroundEffect {
+    pub const ALL: [Self; 3] = [Self::None, Self::Dither, Self::Ascii];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Dither => "dither",
+            Self::Ascii => "ascii",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct ConversationBackgroundSettings {
     pub image_path: Option<PathBuf>,
     pub opacity: f32,
     pub height_percent: f32,
+    #[serde(default)]
+    pub effect: ConversationBackgroundEffect,
 }
 
 impl Default for ConversationBackgroundSettings {
@@ -53,6 +76,7 @@ impl Default for ConversationBackgroundSettings {
             image_path: None,
             opacity: DEFAULT_BACKGROUND_OPACITY,
             height_percent: DEFAULT_BACKGROUND_HEIGHT,
+            effect: ConversationBackgroundEffect::None,
         }
     }
 }
@@ -1629,6 +1653,26 @@ mod tests {
         let mut applied_state = PersistedState::empty();
         applied_state.apply_app_settings(settings);
         assert!(!applied_state.sidebar_show_provider);
+    }
+
+    #[test]
+    fn conversation_background_effect_round_trips_and_defaults() {
+        let legacy: ConversationBackgroundSettings =
+            serde_json::from_str(r#"{"opacity":0.5,"height_percent":80.0}"#).unwrap();
+        assert_eq!(legacy.effect, ConversationBackgroundEffect::None);
+
+        let dither: ConversationBackgroundSettings =
+            serde_json::from_str(r#"{"opacity":0.5,"height_percent":80.0,"effect":"dither"}"#)
+                .unwrap();
+        assert_eq!(dither.effect, ConversationBackgroundEffect::Dither);
+
+        let ascii: ConversationBackgroundSettings =
+            serde_json::from_str(r#"{"opacity":0.5,"height_percent":80.0,"effect":"ascii"}"#)
+                .unwrap();
+        assert_eq!(ascii.effect, ConversationBackgroundEffect::Ascii);
+
+        let serialized = serde_json::to_string(&ascii).unwrap();
+        assert!(serialized.contains(r#""effect":"ascii""#));
     }
 }
 
