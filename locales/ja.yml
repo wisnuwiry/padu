@@ -455,6 +455,10 @@ settings.background_preview_assistant: もちろんです。主な決定事項�
 settings.background_unsupported: 対応している画像形式を選択してください
 settings.background_too_large: 2 MB より小さい画像を選択してください
 settings.background_unavailable: 背景画像を読み込めませんでした
+settings.background_effect: エフェクト
+settings.background_effect_none: なし
+settings.background_effect_dither: ディザ
+settings.background_effect_ascii: ASCII
 
 input.do_anything: 何でも依頼できます…
 input.search_models: モデルを検索…
@@ -634,6 +638,7 @@ notes.new: 新しいノート
 notes.save: 保存
 notes.edit: 編集
 notes.rich_editor: リッチエディタ
+notes.headings: 見出し
 notes.code: コード
 notes.side_by_side: 並べて表示
 notes.preview: プレビュー

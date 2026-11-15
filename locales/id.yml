@@ -450,6 +450,10 @@ settings.background_preview_assistant: Tentu — saya akan menyoroti keputusan u
 settings.background_unsupported: Pilih format gambar yang didukung
 settings.background_too_large: Pilih gambar yang lebih kecil dari 2 MB
 settings.background_unavailable: Gambar latar belakang tidak dapat dimuat
+settings.background_effect: Efek
+settings.background_effect_none: Tidak ada
+settings.background_effect_dither: Dither
+settings.background_effect_ascii: ASCII
 input.do_anything: Lakukan apa saja…
 input.search_models: Cari model…
 input.search_branches: Cari cabang
@@ -618,6 +622,7 @@ notes.new: Catatan Baru
 notes.save: Simpan
 notes.edit: Edit
 notes.rich_editor: Rich Editor
+notes.headings: Judul
 notes.code: Kode
 notes.side_by_side: Berdampingan
 notes.preview: Pratinjau

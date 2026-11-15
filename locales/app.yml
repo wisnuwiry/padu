@@ -1033,6 +1033,14 @@ settings.background_too_large:
   en: Choose an image smaller than 2 MB
 settings.background_unavailable:
   en: The background image could not be loaded
+settings.background_effect:
+  en: Effect
+settings.background_effect_none:
+  en: None
+settings.background_effect_dither:
+  en: Dither
+settings.background_effect_ascii:
+  en: ASCII
 
 input.do_anything:
   en: Do anything…
@@ -1387,6 +1395,8 @@ notes.edit:
   en: Edit
 notes.rich_editor:
   en: Rich Editor
+notes.headings:
+  en: Headings
 notes.code:
   en: Code
 notes.side_by_side:

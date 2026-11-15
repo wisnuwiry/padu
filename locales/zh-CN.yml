@@ -451,6 +451,10 @@ settings.background_preview_assistant: 当然，我会整理出主要决定和�
 settings.background_unsupported: 请选择受支持的图片格式
 settings.background_too_large: 请选择小于 2 MB 的图片
 settings.background_unavailable: 无法加载背景图片
+settings.background_effect: 效果
+settings.background_effect_none: 无
+settings.background_effect_dither: 抖动
+settings.background_effect_ascii: ASCII
 input.do_anything: 做什么都可以…
 input.search_models: 搜索模型…
 input.search_branches: 搜索分支
@@ -619,6 +623,7 @@ notes.new: 新建笔记
 notes.save: 保存
 notes.edit: 编辑
 notes.rich_editor: 富文本编辑器
+notes.headings: 标题
 notes.code: 代码
 notes.side_by_side: 并排
 notes.preview: 预览
