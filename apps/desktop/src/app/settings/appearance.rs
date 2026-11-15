@@ -2,8 +2,8 @@ use std::cell::Cell;
 
 use super::*;
 use crate::theme::ColorScheme;
-use crate::ui::Switch;
 use crate::ui::button::{Button, ButtonRole, ButtonStyle};
+use crate::ui::{Switch, slider};
 use bezel::ui::combobox::{Combobox, ComboboxEvent};
 use bezel::ui::widgets::{Controls, Scaffolding, SliderDrag, slider_fraction};
 use gpui::{Bounds, DragMoveEvent, ElementId, MouseButton, MouseDownEvent, SharedString, canvas};
@@ -251,8 +251,7 @@ fn font_size_slider(
     let drag_move_on_change = on_change.clone();
     let mouse_down_on_change = on_change.clone();
 
-    let slider_control = bezel_theme
-        .slider(fraction)
+    let slider_control = slider(fraction, bezel_theme, theme.accent)
         .child(bounds_recorder)
         .id(control_id)
         .on_drag(SliderDrag(drag_id.clone()), |_, _, _, cx| {
@@ -355,8 +354,7 @@ fn background_adjuster(
     let drag_move_on_change = on_change.clone();
     let mouse_down_on_change = on_change.clone();
 
-    let slider_control = bezel_theme
-        .slider(fraction)
+    let slider_control = slider(fraction, bezel_theme, theme.accent)
         .child(bounds_recorder)
         .id(control_id)
         .on_drag(SliderDrag(drag_id.clone()), |_, _, _, cx| {

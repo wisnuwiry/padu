@@ -4,10 +4,9 @@ use std::rc::Rc;
 
 use bezel::theme::Theme;
 use bezel::ui::focus::pressable;
-use bezel::ui::widgets::Controls;
 use gpui::{
-    AnyView, App, ElementId, IntoElement, Refineable, RenderOnce, StyleRefinement, Styled, Window,
-    prelude::*,
+    AnyView, App, ElementId, Hsla, IntoElement, Refineable, RenderOnce, StyleRefinement, Styled,
+    Window, div, prelude::*, px,
 };
 
 type ToggleCallback = dyn Fn(bool, &mut Window, &mut App);
@@ -18,6 +17,7 @@ pub struct Switch {
     id: ElementId,
     checked: bool,
     enabled: bool,
+    accent: Option<Hsla>,
     tooltip: Option<Rc<dyn Fn(&mut Window, &mut App) -> AnyView>>,
     refinement: StyleRefinement,
     on_toggle: Option<Rc<ToggleCallback>>,
@@ -30,6 +30,7 @@ impl Switch {
             id: id.into(),
             checked,
             enabled: true,
+            accent: None,
             tooltip: None,
             refinement: StyleRefinement::default(),
             on_toggle: None,
@@ -38,6 +39,11 @@ impl Switch {
 
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
+        self
+    }
+
+    pub fn accent(mut self, accent: Hsla) -> Self {
+        self.accent = Some(accent);
         self
     }
 
@@ -63,11 +69,46 @@ impl RenderOnce for Switch {
         let focus = window.use_keyed_state(self.id.clone(), cx, |_, cx| cx.focus_handle());
         let focus = focus.read(cx).clone();
         let bezel_theme = Theme::of(cx);
+        let padu_theme = crate::theme::Theme::current(cx);
+        let scheme = crate::theme::ColorScheme::current(cx);
+        let accent = self.accent.unwrap_or(padu_theme.accent);
         let enabled = self.enabled && self.on_toggle.is_some();
         let next_checked = !self.checked;
 
-        let mut frame = bezel_theme
-            .toggle(self.checked)
+        let track_bg = if self.checked {
+            accent
+        } else {
+            bezel_theme.ink(0.15)
+        };
+
+        let knob_bg = if self.checked {
+            if padu_theme.is_dark && matches!(scheme, crate::theme::ColorScheme::Neutral) {
+                padu_theme.on_inverse
+            } else {
+                gpui::rgb(0xFFFFFF).into()
+            }
+        } else {
+            bezel_theme.ink(0.7)
+        };
+
+        let mut frame = div()
+            .flex_none()
+            .w(px(32.0))
+            .h(px(18.0))
+            .rounded_full()
+            .bg(track_bg)
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .relative()
+            .child(
+                div()
+                    .absolute()
+                    .top(px(1.0))
+                    .left(px(if self.checked { 15.0 } else { 1.0 }))
+                    .size(px(14.0))
+                    .rounded_full()
+                    .bg(knob_bg),
+            )
             .id(self.id)
             .role(gpui::Role::Switch)
             .aria_toggled(if self.checked {

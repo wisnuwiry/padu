@@ -12,6 +12,7 @@ pub mod menu;
 pub mod motion;
 pub mod scrollbar;
 pub mod shortcut_recorder;
+pub mod slider;
 pub mod switch;
 pub mod tag_input;
 pub mod text_field;
@@ -21,6 +22,7 @@ pub mod tooltip;
 pub use button::{Button, ButtonKbd};
 #[allow(unused_imports)]
 pub use editor::{EditorLoader, RichEditor, SharedEditor, configure_editor, editor_theme};
+pub use slider::slider;
 pub use switch::Switch;
 pub use tag_input::TagInput;
 
