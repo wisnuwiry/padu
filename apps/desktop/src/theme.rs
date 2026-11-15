@@ -117,6 +117,7 @@ impl Theme {
         Self::dark_with_scheme(ColorScheme::default())
     }
 
+    #[allow(dead_code)]
     pub fn light() -> Self {
         Self::light_with_scheme(ColorScheme::default())
     }
@@ -236,12 +237,7 @@ impl ColorScheme {
 
 /// Publish the resolved palette. [`Theme::current`] reads it back from the
 /// global, which is how every view gets its colors.
-fn set_active_theme(
-    theme: Theme,
-    scheme: ColorScheme,
-    preference: ThemePreference,
-    cx: &mut App,
-) {
+fn set_active_theme(theme: Theme, scheme: ColorScheme, preference: ThemePreference, cx: &mut App) {
     cx.set_global(ActivePaduTheme {
         theme,
         scheme,

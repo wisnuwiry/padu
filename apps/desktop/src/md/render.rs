@@ -912,6 +912,7 @@ impl<'a> Ctx<'a> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn selection(&self) -> &TranscriptSelection {
         &self.selection
     }
