@@ -19,135 +19,141 @@ impl Padu {
             .gap(px(16.0))
             // Unified About + Version + Updates Card
             .child(
-                bezel_theme
-                    .group_box()
-                    .w_full()
-                    .px(px(20.0))
-                    .py(px(18.0))
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap(px(16.0))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(16.0))
-                            .min_w_0()
-                            .flex_1()
-                            .child(
-                                div()
-                                    .w(px(60.0))
-                                    .h(px(60.0))
-                                    .rounded(px(Theme::surface_radius()))
-                                    .bg(gpui::black())
-                                    .border_1()
-                                    .border_color(theme.border)
-                                    .flex_none()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(icon("icons/logo.svg", 36.0, gpui::white())),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(8.0))
-                                            .child(
-                                                div()
-                                                    .text_size(sp(16.0))
-                                                    .font_weight(FontWeight::SEMIBOLD)
-                                                    .text_color(theme.text)
-                                                    .child("Padu"),
-                                            )
-                                            .child(
-                                                div()
-                                                    .px(px(6.0))
-                                                    .py(px(1.5))
-                                                    .rounded(px(Theme::control_radius()))
-                                                    .bg(theme.surface)
-                                                    .border_1()
-                                                    .border_color(theme.border)
-                                                    .font_family(".SystemUIFontMonospaced")
-                                                    .text_size(sp(11.0))
-                                                    .font_weight(FontWeight::MEDIUM)
-                                                    .text_color(theme.text_secondary)
-                                                    .child(format!("v{version}")),
-                                            ),
+                bezel_theme.group_box().w_full().child(
+                    div()
+                        .w_full()
+                        .px(px(20.0))
+                        .py(px(18.0))
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(16.0))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(16.0))
+                                .min_w_0()
+                                .flex_1()
+                                .child(
+                                    div()
+                                        .w(px(60.0))
+                                        .h(px(60.0))
+                                        .rounded(px(Theme::surface_radius()))
+                                        .bg(gpui::black())
+                                        .border_1()
+                                        .border_color(theme.border)
+                                        .flex_none()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .child(icon("icons/logo.svg", 36.0, gpui::white())),
+                                )
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .gap(px(8.0))
+                                                .child(
+                                                    div()
+                                                        .text_size(sp(16.0))
+                                                        .font_weight(FontWeight::SEMIBOLD)
+                                                        .text_color(theme.text)
+                                                        .child("Padu"),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .px(px(6.0))
+                                                        .py(px(1.5))
+                                                        .rounded(px(Theme::control_radius()))
+                                                        .bg(theme.surface)
+                                                        .border_1()
+                                                        .border_color(theme.border)
+                                                        .font_family(".SystemUIFontMonospaced")
+                                                        .text_size(sp(11.0))
+                                                        .font_weight(FontWeight::MEDIUM)
+                                                        .text_color(theme.text_secondary)
+                                                        .child(format!("v{version}")),
+                                                ),
+                                        )
+                                        .child(
+                                            div()
+                                                .mt(px(3.0))
+                                                .text_size(sp(12.0))
+                                                .line_height(sp(17.0))
+                                                .text_color(theme.text_secondary)
+                                                .child(tr!("about.tagline")),
+                                        ),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .items_end()
+                                .gap(px(4.0))
+                                .flex_none()
+                                .child(if status == crate::updater::UpdateStatus::Available {
+                                    Button::new("install-update-btn", tr!("about.install_update"))
+                                        .button_style(ButtonStyle::Prominent)
+                                        .icon("icons/cloud-upload.svg")
+                                        .on_press(cx.listener(|this, _, _, cx| {
+                                            this.start_available_update(cx);
+                                        }))
+                                } else if is_loading {
+                                    Button::new("updating-btn", tr!("about.checking_for_updates"))
+                                        .button_style(ButtonStyle::Ghost)
+                                        .leading(motion::spin_slow(icon(
+                                            "icons/loader-circle.svg",
+                                            13.0,
+                                            theme.text_secondary,
+                                        )))
+                                        .enabled(false)
+                                } else {
+                                    Button::new(
+                                        "check-for-updates-btn",
+                                        tr!("about.check_for_updates"),
                                     )
-                                    .child(
-                                        div()
-                                            .mt(px(3.0))
-                                            .text_size(sp(12.0))
-                                            .line_height(sp(17.0))
-                                            .text_color(theme.text_secondary)
-                                            .child(tr!("about.tagline")),
-                                    ),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .items_end()
-                            .gap(px(4.0))
-                            .flex_none()
-                            .child(if status == crate::updater::UpdateStatus::Available {
-                                Button::new("install-update-btn", tr!("about.install_update"))
-                                    .button_style(ButtonStyle::Prominent)
-                                    .icon("icons/cloud-upload.svg")
-                                    .on_press(cx.listener(|this, _, _, cx| {
-                                        this.start_available_update(cx);
-                                    }))
-                            } else if is_loading {
-                                Button::new("updating-btn", tr!("about.checking_for_updates"))
-                                    .button_style(ButtonStyle::Ghost)
-                                    .leading(motion::spin_slow(icon(
-                                        "icons/loader-circle.svg",
-                                        13.0,
-                                        theme.text_secondary,
-                                    )))
-                                    .enabled(false)
-                            } else {
-                                Button::new("check-for-updates-btn", tr!("about.check_for_updates"))
                                     .button_style(ButtonStyle::Ghost)
                                     .icon("icons/rotate-cw.svg")
-                                    .on_press(cx.listener(|this, _, _, cx| {
-                                        this.check_for_updates(cx);
-                                    }))
-                            })
-                            .child(
-                                div()
-                                    .text_size(sp(11.5))
-                                    .text_color(
-                                        if status == crate::updater::UpdateStatus::Available {
-                                            theme.accent
-                                        } else {
-                                            theme.text_tertiary
+                                    .on_press(cx.listener(
+                                        |this, _, _, cx| {
+                                            this.check_for_updates(cx);
                                         },
-                                    )
-                                    .child(if is_loading {
-                                        tr!("about.checking_for_updates").to_string()
-                                    } else {
-                                        match status {
-                                            crate::updater::UpdateStatus::Updating => {
-                                                tr!("about.checking_for_updates").to_string()
+                                    ))
+                                })
+                                .child(
+                                    div()
+                                        .text_size(sp(11.5))
+                                        .text_color(
+                                            if status == crate::updater::UpdateStatus::Available {
+                                                theme.accent
+                                            } else {
+                                                theme.text_tertiary
+                                            },
+                                        )
+                                        .child(if is_loading {
+                                            tr!("about.checking_for_updates").to_string()
+                                        } else {
+                                            match status {
+                                                crate::updater::UpdateStatus::Updating => {
+                                                    tr!("about.checking_for_updates").to_string()
+                                                }
+                                                crate::updater::UpdateStatus::Available => {
+                                                    tr!("about.update_available").to_string()
+                                                }
+                                                crate::updater::UpdateStatus::Idle => {
+                                                    tr!("about.up_to_date").to_string()
+                                                }
                                             }
-                                            crate::updater::UpdateStatus::Available => {
-                                                tr!("about.update_available").to_string()
-                                            }
-                                            crate::updater::UpdateStatus::Idle => {
-                                                tr!("about.up_to_date").to_string()
-                                            }
-                                        }
-                                    }),
-                            ),
-                    ),
+                                        }),
+                                ),
+                        ),
+                ),
             )
             // Website, GitHub, Changelog & Sponsor single row of plain buttons, aligned center
             .child(
