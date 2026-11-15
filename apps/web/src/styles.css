@@ -88,6 +88,7 @@
   --danger-soft: rgb(198 74 66 / 10%);
   --code-text: #6d28d9;
   --code-wash: rgb(28 31 37 / 7%);
+  --switch-knob-active: #ffffff;
 }
 
 .dark {
@@ -132,6 +133,13 @@
   --danger-soft: rgb(226 114 106 / 10%);
   --code-text: #c4b5fd;
   --code-wash: rgb(230 230 230 / 8%);
+  --switch-knob-active: #ffffff;
+}
+
+.dark[data-color-scheme="neutral"],
+html.dark[data-color-scheme="neutral"],
+.dark [data-color-scheme="neutral"] {
+  --switch-knob-active: var(--background);
 }
 
 @layer base {
@@ -284,7 +292,7 @@
     appearance: none;
     border: 0;
     border-radius: 999px;
-    background: var(--foreground);
+    background: var(--ring);
   }
 
   .padu-slider::-moz-range-track {
@@ -304,7 +312,7 @@
     height: 18px;
     border: 0;
     border-radius: 999px;
-    background: var(--foreground);
+    background: var(--ring);
   }
 
   .padu-slider:focus-visible {
