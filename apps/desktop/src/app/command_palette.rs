@@ -6,6 +6,7 @@
 //! SQLite scan. Caret blinks therefore repaint one in-memory snapshot instead
 //! of re-fuzzy-matching history or touching storage every frame.
 
+use bezel::ui::surface::Surfaced as _;
 use gpui::{KeyBinding, StyledText, TextRun, actions};
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Matcher, Utf32Str};
@@ -102,6 +103,25 @@ impl PaletteSection {
             Self::Settings => 2,
         }
     }
+}
+
+fn to_title_case(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut capitalize_next = true;
+    for ch in s.chars() {
+        if ch.is_alphanumeric() {
+            if capitalize_next {
+                result.extend(ch.to_uppercase());
+                capitalize_next = false;
+            } else {
+                result.extend(ch.to_lowercase());
+            }
+        } else {
+            capitalize_next = true;
+            result.push(ch);
+        }
+    }
+    result
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2103,6 +2123,7 @@ impl Padu {
             return None;
         }
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx);
         let viewport_height = f32::from(window.viewport_size().height);
         let top = (viewport_height * 0.09).clamp(48.0, 72.0);
         let card_max_height = (viewport_height - top - 36.0)
@@ -2307,7 +2328,7 @@ impl Padu {
                                 .text_size(sp(11.0))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(theme.text_tertiary)
-                                .child(bezel::ui::popover::tracked_upper(&item.section.label())),
+                                .child(to_title_case(&item.section.label())),
                         );
                     }
                     previous_section = Some(item.section);
@@ -2553,10 +2574,12 @@ impl Padu {
             .h(px(card_height))
             .overflow_hidden()
             .rounded(px(bezel::theme::Theme::surface_radius()))
-            .bg(theme.raised)
-            .border_1()
-            .border_color(theme.border_strong)
-            .shadow_2xl()
+            .when(!bezel_theme.glass, |card| {
+                card.bg(theme.raised)
+                    .border_1()
+                    .border_color(theme.border_strong)
+                    .shadow_2xl()
+            })
             .relative()
             .flex()
             .flex_col()
@@ -2611,7 +2634,7 @@ impl Padu {
                     .gap(px(16.0))
                     .border_t_1()
                     .border_color(theme.border)
-                    .bg(theme.canvas.opacity(0.85))
+                    .bg(bezel::ui::popover::band())
                     .text_size(sp(11.0))
                     .text_color(theme.text_tertiary)
                     .child(
@@ -2705,6 +2728,8 @@ impl Padu {
                     ),
             );
 
+        let surfaced_card = card.surface(bezel_theme, bezel_theme.popover_surface);
+
         let scrim = if theme.is_dark {
             gpui::hsla(0.0, 0.0, 0.0, 0.35)
         } else {
@@ -2734,7 +2759,8 @@ impl Padu {
                     .flex()
                     .flex_col()
                     .items_center()
-                    .child(card),
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(surfaced_card),
             ));
         Some(gpui::deferred(layer).with_priority(3).into_any_element())
     }
@@ -2749,6 +2775,16 @@ mod tests {
         let mut matcher = crate::composer_complete::matcher();
         let mut buf = Vec::new();
         pattern.score(Utf32Str::new(candidate, &mut buf), &mut matcher)
+    }
+
+    #[test]
+    fn title_case_capitalizes_words_without_forcing_uppercase() {
+        assert_eq!(to_title_case("suggested"), "Suggested");
+        assert_eq!(to_title_case("TASKS"), "Tasks");
+        assert_eq!(to_title_case("quick actions"), "Quick Actions");
+        assert_eq!(to_title_case("Suggested"), "Suggested");
+        assert_eq!(to_title_case("user_settings"), "User_Settings");
+        assert_eq!(to_title_case(""), "");
     }
 
     #[test]

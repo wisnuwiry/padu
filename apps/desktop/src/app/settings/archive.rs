@@ -120,12 +120,10 @@ impl Padu {
                         tr!("settings.restore"),
                     )
                     .button_style(ButtonStyle::Ghost)
-                    .on_press(cx.listener(
-                        move |this, _, _, cx| {
-                            this.set_session_archived(session_id, false, cx);
-                            this.select_session(session_id, cx);
-                        },
-                    )),
+                    .on_press(cx.listener(move |this, _, _, cx| {
+                        this.set_session_archived(session_id, false, cx);
+                        this.select_session(session_id, cx);
+                    })),
                 )
                 .child(
                     Button::new(
@@ -134,11 +132,9 @@ impl Padu {
                     )
                     .button_style(ButtonStyle::Ghost)
                     .role(ButtonRole::Destructive)
-                    .on_press(cx.listener(
-                        move |this, _, window, cx| {
-                            this.confirm_delete_session(session_id, window, cx);
-                        },
-                    )),
+                    .on_press(cx.listener(move |this, _, window, cx| {
+                        this.confirm_delete_session(session_id, window, cx);
+                    })),
                 );
             group = group.child(row);
         }

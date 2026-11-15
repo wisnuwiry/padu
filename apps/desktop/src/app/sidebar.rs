@@ -450,7 +450,8 @@ impl Render for SessionTooltip {
                         })
                         .when(self.turn_count > 0, |row| {
                             let count = self.turn_count;
-                            let label = format!("{count} turn{}", if count == 1 { "" } else { "s" });
+                            let label =
+                                format!("{count} turn{}", if count == 1 { "" } else { "s" });
                             row.child(
                                 div()
                                     .flex()
@@ -504,11 +505,7 @@ impl Render for SessionTooltip {
                             .when(self.status == SessionStatus::Failed, |e| {
                                 e.child(icon("icons/x.svg", 11.0, status_color))
                             })
-                            .child(
-                                div()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .child(status_text),
-                            ),
+                            .child(div().font_weight(FontWeight::MEDIUM).child(status_text)),
                     )
                 }),
         )
@@ -2587,9 +2584,7 @@ impl Padu {
                     theme.text
                 })
                 .when(grouped_by_project && !selected, |el| {
-                    el.group_hover(row_group_id.clone(), |style| {
-                        style.text_color(theme.text)
-                    })
+                    el.group_hover(row_group_id.clone(), |style| style.text_color(theme.text))
                 })
                 .child(SharedString::from(localized_session_title(session)))
                 .into_any_element()

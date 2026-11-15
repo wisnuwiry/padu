@@ -41,7 +41,11 @@ impl Padu {
                                 .flex_none()
                                 .rounded(px(Theme::control_radius()))
                                 .when_some(app_icon, |element, app_icon| {
-                                    element.child(img(app_icon).size_full().rounded(px(Theme::control_radius())))
+                                    element.child(
+                                        img(app_icon)
+                                            .size_full()
+                                            .rounded(px(Theme::control_radius())),
+                                    )
                                 }),
                         )
                         .child(
@@ -88,44 +92,45 @@ impl Padu {
             .flex_col()
             .gap(px(16.0))
             .child(
-                bezel_theme
-                    .group_box()
-                    .w_full()
-                    .px(px(20.0))
-                    .py(px(14.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(20.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("computer_use.allow_apps")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("computer_use.availability")),
-                            ),
-                    )
-                    .child({
-                        let weak = cx.entity().downgrade();
-                        Switch::new("computer-use-enabled", enabled).on_toggle(
-                            move |enabled, _, cx| {
-                                let _ = weak.update(cx, |this, cx| {
-                                    this.set_computer_use_enabled(enabled, cx)
-                                });
-                            },
+                bezel_theme.group_box().w_full().child(
+                    div()
+                        .w_full()
+                        .px(px(20.0))
+                        .py(px(14.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(20.0))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(
+                                    div()
+                                        .text_size(sp(13.5))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(theme.text)
+                                        .child(tr!("computer_use.allow_apps")),
+                                )
+                                .child(
+                                    div()
+                                        .mt(px(5.0))
+                                        .text_size(sp(12.5))
+                                        .line_height(sp(18.0))
+                                        .text_color(theme.text_secondary)
+                                        .child(tr!("computer_use.availability")),
+                                ),
                         )
-                    }),
+                        .child({
+                            let weak = cx.entity().downgrade();
+                            Switch::new("computer-use-enabled", enabled).on_toggle(
+                                move |enabled, _, cx| {
+                                    let _ = weak.update(cx, |this, cx| {
+                                        this.set_computer_use_enabled(enabled, cx)
+                                    });
+                                },
+                            )
+                        }),
+                ),
             )
             .child(
                 bezel_theme

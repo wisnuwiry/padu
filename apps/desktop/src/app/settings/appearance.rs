@@ -2,11 +2,11 @@ use std::cell::Cell;
 
 use super::*;
 use crate::theme::ColorScheme;
-use crate::ui::button::{Button, ButtonRole, ButtonStyle};
 use crate::ui::Switch;
+use crate::ui::button::{Button, ButtonRole, ButtonStyle};
 use bezel::ui::combobox::{Combobox, ComboboxEvent};
-use bezel::ui::widgets::{slider_fraction, Controls, Scaffolding, SliderDrag};
-use gpui::{canvas, Bounds, DragMoveEvent, ElementId, MouseButton, MouseDownEvent, SharedString};
+use bezel::ui::widgets::{Controls, Scaffolding, SliderDrag, slider_fraction};
+use gpui::{Bounds, DragMoveEvent, ElementId, MouseButton, MouseDownEvent, SharedString, canvas};
 
 fn font_size_label(size: f32) -> String {
     if size.fract() == 0.0 {

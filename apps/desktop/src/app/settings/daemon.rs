@@ -380,81 +380,85 @@ impl Padu {
             let active_banner = bezel::theme::Theme::of(cx)
                 .group_box()
                 .w_full()
-                .px(px(20.0))
-                .py(px(16.0))
                 .border_color(theme.accent.opacity(0.4))
-                .flex()
-                .items_center()
-                .justify_between()
-                .gap(px(16.0))
                 .child(
                     div()
+                        .w_full()
+                        .px(px(20.0))
+                        .py(px(16.0))
                         .flex()
                         .items_center()
-                        .gap(px(14.0))
-                        .min_w_0()
-                        .flex_1()
+                        .justify_between()
+                        .gap(px(16.0))
                         .child(
                             div()
-                                .w(px(38.0))
-                                .h(px(38.0))
-                                .rounded(px(9.0))
-                                .bg(theme.accent.opacity(0.12))
                                 .flex()
                                 .items_center()
-                                .justify_center()
-                                .child(icon("icons/server.svg", 18.0, theme.accent)),
-                        )
-                        .child(
-                            div()
+                                .gap(px(14.0))
                                 .min_w_0()
                                 .flex_1()
-                                .flex()
-                                .flex_col()
-                                .gap(px(3.0))
                                 .child(
                                     div()
+                                        .w(px(38.0))
+                                        .h(px(38.0))
+                                        .rounded(px(9.0))
+                                        .bg(theme.accent.opacity(0.12))
                                         .flex()
                                         .items_center()
-                                        .gap(px(8.0))
-                                        .child(
-                                            div()
-                                                .text_size(sp(13.5))
-                                                .font_weight(FontWeight::MEDIUM)
-                                                .text_color(theme.text)
-                                                .child(tr!(
-                                                    "daemon.remote_active_banner_title",
-                                                    name = active_host_name
-                                                )),
-                                        )
-                                        .child(
-                                            div()
-                                                .px(px(6.0))
-                                                .py(px(1.5))
-                                                .rounded(px(4.0))
-                                                .bg(theme.success.opacity(0.15))
-                                                .text_size(sp(11.0))
-                                                .font_weight(FontWeight::MEDIUM)
-                                                .text_color(theme.success)
-                                                .child(tr!("host.active")),
-                                        ),
+                                        .justify_center()
+                                        .child(icon("icons/server.svg", 18.0, theme.accent)),
                                 )
                                 .child(
                                     div()
-                                        .text_size(sp(12.5))
-                                        .line_height(sp(17.0))
-                                        .text_color(theme.text_secondary)
-                                        .child(tr!("daemon.remote_active_banner_desc")),
+                                        .min_w_0()
+                                        .flex_1()
+                                        .flex()
+                                        .flex_col()
+                                        .gap(px(3.0))
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .gap(px(8.0))
+                                                .child(
+                                                    div()
+                                                        .text_size(sp(13.5))
+                                                        .font_weight(FontWeight::MEDIUM)
+                                                        .text_color(theme.text)
+                                                        .child(tr!(
+                                                            "daemon.remote_active_banner_title",
+                                                            name = active_host_name
+                                                        )),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .px(px(6.0))
+                                                        .py(px(1.5))
+                                                        .rounded(px(4.0))
+                                                        .bg(theme.success.opacity(0.15))
+                                                        .text_size(sp(11.0))
+                                                        .font_weight(FontWeight::MEDIUM)
+                                                        .text_color(theme.success)
+                                                        .child(tr!("host.active")),
+                                                ),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_size(sp(12.5))
+                                                .line_height(sp(17.0))
+                                                .text_color(theme.text_secondary)
+                                                .child(tr!("daemon.remote_active_banner_desc")),
+                                        ),
                                 ),
+                        )
+                        .child(
+                            Button::new("switch-to-local-btn", tr!("daemon.switch_to_local"))
+                                .button_style(ButtonStyle::Ghost)
+                                .icon("icons/arrow-left.svg")
+                                .on_press(cx.listener(|this, _, _, cx| {
+                                    this.switch_to_host(None, cx);
+                                })),
                         ),
-                )
-                .child(
-                    Button::new("switch-to-local-btn", tr!("daemon.switch_to_local"))
-                        .button_style(ButtonStyle::Ghost)
-                        .icon("icons/arrow-left.svg")
-                        .on_press(cx.listener(|this, _, _, cx| {
-                            this.switch_to_host(None, cx);
-                        })),
                 );
 
             return div()
@@ -519,63 +523,65 @@ impl Padu {
             .gap(px(12.0))
             .child(remote_hosts_section)
             .child(
-                bezel_theme
-                    .group_box()
-                    .min_h(px(66.0))
-                    .px(px(20.0))
-                    .py(px(13.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(7.0))
-                                    .child(
-                                        div()
-                                            .text_size(sp(13.5))
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(theme.text)
-                                            .child(tr!("daemon.expose_title")),
-                                    )
-                                    .child(
-                                        div()
-                                            .px(px(6.0))
-                                            .py(px(2.0))
-                                            .rounded_full()
-                                            .text_size(sp(12.5))
-                                            .text_color(if enabled {
-                                                theme.success
-                                            } else {
-                                                theme.text_tertiary
-                                            })
-                                            .bg(theme.overlay)
-                                            .child(if pending {
-                                                tr!("daemon.status_restarting")
-                                            } else if enabled {
-                                                tr!("daemon.status_exposed")
-                                            } else {
-                                                tr!("daemon.status_local")
-                                            }),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .min_w_0()
-                                    .whitespace_normal()
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("daemon.expose_description")),
-                            ),
-                    )
-                    .child(exposure_toggle),
+                bezel_theme.group_box().w_full().child(
+                    div()
+                        .w_full()
+                        .min_h(px(66.0))
+                        .px(px(20.0))
+                        .py(px(13.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(24.0))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(7.0))
+                                        .child(
+                                            div()
+                                                .text_size(sp(13.5))
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_color(theme.text)
+                                                .child(tr!("daemon.expose_title")),
+                                        )
+                                        .child(
+                                            div()
+                                                .px(px(6.0))
+                                                .py(px(2.0))
+                                                .rounded_full()
+                                                .text_size(sp(12.5))
+                                                .text_color(if enabled {
+                                                    theme.success
+                                                } else {
+                                                    theme.text_tertiary
+                                                })
+                                                .bg(theme.overlay)
+                                                .child(if pending {
+                                                    tr!("daemon.status_restarting")
+                                                } else if enabled {
+                                                    tr!("daemon.status_exposed")
+                                                } else {
+                                                    tr!("daemon.status_local")
+                                                }),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .mt(px(5.0))
+                                        .min_w_0()
+                                        .whitespace_normal()
+                                        .text_size(sp(12.5))
+                                        .line_height(sp(18.0))
+                                        .text_color(theme.text_secondary)
+                                        .child(tr!("daemon.expose_description")),
+                                ),
+                        )
+                        .child(exposure_toggle),
+                ),
             )
             .when(enabled, |column| {
                 column.child(
