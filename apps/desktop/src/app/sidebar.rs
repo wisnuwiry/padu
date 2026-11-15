@@ -634,6 +634,7 @@ pub(super) enum SidebarRow {
     /// Opens the window-wide command palette and scrolls with history.
     Search,
     /// Opens the task board workspace.
+    #[allow(dead_code)]
     Board,
     /// Opens the notes workspace.
     Notes,
@@ -1907,7 +1908,6 @@ impl Padu {
     fn sidebar_rows(&self, today: NaiveDate, now: u64) -> Vec<SidebarRow> {
         let mut rows = vec![
             SidebarRow::Search,
-            SidebarRow::Board,
             SidebarRow::Notes,
             SidebarRow::PinnedSeparator,
             SidebarRow::GroupSpacer,
@@ -3610,7 +3610,6 @@ mod tests {
         let group = SidebarGroup::Updated(SessionDateGroup::Today);
         let mut rows = vec![
             SidebarRow::Search,
-            SidebarRow::Board,
             SidebarRow::Notes,
             SidebarRow::PinnedSeparator,
             SidebarRow::GroupSpacer,
@@ -3623,8 +3622,8 @@ mod tests {
         let offset =
             sidebar_bottom_aligned_offset(&rows, index, px(400.0), SidebarGrouping::Updated);
 
-        assert_eq!(index, 36);
-        assert_eq!(offset.item_ix, 29);
+        assert_eq!(index, 35);
+        assert_eq!(offset.item_ix, 28);
         assert_eq!(offset.offset_in_item, px(16.0));
         let visible_height = rows[offset.item_ix..=index]
             .iter()
