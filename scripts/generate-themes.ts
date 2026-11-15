@@ -406,8 +406,8 @@ function generateRustPalette(config: ThemesConfig): string {
     .join("\n");
 
   const allVariants = schemeEntries
-    .map(([id]) => `ColorScheme::${pascalCase(id)}`)
-    .join(", ");
+    .map(([id]) => `        ColorScheme::${pascalCase(id)},`)
+    .join("\n");
 
   const asStrArms = schemeEntries
     .map(([id]) => `            ColorScheme::${pascalCase(id)} => "${id}",`)
@@ -462,7 +462,9 @@ ${enumVariants}
 
 #[allow(dead_code)]
 impl ColorScheme {
-    pub const ALL: [Self; ${schemeEntries.length}] = [${allVariants}];
+    pub const ALL: [Self; ${schemeEntries.length}] = [
+${allVariants}
+    ];
 
     pub const fn as_str(self) -> &'static str {
         match self {

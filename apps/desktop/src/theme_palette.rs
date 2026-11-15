@@ -18,7 +18,15 @@ pub enum ColorScheme {
 
 #[allow(dead_code)]
 impl ColorScheme {
-    pub const ALL: [Self; 7] = [ColorScheme::Purple, ColorScheme::Blue, ColorScheme::Green, ColorScheme::Amber, ColorScheme::Coral, ColorScheme::Rose, ColorScheme::Neutral];
+    pub const ALL: [Self; 7] = [
+        ColorScheme::Purple,
+        ColorScheme::Blue,
+        ColorScheme::Green,
+        ColorScheme::Amber,
+        ColorScheme::Coral,
+        ColorScheme::Rose,
+        ColorScheme::Neutral,
+    ];
 
     pub const fn as_str(self) -> &'static str {
         match self {
