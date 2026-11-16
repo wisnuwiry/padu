@@ -1534,6 +1534,11 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A pane/split drag in flight must never start a text selection: the
+        // press belongs to the drag, not to the terminal grid.
+        if cx.has_active_drag() {
+            return;
+        }
         self.activate_pane(pane_id, window, cx);
         if let Some(pane) = self.panes.get_mut(&pane_id) {
             pane.on_mouse_down(event, window, cx);
@@ -1548,6 +1553,11 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Extending a selection while a pane/split drag crosses this pane
+        // would sweep text the user never drew over.
+        if cx.has_active_drag() {
+            return;
+        }
         if let Some(pane) = self.panes.get_mut(&pane_id) {
             pane.on_mouse_move(event, window, cx);
             cx.notify();
