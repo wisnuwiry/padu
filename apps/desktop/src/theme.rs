@@ -47,7 +47,8 @@ pub struct Theme {
     #[allow(dead_code)]
     pub sidebar: Hsla,
     /// Frosted glass background for sidebars, panels, and material surfaces.
-    /// Follows the active theme palette: `#181818` in dark mode and `#F3F3F3` in light mode.
+    /// Slightly translucent on macOS (the palette tone at 85% over native
+    /// window vibrancy and tint) and opaque on other platforms.
     pub frosted: Hsla,
     pub sidebar_drag_background: Hsla,
     pub sidebar_item_background: Hsla,
@@ -96,6 +97,28 @@ pub struct Theme {
     pub danger_soft: Hsla,
 }
 
+/// The frost fill: the palette tone kept translucent on macOS, so the
+/// native vibrancy beneath reads clearly through while the surface keeps its
+/// color. Opaque where no vibrancy backs it.
+fn frost(tone: u32) -> Hsla {
+    if cfg!(target_os = "macos") {
+        rgb(tone).opacity(0.70).into()
+    } else {
+        rgb(tone).into()
+    }
+}
+
+/// A content-surface fill: the same tone, translucent over the native
+/// vibrancy on macOS. Content sits above the frost chrome, so it holds more
+/// coverage to stay legible. Opaque where no vibrancy backs it.
+fn vibrant(tone: u32) -> Hsla {
+    if cfg!(target_os = "macos") {
+        rgb(tone).opacity(0.85).into()
+    } else {
+        rgb(tone).into()
+    }
+}
+
 impl Theme {
     pub fn control_radius() -> f32 {
         bezel::theme::Theme::control_radius()
@@ -126,16 +149,16 @@ impl Theme {
         let (accent, code_text) = scheme.dark_tokens();
         Self {
             is_dark: true,
-            canvas: rgb(0x1A1A1A).into(),
-            sidebar: rgb(0x181818).into(),
-            frosted: rgb(0x181818).into(),
+            canvas: vibrant(0x1A1A1A),
+            sidebar: frost(0x181818),
+            frosted: frost(0x181818),
             sidebar_drag_background: rgb(0x181818).into(),
             sidebar_item_background: hsla(0.0, 0.0, 1.0, 0.08),
-            surface: rgb(0x1A1A1A).into(),
-            raised: rgb(0x232323).into(),
-            composer: rgb(0x212121).into(),
-            inset: rgb(0x151515).into(),
-            terminal: rgb(0x1A1A1A).into(),
+            surface: vibrant(0x1A1A1A),
+            raised: vibrant(0x232323),
+            composer: vibrant(0x212121),
+            inset: vibrant(0x151515),
+            terminal: vibrant(0x1A1A1A),
             overlay: hsla(220.0 / 360.0, 0.10, 0.90, 0.05),
             overlay_strong: hsla(220.0 / 360.0, 0.10, 0.90, 0.09),
 
@@ -171,16 +194,16 @@ impl Theme {
         let (accent, code_text) = scheme.light_tokens();
         Self {
             is_dark: false,
-            canvas: rgb(0xF6F5F6).into(),
-            sidebar: rgb(0xF3F3F3).into(),
-            frosted: rgb(0xF3F3F3).into(),
+            canvas: vibrant(0xF6F5F6),
+            sidebar: frost(0xF3F3F3),
+            frosted: frost(0xF3F3F3),
             sidebar_drag_background: rgb(0xF3F3F3).into(),
             sidebar_item_background: hsla(0.0, 0.0, 0.0, 0.04),
-            surface: rgb(0xF6F5F6).into(),
-            raised: rgb(0xECECEC).into(),
-            composer: rgb(0xFFFFFF).into(),
-            inset: rgb(0xE6E6E6).into(),
-            terminal: rgb(0xF6F5F6).into(),
+            surface: vibrant(0xF6F5F6),
+            raised: vibrant(0xECECEC),
+            composer: vibrant(0xFFFFFF),
+            inset: vibrant(0xE6E6E6),
+            terminal: vibrant(0xF6F5F6),
             overlay: hsla(220.0 / 360.0, 0.10, 0.12, 0.05),
             overlay_strong: hsla(220.0 / 360.0, 0.10, 0.12, 0.09),
 
