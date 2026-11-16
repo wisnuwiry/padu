@@ -60,6 +60,60 @@ impl ConversationBackgroundEffect {
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DitherEffectConfig {
+    pub max_width: u32,
+    pub color_step: f32,
+    pub spread: f32,
+}
+
+impl Default for DitherEffectConfig {
+    fn default() -> Self {
+        Self {
+            max_width: 800,
+            color_step: 32.0,
+            spread: 40.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AsciiEffectConfig {
+    pub min_columns: u32,
+    pub max_columns: u32,
+    pub cell_size: u32,
+    pub color_step: f32,
+    pub spread: f32,
+    pub bg_dim: f32,
+}
+
+impl Default for AsciiEffectConfig {
+    fn default() -> Self {
+        Self {
+            min_columns: 80,
+            max_columns: 256,
+            cell_size: 8,
+            color_step: 32.0,
+            spread: 40.0,
+            bg_dim: 0.18,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BackgroundEffectFilterConfig {
+    pub dither: DitherEffectConfig,
+    pub ascii: AsciiEffectConfig,
+}
+
+pub static EFFECT_FILTER_CONFIG: std::sync::LazyLock<BackgroundEffectFilterConfig> =
+    std::sync::LazyLock::new(|| {
+        serde_json::from_str(include_str!("../../../background-effects.json")).unwrap_or_default()
+    });
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct ConversationBackgroundSettings {
@@ -1673,6 +1727,20 @@ mod tests {
 
         let serialized = serde_json::to_string(&ascii).unwrap();
         assert!(serialized.contains(r#""effect":"ascii""#));
+    }
+
+    #[test]
+    fn background_effect_filter_config_loads_from_root_json() {
+        let config = &*EFFECT_FILTER_CONFIG;
+        assert_eq!(config.dither.max_width, 800);
+        assert_eq!(config.dither.color_step, 32.0);
+        assert_eq!(config.dither.spread, 40.0);
+        assert_eq!(config.ascii.min_columns, 80);
+        assert_eq!(config.ascii.max_columns, 256);
+        assert_eq!(config.ascii.cell_size, 8);
+        assert_eq!(config.ascii.color_step, 32.0);
+        assert_eq!(config.ascii.spread, 40.0);
+        assert_eq!(config.ascii.bg_dim, 0.18);
     }
 }
 

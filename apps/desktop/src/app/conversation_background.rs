@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::*;
 use image::ImageEncoder;
 use image::codecs::png::{CompressionType, FilterType, PngEncoder};
-use padu_client::persistence::ConversationBackgroundEffect;
+use padu_client::persistence::{ConversationBackgroundEffect, EFFECT_FILTER_CONFIG};
 
 /// Conversation backgrounds are decorative, so they are capped well below the
 /// 48 MB wire limit to keep daemon uploads and transcript frames cheap.
@@ -115,14 +115,33 @@ const ASCII_GLYPHS_8X8: [[u8; 8]; 8] = [
 
 static DITHER_LUT: std::sync::LazyLock<[[u8; 256]; 64]> = std::sync::LazyLock::new(|| {
     let mut lut = [[0u8; 256]; 64];
-    const STEP: f32 = 32.0;
+    let step = EFFECT_FILTER_CONFIG.dither.color_step;
+    let spread_factor = EFFECT_FILTER_CONFIG.dither.spread;
     for y in 0..8 {
         for x in 0..8 {
             let bayer_idx = (y << 3) | x;
             let bayer = BAYER_8X8[y][x] - 0.5;
-            let spread = bayer * 40.0;
+            let spread = bayer * spread_factor;
             for c in 0..=255 {
-                let quantized = ((c as f32 + spread).clamp(0.0, 255.0) / STEP).round() * STEP;
+                let quantized = ((c as f32 + spread).clamp(0.0, 255.0) / step).round() * step;
+                lut[bayer_idx][c] = quantized.clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    lut
+});
+
+static ASCII_DITHER_LUT: std::sync::LazyLock<[[u8; 256]; 64]> = std::sync::LazyLock::new(|| {
+    let mut lut = [[0u8; 256]; 64];
+    let step = EFFECT_FILTER_CONFIG.ascii.color_step;
+    let spread_factor = EFFECT_FILTER_CONFIG.ascii.spread;
+    for y in 0..8 {
+        for x in 0..8 {
+            let bayer_idx = (y << 3) | x;
+            let bayer = BAYER_8X8[y][x] - 0.5;
+            let spread = bayer * spread_factor;
+            for c in 0..=255 {
+                let quantized = ((c as f32 + spread).clamp(0.0, 255.0) / step).round() * step;
                 lut[bayer_idx][c] = quantized.clamp(0.0, 255.0) as u8;
             }
         }
@@ -168,9 +187,8 @@ fn process_background_bytes(
                 return None;
             }
 
-            // Tuned resolution for color dithering: balance retro stippling pattern visibility
-            // with crisp image structure (~800px max width).
-            let target_w = 800u32.min(orig_w);
+            // Single source of truth effect resolution from background-effects.json
+            let target_w = EFFECT_FILTER_CONFIG.dither.max_width.min(orig_w);
             let target_h = ((orig_h as f32 / orig_w as f32) * target_w as f32)
                 .round()
                 .max(1.0) as u32;
@@ -242,9 +260,11 @@ fn process_background_bytes(
                 return None;
             }
 
-            // Cell size is 8x8 pixels per ASCII glyph
-            // High resolution ASCII art structure: target 80 to 256 glyph columns
-            let cols = (orig_w / 8).clamp(80, 256);
+            // ASCII art structure configured via background-effects.json
+            let cell_size = EFFECT_FILTER_CONFIG.ascii.cell_size;
+            let min_cols = EFFECT_FILTER_CONFIG.ascii.min_columns;
+            let max_cols = EFFECT_FILTER_CONFIG.ascii.max_columns;
+            let cols = (orig_w / cell_size).clamp(min_cols, max_cols);
             let rows = ((orig_h as f32 / orig_w as f32) * cols as f32)
                 .round()
                 .max(1.0) as u32;
@@ -252,11 +272,14 @@ fn process_background_bytes(
             let sampled =
                 image::imageops::resize(&rgba, cols, rows, image::imageops::FilterType::Triangle);
 
-            let out_w = cols * 8;
-            let out_h = rows * 8;
+            let out_w = cols * cell_size;
+            let out_h = rows * cell_size;
             let mut out = image::RgbaImage::new(out_w, out_h);
             let out_bytes = out.as_mut();
             let sampled_bytes = sampled.as_raw();
+            let lut = &*ASCII_DITHER_LUT;
+            let bg_dim = EFFECT_FILTER_CONFIG.ascii.bg_dim;
+            let bg_scale = (bg_dim * 256.0).round() as u32;
 
             for cy in 0..rows {
                 let sampled_row_offset = (cy * cols * 4) as usize;
@@ -267,34 +290,43 @@ fn process_background_bytes(
                         continue;
                     }
 
-                    let r = sampled_bytes[s_idx] as u32;
-                    let g = sampled_bytes[s_idx + 1] as u32;
-                    let b = sampled_bytes[s_idx + 2] as u32;
+                    let r = sampled_bytes[s_idx] as usize;
+                    let g = sampled_bytes[s_idx + 1] as usize;
+                    let b = sampled_bytes[s_idx + 2] as usize;
                     let luma = (r * 77 + g * 150 + b * 29) >> 8;
 
-                    let glyph_idx = ((luma * 7 + 128) >> 8).min(7) as usize;
+                    let glyph_idx = ((luma * 7 + 128) >> 8).min(7);
                     let glyph = ASCII_GLYPHS_8X8[glyph_idx];
 
-                    // Keep original vibrant colors for glyph strokes, softly dim background
-                    let bg_r = ((r * 46) >> 8) as u8;
-                    let bg_g = ((g * 46) >> 8) as u8;
-                    let bg_b = ((b * 46) >> 8) as u8;
+                    // Dither-quantized colors for ASCII characters and softly dimmed background
+                    let bg_r = ((r as u32 * bg_scale) >> 8).min(255) as usize;
+                    let bg_g = ((g as u32 * bg_scale) >> 8).min(255) as usize;
+                    let bg_b = ((b as u32 * bg_scale) >> 8).min(255) as usize;
 
-                    let fg = [r as u8, g as u8, b as u8, 255];
-                    let bg = [bg_r, bg_g, bg_b, 255];
-
-                    let base_y = cy * 8;
-                    let base_x = cx * 8;
+                    let base_y = cy * cell_size;
+                    let base_x = cx * cell_size;
 
                     for gy in 0..8 {
                         let row_bits = glyph[gy];
+                        let y_shift = gy << 3;
                         let row_start = (((base_y + gy as u32) * out_w + base_x) * 4) as usize;
                         let row_slice = &mut out_bytes[row_start..row_start + 32];
                         for gx in 0..8 {
                             let is_fg = ((row_bits >> (7 - gx)) & 1) != 0;
-                            let color = if is_fg { &fg } else { &bg };
+                            let bayer_idx = y_shift | gx;
+                            let lut_row = &lut[bayer_idx];
                             let px = gx * 4;
-                            row_slice[px..px + 4].copy_from_slice(color);
+                            if is_fg {
+                                row_slice[px] = lut_row[r];
+                                row_slice[px + 1] = lut_row[g];
+                                row_slice[px + 2] = lut_row[b];
+                                row_slice[px + 3] = a;
+                            } else {
+                                row_slice[px] = lut_row[bg_r];
+                                row_slice[px + 1] = lut_row[bg_g];
+                                row_slice[px + 2] = lut_row[bg_b];
+                                row_slice[px + 3] = a;
+                            }
                         }
                     }
                 }

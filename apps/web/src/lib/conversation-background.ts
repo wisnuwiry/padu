@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import effectConfig from '../../../../background-effects.json'
 
 export type ConversationBackgroundEffect = 'none' | 'dither' | 'ascii'
 
@@ -119,17 +120,31 @@ for (let b = 0; b < 64; b++) {
   const y = (b >> 3) & 7
   const x = b & 7
   const bayerVal = BAYER_8X8[y][x] - 0.5
-  const spread = bayerVal * 40
+  const spread = bayerVal * effectConfig.dither.spread
+  const step = effectConfig.dither.colorStep
   const offset = b * 256
   for (let c = 0; c < 256; c++) {
-    DITHER_LUT[offset + c] = Math.min(255, Math.max(0, Math.round((c + spread) / 32) * 32))
+    DITHER_LUT[offset + c] = Math.min(255, Math.max(0, Math.round((c + spread) / step) * step))
+  }
+}
+
+const ASCII_DITHER_LUT = new Uint8Array(64 * 256)
+for (let b = 0; b < 64; b++) {
+  const y = (b >> 3) & 7
+  const x = b & 7
+  const bayerVal = BAYER_8X8[y][x] - 0.5
+  const spread = bayerVal * effectConfig.ascii.spread
+  const step = effectConfig.ascii.colorStep
+  const offset = b * 256
+  for (let c = 0; c < 256; c++) {
+    ASCII_DITHER_LUT[offset + c] = Math.min(255, Math.max(0, Math.round((c + spread) / step) * step))
   }
 }
 
 function processDither(img: HTMLImageElement): string {
   const naturalW = img.naturalWidth || 1920
   const naturalH = img.naturalHeight || 1080
-  const targetW = Math.min(800, naturalW)
+  const targetW = Math.min(effectConfig.dither.maxWidth, naturalW)
   const targetH = Math.max(1, Math.round((naturalH / naturalW) * targetW))
   const canvas = document.createElement('canvas')
   canvas.width = targetW
@@ -170,7 +185,8 @@ const ASCII_GLYPHS_8X8 = [
 function processAscii(img: HTMLImageElement): string {
   const naturalW = img.naturalWidth || 1920
   const naturalH = img.naturalHeight || 1080
-  const cols = Math.min(256, Math.max(80, Math.round(naturalW / 8)))
+  const { minColumns, maxColumns, cellSize, bgDim } = effectConfig.ascii
+  const cols = Math.min(maxColumns, Math.max(minColumns, Math.round(naturalW / cellSize)))
   const rows = Math.max(1, Math.round((naturalH / naturalW) * cols))
 
   const sampleCanvas = document.createElement('canvas')
@@ -181,8 +197,8 @@ function processAscii(img: HTMLImageElement): string {
   sampleCtx.drawImage(img, 0, 0, cols, rows)
   const sampleData = sampleCtx.getImageData(0, 0, cols, rows).data
 
-  const outW = cols * 8
-  const outH = rows * 8
+  const outW = cols * cellSize
+  const outH = rows * cellSize
   const outCanvas = document.createElement('canvas')
   outCanvas.width = outW
   outCanvas.height = outH
@@ -190,6 +206,7 @@ function processAscii(img: HTMLImageElement): string {
   if (!outCtx) return ''
   const outImgData = outCtx.createImageData(outW, outH)
   const out32 = new Uint32Array(outImgData.data.buffer)
+  const bgScale = Math.round(bgDim * 256)
 
   for (let cy = 0; cy < rows; cy++) {
     const sampleRowOffset = cy * cols * 4
@@ -206,26 +223,26 @@ function processAscii(img: HTMLImageElement): string {
       const glyphIdx = Math.min(7, (luma * 7 + 128) >> 8)
       const glyph = ASCII_GLYPHS_8X8[glyphIdx]
 
-      const bgR = (r * 46) >> 8
-      const bgG = (g * 46) >> 8
-      const bgB = (b * 46) >> 8
+      // Dither-quantized colors for ASCII characters and softly dimmed background
+      const bgR = (r * bgScale) >> 8
+      const bgG = (g * bgScale) >> 8
+      const bgB = (b * bgScale) >> 8
 
-      // Little-endian 32-bit RGBA: (A << 24) | (B << 16) | (G << 8) | R
-      const fg = (255 << 24) | (b << 16) | (g << 8) | r
-      const bg = (255 << 24) | (bgB << 16) | (bgG << 8) | bgR
-      const baseOutIdx = (cy * 8 * outW) + (cx * 8)
+      const baseOutIdx = (cy * cellSize * outW) + (cx * cellSize)
 
       for (let gy = 0; gy < 8; gy++) {
         const rowBits = glyph[gy]
         const rowOffset = baseOutIdx + (gy * outW)
-        out32[rowOffset] = (rowBits & 0x80) ? fg : bg
-        out32[rowOffset + 1] = (rowBits & 0x40) ? fg : bg
-        out32[rowOffset + 2] = (rowBits & 0x20) ? fg : bg
-        out32[rowOffset + 3] = (rowBits & 0x10) ? fg : bg
-        out32[rowOffset + 4] = (rowBits & 0x08) ? fg : bg
-        out32[rowOffset + 5] = (rowBits & 0x04) ? fg : bg
-        out32[rowOffset + 6] = (rowBits & 0x02) ? fg : bg
-        out32[rowOffset + 7] = (rowBits & 0x01) ? fg : bg
+        const yShift = gy << 3
+        for (let gx = 0; gx < 8; gx++) {
+          const isFg = ((rowBits >> (7 - gx)) & 1) !== 0
+          const bayerIdx = yShift | gx
+          const lutOffset = bayerIdx * 256
+          const pR = ASCII_DITHER_LUT[lutOffset + (isFg ? r : bgR)]
+          const pG = ASCII_DITHER_LUT[lutOffset + (isFg ? g : bgG)]
+          const pB = ASCII_DITHER_LUT[lutOffset + (isFg ? b : bgB)]
+          out32[rowOffset + gx] = (a << 24) | (pB << 16) | (pG << 8) | pR
+        }
       }
     }
   }
