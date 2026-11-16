@@ -1,4 +1,4 @@
-use bezel::ui::{context_menu::Place, icons::Icon, menu::Item};
+use bezel::ui::{context_menu::Place, icons::Icon, menu::Item, surface::Surfaced as _};
 use chrono::{Datelike as _, Local, NaiveDate};
 use gpui::{KeyBinding, Point, actions};
 
@@ -299,6 +299,7 @@ impl SessionTooltip {
 impl Render for SessionTooltip {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx);
         let surface_radius = bezel::theme::Theme::surface_radius();
         let control_radius = bezel::theme::Theme::control_radius();
         let is_remote_host =
@@ -311,8 +312,6 @@ impl Render for SessionTooltip {
                 .px(px(12.0))
                 .py(px(10.0))
                 .rounded(px(surface_radius))
-                .bg(theme.frosted)
-                .shadow_xl()
                 .flex()
                 .flex_col()
                 .gap(px(8.0))
@@ -507,7 +506,8 @@ impl Render for SessionTooltip {
                             })
                             .child(div().font_weight(FontWeight::MEDIUM).child(status_text)),
                     )
-                }),
+                })
+                .surface(&bezel_theme, bezel_theme.popover_surface),
         )
     }
 }
