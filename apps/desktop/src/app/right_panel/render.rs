@@ -110,7 +110,6 @@ impl Padu {
             div()
                 .id("right-panel-content-card")
                 .flex_1()
-                .size_full()
                 .min_h_0()
                 .min_w_0()
                 .ml(
