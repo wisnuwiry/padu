@@ -2021,10 +2021,6 @@ impl TerminalView {
             .gap(px(2.0))
             .p(px(2.0))
             .rounded(px(bezel::theme::Theme::control_radius()))
-            .bg(theme.frosted.opacity(0.85))
-            .border_1()
-            .border_color(theme.border.opacity(0.5))
-            .shadow_sm()
             .when(pane.exited, |el| {
                 el.child(
                     div()
