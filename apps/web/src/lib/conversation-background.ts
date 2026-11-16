@@ -129,7 +129,7 @@ for (let b = 0; b < 64; b++) {
 function processDither(img: HTMLImageElement): string {
   const naturalW = img.naturalWidth || 1920
   const naturalH = img.naturalHeight || 1080
-  const targetW = Math.min(2048, naturalW)
+  const targetW = Math.min(800, naturalW)
   const targetH = Math.max(1, Math.round((naturalH / naturalW) * targetW))
   const canvas = document.createElement('canvas')
   canvas.width = targetW

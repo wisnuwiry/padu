@@ -168,14 +168,15 @@ fn process_background_bytes(
                 return None;
             }
 
-            // High resolution color dithering for crisp fidelity (up to 2048px or native)
-            let (target_w, target_h, source) = if orig_w <= 2048 {
+            // Tuned resolution for color dithering: balance retro stippling pattern visibility
+            // with crisp image structure (~800px max width).
+            let target_w = 800u32.min(orig_w);
+            let target_h = ((orig_h as f32 / orig_w as f32) * target_w as f32)
+                .round()
+                .max(1.0) as u32;
+            let (target_w, target_h, source) = if target_w == orig_w && target_h == orig_h {
                 (orig_w, orig_h, std::borrow::Cow::Borrowed(&rgba))
             } else {
-                let target_w = 2048u32;
-                let target_h = ((orig_h as f32 / orig_w as f32) * target_w as f32)
-                    .round()
-                    .max(1.0) as u32;
                 (
                     target_w,
                     target_h,
