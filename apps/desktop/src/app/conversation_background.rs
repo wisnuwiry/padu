@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
 use super::*;
+use image::ImageEncoder;
+use image::codecs::png::{CompressionType, FilterType, PngEncoder};
 use padu_client::persistence::ConversationBackgroundEffect;
 
 /// Conversation backgrounds are decorative, so they are capped well below the
@@ -111,6 +113,21 @@ const ASCII_GLYPHS_8X8: [[u8; 8]; 8] = [
     [0x24, 0x7E, 0x24, 0x24, 0x7E, 0x24, 0x00, 0x00],
 ];
 
+fn encode_png_fast(img: &image::RgbaImage) -> Option<Vec<u8>> {
+    let mut bytes = Vec::new();
+    let encoder =
+        PngEncoder::new_with_quality(&mut bytes, CompressionType::Fast, FilterType::NoFilter);
+    encoder
+        .write_image(
+            img.as_raw(),
+            img.width(),
+            img.height(),
+            image::ExtendedColorType::Rgba8,
+        )
+        .ok()?;
+    Some(bytes)
+}
+
 fn process_background_bytes(
     raw: &[u8],
     original_format: gpui::ImageFormat,
@@ -187,9 +204,7 @@ fn process_background_bytes(
                 }
             }
 
-            let mut png_bytes = Vec::new();
-            let mut cursor = std::io::Cursor::new(&mut png_bytes);
-            if out.write_to(&mut cursor, image::ImageFormat::Png).is_ok() && !png_bytes.is_empty() {
+            if let Some(png_bytes) = encode_png_fast(&out) {
                 Some(Arc::new(gpui::Image::from_bytes(
                     gpui::ImageFormat::Png,
                     png_bytes,
@@ -266,9 +281,7 @@ fn process_background_bytes(
                 }
             }
 
-            let mut png_bytes = Vec::new();
-            let mut cursor = std::io::Cursor::new(&mut png_bytes);
-            if out.write_to(&mut cursor, image::ImageFormat::Png).is_ok() && !png_bytes.is_empty() {
+            if let Some(png_bytes) = encode_png_fast(&out) {
                 Some(Arc::new(gpui::Image::from_bytes(
                     gpui::ImageFormat::Png,
                     png_bytes,
