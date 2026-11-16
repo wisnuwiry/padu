@@ -65,6 +65,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "file-bottom-left-arrow",
     "file-diff",
     "split",
+    "split-vertical",
     "file-types/angular",
     "file-types/audio",
     "file-types/astro",

@@ -6,6 +6,7 @@
 //! SQLite scan. Caret blinks therefore repaint one in-memory snapshot instead
 //! of re-fuzzy-matching history or touching storage every frame.
 
+use bezel::ui::surface::Surfaced as _;
 use gpui::{KeyBinding, StyledText, TextRun, actions};
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Matcher, Utf32Str};
@@ -46,6 +47,7 @@ const EMPTY_RESULTS_HEIGHT: f32 = 160.0;
 const RESULTS_BOTTOM_PADDING: f32 = 6.0;
 const MAX_CARD_HEIGHT: f32 = 440.0;
 const FOOTER_HEIGHT: f32 = 36.0;
+const PALETTE_WIDTH: f32 = 640.0;
 
 /// Bind list navigation beneath the focused one-line input. This is registered
 /// after the input's bindings, although the more-specific key context would
@@ -101,6 +103,25 @@ impl PaletteSection {
             Self::Settings => 2,
         }
     }
+}
+
+fn to_title_case(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut capitalize_next = true;
+    for ch in s.chars() {
+        if ch.is_alphanumeric() {
+            if capitalize_next {
+                result.extend(ch.to_uppercase());
+                capitalize_next = false;
+            } else {
+                result.extend(ch.to_lowercase());
+            }
+        } else {
+            capitalize_next = true;
+            result.push(ch);
+        }
+    }
+    result
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1395,12 +1416,25 @@ impl Padu {
                 } else {
                     note.title.clone()
                 },
-                detail: Some(note.body.lines().next().unwrap_or_default().to_owned()),
+                detail: Some(if note.body.is_empty() {
+                    note.preview.clone()
+                } else {
+                    note.body.lines().next().unwrap_or_default().to_owned()
+                }),
                 icon: PaletteIcon::Asset("icons/note.svg"),
                 shortcut: None,
                 action: PaletteAction::EmbedNote(note.clone()),
                 content_match: None,
-                search_text: format!("{} {} {}", note.title, note.body, note.id),
+                search_text: format!(
+                    "{} {} {}",
+                    note.title,
+                    if note.body.is_empty() {
+                        &note.preview
+                    } else {
+                        &note.body
+                    },
+                    note.id
+                ),
                 order,
                 recency: note.updated_at,
             })
@@ -1822,6 +1856,7 @@ impl Padu {
             let project = Project::from_path(summary.cwd.clone());
             let project_id = project.id;
             self.state.projects.push(project);
+            self.sync_open_projects();
             self.analytics.track(crate::analytics::Event::ProjectAdded);
             project_id
         };
@@ -1981,18 +2016,8 @@ impl Padu {
                 return;
             }
             PaletteAction::EmbedNote(note) => {
-                self.composer_embedded_notes
-                    .push(padu_protocol::notes::EmbeddedNote {
-                        id: note.id,
-                        title: note.title,
-                        content: note.body,
-                        revision: note.revision,
-                    });
                 self.close_command_palette(window, cx);
-                let focus = self.composer_focus(cx);
-                window.focus(&focus, cx);
-                self.schedule_composer_draft_save(cx);
-                cx.notify();
+                self.add_note_to_chat(note.id, window, cx);
                 return;
             }
             _ => {}
@@ -2098,6 +2123,7 @@ impl Padu {
             return None;
         }
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx);
         let viewport_height = f32::from(window.viewport_size().height);
         let top = (viewport_height * 0.09).clamp(48.0, 72.0);
         let card_max_height = (viewport_height - top - 36.0)
@@ -2144,6 +2170,7 @@ impl Padu {
 
         let mut results = div()
             .id("command-palette-results")
+            .w_full()
             .h(px(results_height))
             .flex_none()
             .overflow_y_scroll()
@@ -2198,6 +2225,7 @@ impl Padu {
             let empty_icon = icon(icon_path, 16.0, theme.text_ghost);
             results = results.child(
                 div()
+                    .w_full()
                     .h(px(EMPTY_RESULTS_HEIGHT))
                     .flex()
                     .flex_col()
@@ -2255,9 +2283,10 @@ impl Padu {
                                 .mt(px(12.0))
                                 .h(px(28.0))
                                 .px(px(9.0))
-                                .rounded(px(8.0))
+                                .rounded(px(bezel::theme::Theme::control_radius()))
                                 .border_1()
                                 .border_color(theme.border)
+                                .bg(theme.overlay_strong)
                                 .flex()
                                 .items_center()
                                 .gap(px(7.0))
@@ -2296,10 +2325,10 @@ impl Padu {
                                 .pt(px(8.0))
                                 .flex()
                                 .items_center()
-                                .text_size(sp(12.0))
-                                .font_weight(FontWeight::MEDIUM)
+                                .text_size(sp(11.0))
+                                .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(theme.text_tertiary)
-                                .child(item.section.label()),
+                                .child(to_title_case(&item.section.label())),
                         );
                     }
                     previous_section = Some(item.section);
@@ -2341,9 +2370,13 @@ impl Padu {
                             starts_section && item.section == PaletteSection::Providers,
                             |row| row.mt(px(PROVIDER_SECTION_TOP_MARGIN)),
                         )
+                        .w_full()
                         .h(px(command_palette_row_height(item)))
                         .px(px(10.0))
-                        .rounded(px(8.0))
+                        .rounded(px(bezel::theme::Theme::inset_radius(
+                            bezel::theme::Theme::surface_radius(),
+                            4.0,
+                        )))
                         .border_1()
                         .border_color(if highlighted {
                             theme.border_strong
@@ -2484,15 +2517,18 @@ impl Padu {
                             row.child(
                                 div()
                                     .h(px(20.0))
-                                    .min_w(px(24.0))
-                                    .px(px(6.0))
-                                    .rounded(px(6.0))
+                                    .min_w(px(20.0))
+                                    .px(px(5.0))
+                                    .rounded(px(bezel::theme::Theme::control_radius()))
                                     .flex_none()
                                     .flex()
                                     .items_center()
                                     .justify_center()
                                     .bg(theme.overlay_strong)
-                                    .text_size(sp(12.0))
+                                    .border_1()
+                                    .border_color(theme.border)
+                                    .text_size(sp(11.0))
+                                    .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme.text_tertiary)
                                     .child(shortcut),
                             )
@@ -2533,13 +2569,17 @@ impl Padu {
                     this.dismiss_command_palette(window, cx)
                 }),
             )
-            .w_full()
-            .max_w(px(640.0))
+            .w(px(PALETTE_WIDTH))
+            .max_w_full()
             .h(px(card_height))
             .overflow_hidden()
-            .rounded(px(12.0))
-            .bg(theme.raised)
-            .shadow_xl()
+            .rounded(px(bezel::theme::Theme::surface_radius()))
+            .when(!bezel_theme.glass, |card| {
+                card.bg(theme.raised)
+                    .border_1()
+                    .border_color(theme.border_strong)
+                    .shadow_2xl()
+            })
             .relative()
             .flex()
             .flex_col()
@@ -2560,13 +2600,20 @@ impl Padu {
                     .when(file_view, |header| {
                         header.child(
                             div()
-                                .text_size(sp(12.5))
+                                .px(px(6.0))
+                                .py(px(2.0))
+                                .rounded(px(bezel::theme::Theme::control_radius()))
+                                .bg(theme.overlay_strong)
+                                .border_1()
+                                .border_color(theme.border)
+                                .text_size(sp(12.0))
+                                .font_weight(FontWeight::MEDIUM)
                                 .text_color(theme.text_secondary)
                                 .child(tr!("command_palette.find_file")),
                         )
                     })
                     .when(file_view, |header| {
-                        header.child(icon("icons/chevron-right.svg", 11.0, theme.text_ghost))
+                        header.child(icon("icons/chevron-right.svg", 10.0, theme.text_ghost))
                     })
                     .child(
                         div()
@@ -2584,93 +2631,109 @@ impl Padu {
                     .flex_none()
                     .flex()
                     .items_center()
-                    .gap(px(18.0))
+                    .gap(px(16.0))
                     .border_t_1()
                     .border_color(theme.border)
-                    .bg(theme.canvas.opacity(0.75))
+                    .bg(bezel::ui::popover::band())
                     .text_size(sp(11.0))
                     .text_color(theme.text_tertiary)
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(4.0))
+                            .gap(px(6.0))
                             .child(
                                 div()
                                     .h(px(20.0))
-                                    .min_w(px(24.0))
-                                    .px(px(6.0))
-                                    .rounded(px(6.0))
+                                    .px(px(5.0))
+                                    .rounded(px(bezel::theme::Theme::control_radius()))
                                     .flex()
                                     .items_center()
-                                    .justify_center()
+                                    .gap(px(3.0))
                                     .bg(theme.overlay_strong)
-                                    .child(icon("icons/arrow-up.svg", 10.0, theme.text_tertiary)),
+                                    .border_1()
+                                    .border_color(theme.border)
+                                    .child(icon("icons/arrow-up.svg", 10.0, theme.text_secondary))
+                                    .child(div().h(px(10.0)).w(px(1.0)).bg(theme.border))
+                                    .child(icon(
+                                        "icons/arrow-down.svg",
+                                        10.0,
+                                        theme.text_secondary,
+                                    )),
                             )
                             .child(
                                 div()
-                                    .h(px(20.0))
-                                    .min_w(px(24.0))
-                                    .px(px(6.0))
-                                    .rounded(px(6.0))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .bg(theme.overlay_strong)
-                                    .child(icon("icons/arrow-down.svg", 10.0, theme.text_tertiary)),
-                            )
-                            .child(SharedString::from("Navigate")),
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_tertiary)
+                                    .child(SharedString::from("Navigate")),
+                            ),
                     )
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(4.0))
+                            .gap(px(6.0))
                             .child(
                                 div()
                                     .h(px(20.0))
-                                    .min_w(px(24.0))
                                     .px(px(6.0))
-                                    .rounded(px(6.0))
+                                    .rounded(px(bezel::theme::Theme::control_radius()))
                                     .flex()
                                     .items_center()
                                     .justify_center()
                                     .bg(theme.overlay_strong)
+                                    .border_1()
+                                    .border_color(theme.border)
                                     .child(icon(
                                         "icons/corner-down-left.svg",
                                         10.0,
-                                        theme.text_tertiary,
+                                        theme.text_secondary,
                                     )),
                             )
-                            .child(SharedString::from("Select")),
+                            .child(
+                                div()
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_tertiary)
+                                    .child(SharedString::from("Select")),
+                            ),
                     )
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(4.0))
+                            .gap(px(6.0))
                             .child(
                                 div()
                                     .h(px(20.0))
                                     .min_w(px(24.0))
                                     .px(px(6.0))
-                                    .rounded(px(6.0))
+                                    .rounded(px(bezel::theme::Theme::control_radius()))
                                     .flex()
                                     .items_center()
                                     .justify_center()
                                     .bg(theme.overlay_strong)
-                                    .text_size(sp(12.0))
-                                    .text_color(theme.text_tertiary)
+                                    .border_1()
+                                    .border_color(theme.border)
+                                    .text_size(sp(11.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text_secondary)
                                     .child(SharedString::from("Esc")),
                             )
-                            .child(SharedString::from("Close")),
+                            .child(
+                                div()
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_tertiary)
+                                    .child(SharedString::from("Close")),
+                            ),
                     ),
             );
 
+        let surfaced_card = card.surface(bezel_theme, bezel_theme.popover_surface);
+
         let scrim = if theme.is_dark {
-            gpui::hsla(0.0, 0.0, 0.0, 0.26)
+            gpui::hsla(0.0, 0.0, 0.0, 0.35)
         } else {
-            gpui::hsla(0.0, 0.0, 0.0, 0.14)
+            gpui::hsla(0.0, 0.0, 0.0, 0.16)
         };
         let layer = div()
             .id("command-palette-layer")
@@ -2687,7 +2750,18 @@ impl Padu {
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.close_command_palette(window, cx)),
             )
-            .child(card);
+            .child(bezel::motion::dialog_in(
+                "command-palette-motion",
+                div()
+                    .occlude()
+                    .w(px(PALETTE_WIDTH))
+                    .max_w_full()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(surfaced_card),
+            ));
         Some(gpui::deferred(layer).with_priority(3).into_any_element())
     }
 }
@@ -2701,6 +2775,16 @@ mod tests {
         let mut matcher = crate::composer_complete::matcher();
         let mut buf = Vec::new();
         pattern.score(Utf32Str::new(candidate, &mut buf), &mut matcher)
+    }
+
+    #[test]
+    fn title_case_capitalizes_words_without_forcing_uppercase() {
+        assert_eq!(to_title_case("suggested"), "Suggested");
+        assert_eq!(to_title_case("TASKS"), "Tasks");
+        assert_eq!(to_title_case("quick actions"), "Quick Actions");
+        assert_eq!(to_title_case("Suggested"), "Suggested");
+        assert_eq!(to_title_case("user_settings"), "User_Settings");
+        assert_eq!(to_title_case(""), "");
     }
 
     #[test]

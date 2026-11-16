@@ -1,4 +1,4 @@
-use gpui::{App, Global, Hsla, Rems, Window, WindowAppearance, hsla, rems, rgb, transparent_black};
+use gpui::{App, Global, Hsla, Rems, Window, WindowAppearance, hsla, rems, rgb};
 
 pub use crate::theme_palette::ColorScheme;
 pub use padu_client::theme::ThemePreference;
@@ -47,8 +47,8 @@ pub struct Theme {
     #[allow(dead_code)]
     pub sidebar: Hsla,
     /// Frosted glass background for sidebars, panels, and material surfaces.
-    /// Evaluates to `transparent_black()` on macOS (revealing native window
-    /// vibrancy and tint) and falls back to a neutral surface on other platforms.
+    /// Slightly translucent on macOS (the palette tone at 85% over native
+    /// window vibrancy and tint) and opaque on other platforms.
     pub frosted: Hsla,
     pub sidebar_drag_background: Hsla,
     pub sidebar_item_background: Hsla,
@@ -56,7 +56,7 @@ pub struct Theme {
     pub raised: Hsla,
     pub composer: Hsla,
     pub inset: Hsla,
-    /// Terminal screen surface: paper-white in light mode, near-black in dark.
+    /// Terminal screen surface: matches normal surface background.
     pub terminal: Hsla,
     pub overlay: Hsla,
     pub overlay_strong: Hsla,
@@ -97,10 +97,40 @@ pub struct Theme {
     pub danger_soft: Hsla,
 }
 
+/// The frost fill: the palette tone kept translucent on macOS, so the
+/// native vibrancy beneath reads clearly through while the surface keeps its
+/// color. Opaque where no vibrancy backs it.
+fn frost(tone: u32) -> Hsla {
+    if cfg!(target_os = "macos") {
+        rgb(tone).opacity(0.70).into()
+    } else {
+        rgb(tone).into()
+    }
+}
+
+/// A content-surface fill: the same tone, translucent over the native
+/// vibrancy on macOS. Content sits above the frost chrome, so it holds more
+/// coverage to stay legible. Opaque where no vibrancy backs it.
+fn vibrant(tone: u32) -> Hsla {
+    if cfg!(target_os = "macos") {
+        rgb(tone).opacity(0.85).into()
+    } else {
+        rgb(tone).into()
+    }
+}
+
 impl Theme {
+    pub fn control_radius() -> f32 {
+        bezel::theme::Theme::control_radius()
+    }
+
+    pub fn surface_radius() -> f32 {
+        bezel::theme::Theme::surface_radius()
+    }
+
     pub fn current(cx: &App) -> Self {
         if cx.has_global::<ActivePaduTheme>() {
-            cx.global::<ActivePaduTheme>().0
+            cx.global::<ActivePaduTheme>().theme
         } else {
             Self::dark()
         }
@@ -110,6 +140,7 @@ impl Theme {
         Self::dark_with_scheme(ColorScheme::default())
     }
 
+    #[allow(dead_code)]
     pub fn light() -> Self {
         Self::light_with_scheme(ColorScheme::default())
     }
@@ -118,24 +149,16 @@ impl Theme {
         let (accent, code_text) = scheme.dark_tokens();
         Self {
             is_dark: true,
-            canvas: rgb(0x1A1A1A).into(),
-            sidebar: if cfg!(target_os = "macos") {
-                transparent_black()
-            } else {
-                rgb(0x181818).into()
-            },
-            frosted: if cfg!(target_os = "macos") {
-                transparent_black()
-            } else {
-                rgb(0x181818).into()
-            },
+            canvas: vibrant(0x1A1A1A),
+            sidebar: frost(0x181818),
+            frosted: frost(0x181818),
             sidebar_drag_background: rgb(0x181818).into(),
-            sidebar_item_background: hsla(0.0, 0.0, 0.941, 0.06),
-            surface: rgb(0x1A1A1A).into(),
-            raised: rgb(0x232323).into(),
-            composer: rgb(0x212121).into(),
-            inset: rgb(0x151515).into(),
-            terminal: rgb(0x151515).into(),
+            sidebar_item_background: hsla(0.0, 0.0, 1.0, 0.08),
+            surface: vibrant(0x1A1A1A),
+            raised: vibrant(0x232323),
+            composer: vibrant(0x212121),
+            inset: vibrant(0x151515),
+            terminal: vibrant(0x1A1A1A),
             overlay: hsla(220.0 / 360.0, 0.10, 0.90, 0.05),
             overlay_strong: hsla(220.0 / 360.0, 0.10, 0.90, 0.09),
 
@@ -171,24 +194,16 @@ impl Theme {
         let (accent, code_text) = scheme.light_tokens();
         Self {
             is_dark: false,
-            canvas: rgb(0xF6F5F6).into(),
-            sidebar: if cfg!(target_os = "macos") {
-                transparent_black()
-            } else {
-                rgb(0xF3F3F3).into()
-            },
-            frosted: if cfg!(target_os = "macos") {
-                transparent_black()
-            } else {
-                rgb(0xF3F3F3).into()
-            },
+            canvas: vibrant(0xF6F5F6),
+            sidebar: frost(0xF3F3F3),
+            frosted: frost(0xF3F3F3),
             sidebar_drag_background: rgb(0xF3F3F3).into(),
-            sidebar_item_background: hsla(0.0, 0.0, 0.078, 0.06),
-            surface: rgb(0xF6F5F6).into(),
-            raised: rgb(0xECECEC).into(),
-            composer: rgb(0xFFFFFF).into(),
-            inset: rgb(0xE6E6E6).into(),
-            terminal: rgb(0xFFFFFF).into(),
+            sidebar_item_background: hsla(0.0, 0.0, 0.0, 0.04),
+            surface: vibrant(0xF6F5F6),
+            raised: vibrant(0xECECEC),
+            composer: vibrant(0xFFFFFF),
+            inset: vibrant(0xE6E6E6),
+            terminal: vibrant(0xF6F5F6),
             overlay: hsla(220.0 / 360.0, 0.10, 0.12, 0.05),
             overlay_strong: hsla(220.0 / 360.0, 0.10, 0.12, 0.09),
 
@@ -222,38 +237,95 @@ impl Theme {
 }
 
 #[derive(Clone, Copy)]
-struct ActivePaduTheme(Theme);
+pub struct ActivePaduTheme {
+    pub theme: Theme,
+    #[allow(dead_code)]
+    pub scheme: ColorScheme,
+    #[allow(dead_code)]
+    pub preference: ThemePreference,
+}
 
 impl Global for ActivePaduTheme {}
 
+impl ColorScheme {
+    #[allow(dead_code)]
+    pub fn current(cx: &App) -> Self {
+        if cx.has_global::<ActivePaduTheme>() {
+            cx.global::<ActivePaduTheme>().scheme
+        } else {
+            Self::default()
+        }
+    }
+}
+
 /// Publish the resolved palette. [`Theme::current`] reads it back from the
 /// global, which is how every view gets its colors.
-fn set_active_theme(theme: Theme, cx: &mut App) {
-    cx.set_global(ActivePaduTheme(theme));
+fn set_active_theme(theme: Theme, scheme: ColorScheme, preference: ThemePreference, cx: &mut App) {
+    cx.set_global(ActivePaduTheme {
+        theme,
+        scheme,
+        preference,
+    });
+}
+
+use bezel::theme::AppExt as _;
+use bezel::theme::Brand;
+
+pub fn sync_bezel_brand(preference: ThemePreference, scheme: ColorScheme, cx: &mut App) {
+    let mode = match preference {
+        ThemePreference::System => bezel::theme::appearance::AppearanceMode::System,
+        ThemePreference::Light => bezel::theme::appearance::AppearanceMode::Light,
+        ThemePreference::Dark => bezel::theme::appearance::AppearanceMode::Dark,
+    };
+    cx.set_appearance_mode(mode);
+    let mut brand = Brand::default();
+    brand.accent = scheme.tint();
+    brand.radius = 8.0;
+    cx.set_brand(brand);
 }
 
 /// Resolve and publish the startup palette, before any window exists.
 pub fn init(cx: &mut App) {
+    bezel::theme::appearance::init(bezel::theme::appearance::AppearanceMode::System, cx);
+    let scheme = ColorScheme::default();
+    let preference = ThemePreference::System;
+    sync_bezel_brand(preference, scheme, cx);
+
     let system_appearance = cx.window_appearance();
-    let theme = if resolves_to_dark(ThemePreference::System, system_appearance) {
-        Theme::dark()
+    let is_dark = resolves_to_dark(preference, system_appearance);
+    let theme = if is_dark {
+        Theme::dark_with_scheme(scheme)
     } else {
-        Theme::light()
+        Theme::light_with_scheme(scheme)
     };
-    set_active_theme(theme, cx);
+    set_active_theme(theme, scheme, preference, cx);
 }
 
-pub fn apply_theme_preference(preference: ThemePreference, window: &mut Window, cx: &mut App) {
+pub fn apply_theme(
+    preference: ThemePreference,
+    scheme: ColorScheme,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    sync_bezel_brand(preference, scheme, cx);
     crate::platform::set_window_appearance(window, native_override(preference));
     let is_dark = resolves_to_dark(preference, cx.window_appearance());
     set_active_theme(
         if is_dark {
-            Theme::dark()
+            Theme::dark_with_scheme(scheme)
         } else {
-            Theme::light()
+            Theme::light_with_scheme(scheme)
         },
+        scheme,
+        preference,
         cx,
     );
     crate::platform::configure_sidebar_material(window, is_dark);
     window.refresh();
+}
+
+#[allow(dead_code)]
+pub fn apply_theme_preference(preference: ThemePreference, window: &mut Window, cx: &mut App) {
+    let scheme = ColorScheme::current(cx);
+    apply_theme(preference, scheme, window, cx);
 }

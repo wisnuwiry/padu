@@ -11,10 +11,12 @@ use chrono::{Datelike, Local, NaiveDate};
 use gpui::{PathBuilder, relative};
 
 use super::*;
+use crate::ui::button::{Button, ButtonStyle};
 use crate::usage_history::{
     self, MONTHLY_WINDOW, MonthSlice, PricingStatus, ProjectSlice, ProviderDay, UsageHistory,
     UsageProvider, UsageWindow, WINDOW_CHOICES,
 };
+use bezel::ui::widgets::Scaffolding;
 
 /// Rendered chart height, matching T3's `h-56` plot.
 const CHART_HEIGHT: f32 = 224.0;
@@ -46,6 +48,9 @@ impl Padu {
         self.settings_scroll.set_offset(gpui::Point::default());
         if page == SettingsPage::Usage {
             self.ensure_usage_history(false, cx);
+        }
+        if page == SettingsPage::Browser {
+            self.load_browser_usage(cx);
         }
         if page == SettingsPage::Providers {
             self.ensure_agent_profiles(false, cx);
@@ -358,26 +363,17 @@ impl Padu {
         } else {
             icon("icons/rotate-cw.svg", 12.0, theme.text_tertiary).into_any_element()
         };
-        let refresh = div()
-            .id("usage-refresh")
-            .tab_index(0)
-            .focus_visible(|style| style.border_color(theme.accent))
-            .h(px(28.0))
-            .px(px(8.0))
-            .rounded(px(7.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .items_center()
-            .cursor_pointer()
-            .hover(|element| element.bg(theme.overlay))
+        let refresh = Button::new("usage-refresh", tr!("usage.rescan"))
+            .button_style(ButtonStyle::Ghost)
+            .label_hidden()
+            .leading(refresh_glyph)
+            .enabled(!pending)
             .tooltip(Tooltip::text(if pending {
                 tr!("usage.scanning")
             } else {
                 tr!("usage.rescan")
             }))
-            .child(refresh_glyph)
-            .on_click(cx.listener(|this, _, _, cx| {
+            .on_press(cx.listener(|this, _, _, cx| {
                 this.ensure_usage_history(true, cx);
             }));
 
@@ -1144,13 +1140,13 @@ impl Padu {
                 .into_any_element()
         };
 
-        div()
+        let bezel_theme = bezel::theme::Theme::of(cx);
+        bezel_theme
+            .group_box()
             .mt(px(20.0))
             .flex_1()
             .min_h_0()
             .pb(px(8.0))
-            .rounded(px(13.0))
-            .bg(theme.raised)
             .flex()
             .flex_col()
             .child(
@@ -2015,7 +2011,7 @@ fn usage_skeleton(view: UsageViewMode, theme: &Theme) -> AnyElement {
             let mut card = div()
                 .mt(px(20.0))
                 .px(px(20.0))
-                .rounded(px(13.0))
+                .rounded(px(Theme::surface_radius()))
                 .bg(theme.raised)
                 .flex()
                 .flex_col()
@@ -2462,13 +2458,13 @@ fn usage_month_list(
         ));
     }
 
-    div()
+    let bezel_theme = bezel::theme::Theme::of(cx);
+    bezel_theme
+        .group_box()
         .mt(px(20.0))
         .flex_1()
         .min_h_0()
         .pb(px(8.0))
-        .rounded(px(13.0))
-        .bg(theme.raised)
         .flex()
         .flex_col()
         .child(

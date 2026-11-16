@@ -777,6 +777,7 @@ mod tests {
             },
             is_held: false,
             prefer_character_input: false,
+            layout: None,
         };
         assert!(matches!(
             state.handle_key_down(&regular_key),
@@ -792,6 +793,7 @@ mod tests {
             },
             is_held: false,
             prefer_character_input: false,
+            layout: None,
         };
         assert!(matches!(
             state.handle_key_down(&space_key),
@@ -810,6 +812,7 @@ mod tests {
             },
             is_held: false,
             prefer_character_input: false,
+            layout: None,
         };
         assert!(matches!(
             state.handle_key_down(&esc_key),
@@ -829,6 +832,7 @@ mod tests {
             },
             is_held: false,
             prefer_character_input: false,
+            layout: None,
         };
         assert!(matches!(
             state.handle_key_down(&enter_key),

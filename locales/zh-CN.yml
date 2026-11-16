@@ -96,6 +96,10 @@ command_palette.resume_failed: "无法恢复会话：%{error}"
 language.title: 语言
 language.system: 跟随系统
 language.description: 选择 Padu 的界面语言
+settings.group_preferences: 偏好设置
+settings.group_integration: 集成
+settings.group_agents: 智能体
+settings.group_system: 系统
 settings.general: 通用
 settings.appearance: 外观
 settings.keybindings: 快捷键
@@ -104,6 +108,37 @@ settings.usage: 用量
 settings.daemon: 主机与守护进程
 settings.computer_use: 电脑操作
 settings.notifications: 通知
+settings.browser: 浏览器
+settings.browser_keywords: 浏览器 网页 webview 搜索引擎 主页 cookie 数据 清除 网站
+settings.browser_search_engine: 默认搜索引擎
+settings.browser_search_engine_description: 地址栏中的搜索使用 %{engine}。
+settings.browser_add_search_engine: 添加搜索引擎…
+settings.browser_add_search_engine_hint: 输入服务提供商名称和带有 %s 查询占位符的搜索 URL。
+settings.browser_engine_name_placeholder: 提供商名称（例如 Brave）
+settings.browser_engine_url_placeholder: "搜索 URL（例如 https://search.brave.com/search?q=%s）"
+settings.browser_home: 启动与主页
+settings.browser_home_description: 每次打开新浏览器标签页时加载的初始网页。
+settings.browser_agents_read: 智能体网页读取
+settings.browser_agents_read_description: 允许 AI 智能体浏览标签页、检查页面结构和提取文本。
+settings.browser_agents_act: 智能体网页交互
+settings.browser_agents_act_description: 允许 AI 智能体点击按钮、输入文本和提交表单。需要启用网页读取。
+settings.browser_blocked: 受限域名
+settings.browser_blocked_description: 禁止 AI 智能体访问或检查的网站和域名。
+settings.browser_blocked_none: 无受限域名。允许访问所有可达网站。
+settings.browser_keep_signed_in: 记住登录与 Cookie
+settings.browser_keep_signed_in_description: 在重启后保持身份验证 cookie 和网站数据有效。禁用后，标签页以隐私浏览模式运行。
+settings.browser_data: 浏览数据与缓存
+settings.browser_clear_data: 清除浏览数据
+settings.browser_clearing: 正在清除浏览数据…
+settings.browser_clear_failed: 清除浏览数据失败，请重试。
+settings.browser_cleared: 浏览数据已成功清除。活动的浏览器标签页已关闭。
+settings.browser_clear_unavailable: 清除浏览数据仅在 macOS 上可用。
+settings.browser_calculating: 正在计算存储占用…
+settings.browser_data_unavailable: 存储占用数据不可用。
+settings.browser_no_data: 未找到已保存的网站数据。
+settings.browser_one_site: 正在存储来自 1 个网站的 cookie 和缓存。
+settings.browser_sites_data: 正在存储来自 %{count} 个网站的 cookie 和缓存。
+settings.browser_clear_footer: 清除将删除 cookie、缓存和存储数据，关闭所有浏览器标签页并退出登录。
 settings.about: 关于
 settings.general_keywords: 通用 本地 项目 对话 隐私 匿名 使用数据 分析 分享 更新 自动 版本
 settings.appearance_keywords: 外观 主题 系统 浅色 深色 语言 英语 中文 简体 字号 字体 大小 编辑器
@@ -173,6 +208,7 @@ keybindings.section_editor: 编辑器与查找
 keybindings.section_browser: 内置浏览器
 keybindings.section_files: 文件
 keybindings.section_review: 审阅
+keybindings.section_terminal: 终端
 keybindings.new_task: 新建任务
 keybindings.new_task_desc: 创建新对话或任务
 keybindings.open_project: 打开项目
@@ -265,6 +301,14 @@ keybindings.focus_review_filter: 聚焦审阅文件搜索
 keybindings.focus_review_filter_desc: 聚焦已更改文件的搜索框
 keybindings.toggle_review_tree: 展开或折叠文件夹
 keybindings.toggle_review_tree_desc: 展开或折叠已更改文件树中的文件夹
+keybindings.terminal_split_horizontal: 水平拆分
+keybindings.terminal_split_horizontal_desc: 水平拆分当前活动的终端面板
+keybindings.terminal_split_vertical: 垂直拆分
+keybindings.terminal_split_vertical_desc: 垂直拆分当前活动的终端面板
+keybindings.terminal_toggle_expand: 切换全屏
+keybindings.terminal_toggle_expand_desc: 最大化当前终端面板或恢复全部面板
+keybindings.terminal_close_pane: 关闭终端面板
+keybindings.terminal_close_pane_desc: 关闭当前活动的终端面板
 keybindings.search: 搜索快捷键...
 keybindings.no_results: 未找到快捷键
 settings.back: 返回
@@ -383,6 +427,15 @@ settings.code_word_wrap_description: 折行显示长行，而不是横向滚动
 settings.theme_system: 跟随系统
 settings.theme_light: 浅色
 settings.theme_dark: 深色
+settings.color_scheme: 配色方案
+settings.color_scheme_description: 选择交互控件和高亮显示的强调色
+settings.color_scheme_purple: 紫色
+settings.color_scheme_blue: 蓝色
+settings.color_scheme_green: 绿色
+settings.color_scheme_amber: 琥珀色
+settings.color_scheme_coral: 珊瑚色
+settings.color_scheme_rose: 玫瑰红
+settings.color_scheme_neutral: 中性灰
 settings.sidebar: 侧边栏
 settings.sidebar_description: 自定义侧边栏外观和会话列表
 settings.sidebar_show_provider: 显示提供商
@@ -398,6 +451,10 @@ settings.background_preview_assistant: 当然，我会整理出主要决定和�
 settings.background_unsupported: 请选择受支持的图片格式
 settings.background_too_large: 请选择小于 2 MB 的图片
 settings.background_unavailable: 无法加载背景图片
+settings.background_effect: 效果
+settings.background_effect_none: 无
+settings.background_effect_dither: 抖动
+settings.background_effect_ascii: ASCII
 input.do_anything: 做什么都可以…
 input.search_models: 搜索模型…
 input.search_branches: 搜索分支
@@ -558,12 +615,15 @@ common.copy_selection: 复制所选内容
 common.copy_to_composer: 复制到输入框
 common.copy_code: 复制代码
 common.cancel: 取消
+common.save: 保存
+common.change: 更改…
 common.edit: 编辑
 common.send: 发送
 notes.new: 新建笔记
 notes.save: 保存
 notes.edit: 编辑
 notes.rich_editor: 富文本编辑器
+notes.headings: 标题
 notes.code: 代码
 notes.side_by_side: 并排
 notes.preview: 预览
@@ -1284,12 +1344,22 @@ diff.rows_hidden: "还有 %{count} 行 · 打开审阅查看完整更改"
 terminal.transport_failed: 终端传输失败
 terminal.no_workspace_description: 请先选择一个任务，再打开终端。
 terminal.process_exited: 进程已退出
+terminal.split_horizontal: 水平拆分 (%{shortcut})
+terminal.split_vertical: 垂直拆分 (%{shortcut})
+terminal.expand_full: 最大化 (%{shortcut})
+terminal.show_all_panes: 显示全部终端 (%{shortcut})
+terminal.close_pane: 关闭终端 (%{shortcut})
+terminal.switch_to_terminal: 切换到 %{title}
+terminal.drag_to_dock: 拖拽停靠面板
+terminal.terminals_count_one: "%{count} 个终端"
+terminal.terminals_count_many: "%{count} 个终端"
 browser.back: 后退（%{shortcut}）
 browser.forward: 前进（%{shortcut}）
 browser.stop_loading: 停止加载（Esc）
 browser.reload: 重新加载（%{shortcut}）
 browser.open_external: 在默认浏览器中打开
 browser.browse_web: 浏览网页
+browser.browse_web_hint: 在上方的地址栏输入网址或搜索内容即可开始浏览
 browser.start_hint: 在上方输入网址或搜索内容 — 按 %{shortcut} 聚焦地址栏
 browser.unavailable: 浏览器不可用
 browser.unavailable_on_platform: 浏览器面板尚不支持当前平台
@@ -1327,6 +1397,7 @@ transcript.scroll_to_bottom: 滚动到底部
 transcript.conversation_turns: 对话轮次
 transcript.turn_label: "第 %{number} 轮：%{prompt}"
 transcript.edit_message: 编辑消息
+transcript.message_actions: 消息操作
 duration.second: "%{count} 秒"
 duration.seconds: "%{count} 秒"
 duration.minute: "%{count} 分钟"
@@ -1608,6 +1679,7 @@ board.empty_running: 无运行中的智能体
 board.empty_review: 无待审核任务
 board.empty_done: 无已完成任务
 board.filter_empty: 没有匹配筛选条件的任务
+board.filters: 筛选
 board.clear_filters: 清除筛选
 board.clear_filters_short: 清除
 board.clear_search: 清除搜索

@@ -296,7 +296,7 @@ impl Padu {
                     })
                     .mr(px(8.0))
                     .mb(px(8.0))
-                    .rounded(px(14.0))
+                    .rounded(px(bezel::theme::Theme::panel_radius()))
                     .bg(theme.surface)
                     .overflow_hidden()
                     .relative()
@@ -393,6 +393,12 @@ impl Render for Padu {
                 .children(task_switcher)
                 .children(onboarding_modal)
                 .children(whats_new_modal)
+                .children(self.chat_message_menu.render(
+                    "chat-message-context-menu",
+                    |this| &mut this.chat_message_menu,
+                    window,
+                    cx,
+                ))
                 .into_any_element();
             return self.render_window_frame(content, window, cx);
         }
@@ -424,6 +430,14 @@ impl Render for Padu {
             .on_action(cx.listener(Self::toggle_right_panel_fullscreen_action))
             .on_action(cx.listener(Self::next_right_panel_tab_action))
             .on_action(cx.listener(Self::prev_right_panel_tab_action))
+            .on_action(
+                cx.listener(|this, _: &ToggleRightPanelAddMenu, window, cx| {
+                    this.toggle_right_panel_add_menu(window, cx);
+                }),
+            )
+            .on_action(cx.listener(|this, _: &AddRightPanelTab, window, cx| {
+                this.toggle_right_panel_add_menu(window, cx);
+            }))
             .on_action(cx.listener(Self::open_browser_action))
             .on_action(cx.listener(Self::open_terminal_action))
             .on_action(cx.listener(Self::open_files_action))
@@ -499,7 +513,7 @@ impl Render for Padu {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .bg(theme.surface)
+                    .bg(theme.frosted)
                     .child(if notes_page {
                         self.notes_pane
                             .clone()
@@ -548,7 +562,7 @@ impl Render for Padu {
                                 px(8.0)
                             })
                             .mb(px(8.0))
-                            .rounded(px(10.0))
+                            .rounded(px(bezel::theme::Theme::panel_radius()))
                             .border_1()
                             .border_color(theme.border)
                             .bg(theme.surface)
@@ -621,6 +635,12 @@ impl Render for Padu {
             .children(task_switcher)
             .children(onboarding_modal)
             .children(whats_new_modal)
+            .children(self.chat_message_menu.render(
+                "chat-message-context-menu",
+                |this| &mut this.chat_message_menu,
+                window,
+                cx,
+            ))
             .into_any_element();
 
         self.render_window_frame(content, window, cx)

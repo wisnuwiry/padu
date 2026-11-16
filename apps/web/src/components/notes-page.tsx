@@ -21,6 +21,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { TagInput } from '@/components/ui/tag-input'
 import { Tooltip } from '@/components/ui/tooltip'
 import { useTaskState } from '@/hooks/use-daemon-data'
+import { cn } from '@/lib/utils'
 import {
   createNote,
   deleteNote,
@@ -68,7 +69,7 @@ export async function addContentToNewNote(
 function readNotesLayout(): NotesLayout {
   if (typeof window === 'undefined') return 'edit'
   const saved = window.localStorage.getItem('padu.notesLayout')
-  return saved === 'split' || saved === 'preview' ? saved : 'edit'
+  return saved === 'split' ? saved : 'edit'
 }
 
 function readListCollapsed(): boolean {
@@ -285,7 +286,6 @@ function NotesWorkspace({
   const newShortcut = usePrimaryShortcut('⌘⌥N', 'Ctrl+Alt+N')
   const editShortcut = usePrimaryShortcut('⌘1', 'Ctrl+1')
   const splitShortcut = usePrimaryShortcut('⌘2', 'Ctrl+2')
-  const previewShortcut = usePrimaryShortcut('⌘3', 'Ctrl+3')
   const deleteShortcut = usePrimaryShortcut('⌘⌫', 'Ctrl+Backspace')
   const chatShortcut = usePrimaryShortcut('⌘↵', 'Ctrl+Enter')
   const listShortcut = usePrimaryShortcut('⌘⇧L', 'Ctrl+Shift+L')
@@ -567,9 +567,6 @@ function NotesWorkspace({
       } else if (key === '2' && !event.shiftKey) {
         event.preventDefault()
         setLayout('split')
-      } else if (key === '3' && !event.shiftKey) {
-        event.preventDefault()
-        setLayout('preview')
       } else if (key === 'enter' && !event.shiftKey) {
         if (typing) return
         event.preventDefault()
@@ -605,7 +602,7 @@ function NotesWorkspace({
     : t('project.no_project_name')
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
+    <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground">
       <header className="flex h-12 shrink-0 items-center gap-1.5 px-3.5">
         {!sidebarVisible && (
           <Tooltip content={t('menu.toggle_sidebar')} shortcut={toggleSidebarShortcut}>
@@ -637,7 +634,12 @@ function NotesWorkspace({
         {saving && <span className="text-[11px] text-[var(--text-tertiary)]">{t('notes.save')}</span>}
       </header>
 
-      <div className="flex min-h-0 flex-1 gap-4 px-2 pb-6">
+      <div
+        className={cn(
+          'relative mb-2 flex min-h-0 flex-1 gap-4 overflow-hidden rounded-[10px] border border-border bg-background p-4 text-foreground',
+          sidebarVisible ? 'ml-0.5 mr-2' : 'mx-2',
+        )}
+      >
         {!listCollapsed && (
           <aside aria-label={t('settings.notes')} className="flex w-60 shrink-0 flex-col gap-2">
             <Tooltip content={t('notes.new')} shortcut={newShortcut}>
@@ -706,67 +708,44 @@ function NotesWorkspace({
         <section aria-label={t('notes.label')} className="flex min-h-0 min-w-0 flex-1 flex-col gap-2.5">
           {selected ? (
             <>
-              <label className="sr-only" htmlFor="note-title">{t('notes.title_placeholder')}</label>
-              <input
-                id="note-title"
-                className="h-[38px] w-full shrink-0 rounded-lg px-1 text-[22px] font-bold outline-none placeholder:text-[var(--text-ghost)] focus-visible:ring-2 focus-visible:ring-ring"
-                placeholder={t('notes.title_placeholder')}
-                value={selected.title}
-                onChange={(event) => setSelected({ ...selected, title: event.target.value })}
-              />
+              <div className="flex flex-col gap-0.5">
+                <label className="sr-only" htmlFor="note-title">{t('notes.title_placeholder')}</label>
+                <input
+                  id="note-title"
+                  className="h-[32px] w-full shrink-0 rounded-lg px-1 text-[18px] font-bold outline-none placeholder:text-[var(--text-ghost)] focus-visible:ring-2 focus-visible:ring-ring"
+                  placeholder={t('notes.title_placeholder')}
+                  value={selected.title}
+                  onChange={(event) => setSelected({ ...selected, title: event.target.value })}
+                />
+                <span className="px-1 text-[11px] text-[var(--text-tertiary)]">
+                  {t('notes.updated', { time: formatNoteTimeAgo(selected.updatedAt, t) })}
+                </span>
+              </div>
               <TagInput
+                prefix="Tags"
+                transparent
+                small
                 value={selected.tags ?? []}
                 onChange={(tags) => setSelected({ ...selected, tags })}
                 placeholder={t('notes.tags_placeholder')}
                 getRemoveLabel={(tag) => t('notes.remove_tag', { label: tag })}
-                small
                 focusOutline={false}
-                accentChips
               />
               <div className="flex w-full shrink-0 items-center justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-[var(--text-tertiary)]">
+                <div className="flex items-center gap-1.5">
                   <Tooltip content={t('files.add_to_chat')} shortcut={chatShortcut}>
                     <button
-                      className="flex h-7 cursor-pointer items-center gap-1.5 rounded-md bg-foreground px-2.5 text-[12px] font-medium text-background outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring"
+                      className="flex h-7 cursor-pointer items-center rounded-md bg-foreground px-2.5 text-[12px] font-medium text-background outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring"
                       type="button"
                       onClick={() => addNoteToChat(selected)}
                     >
-                      <PaduIcon name="addToChat" className="size-3.5" />
                       {t('files.add_to_chat')}
                     </button>
                   </Tooltip>
-                  <span className="hidden min-w-0 truncate xl:inline">
-                    {t('notes.created', { time: formatNoteTimeAgo(selected.createdAt, t) })} · {t('notes.updated', { time: formatNoteTimeAgo(selected.updatedAt, t) })}
-                  </span>
-                </div>
-                <div className="flex shrink-0 items-center gap-0.5">
-                  <div className="flex items-center gap-px rounded-[7px] bg-muted p-0.5" role="group" aria-label={t('notes.details')}>
-                    <LayoutButton
-                      active={layout === 'edit'}
-                      icon="pencil"
-                      label={t('notes.edit')}
-                      shortcut={editShortcut}
-                      onClick={() => setLayout('edit')}
-                    />
-                    <LayoutButton
-                      active={layout === 'split'}
-                      icon="split"
-                      label={t('notes.side_by_side')}
-                      shortcut={splitShortcut}
-                      onClick={() => setLayout('split')}
-                    />
-                    <LayoutButton
-                      active={layout === 'preview'}
-                      icon="eye"
-                      label={t('notes.preview')}
-                      shortcut={previewShortcut}
-                      onClick={() => setLayout('preview')}
-                    />
-                  </div>
                   <Tooltip content={t('notes.delete')} shortcut={deleteShortcut}>
                     <button
                       aria-label={t('notes.delete')}
-                      className="grid size-7 cursor-pointer place-items-center rounded-md text-[var(--text-tertiary)] outline-none hover:bg-accent hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring"
+                      className="flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium text-destructive outline-none hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-ring"
                       type="button"
                       onClick={() => {
                         const summary = notes.find((note) => note.id === selected.id)
@@ -774,8 +753,25 @@ function NotesWorkspace({
                       }}
                     >
                       <PaduIcon name="trash" className="size-3.5" />
+                      {t('notes.delete')}
                     </button>
                   </Tooltip>
+                </div>
+                <div className="flex items-center gap-px rounded-[7px] bg-muted p-0.5" role="group" aria-label={t('notes.details')}>
+                  <LayoutButton
+                    active={layout === 'edit'}
+                    icon="pencil"
+                    label={t('notes.edit')}
+                    shortcut={editShortcut}
+                    onClick={() => setLayout('edit')}
+                  />
+                  <LayoutButton
+                    active={layout === 'split'}
+                    icon="split"
+                    label={t('notes.side_by_side')}
+                    shortcut={splitShortcut}
+                    onClick={() => setLayout('split')}
+                  />
                 </div>
               </div>
 
@@ -791,12 +787,6 @@ function NotesWorkspace({
                     />
                   </Suspense>
                 </div>
-              )}
-              {layout === 'preview' && (
-                <MarkdownView
-                  className="min-h-0 flex-1 overflow-y-auto rounded-lg bg-muted/60 p-3.5 text-[14px] leading-7 break-words"
-                  text={selected.content}
-                />
               )}
               {layout === 'split' && (
                 <SplitEditor

@@ -38,8 +38,7 @@ describe('notes utils', () => {
     ).toBe('Padu · 2d · #tag1 #tag2 #tag3 +2')
   })
 
-  test('nextLayoutOnCreate changes preview to edit only', () => {
-    expect(nextLayoutOnCreate('preview')).toBe('edit')
+  test('nextLayoutOnCreate preserves layout', () => {
     expect(nextLayoutOnCreate('split')).toBe('split')
     expect(nextLayoutOnCreate('edit')).toBe('edit')
   })

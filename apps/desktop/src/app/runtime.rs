@@ -3113,6 +3113,33 @@ impl Padu {
         .unwrap_or_else(|| prompt.to_owned())
     }
 
+    pub(crate) fn augment_prompt_with_session_context(
+        &self,
+        session_id: Uuid,
+        prompt: &str,
+    ) -> String {
+        if prompt.trim_start().starts_with('/') {
+            return prompt.to_owned();
+        }
+        let Some(session) = self.state.sessions.iter().find(|s| s.id == session_id) else {
+            return prompt.to_owned();
+        };
+        let cwd = self
+            .workspace_path_for_session(session)
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let mcp_available = crate::mcp_serve::url().is_some();
+        let hidden = crate::mcp_serve::hidden_resources();
+        let session_number = self
+            .state
+            .sessions
+            .iter()
+            .position(|s| s.id == session_id)
+            .map(|pos| (pos + 1) as u64);
+        let context = padu_prompts::session_context(&cwd, session_number, mcp_available, &hidden);
+        format!("{prompt}\n\n---\n{context}")
+    }
+
     pub(super) fn enqueue_follow_up_submission(
         &mut self,
         session_id: Uuid,
@@ -3556,9 +3583,10 @@ impl Padu {
         // Claude's commands pass through untouched; its CLI owns expansion.
         let prompt = submission.prompt;
         let driver_prompt = self.resolve_provider_submission(provider, &prompt);
+        let augmented_prompt = self.augment_prompt_with_session_context(session_id, &driver_prompt);
         let mut failed_to_start = false;
         match driver {
-            Ok(driver) => driver.prompt(driver_prompt),
+            Ok(driver) => driver.prompt(augmented_prompt),
             Err(error) => {
                 failed_to_start = true;
                 let message = tr!("errors.start_agent", error = error);

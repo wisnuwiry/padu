@@ -35,6 +35,51 @@ html.dark[data-color-scheme="purple"] {
   --code-text: #c4b5fd;
 }
 
+/* Color Scheme: Blue */
+[data-color-scheme="blue"] {
+  --color-scheme-id: "blue";
+  --ring: #2563eb;
+  --code-text: #1d4ed8;
+}
+
+.dark [data-color-scheme="blue"],
+[data-color-scheme="blue"].dark,
+html.dark[data-color-scheme="blue"] {
+  --color-scheme-id: "blue";
+  --ring: #3b82f6;
+  --code-text: #93c5fd;
+}
+
+/* Color Scheme: Green */
+[data-color-scheme="green"] {
+  --color-scheme-id: "green";
+  --ring: #059669;
+  --code-text: #047857;
+}
+
+.dark [data-color-scheme="green"],
+[data-color-scheme="green"].dark,
+html.dark[data-color-scheme="green"] {
+  --color-scheme-id: "green";
+  --ring: #10b981;
+  --code-text: #6ee7b7;
+}
+
+/* Color Scheme: Amber */
+[data-color-scheme="amber"] {
+  --color-scheme-id: "amber";
+  --ring: #d97706;
+  --code-text: #b45309;
+}
+
+.dark [data-color-scheme="amber"],
+[data-color-scheme="amber"].dark,
+html.dark[data-color-scheme="amber"] {
+  --color-scheme-id: "amber";
+  --ring: #f59e0b;
+  --code-text: #fcd34d;
+}
+
 /* Color Scheme: Coral */
 [data-color-scheme="coral"] {
   --color-scheme-id: "coral";
@@ -48,4 +93,34 @@ html.dark[data-color-scheme="coral"] {
   --color-scheme-id: "coral";
   --ring: #e2795b;
   --code-text: #e0a882;
+}
+
+/* Color Scheme: Rose */
+[data-color-scheme="rose"] {
+  --color-scheme-id: "rose";
+  --ring: #e11d48;
+  --code-text: #be123c;
+}
+
+.dark [data-color-scheme="rose"],
+[data-color-scheme="rose"].dark,
+html.dark[data-color-scheme="rose"] {
+  --color-scheme-id: "rose";
+  --ring: #f43f5e;
+  --code-text: #fda4af;
+}
+
+/* Color Scheme: Neutral */
+[data-color-scheme="neutral"] {
+  --color-scheme-id: "neutral";
+  --ring: #27272a;
+  --code-text: #18181b;
+}
+
+.dark [data-color-scheme="neutral"],
+[data-color-scheme="neutral"].dark,
+html.dark[data-color-scheme="neutral"] {
+  --color-scheme-id: "neutral";
+  --ring: #e4e4e7;
+  --code-text: #f4f4f5;
 }

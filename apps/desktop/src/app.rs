@@ -15,7 +15,7 @@ use gpui::{
     MouseUpEvent, NavigationDirection, ObjectFit, PathPromptOptions, Pixels, Render, ScrollHandle,
     SharedString, Stateful, StyleRefinement, TextRun, WeakEntity, Window, WindowBounds, canvas,
     div, ease_out_quint, fill, font, img, linear_color_stop, linear_gradient, list, point,
-    prelude::*, pulsating_between, px, rgb,
+    prelude::*, pulsating_between, px, rgb, size,
 };
 use uuid::Uuid;
 
@@ -59,12 +59,13 @@ use crate::persistence::{
 use crate::query::{Query, QueryCache};
 use crate::review_diff::{Snapshot as ReviewDiffSnapshot, Source as ReviewDiffSource};
 use crate::terminal::TerminalView;
-use crate::theme::{Theme, ThemePreference, sp};
+use crate::theme::{ColorScheme, Theme, ThemePreference, sp};
+pub(crate) use crate::ui::RestrictScrollExt;
 use crate::ui::text_field::TextField;
 use crate::ui::{
     MenuChip, ProjectNameSelector, activity_icon, activity_noun, contain_horizontal_scroll,
     contain_scroll, file_icon, icon, icon_button, motion, provider_color, provider_icon,
-    status_color, toggle_switch,
+    status_color,
 };
 use crate::{
     CancelTaskSwitch, CancelTurn, CloseFind, CloseWindow, ConfirmTaskSwitch, CopySelection,
@@ -83,6 +84,10 @@ const TRAFFIC_LIGHT_CLEARANCE: f32 = 86.0;
 #[cfg(not(target_os = "macos"))]
 const TRAFFIC_LIGHT_CLEARANCE: f32 = 8.0;
 const CONTENT_MAX_WIDTH: f32 = 720.0;
+pub const DEFAULT_WINDOW_WIDTH: f32 = 1120.0;
+pub const DEFAULT_WINDOW_HEIGHT: f32 = 700.0;
+pub const MIN_WINDOW_WIDTH: f32 = 840.0;
+pub const MIN_WINDOW_HEIGHT: f32 = 560.0;
 /// Menu-registry id of the composer's model picker, shared by its render site
 /// and the primary-modifier `/` toggle action.
 const MODEL_PICKER_MENU_ID: &str = "provider-model-picker";
@@ -285,6 +290,7 @@ pub(crate) enum SettingsPage {
     Appearance,
     Keybindings,
     Notifications,
+    Browser,
     Providers,
     Skills,
     Usage,
@@ -331,6 +337,7 @@ enum PanelResizeTarget {
     Sidebar,
     RightPanel,
     FileTree,
+    #[allow(dead_code)]
     NotesSplit,
 }
 
@@ -493,6 +500,135 @@ fn persisted_window_state(
         maximized,
         display,
     }
+}
+
+/// Compute default window bounds that fit comfortably within the target display's
+/// visible bounds, scaled down on compact displays so the window never overflows
+/// the active screen or taskbar on any operating system.
+pub fn compute_default_window_bounds(visible_bounds: Bounds<Pixels>) -> Bounds<Pixels> {
+    let visible_size = visible_bounds.size;
+    let visible_width = f32::from(visible_size.width);
+    let visible_height = f32::from(visible_size.height);
+
+    let max_target_width = (visible_width * 0.90).max(MIN_WINDOW_WIDTH.min(visible_width));
+    let max_target_height = (visible_height * 0.88).max(MIN_WINDOW_HEIGHT.min(visible_height));
+
+    let width = DEFAULT_WINDOW_WIDTH
+        .min(max_target_width)
+        .min(visible_width);
+    let height = DEFAULT_WINDOW_HEIGHT
+        .min(max_target_height)
+        .min(visible_height);
+
+    let window_size = size(px(width), px(height));
+    Bounds::centered_at(visible_bounds.center(), window_size)
+}
+
+pub fn default_window_bounds(display: Option<&dyn gpui::PlatformDisplay>) -> Bounds<Pixels> {
+    let Some(display) = display else {
+        return Bounds::new(
+            point(px(0.0), px(0.0)),
+            size(px(DEFAULT_WINDOW_WIDTH), px(DEFAULT_WINDOW_HEIGHT)),
+        );
+    };
+    compute_default_window_bounds(display.visible_bounds())
+}
+
+/// Clamp saved window bounds to the target display's visible bounds.
+/// If saved bounds match previous oversized defaults or overflow the screen,
+/// re-center with responsive default bounds sized for the active display.
+pub fn clamp_window_bounds_to_display(
+    saved: &PersistedWindowState,
+    visible_bounds: Bounds<Pixels>,
+) -> Bounds<Pixels> {
+    let visible_size = visible_bounds.size;
+    let visible_width = f32::from(visible_size.width);
+    let visible_height = f32::from(visible_size.height);
+
+    let is_legacy_oversized = saved.width >= 1380.0 && saved.height >= 880.0;
+    let exceeds_screen = saved.width >= visible_width || saved.height >= visible_height;
+
+    if is_legacy_oversized || exceeds_screen {
+        compute_default_window_bounds(visible_bounds)
+    } else {
+        let max_w = visible_width;
+        let max_h = visible_height;
+        let min_w = MIN_WINDOW_WIDTH.min(max_w);
+        let min_h = MIN_WINDOW_HEIGHT.min(max_h);
+
+        let width = saved.width.min(max_w).max(min_w);
+        let height = saved.height.min(max_h).max(min_h);
+
+        let min_x = f32::from(visible_bounds.origin.x);
+        let max_x = (min_x + visible_width - width).max(min_x);
+        let min_y = f32::from(visible_bounds.origin.y);
+        let max_y = (min_y + visible_height - height).max(min_y);
+
+        let x = saved.x.clamp(min_x, max_x);
+        let y = saved.y.clamp(min_y, max_y);
+
+        Bounds::new(point(px(x), px(y)), size(px(width), px(height)))
+    }
+}
+
+/// Reopen the main window where the user last left it, on the display it was
+/// left on. GPUI window bounds are display-relative, so the persisted frame is
+/// anchored by resolving the saved display UUID against the connected
+/// displays — Zed's scheme — and `display_id` rides along in `WindowOptions`.
+/// When that display is gone the same offsets re-anchor on the primary
+/// display, and dimensions/positions are clamped so the window never overflows
+/// the display on any OS.
+pub fn restored_window_placement(cx: &App) -> (WindowBounds, Option<gpui::DisplayId>) {
+    let displays = cx.displays();
+    let primary = cx.primary_display();
+
+    let saved_state = crate::persistence::load_window_state().filter(|saved| {
+        [saved.x, saved.y, saved.width, saved.height]
+            .iter()
+            .all(|value| value.is_finite())
+    });
+
+    let (anchor, saved) = match saved_state {
+        Some(saved) => {
+            let matched_display = saved.display.and_then(|uuid| {
+                displays
+                    .iter()
+                    .find(|d| d.uuid().ok() == Some(uuid))
+                    .cloned()
+            });
+            let anchor = matched_display.or_else(|| primary.clone());
+            (anchor, Some(saved))
+        }
+        None => (primary.clone(), None),
+    };
+
+    let Some(anchor) = anchor else {
+        return (
+            WindowBounds::Windowed(Bounds::new(
+                point(px(0.0), px(0.0)),
+                size(px(DEFAULT_WINDOW_WIDTH), px(DEFAULT_WINDOW_HEIGHT)),
+            )),
+            None,
+        );
+    };
+
+    let display_id = Some(anchor.id());
+    let (bounds, maximized) = if let Some(saved) = saved {
+        (
+            clamp_window_bounds_to_display(&saved, anchor.visible_bounds()),
+            saved.maximized,
+        )
+    } else {
+        (default_window_bounds(Some(anchor.as_ref())), false)
+    };
+
+    let window_bounds = if maximized {
+        WindowBounds::Maximized(bounds)
+    } else {
+        WindowBounds::Windowed(bounds)
+    };
+
+    (window_bounds, display_id)
 }
 
 fn fitted_file_tree_width(panel_width: f32, file_tree_width: f32) -> f32 {
@@ -897,22 +1033,22 @@ fn traits_choice(theme: Theme, label: String, is_default: bool, selected: bool) 
     })
 }
 
-#[derive(Clone, Copy, Debug)]
-struct UserMessageAction {
-    session_id: Uuid,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct UserMessageAction {
+    pub(crate) session_id: Uuid,
     /// The prompt that opened the turn. A turn can hold several user messages
     /// once a steer lands in it, and only the opening one is a rewind
     /// boundary, so this is what the editor and the rewind both address.
-    message_id: Uuid,
-    turn_count: usize,
+    pub(crate) message_id: Uuid,
+    pub(crate) turn_count: usize,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct AssistantMessageAction {
-    session_id: Uuid,
-    turn_count: usize,
-    enabled: bool,
-    preparing: bool,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct AssistantMessageAction {
+    pub(crate) session_id: Uuid,
+    pub(crate) turn_count: usize,
+    pub(crate) enabled: bool,
+    pub(crate) preparing: bool,
 }
 
 #[derive(Clone)]
@@ -1171,7 +1307,18 @@ pub struct Padu {
     model_search: Entity<TextInput>,
     settings_search: Entity<TextInput>,
     archived_search: Entity<TextInput>,
+    pub(crate) browser_data: crate::app::settings::browser::BrowserData,
+    pub(crate) browser_search_combobox: Entity<bezel::ui::combobox::Combobox>,
+    pub(crate) browser_home_input: Entity<TextInput>,
+    pub(crate) browser_blocked_input: Entity<TextInput>,
+    pub(crate) editing_browser_home: bool,
+    pub(crate) editing_browser_blocked: bool,
+    pub(crate) adding_custom_engine: bool,
+    pub(crate) custom_engine_name_input: Entity<TextInput>,
+    pub(crate) custom_engine_url_input: Entity<TextInput>,
     keybindings_search: Entity<TextInput>,
+    language_combobox: Entity<bezel::ui::combobox::Combobox>,
+    pub(crate) background_effect_combobox: Entity<bezel::ui::combobox::Combobox>,
     daemon_port_input: Entity<TextInput>,
     daemon_origin_inputs: Vec<Entity<TextInput>>,
     daemon_reconfigure_pending: bool,
@@ -1447,6 +1594,10 @@ pub struct Padu {
     /// desktop never creates another attachment file.
     remote_images: RefCell<HashMap<String, RemoteImageState>>,
     conversation_background_image: RefCell<Option<Arc<gpui::Image>>>,
+    conversation_background_raw: RefCell<Option<(gpui::ImageFormat, Arc<Vec<u8>>)>>,
+    #[allow(dead_code)]
+    conversation_background_cache:
+        RefCell<HashMap<padu_client::persistence::ConversationBackgroundEffect, Arc<gpui::Image>>>,
     conversation_background_generation: Cell<u64>,
     /// Coalesced edge trigger for provider and background result queues. The
     /// payloads stay in their typed channels; this channel only wakes the UI.
@@ -1516,6 +1667,8 @@ pub struct Padu {
     sidebar_group_header_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
     /// Stable keyboard focus for each virtualized project-history reveal row.
     sidebar_show_more_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
+    /// Stable keyboard focus for each virtualized sidebar session row.
+    sidebar_session_focuses: RefCell<HashMap<Uuid, FocusHandle>>,
     sidebar_visible: bool,
     sidebar_width: f32,
     right_panel_visible: bool,
@@ -1573,12 +1726,6 @@ pub struct Padu {
     file_preview_selection: TranscriptSelection,
     file_preview_scroll_handle: ScrollHandle,
     file_preview_scrollbar: Rc<ScrollbarState>,
-    /// Markdown preview state for the Notes page. This must stay separate from
-    /// the right-panel file preview because both surfaces can be visible at once.
-    notes_preview_markdown: RefCell<Option<(String, MarkdownView)>>,
-    notes_preview_selection: TranscriptSelection,
-    notes_preview_scroll_handle: ScrollHandle,
-    notes_preview_scrollbar: Rc<ScrollbarState>,
     notes_editor_scroll_handle: ScrollHandle,
     notes_editor_scrollbar: Rc<ScrollbarState>,
     right_panel_pending_tab_reveal: Option<usize>,
@@ -1622,11 +1769,18 @@ pub struct Padu {
     /// since the event handler has no `Context` to refresh them itself.
     workspace_queries_stale: bool,
     right_panel_terminals: HashMap<Uuid, Entity<TerminalView>>,
-    right_panel_browsers: HashMap<Uuid, Entity<BrowserView>>,
+    pub(crate) right_panel_browsers: HashMap<Uuid, Entity<BrowserView>>,
     /// A Browser surface was just opened; the next right panel render moves
     /// focus into its address bar.
     right_panel_pending_browser_focus: Option<Uuid>,
     pub(crate) right_panel_pending_browser_urls: HashMap<Uuid, String>,
+    pub(crate) right_panel_add_menu: bezel::ui::context_menu::ContextMenu<Self>,
+    pub(crate) right_panel_files_menu:
+        bezel::ui::context_menu::ContextMenu<Self, crate::app::right_panel::RightPanelFilesMenuKey>,
+    pub(crate) sidebar_session_menu: bezel::ui::context_menu::ContextMenu<Self, Uuid>,
+    pub(crate) chat_message_menu: bezel::ui::context_menu::ContextMenu<Self, Uuid>,
+    pub(crate) right_panel_tab_reorder:
+        bezel::ui::tabs::Reorder<crate::app::right_panel::RightPanelTabId>,
     _keystroke_interceptor: Option<gpui::Subscription>,
     /// GPUI is compositing deferred draws on a plane above native views, so
     /// menus render over the live webview and no snapshot occlusion is needed.
@@ -1645,13 +1799,19 @@ pub struct Padu {
     notes: Vec<notes::Note>,
     notes_selected: usize,
     notes_title: Entity<TextInput>,
-    notes_body: Entity<padu_editor::Editor>,
+    notes_body: Entity<bezel_editor::Editor>,
     notes_code_body: Entity<TextInput>,
     notes_search: Entity<TextInput>,
     notes_tags: Entity<TextInput>,
     notes_tags_list: Vec<String>,
     notes_layout: notes::NotesLayout,
+    notes_turn_open: bool,
     notes_list_collapsed: bool,
+    notes_heading_indicator_visible: bool,
+    notes_heading_rail: Entity<notes::NotesHeadingRail>,
+    notes_heading_rail_reset_generation: Cell<u64>,
+    notes_headings_cache: RefCell<Rc<Vec<notes::NoteHeadingItem>>>,
+    notes_headings_fingerprint: Cell<Option<u64>>,
     notes_split_ratio: f32,
     notes_save_generation: u64,
     notes_loaded: bool,
@@ -1666,6 +1826,10 @@ pub struct Padu {
     notes_filtered: RefCell<Vec<usize>>,
     notes_filtered_query: String,
     notes_filtered_generation: u64,
+    notes_visible_limit: usize,
+    notes_filtered_total: usize,
+    notes_loading_more: bool,
+    notes_body_load_generation: u64,
     /// Virtualized Notes list and its scrollbar, mirroring the sidebar pattern
     /// so frame work stays proportional to the visible rows.
     notes_list_state: ListState,
@@ -1684,18 +1848,23 @@ pub struct Padu {
     board_new_task_modal_open: bool,
     board_new_task_project_id: Option<Uuid>,
     board_new_task_title: Entity<TextInput>,
-    board_new_task_description: Entity<TextInput>,
+    board_new_task_description: Entity<bezel_editor::Editor>,
+    board_new_task_turn_open: bool,
     board_new_task_agent: Option<ProviderKind>,
     board_new_task_model: Option<String>,
+    #[allow(dead_code)]
     board_new_task_cancel_focus: FocusHandle,
     board_new_task_preview: bool,
     board_edit_title: Entity<TextInput>,
-    board_edit_description: Entity<TextInput>,
+    board_edit_description: Entity<bezel_editor::Editor>,
+    board_edit_turn_open: bool,
     board_edit_labels: Entity<TextInput>,
     board_edit_labels_list: Vec<String>,
     board_edit_agent: Option<ProviderKind>,
     board_edit_saving: bool,
+    #[allow(dead_code)]
     board_edit_preview: bool,
+    #[allow(dead_code)]
     board_markdown_preview: RefCell<MarkdownView>,
     board_collapsed_columns: std::collections::HashSet<padu_client::kanban::TaskStatus>,
     card_updated_events: Receiver<Uuid>,
@@ -1946,6 +2115,7 @@ pub use note_preview::init as init_note_preview_keys;
 pub use onboarding::init as init_onboarding_keys;
 pub use right_panel::init_diff_keys as init_right_panel_diff_keys;
 pub use right_panel::init_files_keys as init_right_panel_files_keys;
+pub use right_panel::{AddRightPanelTab, ToggleRightPanelAddMenu};
 pub use settings::init as init_settings_keys;
 pub use settings::init_skills_keys;
 pub use sidebar::init as init_sidebar_keys;
@@ -2032,6 +2202,14 @@ fn migrate_legacy_projectless_projects(
 }
 
 impl Padu {
+    pub(crate) fn color_scheme(&self) -> ColorScheme {
+        self.state
+            .color_scheme
+            .as_deref()
+            .and_then(ColorScheme::parse)
+            .unwrap_or_default()
+    }
+
     /// Changes the primary workspace without allowing individual pages to
     /// duplicate route-reset logic. Page-local entities remain alive while
     /// another workspace is visible.
@@ -2637,9 +2815,33 @@ impl Padu {
                 .clear_on_escape()
                 .placeholder(tr!("settings.archived_search"))
         });
+        let browser_home_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .placeholder("https://duckduckgo.com")
+        });
+        let browser_blocked_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .placeholder("example.com, api.site.com")
+        });
+        let custom_engine_name_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .placeholder(tr!("settings.browser_engine_name_placeholder"))
+        });
+        let custom_engine_url_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .placeholder(tr!("settings.browser_engine_url_placeholder"))
+        });
+        let notes_editor_scroll_handle = ScrollHandle::new();
+        let notes_editor_scrollbar = ScrollbarState::new();
         let notes_title =
             cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("notes.title_placeholder")));
-        let notes_body = cx.new(|cx| padu_editor::Editor::new("", cx));
+        let notes_body = cx.new(|cx| {
+            bezel_editor::Editor::new("", cx).with_scroll(notes_editor_scroll_handle.clone())
+        });
         let notes_code_body = cx.new(|cx| {
             TextInput::new(window, cx)
                 .multi_line()
@@ -2660,20 +2862,12 @@ impl Padu {
         });
         let board_new_task_title =
             cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("board.task_title")));
-        let board_new_task_description = cx.new(|cx| {
-            TextInput::new(window, cx)
-                .multi_line()
-                .syntax(Some("markdown"))
-                .placeholder(tr!("board.task_description"))
-        });
+        let board_new_task_description = cx.new(|cx| bezel_editor::Editor::new("", cx));
+        let board_new_task_turn_open = false;
         let board_edit_title =
             cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("board.task_title")));
-        let board_edit_description = cx.new(|cx| {
-            TextInput::new(window, cx)
-                .multi_line()
-                .syntax(Some("markdown"))
-                .placeholder(tr!("board.task_description"))
-        });
+        let board_edit_description = cx.new(|cx| bezel_editor::Editor::new("", cx));
+        let board_edit_turn_open = false;
         let board_edit_labels =
             cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("board.labels_placeholder")));
         let keybindings_search = cx.new(|cx| {
@@ -2720,6 +2914,7 @@ impl Padu {
         let right_panel_diff_filter =
             cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("diff.filter_files")));
         let navigation_rail = cx.new(|_| ConversationNavigationRail::new());
+        let notes_heading_rail = cx.new(|_| notes::NotesHeadingRail::new());
         let sidebar_pane = PaduPane::new(Padu::sidebar_pane_content, cx);
         let transcript_pane = PaduPane::new(Padu::transcript_pane_content, cx);
         let right_panel_pane = PaduPane::new(Padu::right_panel_pane_content, cx);
@@ -2764,7 +2959,12 @@ impl Padu {
                 window.display(cx).and_then(|display| display.uuid().ok()),
             ));
         }
-        crate::theme::apply_theme_preference(state.theme, window, cx);
+        let initial_scheme = state
+            .color_scheme
+            .as_deref()
+            .and_then(ColorScheme::parse)
+            .unwrap_or_default();
+        crate::theme::apply_theme(state.theme, initial_scheme, window, cx);
         crate::platform::set_sidebar_material_width(window, sidebar_width);
         let mut onboarding = onboarding::OnboardingState::new(cx);
         if !state.has_completed_onboarding {
@@ -2979,13 +3179,8 @@ impl Padu {
         // tooltips, popovers) composite above native content — without it the
         // browser surface would cover them.
         //
-        // Both backends of the pinned fork implement it, and both browser
-        // hosts render somewhere it can reach: a sibling NSView below GPUI's
-        // overlay layer on macOS, a DirectComposition visual between GPUI's
-        // base and overlay planes on Windows. When it is unavailable the
-        // surface falls back to freezing the page to a bitmap while an
-        // overlay is open.
-        let scene_overlay_enabled = window.enable_scene_overlay().is_ok();
+        // Browser native surface is decoupled; overlay plane is not required.
+        let scene_overlay_enabled = false;
         let (updater_status, updater_events) = cx
             .try_global::<crate::updater::UpdaterState>()
             .and_then(|state| state.0.as_ref())
@@ -3011,6 +3206,10 @@ impl Padu {
         });
 
         let entity = cx.new(|cx| {
+            let language_combobox = Self::create_language_combobox(state.language, cx);
+            let background_effect_combobox =
+                Self::create_background_effect_combobox(state.conversation_background.effect, cx);
+            let browser_search_combobox = Self::create_browser_search_combobox(cx);
             let settings_focus = cx.focus_handle();
             let onboarding_add_project_focus = cx.focus_handle();
             let onboarding_projectless_focus = cx.focus_handle();
@@ -3057,7 +3256,7 @@ impl Padu {
 
             cx.observe_window_appearance(window, |this: &mut Self, window, cx| {
                 if this.state.theme == ThemePreference::System {
-                    crate::theme::apply_theme_preference(this.state.theme, window, cx);
+                    crate::theme::apply_theme(this.state.theme, this.color_scheme(), window, cx);
                     cx.notify();
                 }
             })
@@ -3365,12 +3564,32 @@ impl Padu {
             .detach();
             cx.subscribe(
                 &notes_body,
-                |this: &mut Self, _, event: &padu_editor::EditorEvent, cx| {
-                    if matches!(event, padu_editor::EditorEvent::Changed) {
+                |this: &mut Self, _, event: &bezel_editor::EditorEvent, cx| {
+                    if matches!(event, bezel_editor::EditorEvent::Changed) {
                         this.schedule_note_save(cx);
                     }
                 },
             )
+            .detach();
+            cx.observe(&notes_body, |this: &mut Self, _, cx| {
+                if this.workspace_page == WorkspacePage::Notes
+                    && this.notes_layout == notes::NotesLayout::Rich
+                {
+                    cx.notify();
+                }
+            })
+            .detach();
+            cx.observe(&board_new_task_description, |this: &mut Self, _, cx| {
+                if this.board_new_task_modal_open {
+                    cx.notify();
+                }
+            })
+            .detach();
+            cx.observe(&board_edit_description, |this: &mut Self, _, cx| {
+                if this.board_selected_task_id.is_some() {
+                    cx.notify();
+                }
+            })
             .detach();
             cx.subscribe(
                 &notes_code_body,
@@ -3581,7 +3800,18 @@ impl Padu {
                 branch_create_input,
                 settings_search,
                 archived_search,
+                browser_data: crate::app::settings::browser::BrowserData::default(),
+                browser_search_combobox,
+                browser_home_input,
+                browser_blocked_input,
+                editing_browser_home: false,
+                editing_browser_blocked: false,
+                adding_custom_engine: false,
+                custom_engine_name_input,
+                custom_engine_url_input,
                 keybindings_search,
+                language_combobox,
+                background_effect_combobox,
                 daemon_port_input,
                 daemon_origin_inputs,
                 daemon_reconfigure_pending: false,
@@ -3719,6 +3949,8 @@ impl Padu {
                 note_preview_generation: 0,
                 remote_images: RefCell::new(HashMap::new()),
                 conversation_background_image: RefCell::new(None),
+                conversation_background_raw: RefCell::new(None),
+                conversation_background_cache: RefCell::new(HashMap::new()),
                 conversation_background_generation: Cell::new(0),
                 event_wake_tx,
                 task_state_sync_tx,
@@ -3747,6 +3979,7 @@ impl Padu {
                 sidebar_project_reveal_counts: HashMap::new(),
                 sidebar_group_header_focuses: RefCell::new(HashMap::new()),
                 sidebar_show_more_focuses: RefCell::new(HashMap::new()),
+                sidebar_session_focuses: RefCell::new(HashMap::new()),
                 sidebar_visible,
                 sidebar_width,
                 right_panel_visible,
@@ -3786,12 +4019,8 @@ impl Padu {
                 file_preview_selection: TranscriptSelection::default(),
                 file_preview_scroll_handle: ScrollHandle::new(),
                 file_preview_scrollbar: ScrollbarState::new(),
-                notes_preview_markdown: RefCell::new(None),
-                notes_preview_selection: TranscriptSelection::default(),
-                notes_preview_scroll_handle: ScrollHandle::new(),
-                notes_preview_scrollbar: ScrollbarState::new(),
-                notes_editor_scroll_handle: ScrollHandle::new(),
-                notes_editor_scrollbar: ScrollbarState::new(),
+                notes_editor_scroll_handle,
+                notes_editor_scrollbar,
                 right_panel_pending_tab_reveal: None,
                 right_panel_pending_terminal_focus: None,
                 right_panel_expanded_paths: HashSet::new(),
@@ -3824,6 +4053,11 @@ impl Padu {
                 right_panel_browsers: HashMap::new(),
                 right_panel_pending_browser_focus: None,
                 right_panel_pending_browser_urls: HashMap::new(),
+                right_panel_add_menu: bezel::ui::context_menu::ContextMenu::default(),
+                right_panel_files_menu: bezel::ui::context_menu::ContextMenu::default(),
+                sidebar_session_menu: bezel::ui::context_menu::ContextMenu::default(),
+                chat_message_menu: bezel::ui::context_menu::ContextMenu::default(),
+                right_panel_tab_reorder: bezel::ui::tabs::Reorder::new(),
                 _keystroke_interceptor: None,
                 scene_overlay_enabled,
                 settings_page: None,
@@ -3838,6 +4072,7 @@ impl Padu {
                 notes_tags,
                 notes_tags_list: Vec::new(),
                 notes_layout: notes::NotesLayout::Rich,
+                notes_turn_open: false,
                 notes_list_collapsed: false,
                 notes_split_ratio: 0.5,
                 notes_save_generation: 0,
@@ -3848,6 +4083,10 @@ impl Padu {
                 notes_filtered: RefCell::new(Vec::new()),
                 notes_filtered_query: String::new(),
                 notes_filtered_generation: 0,
+                notes_visible_limit: notes::NOTES_PAGE_SIZE,
+                notes_filtered_total: 0,
+                notes_loading_more: false,
+                notes_body_load_generation: 0,
                 notes_list_state: ListState::new(0, ListAlignment::Top, px(480.0)),
                 notes_scrollbar: ScrollbarState::new(),
                 board_tasks: Vec::new(),
@@ -3865,12 +4104,14 @@ impl Padu {
                 board_new_task_project_id: None,
                 board_new_task_title,
                 board_new_task_description,
+                board_new_task_turn_open,
                 board_new_task_agent: None,
                 board_new_task_model: None,
                 board_new_task_cancel_focus: cx.focus_handle(),
                 board_new_task_preview: false,
                 board_edit_title,
                 board_edit_description,
+                board_edit_turn_open,
                 board_edit_labels,
                 board_edit_labels_list: Vec::new(),
                 board_edit_agent: None,
@@ -3963,6 +4204,11 @@ impl Padu {
                 menus: RefCell::new(HashMap::new()),
                 navigation_rail: navigation_rail.clone(),
                 navigation_rail_reset_generation: Cell::new(0),
+                notes_heading_indicator_visible: true,
+                notes_heading_rail: notes_heading_rail.clone(),
+                notes_heading_rail_reset_generation: Cell::new(0),
+                notes_headings_cache: RefCell::new(Rc::new(Vec::new())),
+                notes_headings_fingerprint: Cell::new(None),
                 sidebar_pane: sidebar_pane.clone(),
                 transcript_pane: transcript_pane.clone(),
                 right_panel_pane: right_panel_pane.clone(),
@@ -3977,6 +4223,7 @@ impl Padu {
             }
         });
         navigation_rail.update(cx, |rail, _| rail.set_padu(entity.downgrade()));
+        notes_heading_rail.update(cx, |rail, _| rail.set_padu(entity.downgrade()));
         for pane in [
             &sidebar_pane,
             &transcript_pane,
@@ -4012,6 +4259,7 @@ impl Padu {
             // And the header's "open project in app" targets, so its menu
             // lists installed apps and icons without ever probing on a frame.
             this.detect_open_in_apps(cx);
+            this.sync_open_projects();
             let keystroke_listener =
                 cx.listener(|this, event: &gpui::KeystrokeEvent, window, cx| {
                     this.handle_project_action_keystroke_event(event, window, cx);
@@ -4022,6 +4270,11 @@ impl Padu {
             }
         });
         entity
+    }
+
+    pub(crate) fn sync_open_projects(&self) {
+        let open_paths = self.state.projects.iter().map(|p| p.path.clone()).collect();
+        padu_mcp::rail::set_open(open_paths);
     }
 }
 

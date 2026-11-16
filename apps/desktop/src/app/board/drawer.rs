@@ -4,8 +4,10 @@ use uuid::Uuid;
 use super::super::*;
 use crate::model::{ProviderKind, unix_time};
 use crate::theme::{Theme, sp};
+use crate::ui::editor::{EditorSelectionToolbar, RichEditor};
 use crate::ui::tooltip::Tooltip;
 use crate::ui::{TagInput, icon, provider_icon};
+use bezel::ui::popover::{Side, sheet, sheet_panel};
 
 use super::types::{
     BOARD_COLUMNS, BoardAgentPickTarget, task_live_badges, task_status_color, task_status_label,
@@ -18,7 +20,7 @@ impl Padu {
         theme: &Theme,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
+    ) -> AnyElement {
         let task_summary = self.board_tasks.iter().find(|t| t.id == task_id).cloned();
         let hydrated = self.board_hydrated_task.clone();
 
@@ -59,19 +61,13 @@ impl Padu {
             .and_then(|t| t.model.clone())
             .or_else(|| task_summary.as_ref().and_then(|t| t.model.clone()));
 
-        let mut drawer = div()
-            .id("task-detail-drawer")
-            .absolute()
-            .top_0()
-            .right_0()
-            .bottom_0()
-            .w(px(380.0))
-            .bg(theme.raised)
-            .border_l_1()
-            .border_color(theme.border_strong)
-            .shadow_xl()
-            .flex()
-            .flex_col()
+        let bezel_theme = bezel::theme::Theme::of(cx);
+        let viewport = window.viewport_size();
+        let extent = px(440.0).min(viewport.width * 0.9);
+
+        let mut panel = sheet_panel(bezel_theme, Side::Right)
+            .id("task-detail-sheet-panel")
+            .occlude()
             .tab_index(0)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
                 if event.keystroke.key.as_str() == "escape" {
@@ -137,7 +133,7 @@ impl Padu {
                     })),
             );
 
-        drawer = drawer.child(header);
+        panel = panel.child(header);
 
         // Drawer Body: Scrollable middle section
         let mut body = div()
@@ -519,26 +515,39 @@ impl Padu {
             );
         }
 
-        // Description editor (markdown editor with Write/Preview tabs & toolbar)
+        // Description editor with rich text editor
         let can_save = hydrated.is_some()
             && !self.board_edit_saving
             && !self.board_edit_title.read(cx).content().trim().is_empty();
-        body = body.child(self.render_board_markdown_editor(
-            "task-edit-description",
-            &self.board_edit_description,
-            self.board_edit_preview,
-            px(110.0),
-            px(280.0),
-            theme,
-            window,
-            cx,
-            |this, preview, cx| {
-                this.board_edit_preview = preview;
-                cx.notify();
-            },
-        ));
+        body = body.child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(4.0))
+                .child(
+                    div()
+                        .text_size(sp(12.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text_secondary)
+                        .child(tr!("board.task_description")),
+                )
+                .child(
+                    div()
+                        .h(px(220.0))
+                        .rounded(px(6.0))
+                        .border_1()
+                        .border_color(theme.border)
+                        .overflow_hidden()
+                        .flex()
+                        .flex_col()
+                        .child(RichEditor::new(
+                            "task-edit-description-editor",
+                            self.board_edit_description.clone(),
+                        )),
+                ),
+        );
 
-        drawer = drawer.child(body);
+        panel = panel.child(body);
 
         // Sticky Footer: Delete on the left, Save on the right
         let title_for_delete_click = title.clone();
@@ -633,8 +642,43 @@ impl Padu {
                     }),
             );
 
-        drawer = drawer.child(footer);
+        panel = panel.child(footer);
 
-        drawer
+        let entity = cx.entity().downgrade();
+        let entity_close = cx.entity().downgrade();
+        let selection_toolbar = EditorSelectionToolbar::new(
+            "task-edit-selection-toolbar",
+            self.board_edit_description.clone(),
+            self.board_edit_turn_open,
+            move |_, cx| {
+                let _ = entity.update(cx, |this, cx| {
+                    this.board_edit_turn_open = !this.board_edit_turn_open;
+                    cx.notify();
+                });
+            },
+            move |_, cx| {
+                let _ = entity_close.update(cx, |this, cx| {
+                    this.board_edit_turn_open = false;
+                    cx.notify();
+                });
+            },
+        )
+        .render(window, cx);
+        panel = panel.children(selection_toolbar);
+
+        let weak = cx.entity().downgrade();
+        sheet(
+            "task-detail-sheet",
+            viewport,
+            Side::Right,
+            extent,
+            panel.into_any_element(),
+            None,
+            move |_event, _window, cx| {
+                let _ = weak.update(cx, |this, cx| {
+                    this.select_board_task(None, cx);
+                });
+            },
+        )
     }
 }

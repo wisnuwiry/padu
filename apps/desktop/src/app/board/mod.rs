@@ -10,6 +10,7 @@ pub mod types;
 
 use std::collections::HashMap;
 
+use bezel::ui::widgets::Scaffolding;
 use padu_client::kanban::TaskSummary;
 use uuid::Uuid;
 
@@ -34,6 +35,7 @@ impl Padu {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx).clone();
         let search_query = self.board_search.read(cx).content().trim().to_lowercase();
         let selected_task_id = self.board_selected_task_id;
 
@@ -82,17 +84,6 @@ impl Padu {
             .map(|session| (session.id, task_live_badges(Some(session), now)))
             .collect();
 
-        // Root container
-        let mut page = div()
-            .id("board-page")
-            .size_full()
-            .flex()
-            .flex_col()
-            .bg(theme.canvas);
-
-        // Header toolbar
-        page = page.child(self.render_board_header(cx));
-
         // Content area: 5 columns + detail flyout
         let mut columns_container = div()
             .id("board-columns-container")
@@ -126,15 +117,41 @@ impl Padu {
             .min_h_0()
             .flex()
             .relative()
+            .overflow_hidden()
             .child(columns_container);
 
-        // Detail Flyout Drawer
+        // Detail Task Sheet
         if let Some(task_id) = selected_task_id {
             main_content =
                 main_content.child(self.render_task_detail_drawer(task_id, &theme, window, cx));
         }
 
-        page = page.child(main_content);
+        let card = bezel_theme
+            .group_box()
+            .id("board-content-card")
+            .flex_1()
+            .min_h_0()
+            .ml(if self.sidebar_visible {
+                px(2.0)
+            } else {
+                px(8.0)
+            })
+            .mr(px(8.0))
+            .mb(px(8.0))
+            .bg(theme.surface)
+            .overflow_hidden()
+            .child(main_content);
+
+        // Root container
+        let mut page = div()
+            .id("board-page")
+            .key_context("BoardPage")
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(theme.frosted)
+            .child(self.render_board_header(cx))
+            .child(card);
 
         if selected_task_id.is_some() && !self.board_new_task_modal_open {
             page = page.on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {

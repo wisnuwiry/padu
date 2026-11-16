@@ -426,6 +426,9 @@ impl Padu {
         }
         self.session_navigation.remove(session_id);
         self.task_switcher.remove(session_id);
+        self.sidebar_session_focuses
+            .borrow_mut()
+            .remove(&session_id);
         let project_still_used = self
             .state
             .sessions
@@ -1734,6 +1737,7 @@ impl Padu {
                     let project = Project::from_path(path);
                     let project_id = project.id;
                     this.state.projects.push(project);
+                    this.sync_open_projects();
                     this.analytics.track(crate::analytics::Event::ProjectAdded);
                     this.create_session_for(project_id, this.state.last_provider, cx);
                 });
@@ -1782,6 +1786,7 @@ impl Padu {
                     project.name = Project::PROJECTLESS_NAME.to_owned();
                     let project_id = project.id;
                     padu.state.projects.push(project);
+                    padu.sync_open_projects();
                     padu.create_session_for(project_id, padu.state.last_provider, cx);
                 }
                 Err(error) => {

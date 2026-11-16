@@ -449,59 +449,67 @@ export const RightPanel = forwardRef<RightPanelHandle, RightPanelProps>(function
         )}
       </header>
 
-      {!activeTab && !showingConversation && (
-        <PanelChooser hasProject={hasProject} onSelect={openSurface} />
-      )}
-      {!showingConversation && tabs.map((tab) => (
-        <div
-          aria-labelledby={panelTabId(tab.id)}
-          className={cn('min-h-0 flex-1', tab.id === activeTab?.id ? 'flex' : 'hidden')}
-          id={panelContentId(tab.id)}
-          key={tab.id}
-          role="tabpanel"
-        >
-          {(tab.surface === 'files' || tab.surface === 'file') && (
-            <FilesPanel
-              active={active && tab.id === activeTab?.id}
-              buffers={fileBuffers}
-              panelWidth={fittedPanelWidth}
-              project={project}
-              requestedFile={tab.selectedFile ?? null}
-              session={session}
-              setBuffers={setFileBuffers}
-              tabId={tab.id}
-              onDirtyChange={setTabDirty}
-              onOpenFile={openFile}
-              onAddToChat={onAddToChat}
-              onFindFile={onFindFile}
-            />
-          )}
-          {tab.surface === 'changes' && (
-            <ChangesPanel
-              diffSource={diffSource}
-              panelWidth={fittedPanelWidth}
-              project={project}
-              session={session}
-              onDiffSourceChange={setDiffSource}
-            />
-          )}
-          {tab.surface === 'terminal' && tab.terminalId && (
-            <TerminalPanel
-              project={project}
-              session={session}
-              terminalId={tab.terminalId}
-              onTitle={(title) => updateTab(tab.id, { title })}
-            />
-          )}
-          {tab.surface === 'backgroundWork' && tab.backgroundWorkKey && (
-            <BackgroundWorkPanel
-              session={session}
-              workKey={tab.backgroundWorkKey}
-              onTitle={(title) => updateTab(tab.id, { title })}
-            />
-          )}
-        </div>
-      ))}
+      <div
+        className={cn(
+          'relative mb-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[10px] border border-border bg-background text-foreground',
+          fullscreen && !sidebarVisible ? 'ml-2' : 'ml-0.5',
+          'mr-2',
+        )}
+      >
+        {!activeTab && !showingConversation && (
+          <PanelChooser hasProject={hasProject} onSelect={openSurface} />
+        )}
+        {!showingConversation && tabs.map((tab) => (
+          <div
+            aria-labelledby={panelTabId(tab.id)}
+            className={cn('min-h-0 flex-1', tab.id === activeTab?.id ? 'flex' : 'hidden')}
+            id={panelContentId(tab.id)}
+            key={tab.id}
+            role="tabpanel"
+          >
+            {(tab.surface === 'files' || tab.surface === 'file') && (
+              <FilesPanel
+                active={active && tab.id === activeTab?.id}
+                buffers={fileBuffers}
+                panelWidth={fittedPanelWidth}
+                project={project}
+                requestedFile={tab.selectedFile ?? null}
+                session={session}
+                setBuffers={setFileBuffers}
+                tabId={tab.id}
+                onDirtyChange={setTabDirty}
+                onOpenFile={openFile}
+                onAddToChat={onAddToChat}
+                onFindFile={onFindFile}
+              />
+            )}
+            {tab.surface === 'changes' && (
+              <ChangesPanel
+                diffSource={diffSource}
+                panelWidth={fittedPanelWidth}
+                project={project}
+                session={session}
+                onDiffSourceChange={setDiffSource}
+              />
+            )}
+            {tab.surface === 'terminal' && tab.terminalId && (
+              <TerminalPanel
+                project={project}
+                session={session}
+                terminalId={tab.terminalId}
+                onTitle={(title) => updateTab(tab.id, { title })}
+              />
+            )}
+            {tab.surface === 'backgroundWork' && tab.backgroundWorkKey && (
+              <BackgroundWorkPanel
+                session={session}
+                workKey={tab.backgroundWorkKey}
+                onTitle={(title) => updateTab(tab.id, { title })}
+              />
+            )}
+          </div>
+        ))}
+      </div>
     </aside>
   )
 })

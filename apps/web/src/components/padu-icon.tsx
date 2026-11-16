@@ -73,6 +73,7 @@ export const PADU_ICONS = {
   server: 'i-padu-server',
   settings: 'i-padu-settings',
   split: 'i-padu-split',
+  splitVertical: 'i-padu-split-vertical',
   sparkle: 'i-padu-sparkle',
   star: 'i-padu-star',
   starFilled: 'i-padu-star-filled',

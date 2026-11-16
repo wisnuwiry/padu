@@ -2,12 +2,15 @@ use gpui::actions;
 
 use super::composer::next_picker_highlight;
 use super::*;
+use crate::ui::button::{Button, ButtonStyle};
+use bezel::ui::widgets::{Content, Scaffolding};
 
 actions!(padu_settings, [FocusSettingsSearch]);
 
 mod about;
 mod appearance;
 mod archive;
+pub(crate) mod browser;
 mod computer_use;
 mod daemon;
 mod general;
@@ -43,70 +46,116 @@ const SETTINGS_CONTENT_CONTEXT: &str = "SettingsContent";
 /// it.
 const SETTINGS_SEARCH_CONTEXT: &str = "SettingsSidebar > TextInput";
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SettingsGroup {
+    Preferences,
+    Integration,
+    Agents,
+    System,
+}
+
+impl SettingsGroup {
+    pub(crate) fn label_key(self) -> Option<&'static str> {
+        match self {
+            Self::Preferences => None,
+            Self::Integration => Some("settings.group_integration"),
+            Self::Agents => Some("settings.group_agents"),
+            Self::System => Some("settings.group_system"),
+        }
+    }
+
+    pub(crate) fn id_str(self) -> &'static str {
+        match self {
+            Self::Preferences => "preferences",
+            Self::Integration => "integration",
+            Self::Agents => "agents",
+            Self::System => "system",
+        }
+    }
+}
+
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
-const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 11] = [
+const SETTINGS_PAGES: [(SettingsGroup, SettingsPage, &str, &str, &str); 12] = [
     (
+        SettingsGroup::Preferences,
         SettingsPage::General,
         "settings.general",
         "icons/settings.svg",
         "settings.general_keywords",
     ),
     (
+        SettingsGroup::Preferences,
         SettingsPage::Appearance,
         "settings.appearance",
         "icons/appearance.svg",
         "settings.appearance_keywords",
     ),
     (
+        SettingsGroup::Preferences,
         SettingsPage::Keybindings,
         "settings.keybindings",
         "icons/command.svg",
         "settings.keybindings_keywords",
     ),
     (
+        SettingsGroup::Preferences,
         SettingsPage::Notifications,
         "settings.notifications",
         "icons/bell.svg",
         "settings.notifications_keywords",
     ),
     (
+        SettingsGroup::Integration,
+        SettingsPage::Browser,
+        "settings.browser",
+        "icons/globe.svg",
+        "settings.browser_keywords",
+    ),
+    (
+        SettingsGroup::Agents,
         SettingsPage::Providers,
         "settings.providers",
         "icons/bot.svg",
         "settings.providers_keywords",
     ),
     (
+        SettingsGroup::Agents,
         SettingsPage::Skills,
         "settings.skills",
         "icons/package.svg",
         "settings.skills_keywords",
     ),
     (
+        SettingsGroup::Agents,
         SettingsPage::Usage,
         "settings.usage",
         "icons/chart-column.svg",
         "settings.usage_keywords",
     ),
     (
-        SettingsPage::Daemon,
-        "settings.daemon",
-        "icons/server.svg",
-        "settings.daemon_keywords",
-    ),
-    (
+        SettingsGroup::Agents,
         SettingsPage::ComputerUse,
         "settings.computer_use",
         "icons/cursor-spark.svg",
         "settings.computer_use_keywords",
     ),
     (
+        SettingsGroup::System,
+        SettingsPage::Daemon,
+        "settings.daemon",
+        "icons/server.svg",
+        "settings.daemon_keywords",
+    ),
+    (
+        SettingsGroup::System,
         SettingsPage::Archived,
         "settings.archived",
         "icons/archive.svg",
         "settings.archived_keywords",
     ),
     (
+        SettingsGroup::System,
         SettingsPage::About,
         "settings.about",
         "icons/info.svg",
@@ -143,14 +192,14 @@ fn settings_search_shortcut() -> &'static str {
 /// already be trimmed and lowercased; when it is empty every page matches.
 pub(super) fn visible_settings_pages(
     query: &str,
-) -> impl Iterator<Item = (SettingsPage, String, &'static str)> + '_ {
+) -> impl Iterator<Item = (SettingsGroup, SettingsPage, String, &'static str)> + '_ {
     SETTINGS_PAGES
         .into_iter()
-        .filter(|(page, ..)| page.is_visible_in_navigation())
-        .filter_map(move |(page, label_key, icon, keywords_key)| {
+        .filter(|(_, page, ..)| page.is_visible_in_navigation())
+        .filter_map(move |(group, page, label_key, icon, keywords_key)| {
             let label = crate::i18n::translate(label_key);
             let keywords = crate::i18n::translate(keywords_key).to_lowercase();
-            (query.is_empty() || keywords.contains(query)).then_some((page, label, icon))
+            (query.is_empty() || keywords.contains(query)).then_some((group, page, label, icon))
         })
 }
 
@@ -200,9 +249,32 @@ impl Padu {
         let theme = Theme::current(cx);
         let current_page = self.settings_page.unwrap_or(SettingsPage::General);
         let query = self.settings_search_query(cx);
-        let mut navigation = div().flex().flex_col().gap(px(3.0));
+        let mut navigation = div().flex().flex_col().gap(px(2.0));
+        let mut current_group: Option<SettingsGroup> = None;
+        let mut is_first_group = true;
 
-        for (page, label, icon_path) in visible_settings_pages(&query) {
+        for (group, page, label, icon_path) in visible_settings_pages(&query) {
+            if current_group != Some(group) {
+                current_group = Some(group);
+                if let Some(label_key) = group.label_key() {
+                    navigation = navigation.child(
+                        div()
+                            .id(SharedString::from(format!(
+                                "settings-group-{}",
+                                group.id_str()
+                            )))
+                            .pt(if is_first_group { px(0.0) } else { px(8.0) })
+                            .pb(px(2.0))
+                            .px(px(10.0))
+                            .text_size(sp(11.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme.text_tertiary)
+                            .child(crate::i18n::translate(label_key)),
+                    );
+                }
+                is_first_group = false;
+            }
+
             let selected = current_page == page;
             navigation = navigation.child(
                 div()
@@ -266,8 +338,17 @@ impl Padu {
                         .suffix(kbd_badge(settings_search_shortcut(), &theme)),
                 ),
             )
-            .child(div().h(px(18.0)))
-            .child(div().px(px(12.0)).child(navigation))
+            .child(
+                div()
+                    .id("settings-sidebar-scroll")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .pt(px(10.0))
+                    .pb(px(14.0))
+                    .px(px(12.0))
+                    .child(navigation),
+            )
     }
 
     /// The search field's content, normalized the way the page filter expects.
@@ -287,7 +368,7 @@ impl Padu {
     fn cycle_settings_page(&mut self, key: &str, cx: &mut Context<Self>) {
         let query = self.settings_search_query(cx);
         let pages = visible_settings_pages(&query)
-            .map(|(page, ..)| page)
+            .map(|(_, page, ..)| page)
             .collect::<Vec<_>>();
         let current_page = self.settings_page.unwrap_or(SettingsPage::General);
         let current = pages.iter().position(|page| *page == current_page);
@@ -304,48 +385,17 @@ impl Padu {
         window.focus(&focus, cx);
     }
 
-    fn render_settings_back_button(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let theme = Theme::current(cx);
-        div()
-            .id("settings-back")
-            .tab_index(0)
-            .h(px(26.0))
-            .px(px(6.0))
-            .flex_none()
-            .rounded(px(6.0))
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .cursor_pointer()
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
-            .hover(|element| element.bg(theme.overlay))
-            .active(|element| element.bg(theme.overlay_strong))
+    fn render_settings_back_button(&self, cx: &mut Context<Self>) -> Button {
+        Button::new("settings-back", tr!("settings.back"))
+            .button_style(ButtonStyle::Ghost)
+            .icon("icons/arrow-left.svg")
             .tooltip(Tooltip::text(tr!("settings.back")))
-            .child(icon("icons/arrow-left.svg", 14.0, theme.text_tertiary))
-            .child(
-                div()
-                    .text_size(sp(13.0))
-                    .text_color(theme.text_secondary)
-                    .child(tr!("settings.back")),
-            )
-            .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                cx.stop_propagation();
-            })
-            .on_click(cx.listener(|this, _, window, cx| {
+            .on_press(cx.listener(|this, _, window, cx| {
                 cx.stop_propagation();
                 this.settings_page = None;
                 let focus_handle = this.composer_focus(cx);
                 window.focus(&focus_handle, cx);
                 cx.notify();
-            }))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.settings_page = None;
-                    let focus_handle = this.composer_focus(cx);
-                    window.focus(&focus_handle, cx);
-                    cx.notify();
-                    cx.stop_propagation();
-                }
             }))
     }
 
@@ -403,6 +453,20 @@ impl Padu {
             window,
             cx,
         );
+        let page_title = match page {
+            SettingsPage::General => tr!("settings.general"),
+            SettingsPage::Appearance => tr!("settings.appearance"),
+            SettingsPage::Keybindings => tr!("settings.keybindings"),
+            SettingsPage::Notifications => tr!("settings.notifications"),
+            SettingsPage::Browser => tr!("settings.browser"),
+            SettingsPage::Providers => tr!("settings.providers"),
+            SettingsPage::Skills => tr!("settings.skills"),
+            SettingsPage::Usage => tr!("settings.usage"),
+            SettingsPage::Daemon => tr!("settings.daemon"),
+            SettingsPage::ComputerUse => tr!("settings.computer_use"),
+            SettingsPage::Archived => tr!("settings.archived"),
+            SettingsPage::About => tr!("settings.about"),
+        };
         // The Monthly and Projects list views own their own scrolling, so
         // their pages fill the viewport instead of riding the shared scroll
         // container.
@@ -432,25 +496,14 @@ impl Padu {
                         .text_size(sp(18.0))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(theme.text)
-                        .child(match page {
-                            SettingsPage::General => tr!("settings.general"),
-                            SettingsPage::Appearance => tr!("settings.appearance"),
-                            SettingsPage::Keybindings => tr!("settings.keybindings"),
-                            SettingsPage::Notifications => tr!("settings.notifications"),
-                            SettingsPage::Providers => tr!("settings.providers"),
-                            SettingsPage::Skills => tr!("settings.skills"),
-                            SettingsPage::Usage => tr!("settings.usage"),
-                            SettingsPage::Daemon => tr!("settings.daemon"),
-                            SettingsPage::ComputerUse => tr!("settings.computer_use"),
-                            SettingsPage::Archived => tr!("settings.archived"),
-                            SettingsPage::About => tr!("settings.about"),
-                        }),
+                        .child(page_title.clone()),
                 )
                 .child(match page {
                     SettingsPage::General => self.render_general_settings(cx),
                     SettingsPage::Appearance => self.render_appearance_settings(cx),
                     SettingsPage::Keybindings => self.render_keybindings_settings(cx),
                     SettingsPage::Notifications => self.render_notifications_settings(cx),
+                    SettingsPage::Browser => self.render_browser_settings(cx),
                     SettingsPage::Providers => self.render_providers_settings(cx),
                     SettingsPage::Skills => self.render_skills_settings(cx),
                     SettingsPage::Usage => self.render_usage_settings(cx),
@@ -488,6 +541,28 @@ impl Padu {
                 .into_any_element()
         };
 
+        let titlebar_drag_region =
+            self.render_settings_drag_region("settings-content-titlebar", cx);
+        let bezel_theme = bezel::theme::Theme::of(cx);
+        let breadcrumb = bezel_theme
+            .breadcrumb()
+            .id("settings-breadcrumb")
+            .self_center()
+            .pl(px(16.0))
+            .pr(px(32.0))
+            .flex_none()
+            .child(
+                bezel_theme
+                    .breadcrumb_item(tr!("common.settings"), false)
+                    .id("settings-breadcrumb-root")
+                    .hover(|element| element.text_color(bezel_theme.text))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.open_settings_page(SettingsPage::General, cx);
+                    })),
+            )
+            .child(bezel_theme.breadcrumb_separator())
+            .child(bezel_theme.breadcrumb_item(page_title, true));
+
         div()
             .flex_1()
             .h_full()
@@ -502,54 +577,20 @@ impl Padu {
                     .flex_none()
                     .flex()
                     .items_center()
-                    .child(
-                        div()
-                            .pl(px(16.0))
-                            .pr(px(32.0))
-                            .flex_none()
-                            .flex()
-                            .items_center()
-                            .gap(px(5.0))
-                            .text_size(sp(12.0))
-                            .child(
-                                div()
-                                    .text_color(theme.text_tertiary)
-                                    .child(tr!("common.settings")),
-                            )
-                            .child(div().text_color(theme.text_ghost).child("/"))
-                            .child(div().text_color(theme.text_secondary).child(match page {
-                                SettingsPage::General => tr!("settings.general"),
-                                SettingsPage::Appearance => tr!("settings.appearance"),
-                                SettingsPage::Keybindings => tr!("settings.keybindings"),
-                                SettingsPage::Notifications => tr!("settings.notifications"),
-                                SettingsPage::Providers => tr!("settings.providers"),
-                                SettingsPage::Skills => tr!("settings.skills"),
-                                SettingsPage::Usage => tr!("settings.usage"),
-                                SettingsPage::Daemon => tr!("settings.daemon"),
-                                SettingsPage::ComputerUse => tr!("settings.computer_use"),
-                                SettingsPage::Archived => tr!("settings.archived"),
-                                SettingsPage::About => tr!("settings.about"),
-                            })),
-                    )
-                    .child(
-                        self.render_settings_drag_region("settings-content-titlebar", cx)
-                            .flex_1(),
-                    )
+                    .child(breadcrumb)
+                    .child(titlebar_drag_region.flex_1())
                     .children(right_window_controls),
             )
             .child(
-                div()
+                bezel_theme
+                    .group_box()
                     .id("settings-content-card")
                     .flex_1()
                     .min_h_0()
                     .ml(px(2.0))
                     .mr(px(8.0))
                     .mb(px(8.0))
-                    .rounded(px(10.0))
-                    .border_1()
-                    .border_color(theme.border)
                     .bg(theme.surface)
-                    .overflow_hidden()
                     .child(card_content),
             )
     }
@@ -606,5 +647,41 @@ mod tests {
     #[gpui::test]
     fn settings_key_bindings_register(cx: &mut TestAppContext) {
         cx.update(super::init);
+    }
+
+    #[test]
+    fn settings_pages_are_grouped() {
+        use super::{SETTINGS_PAGES, SettingsGroup, SettingsPage};
+
+        assert_eq!(SettingsGroup::Preferences.label_key(), None);
+        assert_eq!(
+            SettingsGroup::Integration.label_key(),
+            Some("settings.group_integration")
+        );
+        assert_eq!(
+            SettingsGroup::Agents.label_key(),
+            Some("settings.group_agents")
+        );
+        assert_eq!(
+            SettingsGroup::System.label_key(),
+            Some("settings.group_system")
+        );
+
+        for (group, page, ..) in SETTINGS_PAGES {
+            match page {
+                SettingsPage::General
+                | SettingsPage::Appearance
+                | SettingsPage::Keybindings
+                | SettingsPage::Notifications => assert_eq!(group, SettingsGroup::Preferences),
+                SettingsPage::Browser => assert_eq!(group, SettingsGroup::Integration),
+                SettingsPage::Providers
+                | SettingsPage::Skills
+                | SettingsPage::Usage
+                | SettingsPage::ComputerUse => assert_eq!(group, SettingsGroup::Agents),
+                SettingsPage::Daemon | SettingsPage::Archived | SettingsPage::About => {
+                    assert_eq!(group, SettingsGroup::System)
+                }
+            }
+        }
     }
 }

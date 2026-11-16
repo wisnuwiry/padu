@@ -4,6 +4,10 @@
   "schemes": {
     "purple": {
       "name": "Purple",
+      "tint": {
+        "hue": 276.935,
+        "chroma": 0.182
+      },
       "light": {
         "accent": "#7c3aed",
         "accentSoft": "rgba(124, 58, 237, 0.12)",
@@ -17,8 +21,69 @@
         "codeText": "#c4b5fd"
       }
     },
+    "blue": {
+      "name": "Blue",
+      "tint": {
+        "hue": 250.0,
+        "chroma": 0.18
+      },
+      "light": {
+        "accent": "#2563eb",
+        "accentSoft": "rgba(37, 99, 235, 0.12)",
+        "ring": "#2563eb",
+        "codeText": "#1d4ed8"
+      },
+      "dark": {
+        "accent": "#3b82f6",
+        "accentSoft": "rgba(59, 130, 246, 0.15)",
+        "ring": "#3b82f6",
+        "codeText": "#93c5fd"
+      }
+    },
+    "green": {
+      "name": "Green",
+      "tint": {
+        "hue": 155.0,
+        "chroma": 0.16
+      },
+      "light": {
+        "accent": "#059669",
+        "accentSoft": "rgba(5, 150, 105, 0.12)",
+        "ring": "#059669",
+        "codeText": "#047857"
+      },
+      "dark": {
+        "accent": "#10b981",
+        "accentSoft": "rgba(16, 185, 129, 0.15)",
+        "ring": "#10b981",
+        "codeText": "#6ee7b7"
+      }
+    },
+    "amber": {
+      "name": "Amber",
+      "tint": {
+        "hue": 85.0,
+        "chroma": 0.16
+      },
+      "light": {
+        "accent": "#d97706",
+        "accentSoft": "rgba(217, 119, 6, 0.12)",
+        "ring": "#d97706",
+        "codeText": "#b45309"
+      },
+      "dark": {
+        "accent": "#f59e0b",
+        "accentSoft": "rgba(245, 158, 11, 0.15)",
+        "ring": "#f59e0b",
+        "codeText": "#fcd34d"
+      }
+    },
     "coral": {
       "name": "Coral",
+      "tint": {
+        "hue": 35.0,
+        "chroma": 0.17
+      },
       "light": {
         "accent": "#c85f44",
         "accentSoft": "rgba(200, 95, 68, 0.12)",
@@ -30,6 +95,44 @@
         "accentSoft": "rgba(226, 121, 91, 0.15)",
         "ring": "#e2795b",
         "codeText": "#e0a882"
+      }
+    },
+    "rose": {
+      "name": "Rose",
+      "tint": {
+        "hue": 15.0,
+        "chroma": 0.19
+      },
+      "light": {
+        "accent": "#e11d48",
+        "accentSoft": "rgba(225, 29, 72, 0.12)",
+        "ring": "#e11d48",
+        "codeText": "#be123c"
+      },
+      "dark": {
+        "accent": "#f43f5e",
+        "accentSoft": "rgba(244, 63, 94, 0.15)",
+        "ring": "#f43f5e",
+        "codeText": "#fda4af"
+      }
+    },
+    "neutral": {
+      "name": "Neutral",
+      "tint": {
+        "hue": 0.0,
+        "chroma": 0.0
+      },
+      "light": {
+        "accent": "#27272a",
+        "accentSoft": "rgba(39, 39, 42, 0.12)",
+        "ring": "#27272a",
+        "codeText": "#18181b"
+      },
+      "dark": {
+        "accent": "#e4e4e7",
+        "accentSoft": "rgba(228, 228, 231, 0.15)",
+        "ring": "#e4e4e7",
+        "codeText": "#f4f4f5"
       }
     }
   },
@@ -78,7 +181,7 @@
       "raised": "#232323",
       "inset": "#151515",
       "composer": "#212121",
-      "terminal": "#151515",
+      "terminal": "#1a1a1a",
       "sidebar": "#181818",
       "backgroundElement": "#232323",
       "backgroundSelected": "#303030",

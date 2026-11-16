@@ -130,26 +130,27 @@ pub enum Lang {
 pub fn lang_for_tag(tag: &str) -> Option<Lang> {
     let tag = tag.trim().to_ascii_lowercase();
     Some(match tag.as_str() {
-        "rust" | "rs" => Lang::Rust,
+        "rust" | "rs" | "zig" | "prisma" | "hs" | "haskell" | "ml" | "ocaml" => Lang::Rust,
         "js" | "jsx" | "mjs" | "cjs" | "javascript" | "node" | "ts" | "tsx" | "mts" | "cts"
-        | "typescript" => Lang::Script,
-        "py" | "python" | "python3" => Lang::Python,
+        | "typescript" | "dart" | "sol" | "solidity" => Lang::Script,
+        "py" | "python" | "python3" | "r" => Lang::Python,
         "go" | "golang" => Lang::Go,
-        "c" | "h" | "cc" | "cpp" | "c++" | "cxx" | "hpp" | "objc" | "objective-c" | "m" | "mm" => {
-            Lang::C
-        }
+        "c" | "h" | "cc" | "cpp" | "c++" | "cxx" | "hpp" | "objc" | "objective-c" | "m" | "mm"
+        | "php" | "proto" | "protobuf" => Lang::C,
         "java" | "kt" | "kotlin" | "scala" | "cs" | "csharp" | "c#" => Lang::Java,
-        "rb" | "ruby" | "gemfile" | "rake" | "ex" | "exs" | "elixir" => Lang::Ruby,
+        "rb" | "ruby" | "gemfile" | "rake" | "ex" | "exs" | "elixir" | "erl" | "erlang" | "clj"
+        | "clojure" | "lua" => Lang::Ruby,
         "swift" => Lang::Swift,
-        "json" | "jsonc" | "json5" => Lang::Json,
+        "json" | "jsonc" | "json5" | "gql" | "graphql" => Lang::Json,
         "yaml" | "yml" => Lang::Yaml,
-        "toml" | "ini" | "cfg" | "conf" | "config" => Lang::Toml,
+        "toml" | "ini" | "cfg" | "conf" | "config" | "env" | ".env" => Lang::Toml,
         "sh" | "bash" | "zsh" | "shell" | "shellscript" | "console" | "fish" | "dockerfile"
-        | "docker" | "makefile" | "make" => Lang::Shell,
+        | "docker" | "makefile" | "make" | "ps" | "ps1" | "powershell" | "nix" => Lang::Shell,
         "css" | "scss" | "sass" | "less" => Lang::Css,
-        "html" | "htm" | "xml" | "svg" | "vue" | "svelte" => Lang::Html,
+        "html" | "htm" | "xml" | "svg" | "vue" | "svelte" | "astro" => Lang::Html,
         "sql" | "postgres" | "postgresql" | "mysql" | "sqlite" => Lang::Sql,
-        "md" | "markdown" | "mdx" | "mdown" => Lang::Markdown,
+        "md" | "markdown" | "mdx" | "mdown" | "tex" | "latex" | "math" | "katex" => Lang::Markdown,
+        "mermaid" => Lang::Markdown,
         "diff" | "patch" => Lang::Diff,
         _ => return None,
     })
@@ -978,6 +979,109 @@ pub fn tokenize_line(lang: Lang, line: &str, carry: Carry) -> (Vec<Token>, Carry
     }
 
     (tokens, carry)
+}
+
+/// Supported code block languages offered by editor language pickers.
+pub const HIGHLIGHT_LANGUAGES: &[&str] = &[
+    "astro",
+    "bash",
+    "c",
+    "clojure",
+    "cpp",
+    "csharp",
+    "css",
+    "dart",
+    "diff",
+    "dockerfile",
+    "elixir",
+    "erlang",
+    "fish",
+    "go",
+    "graphql",
+    "haskell",
+    "html",
+    "ini",
+    "java",
+    "javascript",
+    "json",
+    "jsonc",
+    "jsx",
+    "kotlin",
+    "latex",
+    "less",
+    "lua",
+    "makefile",
+    "markdown",
+    "math",
+    "mermaid",
+    "nix",
+    "ocaml",
+    "php",
+    "powershell",
+    "prisma",
+    "protobuf",
+    "python",
+    "r",
+    "ruby",
+    "rust",
+    "sass",
+    "scala",
+    "scss",
+    "shell",
+    "solidity",
+    "sql",
+    "svelte",
+    "swift",
+    "toml",
+    "tsx",
+    "typescript",
+    "vue",
+    "xml",
+    "yaml",
+    "zig",
+];
+
+/// Convert `TokenClass` into `bezel::theme::HighlightKind`.
+pub fn map_token_class(class: TokenClass) -> bezel::theme::HighlightKind {
+    match class {
+        TokenClass::Keyword => bezel::theme::HighlightKind::Keyword,
+        TokenClass::Literal => bezel::theme::HighlightKind::Constant,
+        TokenClass::String => bezel::theme::HighlightKind::String,
+        TokenClass::Comment => bezel::theme::HighlightKind::Comment,
+        TokenClass::Number => bezel::theme::HighlightKind::Number,
+        TokenClass::Type => bezel::theme::HighlightKind::TypeName,
+        TokenClass::Function => bezel::theme::HighlightKind::Function,
+        TokenClass::Meta => bezel::theme::HighlightKind::Attribute,
+        TokenClass::Mention => bezel::theme::HighlightKind::VariableSpecial,
+        TokenClass::Added => bezel::theme::HighlightKind::Property,
+        TokenClass::Removed => bezel::theme::HighlightKind::Invalid,
+    }
+}
+
+/// Syntax highlighter callback for `bezel-markdown` fenced code blocks.
+pub fn highlight_code(
+    language: &str,
+    code: &str,
+) -> Option<Vec<(Range<usize>, bezel::theme::HighlightKind)>> {
+    let lang = lang_for_tag(language)?;
+    let mut spans = Vec::new();
+    let mut carry = Carry::None;
+    let mut line_start = 0usize;
+
+    for line in code.split('\n') {
+        let (tokens, next_carry) = tokenize_line(lang, line, carry);
+        carry = next_carry;
+        for token in tokens {
+            let start = line_start + token.range.start;
+            let end = line_start + token.range.end;
+            if start < end {
+                spans.push((start..end, map_token_class(token.class)));
+            }
+        }
+        line_start += line.len() + 1;
+    }
+
+    Some(spans)
 }
 
 /// Tokenize a whole block, one entry per line, threading the carry.
@@ -1815,5 +1919,32 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn highlight_languages_all_map_to_supported_lang() {
+        for lang_name in HIGHLIGHT_LANGUAGES {
+            assert!(
+                lang_for_tag(lang_name).is_some(),
+                "language {lang_name} must be supported by lang_for_tag"
+            );
+        }
+    }
+
+    #[test]
+    fn highlight_code_produces_monotonic_valid_spans() {
+        let code = "fn main() {\n    let val = 42;\n    println!(\"{val}\");\n}\n";
+        let spans = highlight_code("rust", code).expect("rust should be recognized");
+        assert!(!spans.is_empty());
+        let mut prev_end = 0;
+        for (range, _) in &spans {
+            assert!(range.start >= prev_end);
+            assert!(range.end <= code.len());
+            assert!(code.is_char_boundary(range.start));
+            assert!(code.is_char_boundary(range.end));
+            prev_end = range.end;
+        }
+
+        assert!(highlight_code("unknown-xyz", code).is_none());
     }
 }

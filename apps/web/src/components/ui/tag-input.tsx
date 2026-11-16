@@ -2,7 +2,7 @@ import * as React from 'react'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
-export interface TagInputProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange'> {
+export interface TagInputProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange' | 'prefix'> {
   value: string[]
   onChange: (tags: string[]) => void
   placeholder?: string
@@ -11,6 +11,8 @@ export interface TagInputProps extends Omit<React.HTMLAttributes<HTMLDivElement>
   small?: boolean
   focusOutline?: boolean
   accentChips?: boolean
+  prefix?: React.ReactNode
+  transparent?: boolean
   /** Localized accessible name for a tag's remove button. Defaults to English. */
   getRemoveLabel?: (tag: string) => string
 }
@@ -24,6 +26,8 @@ export function TagInput({
   small = false,
   focusOutline = true,
   accentChips = false,
+  prefix,
+  transparent = false,
   getRemoveLabel,
   ...props
 }: TagInputProps) {
@@ -57,6 +61,7 @@ export function TagInput({
         small
           ? 'gap-1 min-h-[24px] py-0.5 px-1.5 rounded text-[10.5px] bg-muted/30'
           : 'gap-1.5 min-h-[36px] p-1.5 rounded-md bg-muted/40',
+        transparent && 'bg-transparent px-0 min-h-0',
         focusOutline && 'focus-within:ring-1 focus-within:ring-ring border border-input',
         !focusOutline && 'border-0 outline-none focus-within:ring-0',
         disabled && 'opacity-50 cursor-not-allowed',
@@ -65,6 +70,11 @@ export function TagInput({
       onClick={() => inputRef.current?.focus()}
       {...props}
     >
+      {prefix && (
+        <span className="mr-1 shrink-0 text-xs font-medium text-muted-foreground select-none">
+          {prefix}
+        </span>
+      )}
       {value.map((tag, idx) => (
         <Badge
           key={`${tag}-${idx}`}

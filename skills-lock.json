@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "bezel": {
+      "source": "crabtalk/bezel",
+      "sourceType": "github",
+      "skillPath": "skills/bezel/SKILL.md",
+      "computedHash": "08baf2c6105a78520d579f175827ed1684391e6b1d6b3f045b270fedcc928251"
+    }
+  }
+}

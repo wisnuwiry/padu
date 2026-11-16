@@ -1,11 +1,62 @@
+use bezel::ui::{context_menu::Place, icons::Icon, menu::Item, surface::Surfaced as _};
 use chrono::{Datelike as _, Local, NaiveDate};
-use gpui::{KeyBinding, actions};
+use gpui::{KeyBinding, Point, actions};
 
 use super::*;
 use crate::app::right_panel::EmptyStateCardAction;
 use padu_client::sidebar as daemon_sidebar;
 
 actions!(padu_sidebar, [CancelSessionRename]);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SidebarSessionMenuAction {
+    TogglePin(bool),
+    Archive,
+    Rename,
+    Remove,
+}
+
+pub(crate) fn sidebar_session_context_menu_items(
+    is_pinned: bool,
+    is_busy: bool,
+) -> (Vec<Item>, Vec<Option<SidebarSessionMenuAction>>) {
+    let mut items = Vec::new();
+    let mut actions = Vec::new();
+
+    items.push(
+        Item::action(if is_pinned {
+            tr!("session.unpin")
+        } else {
+            tr!("session.pin")
+        })
+        .with_icon(Icon::asset("icons/pin.svg")),
+    );
+    actions.push(Some(SidebarSessionMenuAction::TogglePin(!is_pinned)));
+
+    let archive_item =
+        Item::action(tr!("session.archive")).with_icon(Icon::asset("icons/archive.svg"));
+    let archive_item = if is_busy {
+        archive_item.disabled()
+    } else {
+        archive_item
+    };
+    items.push(archive_item);
+    actions.push(Some(SidebarSessionMenuAction::Archive));
+
+    items.push(Item::Separator);
+    actions.push(None);
+
+    items.push(Item::action(tr!("common.rename")).with_icon(Icon::asset("icons/pencil.svg")));
+    actions.push(Some(SidebarSessionMenuAction::Rename));
+
+    items.push(Item::Separator);
+    actions.push(None);
+
+    items.push(Item::action(tr!("common.remove")).with_icon(Icon::asset("icons/trash.svg")));
+    actions.push(Some(SidebarSessionMenuAction::Remove));
+
+    (items, actions)
+}
 
 const SESSION_RENAME_PARENT_CONTEXT: &str = "SessionRename";
 const SESSION_RENAME_FIELD_CONTEXT: &str = "SessionRename > TextInput";
@@ -226,10 +277,17 @@ struct SessionTooltip {
     title: SharedString,
     project: SharedString,
     host: SharedString,
-    provider: SharedString,
     provider_kind: ProviderKind,
+    model: Option<SharedString>,
+    branch: Option<SharedString>,
+    runtime_mode: Option<SharedString>,
+    runtime_mode_icon: &'static str,
     status_text: Option<SharedString>,
     status: SessionStatus,
+    activity_time: Option<SharedString>,
+    turn_count: usize,
+    context_tokens: Option<String>,
+    goal: Option<SharedString>,
 }
 
 impl SessionTooltip {
@@ -241,126 +299,215 @@ impl SessionTooltip {
 impl Render for SessionTooltip {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx);
+        let surface_radius = bezel::theme::Theme::surface_radius();
+        let control_radius = bezel::theme::Theme::control_radius();
+        let is_remote_host =
+            self.host.as_ref() != "Local" && self.host.as_ref() != tr!("host.local").as_str();
+
         div().pt(px(4.0)).pl(px(2.0)).child(
             div()
-                .w(px(280.0))
-                .px(px(10.0))
-                .py(px(8.0))
-                .rounded(px(6.0))
-                .border_1()
-                .border_color(theme.border_strong)
-                .bg(theme.raised)
-                .shadow_md()
+                .min_w(px(240.0))
+                .max_w(px(320.0))
+                .px(px(12.0))
+                .py(px(10.0))
+                .rounded(px(surface_radius))
                 .flex()
                 .flex_col()
-                .gap(px(7.0))
+                .gap(px(8.0))
+                // Prominent title with increased font size
                 .child(
                     div()
-                        .text_size(sp(12.5))
-                        .font_weight(FontWeight::MEDIUM)
-                        .line_height(sp(16.0))
+                        .text_size(sp(14.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .line_height(sp(18.0))
                         .text_color(theme.text)
                         .whitespace_normal()
                         .child(self.title.clone()),
                 )
-                .child(div().w_full().h(px(1.0)).bg(theme.border))
+                // Optional goal / pursuit
+                .when_some(self.goal.clone(), |el, goal| {
+                    el.child(
+                        div()
+                            .flex()
+                            .items_start()
+                            .gap(px(5.0))
+                            .text_size(sp(12.0))
+                            .line_height(sp(15.0))
+                            .text_color(theme.text_secondary)
+                            .child(icon("icons/target.svg", 13.0, theme.accent))
+                            .child(div().flex_1().min_w_0().whitespace_normal().child(goal)),
+                    )
+                })
+                // Primary metadata chips
                 .child(
                     div()
                         .flex()
-                        .flex_col()
+                        .items_center()
                         .gap(px(5.0))
-                        .text_size(sp(11.5))
-                        .line_height(sp(14.0))
-                        .text_color(theme.text_secondary)
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(7.0))
-                                .child(icon(
-                                    provider_icon(self.provider_kind),
-                                    12.0,
-                                    provider_color(&theme, self.provider_kind),
-                                ))
-                                .child(div().text_color(theme.text_tertiary).child(
-                                    SharedString::from(format!("{}:", tr!("sidebar.provider"))),
-                                ))
-                                .child(
-                                    div()
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(theme.text)
-                                        .child(self.provider.clone()),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(7.0))
-                                .child(icon("icons/folder.svg", 12.0, theme.text_tertiary))
-                                .child(div().text_color(theme.text_tertiary).child(
-                                    SharedString::from(format!("{}:", tr!("sidebar.project"))),
-                                ))
-                                .child(
-                                    div()
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(theme.text)
-                                        .child(self.project.clone()),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(7.0))
-                                .child(icon("icons/server.svg", 12.0, theme.text_tertiary))
-                                .child(
-                                    div().text_color(theme.text_tertiary).child(
-                                        SharedString::from(format!("{}:", tr!("sidebar.host"))),
-                                    ),
-                                )
-                                .child(
-                                    div()
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(theme.text)
-                                        .child(self.host.clone()),
-                                ),
-                        )
-                        .when_some(self.status_text.clone(), |el, status_text| {
-                            let status_color = status_color(&theme, self.status);
-                            el.child(
+                        .flex_wrap()
+                        .when_some(self.model.clone(), |row, model| {
+                            row.child(
                                 div()
                                     .flex()
                                     .items_center()
-                                    .gap(px(7.0))
-                                    .when(
-                                        matches!(
-                                            self.status,
-                                            SessionStatus::Working | SessionStatus::Connecting
-                                        ),
-                                        |e| {
-                                            e.child(motion::spin_slow(icon(
-                                                "icons/loader-circle.svg",
-                                                12.0,
-                                                status_color,
-                                            )))
-                                        },
-                                    )
-                                    .when(self.status == SessionStatus::Waiting, |e| {
-                                        e.child(icon("icons/alert.svg", 12.0, status_color))
-                                    })
-                                    .when(self.status == SessionStatus::Failed, |e| {
-                                        e.child(icon("icons/x.svg", 12.0, status_color))
-                                    })
-                                    .child(
-                                        div()
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(status_color)
-                                            .child(status_text),
-                                    ),
+                                    .gap(px(4.0))
+                                    .px(px(6.0))
+                                    .py(px(2.5))
+                                    .rounded(px(control_radius))
+                                    .bg(theme.overlay)
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(icon(
+                                        provider_icon(self.provider_kind),
+                                        11.0,
+                                        provider_color(&theme, self.provider_kind),
+                                    ))
+                                    .child(model),
+                            )
+                        })
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(4.0))
+                                .px(px(6.0))
+                                .py(px(2.5))
+                                .rounded(px(control_radius))
+                                .bg(theme.overlay)
+                                .text_size(sp(11.0))
+                                .text_color(theme.text_secondary)
+                                .child(icon("icons/folder.svg", 11.0, theme.text_tertiary))
+                                .child(self.project.clone()),
+                        )
+                        .when_some(self.branch.clone(), |row, branch| {
+                            row.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(4.0))
+                                    .px(px(6.0))
+                                    .py(px(2.5))
+                                    .rounded(px(control_radius))
+                                    .bg(theme.overlay)
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(icon("icons/git-branch.svg", 11.0, theme.accent))
+                                    .child(branch),
+                            )
+                        })
+                        .when_some(self.runtime_mode.clone(), |row, mode| {
+                            row.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(4.0))
+                                    .px(px(6.0))
+                                    .py(px(2.5))
+                                    .rounded(px(control_radius))
+                                    .bg(theme.overlay)
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(icon(self.runtime_mode_icon, 11.0, theme.text_tertiary))
+                                    .child(mode),
+                            )
+                        })
+                        .when(is_remote_host, |row| {
+                            row.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(4.0))
+                                    .px(px(6.0))
+                                    .py(px(2.5))
+                                    .rounded(px(control_radius))
+                                    .bg(theme.overlay)
+                                    .text_size(sp(11.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(icon("icons/server.svg", 11.0, theme.text_tertiary))
+                                    .child(self.host.clone()),
                             )
                         }),
-                ),
+                )
+                // Secondary metrics & recency footer
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(10.0))
+                        .text_size(sp(11.0))
+                        .text_color(theme.text_tertiary)
+                        .when_some(self.activity_time.clone(), |row, time| {
+                            row.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(3.5))
+                                    .child(icon("icons/clock.svg", 11.0, theme.text_ghost))
+                                    .child(time),
+                            )
+                        })
+                        .when(self.turn_count > 0, |row| {
+                            let count = self.turn_count;
+                            let label =
+                                format!("{count} turn{}", if count == 1 { "" } else { "s" });
+                            row.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(3.5))
+                                    .child(icon("icons/list-checks.svg", 11.0, theme.text_ghost))
+                                    .child(label),
+                            )
+                        })
+                        .when_some(self.context_tokens.clone(), |row, tokens| {
+                            row.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(3.5))
+                                    .child(icon("icons/zap.svg", 11.0, theme.text_ghost))
+                                    .child(tokens),
+                            )
+                        }),
+                )
+                // Live status banner (if active/waiting/failed)
+                .when_some(self.status_text.clone(), |el, status_text| {
+                    let status_color = status_color(&theme, self.status);
+                    el.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(5.0))
+                            .px(px(6.0))
+                            .py(px(3.0))
+                            .rounded(px(control_radius))
+                            .bg(status_color.opacity(0.10))
+                            .text_size(sp(11.0))
+                            .text_color(status_color)
+                            .when(
+                                matches!(
+                                    self.status,
+                                    SessionStatus::Working | SessionStatus::Connecting
+                                ),
+                                |e| {
+                                    e.child(motion::spin_slow(icon(
+                                        "icons/loader-circle.svg",
+                                        11.0,
+                                        status_color,
+                                    )))
+                                },
+                            )
+                            .when(self.status == SessionStatus::Waiting, |e| {
+                                e.child(icon("icons/alert.svg", 11.0, status_color))
+                            })
+                            .when(self.status == SessionStatus::Failed, |e| {
+                                e.child(icon("icons/x.svg", 11.0, status_color))
+                            })
+                            .child(div().font_weight(FontWeight::MEDIUM).child(status_text)),
+                    )
+                })
+                .surface(&bezel_theme, bezel_theme.popover_surface),
         )
     }
 }
@@ -484,6 +631,7 @@ pub(super) enum SidebarRow {
     /// Opens the window-wide command palette and scrolls with history.
     Search,
     /// Opens the task board workspace.
+    #[allow(dead_code)]
     Board,
     /// Opens the notes workspace.
     Notes,
@@ -919,6 +1067,7 @@ impl Padu {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx);
         div()
             .id(id)
             .tab_index(0)
@@ -926,14 +1075,14 @@ impl Padu {
             .h(px(SIDEBAR_ACTION_ROW_HEIGHT))
             .flex_none()
             .px(px(6.0))
-            .rounded(px(7.0))
+            .rounded(px(bezel::theme::Theme::control_radius()))
             .flex()
             .items_center()
             .gap(px(10.0))
             .cursor_pointer()
             .focus_visible(|style| style.border_1().border_color(theme.accent))
-            .hover(|element| element.bg(theme.sidebar_item_background))
-            .active(|element| element.bg(theme.overlay_strong))
+            .hover(|element| element.bg(bezel_theme.element_hover))
+            .active(|element| element.bg(bezel_theme.element_active))
             .child(
                 div()
                     .size(px(20.0))
@@ -1554,7 +1703,7 @@ impl Padu {
     pub(super) fn render_sidebar(
         &self,
         width: f32,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = Theme::current(cx);
@@ -1643,6 +1792,12 @@ impl Padu {
                     }),
             )
             .child(self.render_sidebar_footer(cx))
+            .children(self.sidebar_session_menu.render(
+                "sidebar-session-context-menu",
+                |this| &mut this.sidebar_session_menu,
+                window,
+                cx,
+            ))
     }
 
     /// Keep a newly selected task visible without disturbing the sidebar when
@@ -1750,7 +1905,6 @@ impl Padu {
     fn sidebar_rows(&self, today: NaiveDate, now: u64) -> Vec<SidebarRow> {
         let mut rows = vec![
             SidebarRow::Search,
-            SidebarRow::Board,
             SidebarRow::Notes,
             SidebarRow::PinnedSeparator,
             SidebarRow::GroupSpacer,
@@ -1875,6 +2029,7 @@ impl Padu {
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx);
         let collapsed = self.sidebar_collapsed_groups.contains(&group);
         let group_key = group.element_key();
         let group_name = SharedString::from(format!("sidebar-group-header-{group_key}"));
@@ -1923,11 +2078,11 @@ impl Padu {
             .group(group_name)
             .relative()
             .w_full()
-            .rounded(px(6.0))
+            .rounded(px(bezel::theme::Theme::control_radius()))
             .cursor_pointer()
             .focus_visible(|style| style.border_1().border_color(theme.accent))
-            .hover(|style| style.bg(theme.sidebar_item_background))
-            .active(|style| style.bg(theme.overlay_strong))
+            .hover(|style| style.bg(bezel_theme.element_hover))
+            .active(|style| style.bg(bezel_theme.element_active))
             .child(
                 div()
                     .flex_1()
@@ -2308,6 +2463,53 @@ impl Padu {
         cx.notify();
     }
 
+    pub(super) fn open_sidebar_session_context_menu(
+        &mut self,
+        session_id: Uuid,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return;
+        };
+        let is_pinned = session.pinned_at.is_some();
+        let is_busy = session.is_busy();
+        let (items, actions) = sidebar_session_context_menu_items(is_pinned, is_busy);
+
+        self.sidebar_session_menu.open(
+            session_id,
+            Place::At(position),
+            items,
+            move |this, path, window, cx| {
+                if let Some(&index) = path.first() {
+                    match actions.get(index).copied().flatten() {
+                        Some(SidebarSessionMenuAction::TogglePin(pin)) => {
+                            this.set_session_pinned(session_id, pin, cx);
+                        }
+                        Some(SidebarSessionMenuAction::Archive) => {
+                            this.set_session_archived(session_id, true, cx);
+                        }
+                        Some(SidebarSessionMenuAction::Rename) => {
+                            this.begin_session_rename(session_id, window, cx);
+                        }
+                        Some(SidebarSessionMenuAction::Remove) => {
+                            this.confirm_delete_session(session_id, window, cx);
+                        }
+                        None => {}
+                    }
+                }
+            },
+            window,
+            cx,
+        );
+    }
+
     fn render_sidebar_session_item(&self, session_id: Uuid, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         let Some(session) = self
@@ -2345,6 +2547,8 @@ impl Padu {
         let rename_input =
             (self.session_rename == Some(session_id)).then(|| self.session_rename_input.clone());
         let renaming = rename_input.is_some();
+        let control_radius = bezel::theme::Theme::control_radius();
+        let row_group_id = SharedString::from(format!("session-row-{session_id}"));
         let title = if let Some(rename_input) = rename_input {
             div()
                 .id(SharedString::from(format!(
@@ -2358,7 +2562,7 @@ impl Padu {
                 .flex_1()
                 .min_w_0()
                 .px(px(4.0))
-                .rounded(px(4.0))
+                .rounded(px(control_radius))
                 .bg(theme.inset)
                 .flex()
                 .items_center()
@@ -2378,6 +2582,9 @@ impl Padu {
                     theme.text_secondary
                 } else {
                     theme.text
+                })
+                .when(grouped_by_project && !selected, |el| {
+                    el.group_hover(row_group_id.clone(), |style| style.text_color(theme.text))
                 })
                 .child(SharedString::from(localized_session_title(session)))
                 .into_any_element()
@@ -2413,14 +2620,69 @@ impl Padu {
             .map(Project::display_name)
             .unwrap_or_else(|| tr!("project.no_project_name"));
 
+        let branch = match &session.workspace {
+            SessionWorkspace::Local => None,
+            SessionWorkspace::NewWorktree { base_branch } => base_branch.as_deref(),
+            SessionWorkspace::Worktree { branch, .. } => Some(branch.as_str()),
+        }
+        .filter(|branch| !branch.is_empty())
+        .map(SharedString::from);
+
+        let model = session
+            .model
+            .as_deref()
+            .filter(|model| !model.is_empty())
+            .or_else(|| self.model_for_session(session))
+            .map(|m| {
+                self.provider_probe(session.provider)
+                    .and_then(|probe| probe.models.iter().find(|candidate| candidate.id == m))
+                    .map(|candidate| SharedString::from(candidate.name.clone()))
+                    .unwrap_or_else(|| SharedString::from(m.to_owned()))
+            })
+            .or_else(|| {
+                padu_protocol::model_catalog::fallback_models(session.provider)
+                    .into_iter()
+                    .find(|m| m.is_default)
+                    .map(|m| SharedString::from(m.name))
+            });
+
+        let now = unix_time();
+        let activity_time = session
+            .last_reply_at
+            .map(|ts| SharedString::from(format_time_ago(now.saturating_sub(ts))))
+            .or_else(|| {
+                Some(SharedString::from(format_time_ago(
+                    now.saturating_sub(session.created_at),
+                )))
+            });
+
+        let context_tokens = session
+            .context_usage
+            .as_ref()
+            .map(|u| crate::usage::format_tokens(u.tokens));
+
+        let goal = session
+            .thread_goal
+            .as_ref()
+            .map(|g| g.objective.trim())
+            .filter(|obj| !obj.is_empty())
+            .map(SharedString::from);
+
         let session_tooltip = SessionTooltip {
             title: SharedString::from(localized_session_title(session)),
             project: SharedString::from(project_name),
             host: SharedString::from(self.state.active_host_display_name(&tr!("host.local"))),
-            provider: SharedString::from(session.provider.display_name()),
             provider_kind: session.provider,
+            model,
+            branch,
+            runtime_mode: Some(SharedString::from(session.runtime_mode.label())),
+            runtime_mode_icon: session.runtime_mode.icon(),
             status_text: hover_status_text,
             status: session.status,
+            activity_time,
+            turn_count: session.turns.len(),
+            context_tokens,
+            goal,
         };
 
         let dot = div()
@@ -2430,11 +2692,22 @@ impl Padu {
             .flex()
             .items_center()
             .justify_center()
-            .child(div().w(px(6.0)).h(px(6.0)).rounded_full().bg(if selected {
-                theme.accent
-            } else {
-                theme.text_tertiary
-            }));
+            .child(
+                div()
+                    .w(px(6.0))
+                    .h(px(6.0))
+                    .rounded_full()
+                    .bg(if selected {
+                        theme.accent
+                    } else {
+                        theme.text_tertiary
+                    })
+                    .when(!selected, |dot| {
+                        dot.group_hover(row_group_id.clone(), |style| {
+                            style.bg(theme.text_secondary)
+                        })
+                    }),
+            );
         let row_content = if grouped_by_project {
             div()
                 .flex_1()
@@ -2490,6 +2763,11 @@ impl Padu {
                                 theme.text_tertiary
                             } else {
                                 theme.text_ghost
+                            })
+                            .when(!selected && !session.is_busy(), |el| {
+                                el.group_hover(row_group_id.clone(), |style| {
+                                    style.text_color(theme.text_tertiary)
+                                })
                             })
                             .child(label),
                     )
@@ -2561,14 +2839,31 @@ impl Padu {
                                         .flex()
                                         .items_center()
                                         .justify_center()
-                                        .child(icon("icons/folder.svg", 12.5, theme.text_tertiary)),
+                                        .child(icon(
+                                            "icons/folder.svg",
+                                            12.5,
+                                            if selected {
+                                                theme.text_secondary
+                                            } else {
+                                                theme.text_tertiary
+                                            },
+                                        )),
                                 )
                                 .child(
                                     div()
                                         .flex_1()
                                         .min_w_0()
                                         .truncate()
-                                        .text_color(theme.text_tertiary)
+                                        .text_color(if selected {
+                                            theme.text_secondary
+                                        } else {
+                                            theme.text_tertiary
+                                        })
+                                        .when(!selected, |el| {
+                                            el.group_hover(row_group_id.clone(), |style| {
+                                                style.text_color(theme.text_secondary)
+                                            })
+                                        })
                                         .child(label),
                                 )
                         })
@@ -2582,18 +2877,29 @@ impl Padu {
                                     } else {
                                         theme.text_ghost
                                     })
+                                    .when(!selected && !session.is_busy(), |el| {
+                                        el.group_hover(row_group_id.clone(), |style| {
+                                            style.text_color(theme.text_tertiary)
+                                        })
+                                    })
                                     .child(label),
                             )
                         }),
                 )
         };
 
-        let padu = cx.entity().downgrade();
-        let menu = self.menu_handle(format!("session-{session_id}"), cx);
-        let row_focus = menu.trigger_focus_handle().clone();
-        let keyboard_menu = menu.clone();
+        let bezel_theme = bezel::theme::Theme::of(cx);
+        let row_focus = self
+            .sidebar_session_focuses
+            .borrow_mut()
+            .entry(session_id)
+            .or_insert_with(|| cx.focus_handle())
+            .clone();
+        let is_menu_open = self.sidebar_session_menu.showing(&session_id);
+        let is_active = selected || is_menu_open;
         let row = div()
             .id(SharedString::from(format!("session-{}", session.id)))
+            .group(row_group_id)
             .w_full()
             .min_w_0()
             .h(px(row_height))
@@ -2602,20 +2908,41 @@ impl Padu {
             .pl(px(left_padding))
             .pr(px(8.0))
             .py(px(row_py))
-            .rounded(px(7.0))
+            .rounded(px(control_radius))
             .cursor_pointer()
-            .when(selected, |element| {
-                element.bg(theme.sidebar_item_background)
+            .when(is_active, |element| {
+                element
+                    .bg(bezel_theme.card_selected_bg())
+                    .shadow(bezel::theme::card_selected_shadows())
+                    .hover(|el| el.bg(bezel_theme.element_active))
+                    .active(|el| el.bg(bezel_theme.element_active))
             })
-            .hover(|element| element.bg(theme.sidebar_item_background))
-            .active(|element| element.bg(theme.sidebar_item_background))
+            .when(!is_active, |element| {
+                element
+                    .hover(|el| el.bg(bezel_theme.element_hover))
+                    .active(|el| el.bg(bezel_theme.element_active))
+            })
             .child(row_content)
             .when(!renaming, |element| {
+                let right_click_focus = row_focus.clone();
                 element
                     .tooltip(move |window, cx| session_tooltip.clone().build(window, cx))
                     .track_focus(&row_focus)
                     .tab_index(0)
                     .focus_visible(|style| style.border_1().border_color(theme.accent))
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                            window.focus(&right_click_focus, cx);
+                            this.open_sidebar_session_context_menu(
+                                session_id,
+                                event.position,
+                                window,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    )
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                         let key = event.keystroke.key.as_str();
                         if key == "down" {
@@ -2643,7 +2970,12 @@ impl Padu {
                             this.confirm_delete_session(session_id, window, cx);
                             cx.stop_propagation();
                         } else if key == "f10" && event.keystroke.modifiers.shift {
-                            keyboard_menu.open_context_menu(window, cx);
+                            this.open_sidebar_session_context_menu(
+                                session_id,
+                                window.mouse_position(),
+                                window,
+                                cx,
+                            );
                             cx.stop_propagation();
                         }
                     }))
@@ -2662,58 +2994,7 @@ impl Padu {
                 }))
                 .into_any_element()
         } else {
-            let is_pinned = session.pinned_at.is_some();
-            let is_busy = session.is_busy();
-            context_menu(
-                div().w_full().child(row),
-                SharedString::from(format!("session-menu-{session_id}")),
-                &menu,
-                move |_| {
-                    let rename_padu = padu.clone();
-                    let remove_padu = padu.clone();
-                    let pin_padu = padu.clone();
-                    let archive_padu = padu.clone();
-                    vec![
-                        MenuItem::new(
-                            if is_pinned {
-                                tr!("session.unpin")
-                            } else {
-                                tr!("session.pin")
-                            },
-                            move |_, cx| {
-                                let _ = pin_padu.update(cx, |padu, cx| {
-                                    padu.set_session_pinned(session_id, !is_pinned, cx);
-                                });
-                            },
-                        )
-                        .icon("icons/pin.svg"),
-                        MenuItem::new(tr!("session.archive"), move |_, cx| {
-                            if !is_busy {
-                                let _ = archive_padu.update(cx, |padu, cx| {
-                                    padu.set_session_archived(session_id, true, cx);
-                                });
-                            }
-                        })
-                        .icon("icons/archive.svg")
-                        .disabled(is_busy),
-                        MenuItem::Separator,
-                        MenuItem::new(tr!("common.rename"), move |window, cx| {
-                            let _ = rename_padu.update(cx, |padu, cx| {
-                                padu.begin_session_rename(session_id, window, cx);
-                            });
-                        })
-                        .icon("icons/pencil.svg"),
-                        MenuItem::Separator,
-                        MenuItem::new(tr!("common.remove"), move |window, cx| {
-                            let _ = remove_padu.update(cx, |padu, cx| {
-                                padu.confirm_delete_session(session_id, window, cx)
-                            });
-                        })
-                        .icon("icons/trash.svg")
-                        .destructive(true),
-                    ]
-                },
-            )
+            row.into_any_element()
         };
 
         div()
@@ -3324,7 +3605,6 @@ mod tests {
         let group = SidebarGroup::Updated(SessionDateGroup::Today);
         let mut rows = vec![
             SidebarRow::Search,
-            SidebarRow::Board,
             SidebarRow::Notes,
             SidebarRow::PinnedSeparator,
             SidebarRow::GroupSpacer,
@@ -3337,8 +3617,8 @@ mod tests {
         let offset =
             sidebar_bottom_aligned_offset(&rows, index, px(400.0), SidebarGrouping::Updated);
 
-        assert_eq!(index, 36);
-        assert_eq!(offset.item_ix, 29);
+        assert_eq!(index, 35);
+        assert_eq!(offset.item_ix, 28);
         assert_eq!(offset.offset_in_item, px(16.0));
         let visible_height = rows[offset.item_ix..=index]
             .iter()
@@ -3348,5 +3628,36 @@ mod tests {
             - offset.offset_in_item;
         assert_eq!(visible_height, px(400.0));
         assert_eq!(sidebar_session_row_index(&rows, Uuid::from_u128(41)), None);
+    }
+
+    #[test]
+    fn sidebar_session_context_menu_items_structure() {
+        let (unpinned_items, unpinned_actions) = sidebar_session_context_menu_items(false, false);
+        assert_eq!(unpinned_items.len(), 6);
+        assert_eq!(unpinned_actions.len(), 6);
+        assert_eq!(
+            unpinned_actions[0],
+            Some(SidebarSessionMenuAction::TogglePin(true))
+        );
+        assert_eq!(unpinned_actions[1], Some(SidebarSessionMenuAction::Archive));
+        assert!(unpinned_items[1].selectable());
+        assert_eq!(unpinned_items[2], Item::Separator);
+        assert_eq!(unpinned_actions[2], None);
+        assert_eq!(unpinned_actions[3], Some(SidebarSessionMenuAction::Rename));
+        assert_eq!(unpinned_items[4], Item::Separator);
+        assert_eq!(unpinned_actions[4], None);
+        assert_eq!(unpinned_actions[5], Some(SidebarSessionMenuAction::Remove));
+
+        let (pinned_busy_items, pinned_busy_actions) =
+            sidebar_session_context_menu_items(true, true);
+        assert_eq!(
+            pinned_busy_actions[0],
+            Some(SidebarSessionMenuAction::TogglePin(false))
+        );
+        assert_eq!(
+            pinned_busy_actions[1],
+            Some(SidebarSessionMenuAction::Archive)
+        );
+        assert!(!pinned_busy_items[1].selectable());
     }
 }

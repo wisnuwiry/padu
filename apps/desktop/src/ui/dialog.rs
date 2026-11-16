@@ -1,10 +1,11 @@
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Context, ElementId, FocusHandle, FontWeight, Hsla, KeyDownEvent, MouseButton,
+    AnyElement, App, Context, ElementId, FocusHandle, FontWeight, Hsla, KeyDownEvent, MouseButton,
     Pixels, SharedString, Stateful, Window, div, px,
 };
 
 use crate::theme::{Theme, sp};
+use crate::ui::button::{Button, ButtonRole, ButtonStyle};
 use crate::ui::icon;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,6 +31,8 @@ pub fn dialog_backdrop<V: 'static>(
     on_dismiss: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
     card: impl IntoElement,
 ) -> AnyElement {
+    let id = id.into();
+    let motion_id = ElementId::Name(format!("{}-in", id).into());
     let layer = div()
         .id(id)
         .absolute()
@@ -46,18 +49,21 @@ pub fn dialog_backdrop<V: 'static>(
                 on_dismiss(view, window, cx);
             }),
         )
-        .child(card);
+        .child(bezel::motion::dialog_in(
+            motion_id,
+            div().occlude().child(card),
+        ));
 
     gpui::deferred(layer).with_priority(5).into_any_element()
 }
 
-/// Standard modal card container.
+/// Standard modal card container with keyboard traversal support.
 pub fn dialog_card(id: impl Into<ElementId>, theme: &Theme, width: Pixels) -> Stateful<gpui::Div> {
-    div()
+    bezel::ui::focus::traversal(div())
         .id(id)
         .tab_group()
         .w(width)
-        .rounded(px(14.0))
+        .rounded(px(bezel::theme::Theme::panel_radius()))
         .bg(theme.surface)
         .border_1()
         .border_color(theme.border_strong)
@@ -69,108 +75,34 @@ pub fn dialog_card(id: impl Into<ElementId>, theme: &Theme, width: Pixels) -> St
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
 }
 
-/// Standardized 32px height cancel button with focus visibility and Esc badge.
-pub fn dialog_cancel_button<V: 'static>(
+/// Standardized cancel button backed by bezel's Button component with Esc shortcut badge.
+pub fn dialog_cancel_button(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
-    focus: &FocusHandle,
-    theme: &Theme,
-    cx: &mut Context<V>,
-    on_click: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
-) -> Stateful<gpui::Div> {
-    let on_click = std::rc::Rc::new(on_click);
-    let click_action = on_click.clone();
-    let key_action = on_click;
-
-    div()
-        .id(id)
-        .track_focus(focus)
-        .tab_index(0)
-        .h(px(32.0))
-        .px(px(14.0))
-        .rounded(px(7.0))
-        .border_1()
-        .border_color(theme.border_strong)
-        .flex()
-        .items_center()
-        .justify_center()
-        .gap(px(6.0))
-        .cursor_pointer()
-        .text_size(sp(13.0))
-        .font_weight(FontWeight::MEDIUM)
-        .text_color(theme.text_secondary)
-        .hover(|s| s.bg(theme.overlay).text_color(theme.text))
-        .active(|s| s.bg(theme.overlay_strong))
-        .focus_visible(|s| s.border_1().border_color(theme.accent))
-        .child(label.into())
-        .child(crate::ui::kbd_badge("Esc", theme))
-        .on_click(cx.listener(move |view, _, window, cx| {
-            click_action(view, window, cx);
-        }))
-        .on_key_down(cx.listener(move |view, event: &KeyDownEvent, window, cx| {
-            if !event.keystroke.modifiers.modified()
-                && matches!(event.keystroke.key.as_str(), "enter" | "space" | "escape")
-            {
-                key_action(view, window, cx);
-                cx.stop_propagation();
-            }
-        }))
+    on_click: impl Fn(&(), &mut Window, &mut App) + 'static,
+) -> Button {
+    Button::new(id, label)
+        .button_style(ButtonStyle::Ghost)
+        .role(ButtonRole::Cancel)
+        .kbd("Esc")
+        .on_press(on_click)
 }
 
-/// Standardized 32px height danger confirmation button.
-pub fn dialog_confirm_button<V: 'static>(
+/// Standardized confirmation button backed by bezel's Button component with Enter shortcut badge.
+pub fn dialog_confirm_button(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
-    focus: &FocusHandle,
     variant: ConfirmVariant,
-    theme: &Theme,
-    cx: &mut Context<V>,
-    on_confirm: impl Fn(&mut V, &mut Window, &mut Context<V>) + 'static,
-) -> Stateful<gpui::Div> {
-    let on_confirm = std::rc::Rc::new(on_confirm);
-    let click_action = on_confirm.clone();
-    let key_action = on_confirm;
-
-    let (bg, text_color, badge_border) = match variant {
-        ConfirmVariant::Danger => (theme.danger, gpui::white(), gpui::hsla(0.0, 0.0, 1.0, 0.25)),
+    on_confirm: impl Fn(&(), &mut Window, &mut App) + 'static,
+) -> Button {
+    let (style, role) = match variant {
+        ConfirmVariant::Danger => (ButtonStyle::Destructive, ButtonRole::Destructive),
     };
-
-    div()
-        .id(id)
-        .track_focus(focus)
-        .tab_index(0)
-        .h(px(32.0))
-        .px(px(14.0))
-        .rounded(px(7.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .gap(px(6.0))
-        .cursor_pointer()
-        .text_size(sp(13.0))
-        .font_weight(FontWeight::MEDIUM)
-        .bg(bg)
-        .text_color(text_color)
-        .hover(|s| s.opacity(0.9))
-        .focus_visible(|s| s.border_1().border_color(theme.accent))
-        .child(label.into())
-        .child(crate::ui::kbd_badge_icon(
-            "icons/corner-down-left.svg",
-            bg,
-            text_color,
-            badge_border,
-        ))
-        .on_click(cx.listener(move |view, _, window, cx| {
-            click_action(view, window, cx);
-        }))
-        .on_key_down(cx.listener(move |view, event: &KeyDownEvent, window, cx| {
-            if !event.keystroke.modifiers.modified()
-                && matches!(event.keystroke.key.as_str(), "enter" | "space")
-            {
-                key_action(view, window, cx);
-                cx.stop_propagation();
-            }
-        }))
+    Button::new(id, label)
+        .button_style(style)
+        .role(role)
+        .kbd_icon("icons/corner-down-left.svg")
+        .on_press(on_confirm)
 }
 
 /// Renders the standard confirmation card containing header, message, and Cancel/Confirm actions.
@@ -183,9 +115,9 @@ pub fn render_confirm_dialog_card<V: 'static>(
     cancel_label: SharedString,
     variant: ConfirmVariant,
     icon_name: Option<&'static str>,
-    cancel_focus: &FocusHandle,
-    confirm_focus: &FocusHandle,
     theme: &Theme,
+    confirm_focus: Option<&FocusHandle>,
+    cancel_focus: Option<&FocusHandle>,
     cx: &mut Context<V>,
     on_confirm: impl Fn(&mut V, &mut Window, &mut Context<V>) + Copy + 'static,
     on_cancel: impl Fn(&mut V, &mut Window, &mut Context<V>) + Copy + 'static,
@@ -202,24 +134,24 @@ pub fn render_confirm_dialog_card<V: 'static>(
         theme.overlay
     };
 
-    let cancel_button = dialog_cancel_button(
+    let mut cancel_button = dialog_cancel_button(
         "confirm-dialog-cancel",
         cancel_label,
-        cancel_focus,
-        theme,
-        cx,
-        move |view, window, cx| on_cancel(view, window, cx),
+        cx.listener(move |view, _, window, cx| on_cancel(view, window, cx)),
     );
+    if let Some(focus) = cancel_focus {
+        cancel_button = cancel_button.track_focus(focus);
+    }
 
-    let confirm_button = dialog_confirm_button(
+    let mut confirm_button = dialog_confirm_button(
         "confirm-dialog-confirm",
         confirm_label,
-        confirm_focus,
         variant,
-        theme,
-        cx,
-        move |view, window, cx| on_confirm(view, window, cx),
+        cx.listener(move |view, _, window, cx| on_confirm(view, window, cx)),
     );
+    if let Some(focus) = confirm_focus {
+        confirm_button = confirm_button.track_focus(focus);
+    }
 
     let card = dialog_card(id, theme, px(420.0))
         .child(

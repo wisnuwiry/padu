@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use bezel::theme::Theme as BezelTheme;
+use bezel::ui::widgets::Content;
 use gpui::{
     AnyElement, App, Div, ElementId, FontWeight, InteractiveElement, Interactivity, IntoElement,
     KeyDownEvent, ParentElement, RenderOnce, SharedString, Stateful, StyleRefinement, Styled,
@@ -8,8 +10,6 @@ use gpui::{
 
 use crate::input::TextInput;
 use crate::theme::{Theme, sp};
-
-use super::icon;
 
 /// A common tag/label chip input shell: displays tokens as compact chips
 /// inside the input container, followed by an inline [`TextInput`] to add more.
@@ -23,6 +23,8 @@ pub struct TagInput {
     focus_outline: bool,
     small: bool,
     accent_chips: bool,
+    prefix: Option<SharedString>,
+    transparent: bool,
     on_remove: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + 'static>>,
 }
 
@@ -36,6 +38,8 @@ impl TagInput {
             focus_outline: true,
             small: false,
             accent_chips: false,
+            prefix: None,
+            transparent: false,
             on_remove: None,
         }
     }
@@ -59,6 +63,7 @@ impl TagInput {
     }
 
     /// Whether chips should be styled with primary/accent outline and text.
+    #[allow(dead_code)]
     pub fn accent_chips(mut self, accent_chips: bool) -> Self {
         self.accent_chips = accent_chips;
         self
@@ -67,6 +72,18 @@ impl TagInput {
     /// The list of tags/labels to render as chips inside the input container.
     pub fn tags(mut self, tags: impl IntoIterator<Item = impl Into<SharedString>>) -> Self {
         self.tags = tags.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Optional prefix label displayed before chips and input (e.g. "Tags").
+    pub fn prefix(mut self, prefix: impl Into<SharedString>) -> Self {
+        self.prefix = Some(prefix.into());
+        self
+    }
+
+    /// Whether container background should be transparent rather than `theme.inset`.
+    pub fn transparent(mut self, transparent: bool) -> Self {
+        self.transparent = transparent;
         self
     }
 
@@ -97,6 +114,7 @@ impl ParentElement for TagInput {
 
 impl RenderOnce for TagInput {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let bezel_theme = BezelTheme::of(cx);
         let theme = Theme::current(cx);
         let focused = self.input.read(cx).is_visually_focused(window);
         let input_clone = self.input.clone();
@@ -106,20 +124,27 @@ impl RenderOnce for TagInput {
         let show_focus_border = focused && self.focus_outline;
         let is_small = self.small;
         let accent_chips = self.accent_chips;
+        let is_transparent = self.transparent;
 
         let mut container = self
             .base
-            .when(is_small, |s| {
+            .when(is_small && !is_transparent, |s| {
                 s.min_h(px(24.0))
                     .py(px(1.5))
                     .px(px(4.0))
                     .rounded(px(5.0))
                     .gap(px(4.0))
             })
-            .when(!is_small, |s| {
+            .when(is_small && is_transparent, |s| {
+                s.min_h(px(24.0)).py(px(1.5)).px(px(0.0)).gap(px(4.0))
+            })
+            .when(!is_small && !is_transparent, |s| {
                 s.min_h(px(34.0)).p(px(6.0)).rounded(px(6.0)).gap(px(6.0))
             })
-            .bg(theme.inset)
+            .when(!is_small && is_transparent, |s| {
+                s.min_h(px(34.0)).py(px(4.0)).px(px(0.0)).gap(px(6.0))
+            })
+            .when(!is_transparent, |s| s.bg(theme.inset))
             .when(bordered, |s| {
                 s.border_1().border_color(if show_focus_border {
                     theme.accent
@@ -140,83 +165,66 @@ impl RenderOnce for TagInput {
                 window.focus(&focus, cx);
             });
 
-        for (i, tag) in self.tags.iter().enumerate() {
-            let remove_cb = on_remove.clone();
+        if let Some(prefix) = &self.prefix {
             container = container.child(
                 div()
-                    .id(SharedString::from(format!("tag-chip-{}", i)))
-                    .when(is_small, |s| {
-                        s.h(px(18.0))
-                            .px(px(5.0))
-                            .rounded(px(3.5))
-                            .gap(px(3.0))
-                            .text_size(sp(10.0))
-                    })
-                    .when(!is_small, |s| {
-                        s.h(px(22.0))
-                            .px(px(7.0))
-                            .rounded(px(4.0))
-                            .gap(px(4.0))
-                            .text_size(sp(11.0))
-                    })
-                    .when(accent_chips, |s| {
-                        s.bg(theme.accent.opacity(0.12))
-                            .border_1()
-                            .border_color(theme.accent.opacity(0.40))
-                            .text_color(theme.accent)
-                    })
-                    .when(!accent_chips, |s| {
-                        s.bg(theme.overlay)
-                            .border_1()
-                            .border_color(theme.border)
-                            .text_color(theme.text)
-                    })
-                    .flex()
-                    .items_center()
+                    .flex_none()
+                    .text_size(if is_small { sp(11.0) } else { sp(12.0) })
                     .font_weight(FontWeight::MEDIUM)
-                    .child(tag.clone())
-                    .child(
-                        div()
-                            .id(SharedString::from(format!("tag-chip-remove-{}", i)))
-                            .cursor_pointer()
-                            .text_color(if accent_chips {
-                                theme.accent.opacity(0.7)
-                            } else {
-                                theme.text_tertiary
-                            })
-                            .hover(|s| s.text_color(theme.danger))
-                            .tab_index(0)
-                            .focus_visible(|style| style.border_color(theme.accent))
-                            .child(icon(
-                                "icons/x.svg",
-                                if is_small { 9.0 } else { 10.0 },
-                                if accent_chips {
-                                    theme.accent.opacity(0.7)
-                                } else {
-                                    theme.text_tertiary
-                                },
-                            ))
-                            .on_click({
-                                let remove_cb = remove_cb.clone();
-                                move |_, window, cx| {
-                                    if let Some(cb) = &remove_cb {
-                                        cb(i, window, cx);
-                                    }
-                                }
-                            })
-                            .on_key_down({
-                                let remove_cb = remove_cb.clone();
-                                move |event: &KeyDownEvent, window, cx| {
-                                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                        if let Some(cb) = &remove_cb {
-                                            cb(i, window, cx);
-                                        }
-                                        cx.stop_propagation();
-                                    }
-                                }
-                            }),
-                    ),
+                    .text_color(bezel_theme.text_muted)
+                    .mr(px(2.0))
+                    .child(prefix.clone()),
             );
+        }
+
+        for (i, tag) in self.tags.iter().enumerate() {
+            let mut chip = bezel_theme
+                .tag(tag.clone())
+                .id(SharedString::from(format!("tag-chip-{}", i)));
+
+            if is_small {
+                chip = chip
+                    .h(px(18.0))
+                    .pl(px(5.0))
+                    .pr(px(4.0))
+                    .py(px(0.0))
+                    .gap(px(3.0))
+                    .text_size(sp(10.0));
+            }
+
+            if accent_chips {
+                chip = chip
+                    .bg(theme.accent.opacity(0.12))
+                    .border_color(theme.accent.opacity(0.40))
+                    .text_color(theme.accent)
+                    .hover(|s| s.bg(theme.accent.opacity(0.20)));
+            } else {
+                chip = chip.hover(|s| s.bg(bezel_theme.element_hover));
+            }
+
+            if let Some(on_remove) = &on_remove {
+                let remove_cb = on_remove.clone();
+                let remove_cb_key = on_remove.clone();
+                chip = chip
+                    .cursor_pointer()
+                    .tab_index(0)
+                    .focus_visible(move |style| style.border_color(theme.accent))
+                    .on_click(move |_, window, cx| {
+                        cx.stop_propagation();
+                        remove_cb(i, window, cx);
+                    })
+                    .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                        if matches!(
+                            event.keystroke.key.as_str(),
+                            "enter" | "space" | "backspace" | "delete"
+                        ) {
+                            cx.stop_propagation();
+                            remove_cb_key(i, window, cx);
+                        }
+                    });
+            }
+
+            container = container.child(chip);
         }
 
         // Inline text input to type new tags

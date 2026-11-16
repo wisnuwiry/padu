@@ -227,9 +227,6 @@ export function ProvidersSettings() {
             <p className="mt-[5px] text-[12px] leading-[18px] text-[var(--text-secondary)]">
               {t('providers.web_description')}
             </p>
-            <p className="mt-[5px] text-[12px] leading-[18px] text-[var(--text-secondary)]">
-              {t('providers.priority_description')}
-            </p>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           <button

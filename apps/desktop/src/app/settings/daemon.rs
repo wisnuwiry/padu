@@ -7,6 +7,9 @@ use padu_client::transport::{
 };
 
 use super::*;
+use crate::ui::Switch;
+use crate::ui::button::{Button, ButtonStyle};
+use bezel::ui::widgets::{Controls, Scaffolding};
 
 /// Edge length, in pixels, of the credentials card's QR code.
 const DAEMON_QR_PX: u32 = 180;
@@ -48,14 +51,14 @@ fn qr_input_row(label: String, input: Entity<TextInput>, theme: &Theme) -> Div {
 impl Padu {
     fn render_remote_hosts_section(&self, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx);
         let hosts = &self.state.hosts;
         let active_host_id = self.state.active_host_id.as_deref();
 
-        div()
+        bezel_theme
+            .group_box()
             .px(px(20.0))
             .py(px(16.0))
-            .rounded(px(13.0))
-            .bg(theme.raised)
             .child(
                 div()
                     .flex()
@@ -83,34 +86,11 @@ impl Padu {
                             ),
                     )
                     .child(
-                        div()
-                            .id("add-remote-host-btn")
-                            .tab_index(0)
-                            .h(px(28.0))
-                            .px(px(11.0))
-                            .rounded(px(7.0))
-                            .border_1()
-                            .border_color(theme.border_strong)
-                            .flex()
-                            .items_center()
-                            .gap(px(5.0))
-                            .cursor_pointer()
-                            .text_size(sp(12.5))
-                            .text_color(theme.text)
-                            .hover(|e| e.bg(theme.overlay))
-                            .focus_visible(|style| style.border_color(theme.accent))
-                            .child(icon("icons/plus.svg", 12.0, theme.text_secondary))
-                            .child(tr!("host.add_host"))
-                            .on_click(cx.listener(|this, _, _, cx| {
+                        Button::new("add-remote-host-btn", tr!("host.add_host"))
+                            .button_style(ButtonStyle::Ghost)
+                            .icon("icons/plus.svg")
+                            .on_press(cx.listener(|this, _, _, cx| {
                                 this.request_host_dialog(None, cx);
-                            }))
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                                if !event.keystroke.modifiers.modified()
-                                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                                {
-                                    this.request_host_dialog(None, cx);
-                                    cx.stop_propagation();
-                                }
                             })),
                     ),
             )
@@ -333,64 +313,36 @@ impl Padu {
                                     .when(!is_active, |row| {
                                         let switch_id = switch_id.clone();
                                         row.child(
-                                            div()
-                                                .id(SharedString::from(format!(
+                                            Button::new(
+                                                SharedString::from(format!(
                                                     "connect-host-{}",
                                                     switch_id
-                                                )))
-                                                .tab_index(0)
-                                                .h(px(28.0))
-                                                .px(px(11.0))
-                                                .rounded(px(6.0))
-                                                .bg(theme.inverse)
-                                                .text_color(theme.on_inverse)
-                                                .font_weight(FontWeight::MEDIUM)
-                                                .flex()
-                                                .items_center()
-                                                .cursor_pointer()
-                                                .text_size(sp(12.0))
-                                                .hover(|e| e.opacity(0.9))
-                                                .focus_visible(|style| {
-                                                    style.border_color(theme.accent)
-                                                })
-                                                .child(tr!("host.connect"))
-                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                )),
+                                                tr!("host.connect"),
+                                            )
+                                            .button_style(ButtonStyle::Prominent)
+                                            .on_press(
+                                                cx.listener(move |this, _, _, cx| {
                                                     this.switch_to_host(
                                                         Some(switch_id.clone()),
                                                         cx,
                                                     );
-                                                })),
+                                                }),
+                                            ),
                                         )
                                     })
                                     .child(
-                                        div()
-                                            .id(SharedString::from(format!(
-                                                "edit-host-{}",
-                                                edit_id
-                                            )))
-                                            .tab_index(0)
-                                            .h(px(28.0))
-                                            .px(px(10.0))
-                                            .rounded(px(6.0))
-                                            .border_1()
-                                            .border_color(theme.border_strong)
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(4.0))
-                                            .cursor_pointer()
-                                            .text_size(sp(12.0))
-                                            .text_color(theme.text_secondary)
-                                            .hover(|e| e.bg(theme.overlay).text_color(theme.text))
-                                            .focus_visible(|style| style.border_color(theme.accent))
-                                            .child(icon(
-                                                "icons/pencil.svg",
-                                                11.0,
-                                                theme.text_tertiary,
-                                            ))
-                                            .child(tr!("common.edit"))
-                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                        Button::new(
+                                            SharedString::from(format!("edit-host-{}", edit_id)),
+                                            tr!("common.edit"),
+                                        )
+                                        .button_style(ButtonStyle::Ghost)
+                                        .icon("icons/pencil.svg")
+                                        .on_press(
+                                            cx.listener(move |this, _, _, cx| {
                                                 this.request_host_dialog(Some(edit_id.clone()), cx);
-                                            })),
+                                            }),
+                                        ),
                                     ),
                             )
                     }))
@@ -425,109 +377,88 @@ impl Padu {
                 .map(|h| h.display_name().to_string())
                 .unwrap_or_else(|| self.daemon_hostname.clone());
 
-            let active_banner = div()
+            let active_banner = bezel::theme::Theme::of(cx)
+                .group_box()
                 .w_full()
-                .px(px(20.0))
-                .py(px(16.0))
-                .rounded(px(13.0))
-                .bg(theme.raised)
-                .border_1()
                 .border_color(theme.accent.opacity(0.4))
-                .flex()
-                .items_center()
-                .justify_between()
-                .gap(px(16.0))
                 .child(
                     div()
+                        .w_full()
+                        .px(px(20.0))
+                        .py(px(16.0))
                         .flex()
                         .items_center()
-                        .gap(px(14.0))
-                        .min_w_0()
-                        .flex_1()
+                        .justify_between()
+                        .gap(px(16.0))
                         .child(
                             div()
-                                .w(px(38.0))
-                                .h(px(38.0))
-                                .rounded(px(9.0))
-                                .bg(theme.accent.opacity(0.12))
                                 .flex()
                                 .items_center()
-                                .justify_center()
-                                .child(icon("icons/server.svg", 18.0, theme.accent)),
-                        )
-                        .child(
-                            div()
+                                .gap(px(14.0))
                                 .min_w_0()
                                 .flex_1()
-                                .flex()
-                                .flex_col()
-                                .gap(px(3.0))
                                 .child(
                                     div()
+                                        .w(px(38.0))
+                                        .h(px(38.0))
+                                        .rounded(px(9.0))
+                                        .bg(theme.accent.opacity(0.12))
                                         .flex()
                                         .items_center()
-                                        .gap(px(8.0))
-                                        .child(
-                                            div()
-                                                .text_size(sp(13.5))
-                                                .font_weight(FontWeight::MEDIUM)
-                                                .text_color(theme.text)
-                                                .child(tr!(
-                                                    "daemon.remote_active_banner_title",
-                                                    name = active_host_name
-                                                )),
-                                        )
-                                        .child(
-                                            div()
-                                                .px(px(6.0))
-                                                .py(px(1.5))
-                                                .rounded(px(4.0))
-                                                .bg(theme.success.opacity(0.15))
-                                                .text_size(sp(11.0))
-                                                .font_weight(FontWeight::MEDIUM)
-                                                .text_color(theme.success)
-                                                .child(tr!("host.active")),
-                                        ),
+                                        .justify_center()
+                                        .child(icon("icons/server.svg", 18.0, theme.accent)),
                                 )
                                 .child(
                                     div()
-                                        .text_size(sp(12.5))
-                                        .line_height(sp(17.0))
-                                        .text_color(theme.text_secondary)
-                                        .child(tr!("daemon.remote_active_banner_desc")),
+                                        .min_w_0()
+                                        .flex_1()
+                                        .flex()
+                                        .flex_col()
+                                        .gap(px(3.0))
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .gap(px(8.0))
+                                                .child(
+                                                    div()
+                                                        .text_size(sp(13.5))
+                                                        .font_weight(FontWeight::MEDIUM)
+                                                        .text_color(theme.text)
+                                                        .child(tr!(
+                                                            "daemon.remote_active_banner_title",
+                                                            name = active_host_name
+                                                        )),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .px(px(6.0))
+                                                        .py(px(1.5))
+                                                        .rounded(px(4.0))
+                                                        .bg(theme.success.opacity(0.15))
+                                                        .text_size(sp(11.0))
+                                                        .font_weight(FontWeight::MEDIUM)
+                                                        .text_color(theme.success)
+                                                        .child(tr!("host.active")),
+                                                ),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_size(sp(12.5))
+                                                .line_height(sp(17.0))
+                                                .text_color(theme.text_secondary)
+                                                .child(tr!("daemon.remote_active_banner_desc")),
+                                        ),
                                 ),
+                        )
+                        .child(
+                            Button::new("switch-to-local-btn", tr!("daemon.switch_to_local"))
+                                .button_style(ButtonStyle::Ghost)
+                                .icon("icons/arrow-left.svg")
+                                .on_press(cx.listener(|this, _, _, cx| {
+                                    this.switch_to_host(None, cx);
+                                })),
                         ),
-                )
-                .child(
-                    div()
-                        .id("switch-to-local-btn")
-                        .tab_index(0)
-                        .h(px(30.0))
-                        .px(px(12.0))
-                        .rounded(px(7.0))
-                        .border_1()
-                        .border_color(theme.border_strong)
-                        .flex()
-                        .items_center()
-                        .gap(px(6.0))
-                        .cursor_pointer()
-                        .text_size(sp(12.5))
-                        .text_color(theme.text)
-                        .hover(|e| e.bg(theme.overlay))
-                        .focus_visible(|style| style.border_color(theme.accent))
-                        .child(icon("icons/arrow-left.svg", 12.0, theme.text_secondary))
-                        .child(tr!("daemon.switch_to_local"))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.switch_to_host(None, cx);
-                        }))
-                        .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                            if !event.keystroke.modifiers.modified()
-                                && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                            {
-                                this.switch_to_host(None, cx);
-                                cx.stop_propagation();
-                            }
-                        })),
                 );
 
             return div()
@@ -546,84 +477,43 @@ impl Padu {
         let fields_dirty = self.daemon_exposure_fields_dirty(cx);
         let token = self.state.daemon_exposure.token.clone();
 
-        let exposure_toggle = toggle_switch(
-            "daemon-exposure-toggle",
-            enabled,
-            pending,
-            theme,
-            cx,
-            move |this, _, cx| this.set_daemon_exposure_enabled(!enabled, cx),
-        );
+        let weak = cx.entity().downgrade();
+        let exposure_toggle = Switch::new("daemon-exposure-toggle", enabled)
+            .enabled(!pending)
+            .on_toggle(move |enabled, _, cx| {
+                let _ = weak.update(cx, |this, cx| this.set_daemon_exposure_enabled(enabled, cx));
+            });
 
         let apply_disabled = pending || !fields_dirty;
-        let apply_button = div()
-            .id("apply-daemon-settings")
-            .tab_index(0)
-            .h(px(29.0))
-            .px(px(11.0))
-            .rounded(px(7.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_pointer()
-            .text_size(sp(12.5))
-            .text_color(theme.text_secondary)
-            .opacity(if apply_disabled { 0.55 } else { 1.0 })
-            .focus_visible(|style| style.border_color(theme.accent))
-            .when(!apply_disabled, |element| {
-                element
-                    .hover(|element| element.bg(theme.overlay))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.apply_daemon_exposure_fields(cx);
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                        if !event.keystroke.modifiers.modified()
-                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                        {
-                            this.apply_daemon_exposure_fields(cx);
-                            cx.stop_propagation();
-                        }
-                    }))
-            })
-            .child(if pending {
+        let apply_button = Button::new(
+            "apply-daemon-settings",
+            if pending {
                 tr!("daemon.restarting")
             } else {
                 tr!("daemon.apply")
-            });
+            },
+        )
+        .button_style(ButtonStyle::Ghost)
+        .enabled(!apply_disabled)
+        .on_press(cx.listener(|this, _, _, cx| {
+            this.apply_daemon_exposure_fields(cx);
+        }));
 
-        let regenerate_button = div()
-            .id("regenerate-daemon-token")
-            .tab_index(0)
-            .h(px(27.0))
-            .px(px(9.0))
-            .rounded(px(6.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .items_center()
-            .cursor_pointer()
-            .text_size(sp(12.5))
-            .text_color(theme.text_secondary)
-            .opacity(if pending { 0.55 } else { 1.0 })
-            .focus_visible(|style| style.border_color(theme.accent))
-            .when(!pending, |element| {
-                element
-                    .hover(|element| element.bg(theme.overlay))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.regenerate_daemon_token(cx);
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                        if !event.keystroke.modifiers.modified()
-                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                        {
-                            this.regenerate_daemon_token(cx);
-                            cx.stop_propagation();
-                        }
-                    }))
-            })
-            .child(tr!("daemon.regenerate_token"));
+        let regenerate_button =
+            Button::new("regenerate-daemon-token", tr!("daemon.regenerate_token"))
+                .button_style(ButtonStyle::Ghost)
+                .enabled(!pending)
+                .on_press(cx.listener(|this, _, _, cx| {
+                    this.regenerate_daemon_token(cx);
+                }));
+
+        let remote_hosts_section = self.render_remote_hosts_section(cx);
+        let qr_section = if enabled {
+            Some(self.render_daemon_qr_section(&token, &theme, cx))
+        } else {
+            None
+        };
+        let bezel_theme = bezel::theme::Theme::of(cx).clone();
 
         div()
             .mt(px(15.0))
@@ -631,74 +521,74 @@ impl Padu {
             .flex()
             .flex_col()
             .gap(px(12.0))
-            .child(self.render_remote_hosts_section(cx))
+            .child(remote_hosts_section)
             .child(
-                div()
-                    .min_h(px(66.0))
-                    .px(px(20.0))
-                    .py(px(13.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(7.0))
-                                    .child(
-                                        div()
-                                            .text_size(sp(13.5))
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(theme.text)
-                                            .child(tr!("daemon.expose_title")),
-                                    )
-                                    .child(
-                                        div()
-                                            .px(px(6.0))
-                                            .py(px(2.0))
-                                            .rounded_full()
-                                            .text_size(sp(12.5))
-                                            .text_color(if enabled {
-                                                theme.success
-                                            } else {
-                                                theme.text_tertiary
-                                            })
-                                            .bg(theme.overlay)
-                                            .child(if pending {
-                                                tr!("daemon.status_restarting")
-                                            } else if enabled {
-                                                tr!("daemon.status_exposed")
-                                            } else {
-                                                tr!("daemon.status_local")
-                                            }),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .min_w_0()
-                                    .whitespace_normal()
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("daemon.expose_description")),
-                            ),
-                    )
-                    .child(exposure_toggle),
+                bezel_theme.group_box().w_full().child(
+                    div()
+                        .w_full()
+                        .min_h(px(66.0))
+                        .px(px(20.0))
+                        .py(px(13.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(24.0))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(7.0))
+                                        .child(
+                                            div()
+                                                .text_size(sp(13.5))
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_color(theme.text)
+                                                .child(tr!("daemon.expose_title")),
+                                        )
+                                        .child(
+                                            div()
+                                                .px(px(6.0))
+                                                .py(px(2.0))
+                                                .rounded_full()
+                                                .text_size(sp(12.5))
+                                                .text_color(if enabled {
+                                                    theme.success
+                                                } else {
+                                                    theme.text_tertiary
+                                                })
+                                                .bg(theme.overlay)
+                                                .child(if pending {
+                                                    tr!("daemon.status_restarting")
+                                                } else if enabled {
+                                                    tr!("daemon.status_exposed")
+                                                } else {
+                                                    tr!("daemon.status_local")
+                                                }),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .mt(px(5.0))
+                                        .min_w_0()
+                                        .whitespace_normal()
+                                        .text_size(sp(12.5))
+                                        .line_height(sp(18.0))
+                                        .text_color(theme.text_secondary)
+                                        .child(tr!("daemon.expose_description")),
+                                ),
+                        )
+                        .child(exposure_toggle),
+                ),
             )
             .when(enabled, |column| {
                 column.child(
-                    div()
+                    bezel_theme
+                        .group_box()
                         .px(px(20.0))
                         .py(px(15.0))
-                        .rounded(px(13.0))
-                        .bg(theme.raised)
                         .child(
                             div()
                                 .text_size(sp(13.5))
@@ -821,46 +711,15 @@ impl Padu {
                                         ))
                                         .child(
                                             div().flex().items_center().justify_start().child(
-                                                div()
-                                                    .id("add-daemon-origin-btn")
-                                                    .tab_index(0)
-                                                    .h(px(26.0))
-                                                    .px(px(8.0))
-                                                    .rounded(px(6.0))
-                                                    .border_1()
-                                                    .border_color(theme.border_strong)
-                                                    .flex()
-                                                    .items_center()
-                                                    .gap(px(5.0))
-                                                    .cursor_pointer()
-                                                    .text_size(sp(12.0))
-                                                    .text_color(theme.text_secondary)
-                                                    .hover(|el| el.bg(theme.overlay))
-                                                    .focus_visible(|style| {
-                                                        style.border_color(theme.accent)
-                                                    })
-                                                    .on_click(cx.listener(|this, _, window, cx| {
-                                                        this.add_daemon_origin(window, cx);
-                                                    }))
-                                                    .on_key_down(cx.listener(
-                                                        |this, event: &KeyDownEvent, window, cx| {
-                                                            if !event.keystroke.modifiers.modified()
-                                                                && matches!(
-                                                                    event.keystroke.key.as_str(),
-                                                                    "enter" | "space"
-                                                                )
-                                                            {
-                                                                this.add_daemon_origin(window, cx);
-                                                                cx.stop_propagation();
-                                                            }
-                                                        },
-                                                    ))
-                                                    .child(icon(
-                                                        "icons/plus.svg",
-                                                        11.0,
-                                                        theme.text_secondary,
-                                                    ))
-                                                    .child(tr!("daemon.add_origin")),
+                                                Button::new(
+                                                    "add-daemon-origin-btn",
+                                                    tr!("daemon.add_origin"),
+                                                )
+                                                .button_style(ButtonStyle::Ghost)
+                                                .icon("icons/plus.svg")
+                                                .on_press(cx.listener(|this, _, window, cx| {
+                                                    this.add_daemon_origin(window, cx);
+                                                })),
                                             ),
                                         ),
                                 ),
@@ -870,11 +729,10 @@ impl Padu {
             })
             .when(enabled, |column| {
                 column.child(
-                    div()
+                    bezel_theme
+                        .group_box()
                         .px(px(20.0))
                         .py(px(15.0))
-                        .rounded(px(13.0))
-                        .bg(theme.raised)
                         .child(
                             div()
                                 .text_size(sp(13.5))
@@ -943,7 +801,7 @@ impl Padu {
                                     ),
                             )
                         })
-                        .child(self.render_daemon_qr_section(&token, &theme, cx))
+                        .children(qr_section)
                         .child(
                             div()
                                 .mt(px(10.0))
@@ -954,6 +812,19 @@ impl Padu {
                 )
             })
             .into_any_element()
+    }
+
+    fn set_daemon_qr_transport(&mut self, kind: HostKind, cx: &mut Context<Self>) {
+        if self.daemon_qr_transport != kind {
+            self.daemon_qr_transport = kind;
+            // Addresses differ per transport, so the previous
+            // one must not linger as a stale value.
+            self.daemon_qr_field_input
+                .update(cx, |input, cx| input.set_content("", cx));
+            self.daemon_qr_cache.replace(None);
+            self.daemon_qr_tunnel_error = None;
+            cx.notify();
+        }
     }
 
     /// The connection code for this daemon — the only place its address and
@@ -968,66 +839,32 @@ impl Padu {
         // section title with a notes view-mode style segmented transport
         // picker, then the body splits into code (left) and instructions
         // (right).
-        let mut header_tabs = div()
-            .flex()
-            .items_center()
-            .gap(px(1.0))
-            .p(px(2.0))
-            .rounded(px(7.0))
-            .bg(theme.overlay);
-        for kind in DAEMON_QR_TRANSPORTS {
-            let active = kind == self.daemon_qr_transport;
-            header_tabs = header_tabs.child(
-                div()
-                    .id(SharedString::from(format!("daemon-qr-tab-{kind:?}")))
-                    .tab_index(0)
-                    .h(px(28.0))
-                    .px(px(10.0))
-                    .rounded(px(6.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .cursor_pointer()
-                    .text_size(sp(12.5))
-                    .text_color(if active {
-                        theme.text
-                    } else {
-                        theme.text_secondary
-                    })
-                    .when(active, |el| el.bg(theme.overlay_strong))
-                    .hover(|el| el.bg(theme.overlay_strong))
-                    .focus_visible(|style| style.border_color(theme.accent))
-                    .child(host_transport_label(kind))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if this.daemon_qr_transport != kind {
-                            this.daemon_qr_transport = kind;
-                            // Addresses differ per transport, so the previous
-                            // one must not linger as a stale value.
-                            this.daemon_qr_field_input
-                                .update(cx, |input, cx| input.set_content("", cx));
-                            this.daemon_qr_cache.replace(None);
-                            this.daemon_qr_tunnel_error = None;
-                            cx.notify();
-                        }
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                        if !event.keystroke.modifiers.modified()
-                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                        {
-                            this.daemon_qr_transport = kind;
-                            this.daemon_qr_field_input
-                                .update(cx, |input, cx| input.set_content("", cx));
-                            this.daemon_qr_cache.replace(None);
-                            this.daemon_qr_tunnel_error = None;
-                            cx.notify();
-                            cx.stop_propagation();
-                        }
-                    })),
-            );
-        }
+        let bezel_theme = bezel::theme::Theme::of(cx);
+        let header_tabs =
+            bezel_theme
+                .toggle_group()
+                .children(DAEMON_QR_TRANSPORTS.into_iter().map(|kind| {
+                    let active = kind == self.daemon_qr_transport;
+                    bezel_theme
+                        .toggle_group_item(host_transport_label(kind), active)
+                        .id(SharedString::from(format!("daemon-qr-tab-{kind:?}")))
+                        .tab_index(0)
+                        .focus_visible(|style| style.border_color(theme.accent))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.set_daemon_qr_transport(kind, cx);
+                        }))
+                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                            if !event.keystroke.modifiers.modified()
+                                && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                            {
+                                this.set_daemon_qr_transport(kind, cx);
+                                cx.stop_propagation();
+                            }
+                        }))
+                }));
         // Left column: transport inputs, tunnel action, address, and code.
         // Right column: what the other device needs for this transport.
-        let header = div().mt(px(10.0)).child(header_tabs);
+        let header = div().mt(px(10.0)).flex().items_start().child(header_tabs);
         let mut left = div().flex().flex_col().gap(px(10.0)).flex_1().min_w_0();
         let right = self.qr_instruction_panel(self.daemon_qr_transport, theme, cx);
 
@@ -1060,7 +897,7 @@ impl Padu {
                     ));
             }
             HostKind::Cloudflare => {
-                left = left.child(self.render_daemon_qr_tunnel_button(theme, cx));
+                left = left.child(self.render_daemon_qr_tunnel_button(cx));
             }
         }
 
@@ -1389,46 +1226,20 @@ impl Padu {
         }
     }
 
-    fn render_daemon_qr_tunnel_button(&self, theme: &Theme, cx: &mut Context<Self>) -> Div {
+    fn render_daemon_qr_tunnel_button(&self, cx: &mut Context<Self>) -> Div {
         let starting = self.daemon_qr_tunnel_starting;
         let started = self.host_transports.get(DAEMON_QR_TUNNEL_KEY).is_some();
-        let button = div()
-            .id("daemon-qr-tunnel-button")
-            .tab_index(0)
-            .h(px(28.0))
-            .px(px(12.0))
-            .rounded(px(6.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .items_center()
-            .justify_center()
-            .gap(px(6.0))
-            .cursor_pointer()
-            .text_size(sp(12.5))
-            .text_color(theme.text_secondary)
-            .opacity(if starting { 0.55 } else { 1.0 })
-            .focus_visible(|style| style.border_color(theme.accent))
-            .when(!starting, |element| {
-                element
-                    .hover(|e| e.bg(theme.overlay))
-                    .on_click(cx.listener(|this, _, _, cx| this.start_daemon_qr_tunnel(cx)))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                        if !event.keystroke.modifiers.modified()
-                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                        {
-                            this.start_daemon_qr_tunnel(cx);
-                            cx.stop_propagation();
-                        }
-                    }))
-            })
-            .child(if starting {
-                tr!("daemon.qr_tunnel_starting")
-            } else if started {
-                tr!("daemon.qr_restart_tunnel")
-            } else {
-                tr!("daemon.qr_start_tunnel")
-            });
+        let label = if starting {
+            tr!("daemon.qr_tunnel_starting")
+        } else if started {
+            tr!("daemon.qr_restart_tunnel")
+        } else {
+            tr!("daemon.qr_start_tunnel")
+        };
+        let button = Button::new("daemon-qr-tunnel-button", label)
+            .button_style(ButtonStyle::Ghost)
+            .enabled(!starting)
+            .on_press(cx.listener(|this, _, _, cx| this.start_daemon_qr_tunnel(cx)));
         let mut column = div().flex().flex_col().gap(px(6.0)).child(button);
         if let Some(error) = self.daemon_qr_tunnel_error.clone() {
             column = column.child(

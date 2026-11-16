@@ -95,6 +95,10 @@ command_palette.resume_failed: "Tidak dapat melanjutkan sesi: %{error}"
 language.title: Bahasa
 language.system: Sistem
 language.description: Pilih bahasa yang digunakan di seluruh Padu
+settings.group_preferences: Preferensi
+settings.group_integration: Integrasi
+settings.group_agents: Agen
+settings.group_system: Sistem
 settings.general: Umum
 settings.appearance: Tampilan
 settings.keybindings: Pintasan Tombol
@@ -103,6 +107,37 @@ settings.usage: Penggunaan
 settings.daemon: Host & Daemon
 settings.computer_use: Penggunaan Komputer
 settings.notifications: Notifikasi
+settings.browser: Peramban
+settings.browser_keywords: peramban web webview mesin pencari beranda cookie data bersihkan situs
+settings.browser_search_engine: Mesin Pencari Default
+settings.browser_search_engine_description: Pencarian dari bilah alamat menggunakan %{engine}.
+settings.browser_add_search_engine: Tambah Mesin Pencari…
+settings.browser_add_search_engine_hint: Masukkan nama penyedia dan URL pencarian dengan %s sebagai pengganti kueri.
+settings.browser_engine_name_placeholder: Nama penyedia (mis. Brave)
+settings.browser_engine_url_placeholder: "URL pencarian (mis. https://search.brave.com/search?q=%s)"
+settings.browser_home: Halaman Awal & Beranda
+settings.browser_home_description: Halaman web awal yang dimuat setiap kali tab peramban baru dibuka.
+settings.browser_agents_read: Pembacaan Web oleh Agen
+settings.browser_agents_read_description: Izinkan agen AI menavigasi tab, memeriksa struktur halaman, dan mengekstrak teks.
+settings.browser_agents_act: Interaksi Web oleh Agen
+settings.browser_agents_act_description: Izinkan agen AI mengklik tombol, mengetik teks, dan mengirim formulir. Memerlukan pembacaan web.
+settings.browser_blocked: Domain yang Dibatasi
+settings.browser_blocked_description: Situs web dan domain yang dilarang dikunjungi atau diperiksa oleh agen AI.
+settings.browser_blocked_none: Tidak ada domain yang dibatasi. Semua situs web yang dapat dijangkau diizinkan.
+settings.browser_keep_signed_in: Ingat Masuk & Cookie
+settings.browser_keep_signed_in_description: Pertahankan cookie autentikasi dan data situs tetap aktif setelah dimulai ulang. Jika dinonaktifkan, tab berjalan dalam mode penjelajahan pribadi.
+settings.browser_data: Data & Cache Penjelajahan
+settings.browser_clear_data: Bersihkan Data Penjelajahan
+settings.browser_clearing: Membersihkan data penjelajahan…
+settings.browser_clear_failed: Gagal membersihkan data penjelajahan. Silakan coba lagi.
+settings.browser_cleared: Data penjelajahan berhasil dibersihkan. Tab peramban yang aktif telah ditutup.
+settings.browser_clear_unavailable: Pembersihan data penjelajahan hanya tersedia di macOS.
+settings.browser_calculating: Menghitung penggunaan penyimpanan…
+settings.browser_data_unavailable: Data penggunaan penyimpanan tidak tersedia.
+settings.browser_no_data: Tidak ada data situs web yang tersimpan.
+settings.browser_one_site: Menyimpan cookie dan cache dari 1 situs web.
+settings.browser_sites_data: Menyimpan cookie dan cache dari %{count} situs web.
+settings.browser_clear_footer: Pembersihan akan menghapus cookie, cache, dan penyimpanan, menutup semua tab peramban, dan mengeluarkan akun Anda.
 settings.about: Tentang
 settings.general_keywords: umum lokal proyek percakapan privasi analitik telemetri anonim bagikan pembaruan otomatis sparkle versi
 settings.appearance_keywords: tampilan tema sistem terang gelap bahasa inggris indonesia jepang mandarin font ukuran teks editor
@@ -172,6 +207,7 @@ keybindings.section_editor: Editor & Pencarian
 keybindings.section_browser: Browser Bawaan
 keybindings.section_files: Berkas
 keybindings.section_review: Tinjauan
+keybindings.section_terminal: Terminal
 keybindings.new_task: Tugas Baru
 keybindings.new_task_desc: Buat percakapan atau tugas baru
 keybindings.open_project: Buka Proyek
@@ -264,6 +300,14 @@ keybindings.focus_review_filter: Fokuskan Pencarian File Tinjauan
 keybindings.focus_review_filter_desc: Fokuskan kolom pencarian file yang berubah
 keybindings.toggle_review_tree: Perluas atau Ciutkan Folder
 keybindings.toggle_review_tree_desc: Perluas atau ciutkan folder pada pohon file yang berubah
+keybindings.terminal_split_horizontal: Bagi Horizontal
+keybindings.terminal_split_horizontal_desc: Bagi panel terminal aktif secara horizontal
+keybindings.terminal_split_vertical: Bagi Vertikal
+keybindings.terminal_split_vertical_desc: Bagi panel terminal aktif secara vertikal
+keybindings.terminal_toggle_expand: Alihkan Ukuran Penuh
+keybindings.terminal_toggle_expand_desc: Perbesar panel terminal aktif atau pulihkan semua panel
+keybindings.terminal_close_pane: Tutup Panel Terminal
+keybindings.terminal_close_pane_desc: Tutup panel terminal yang aktif
 keybindings.search: Cari pintasan tombol...
 keybindings.no_results: Pintasan tombol tidak ditemukan
 settings.back: Kembali
@@ -382,6 +426,15 @@ settings.code_word_wrap_description: Bungkus baris panjang alih-alih menggulir s
 settings.theme_system: Sistem
 settings.theme_light: Terang
 settings.theme_dark: Gelap
+settings.color_scheme: Skema warna
+settings.color_scheme_description: Pilih warna aksen untuk kontrol interaktif dan sorotan
+settings.color_scheme_purple: Ungu
+settings.color_scheme_blue: Biru
+settings.color_scheme_green: Hijau
+settings.color_scheme_amber: Amber
+settings.color_scheme_coral: Koral
+settings.color_scheme_rose: Mawar
+settings.color_scheme_neutral: Netral
 settings.sidebar: Bilah sisi
 settings.sidebar_description: Sesuaikan tampilan bilah sisi dan daftar percakapan
 settings.sidebar_show_provider: Tampilkan penyedia
@@ -397,6 +450,10 @@ settings.background_preview_assistant: Tentu — saya akan menyoroti keputusan u
 settings.background_unsupported: Pilih format gambar yang didukung
 settings.background_too_large: Pilih gambar yang lebih kecil dari 2 MB
 settings.background_unavailable: Gambar latar belakang tidak dapat dimuat
+settings.background_effect: Efek
+settings.background_effect_none: Tidak ada
+settings.background_effect_dither: Dither
+settings.background_effect_ascii: ASCII
 input.do_anything: Lakukan apa saja…
 input.search_models: Cari model…
 input.search_branches: Cari cabang
@@ -557,12 +614,15 @@ common.copy_selection: Salin Pilihan
 common.copy_to_composer: Salin ke Komposer
 common.copy_code: Salin Kode
 common.cancel: Batal
+common.save: Simpan
+common.change: Ubah…
 common.edit: Edit
 common.send: Kirim
 notes.new: Catatan Baru
 notes.save: Simpan
 notes.edit: Edit
 notes.rich_editor: Rich Editor
+notes.headings: Judul
 notes.code: Kode
 notes.side_by_side: Berdampingan
 notes.preview: Pratinjau
@@ -1283,12 +1343,22 @@ diff.rows_hidden: "%{count} baris lagi · buka Peninjauan untuk melihat seluruh 
 terminal.transport_failed: Transport terminal gagal
 terminal.no_workspace_description: Pilih tugas sebelum membuka terminal.
 terminal.process_exited: Proses telah keluar
+terminal.split_horizontal: Bagi horizontal (%{shortcut})
+terminal.split_vertical: Bagi vertikal (%{shortcut})
+terminal.expand_full: Perbesar penuh (%{shortcut})
+terminal.show_all_panes: Tampilkan semua panel (%{shortcut})
+terminal.close_pane: Tutup terminal (%{shortcut})
+terminal.switch_to_terminal: Beralih ke %{title}
+terminal.drag_to_dock: Seret untuk menambatkan panel
+terminal.terminals_count_one: "%{count} terminal"
+terminal.terminals_count_many: "%{count} terminal"
 browser.back: Kembali (%{shortcut})
 browser.forward: Maju (%{shortcut})
 browser.stop_loading: Hentikan pemuatan (Esc)
 browser.reload: Muat ulang (%{shortcut})
 browser.open_external: Buka di browser default
 browser.browse_web: Jelajahi web
+browser.browse_web_hint: Masukkan URL atau cari di bilah alamat di atas untuk memulai
 browser.start_hint: Masukkan URL atau cari di atas — %{shortcut} memfokuskan bilah alamat
 browser.unavailable: Browser tidak tersedia
 browser.unavailable_on_platform: Tampilan browser belum tersedia di platform ini
@@ -1326,6 +1396,7 @@ transcript.scroll_to_bottom: Gulir ke bawah
 transcript.conversation_turns: Putaran percakapan
 transcript.turn_label: "Putaran %{number}: %{prompt}"
 transcript.edit_message: Edit pesan
+transcript.message_actions: Tindakan pesan
 duration.second: "%{count} detik"
 duration.seconds: "%{count} detik"
 duration.minute: "%{count} menit"
@@ -1603,6 +1674,7 @@ board.empty_running: Tidak ada agen yang berjalan
 board.empty_review: Tidak ada tugas menunggu review
 board.empty_done: Tidak ada tugas yang selesai
 board.filter_empty: Tidak ada tugas yang cocok dengan filter
+board.filters: Filter
 board.clear_filters: Hapus Filter
 board.clear_filters_short: Bersihkan
 board.clear_search: Hapus pencarian

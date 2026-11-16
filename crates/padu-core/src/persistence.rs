@@ -195,6 +195,8 @@ pub struct AppSettings {
     pub analytics_enabled: bool,
     pub favorite_models: Vec<FavoriteModel>,
     pub theme: ThemePreference,
+    #[serde(default)]
+    pub color_scheme: Option<String>,
     pub language: AppLanguage,
 }
 
@@ -204,6 +206,7 @@ impl Default for AppSettings {
             analytics_enabled: default_analytics_enabled(),
             favorite_models: Vec::new(),
             theme: ThemePreference::System,
+            color_scheme: None,
             language: AppLanguage::default(),
         }
     }
@@ -271,6 +274,8 @@ pub struct PersistedState {
     pub favorite_models: Vec<FavoriteModel>,
     #[serde(default)]
     pub theme: ThemePreference,
+    #[serde(default)]
+    pub color_scheme: Option<String>,
     #[serde(default)]
     pub language: AppLanguage,
     #[serde(default = "default_sidebar_visibility")]
@@ -342,6 +347,7 @@ impl PersistedState {
             remembered_model_traits: Vec::new(),
             favorite_models: Vec::new(),
             theme: ThemePreference::System,
+            color_scheme: None,
             language: AppLanguage::default(),
             sidebar_visible: true,
             right_panel_visible: false,
@@ -438,6 +444,7 @@ impl PersistedState {
             analytics_enabled: self.analytics_enabled,
             favorite_models: self.favorite_models.clone(),
             theme: self.theme,
+            color_scheme: self.color_scheme.clone(),
             language: self.language,
         }
     }
@@ -475,6 +482,7 @@ impl PersistedState {
         self.analytics_enabled = settings.analytics_enabled;
         self.favorite_models = settings.favorite_models;
         self.theme = settings.theme;
+        self.color_scheme = settings.color_scheme;
         self.language = settings.language;
     }
 

@@ -1,29 +1,32 @@
 use super::*;
+use crate::ui::Switch;
+use crate::ui::button::{Button, ButtonStyle};
+use bezel::ui::widgets::Scaffolding;
 
 impl Padu {
     pub(super) fn render_general_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx);
         let updater_available = cx
             .try_global::<crate::updater::UpdaterState>()
             .is_some_and(|updater| updater.0.is_some());
         let analytics_enabled = self.state.analytics_enabled;
-        let analytics_toggle = toggle_switch(
-            "anonymous-analytics-toggle",
-            analytics_enabled,
-            false,
-            theme,
-            cx,
-            move |this, _, cx| this.set_analytics_enabled(!analytics_enabled, cx),
-        );
+        let weak = cx.entity().downgrade();
+        let analytics_toggle = Switch::new("anonymous-analytics-toggle", analytics_enabled)
+            .on_toggle(move |enabled, _, cx| {
+                let _ = weak.update(cx, |this, cx| this.set_analytics_enabled(enabled, cx));
+            });
         div()
+            .pt(px(20.0))
+            .flex()
+            .flex_col()
+            .gap(px(16.0))
             .child(
-                div()
-                    .mt(px(15.0))
+                bezel_theme
+                    .group_box()
                     .w_full()
                     .px(px(20.0))
                     .py(px(14.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
                     .child(
                         div()
                             .text_size(sp(13.5))
@@ -41,58 +44,96 @@ impl Padu {
                     ),
             )
             .child(
-                div()
-                    .mt(px(15.0))
+                bezel_theme
+                    .group_box()
                     .w_full()
-                    .min_h(px(60.0))
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
                     .child(
                         div()
-                            .flex_1()
-                            .min_w_0()
+                            .w_full()
+                            .min_h(px(60.0))
+                            .px(px(20.0))
+                            .py(px(12.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(24.0))
                             .child(
                                 div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("settings.share_anonymous_usage_data")),
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(
+                                        div()
+                                            .text_size(sp(13.5))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(theme.text)
+                                            .child(tr!("settings.share_anonymous_usage_data")),
+                                    )
+                                    .child(
+                                        div()
+                                            .mt(px(5.0))
+                                            .text_size(sp(12.5))
+                                            .line_height(sp(18.0))
+                                            .text_color(theme.text_secondary)
+                                            .child(tr!(
+                                                "settings.share_anonymous_usage_data_description"
+                                            )),
+                                    ),
                             )
+                            .child(analytics_toggle),
+                    )
+                    .when(updater_available, |group| {
+                        let enabled = self.automatic_updates_enabled;
+                        let weak = cx.entity().downgrade();
+                        let toggle = Switch::new("automatic-updates-toggle", enabled).on_toggle(
+                            move |enabled, _, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.set_automatic_updates_enabled(enabled, cx)
+                                });
+                            },
+                        );
+                        group
+                            .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
                             .child(
                                 div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("settings.share_anonymous_usage_data_description")),
-                            ),
-                    )
-                    .child(analytics_toggle),
+                                    .w_full()
+                                    .min_h(px(60.0))
+                                    .px(px(20.0))
+                                    .py(px(12.0))
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(24.0))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .child(
+                                                div()
+                                                    .text_size(sp(13.5))
+                                                    .font_weight(FontWeight::MEDIUM)
+                                                    .text_color(theme.text)
+                                                    .child(tr!("settings.automatic_updates")),
+                                            )
+                                            .child(
+                                                div()
+                                                    .mt(px(5.0))
+                                                    .text_size(sp(12.5))
+                                                    .line_height(sp(18.0))
+                                                    .text_color(theme.text_secondary)
+                                                    .child(tr!(
+                                                        "settings.automatic_updates_description"
+                                                    )),
+                                            ),
+                                    )
+                                    .child(toggle),
+                            )
+                    }),
             )
-            .when(updater_available, |column| {
-                let enabled = self.automatic_updates_enabled;
-                let toggle = toggle_switch(
-                    "automatic-updates-toggle",
-                    enabled,
-                    false,
-                    theme,
-                    cx,
-                    move |this, _, cx| this.set_automatic_updates_enabled(!enabled, cx),
-                );
-                column.child(
+            .child(
+                bezel_theme.group_box().w_full().child(
                     div()
-                        .mt(px(15.0))
                         .w_full()
                         .min_h(px(60.0))
                         .px(px(20.0))
                         .py(px(12.0))
-                        .rounded(px(13.0))
-                        .bg(theme.raised)
                         .flex()
                         .items_center()
                         .gap(px(24.0))
@@ -105,7 +146,7 @@ impl Padu {
                                         .text_size(sp(13.5))
                                         .font_weight(FontWeight::MEDIUM)
                                         .text_color(theme.text)
-                                        .child(tr!("settings.automatic_updates")),
+                                        .child(tr!("onboarding.command_title")),
                                 )
                                 .child(
                                     div()
@@ -113,68 +154,18 @@ impl Padu {
                                         .text_size(sp(12.5))
                                         .line_height(sp(18.0))
                                         .text_color(theme.text_secondary)
-                                        .child(tr!("settings.automatic_updates_description")),
+                                        .child(tr!("onboarding.welcome_subtitle")),
                                 ),
                         )
-                        .child(toggle),
-                )
-            })
-            .child(
-                div()
-                    .mt(px(15.0))
-                    .w_full()
-                    .min_h(px(60.0))
-                    .px(px(20.0))
-                    .py(px(12.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
-                    .flex()
-                    .items_center()
-                    .gap(px(24.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("onboarding.command_title")),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("onboarding.welcome_subtitle")),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .id("replay-onboarding-btn")
-                            .tab_index(0)
-                            .focus_visible(|style| style.border_1().border_color(theme.accent))
-                            .h(px(32.0))
-                            .px(px(14.0))
-                            .rounded(px(8.0))
-                            .bg(theme.overlay_strong)
-                            .text_size(sp(12.5))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.text)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .cursor_pointer()
-                            .hover(|el| el.bg(theme.overlay))
-                            .active(|el| el.opacity(0.85))
-                            .child(tr!("onboarding.replay_button"))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.settings_page = None;
-                                this.open_onboarding(window, cx);
-                            })),
-                    ),
+                        .child(
+                            Button::new("replay-onboarding-btn", tr!("onboarding.replay_button"))
+                                .button_style(ButtonStyle::Ghost)
+                                .on_press(cx.listener(|this, _, window, cx| {
+                                    this.settings_page = None;
+                                    this.open_onboarding(window, cx);
+                                })),
+                        ),
+                ),
             )
             .into_any_element()
     }

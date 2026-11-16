@@ -1,8 +1,12 @@
 use super::*;
+use crate::ui::Switch;
+use crate::ui::button::{Button, ButtonRole, ButtonStyle};
+use bezel::ui::widgets::Scaffolding;
 
 impl Padu {
     pub(super) fn render_computer_use_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx).clone();
         let enabled = self.state.computer_use_enabled;
         let permissions = self.computer_permissions.clone();
         let pending = self.computer_permission_request_pending;
@@ -35,9 +39,13 @@ impl Padu {
                                 .w(px(32.0))
                                 .h(px(32.0))
                                 .flex_none()
-                                .rounded(px(7.0))
+                                .rounded(px(Theme::control_radius()))
                                 .when_some(app_icon, |element, app_icon| {
-                                    element.child(img(app_icon).size_full().rounded(px(7.0)))
+                                    element.child(
+                                        img(app_icon)
+                                            .size_full()
+                                            .rounded(px(Theme::control_radius())),
+                                    )
                                 }),
                         )
                         .child(
@@ -61,78 +69,75 @@ impl Padu {
                                 ),
                         )
                         .child(
-                            div()
-                                .id(SharedString::from(format!("revoke-computer-app-{key}")))
-                                .h(px(25.0))
-                                .px(px(9.0))
-                                .rounded(px(6.0))
-                                .border_1()
-                                .border_color(theme.border_strong)
-                                .flex()
-                                .items_center()
-                                .cursor_pointer()
-                                .text_size(sp(12.5))
-                                .text_color(theme.text_secondary)
-                                .hover(|element| element.bg(theme.overlay).text_color(theme.danger))
-                                .child(tr!("common.revoke"))
-                                .on_click(cx.listener(move |this, _, _, cx| {
+                            Button::new(
+                                SharedString::from(format!("revoke-computer-app-{key}")),
+                                tr!("common.revoke"),
+                            )
+                            .button_style(ButtonStyle::Ghost)
+                            .role(ButtonRole::Destructive)
+                            .on_press(cx.listener(
+                                move |this, _, _, cx| {
                                     this.revoke_computer_app(&key, cx);
-                                })),
+                                },
+                            )),
                         ),
                 );
             }
         }
 
         div()
-            .mt(px(15.0))
+            .pt(px(20.0))
             .w_full()
             .flex()
             .flex_col()
-            .gap(px(12.0))
+            .gap(px(16.0))
             .child(
-                div()
-                    .px(px(20.0))
-                    .py(px(14.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
-                    .flex()
-                    .items_center()
-                    .gap(px(20.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(sp(13.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.text)
-                                    .child(tr!("computer_use.allow_apps")),
+                bezel_theme.group_box().w_full().child(
+                    div()
+                        .w_full()
+                        .px(px(20.0))
+                        .py(px(14.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(20.0))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(
+                                    div()
+                                        .text_size(sp(13.5))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(theme.text)
+                                        .child(tr!("computer_use.allow_apps")),
+                                )
+                                .child(
+                                    div()
+                                        .mt(px(5.0))
+                                        .text_size(sp(12.5))
+                                        .line_height(sp(18.0))
+                                        .text_color(theme.text_secondary)
+                                        .child(tr!("computer_use.availability")),
+                                ),
+                        )
+                        .child({
+                            let weak = cx.entity().downgrade();
+                            Switch::new("computer-use-enabled", enabled).on_toggle(
+                                move |enabled, _, cx| {
+                                    let _ = weak.update(cx, |this, cx| {
+                                        this.set_computer_use_enabled(enabled, cx)
+                                    });
+                                },
                             )
-                            .child(
-                                div()
-                                    .mt(px(5.0))
-                                    .text_size(sp(12.5))
-                                    .line_height(sp(18.0))
-                                    .text_color(theme.text_secondary)
-                                    .child(tr!("computer_use.availability")),
-                            ),
-                    )
-                    .child(toggle_switch(
-                        "computer-use-enabled",
-                        enabled,
-                        false,
-                        theme,
-                        cx,
-                        move |this, _, cx| this.set_computer_use_enabled(!enabled, cx),
-                    )),
+                        }),
+                ),
             )
             .child(
-                div()
+                bezel_theme
+                    .group_box()
+                    .w_full()
                     .px(px(20.0))
                     .py(px(14.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
                     .child(
                         div()
                             .text_size(sp(13.5))
@@ -168,36 +173,28 @@ impl Padu {
                     ))
                     .child(
                         div().mt(px(11.0)).flex().items_center().gap(px(8.0)).child(
-                            div()
-                                .id("recheck-computer-permissions")
-                                .h(px(28.0))
-                                .px(px(11.0))
-                                .rounded(px(7.0))
-                                .border_1()
-                                .border_color(theme.border_strong)
-                                .text_color(theme.text_secondary)
-                                .flex()
-                                .items_center()
-                                .cursor_pointer()
-                                .text_size(sp(12.5))
-                                .opacity(if pending { 0.6 } else { 1.0 })
-                                .child(if pending {
+                            Button::new(
+                                "recheck-computer-permissions",
+                                if pending {
                                     tr!("common.checking")
                                 } else {
                                     tr!("common.recheck")
-                                })
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.request_computer_permissions(false, cx);
-                                })),
+                                },
+                            )
+                            .button_style(ButtonStyle::Ghost)
+                            .enabled(!pending)
+                            .on_press(cx.listener(|this, _, _, cx| {
+                                this.request_computer_permissions(false, cx);
+                            })),
                         ),
                     ),
             )
             .child(
-                div()
+                bezel_theme
+                    .group_box()
+                    .w_full()
                     .px(px(20.0))
                     .py(px(14.0))
-                    .rounded(px(13.0))
-                    .bg(theme.raised)
                     .child(
                         div()
                             .text_size(sp(13.5))
@@ -311,7 +308,7 @@ fn permission_status_row(
     theme: Theme,
     cx: &mut Context<Padu>,
 ) -> Div {
-    let status = if granted {
+    let status: AnyElement = if granted {
         div()
             .id(id)
             .h(px(25.0))
@@ -325,24 +322,14 @@ fn permission_status_row(
             .text_color(theme.success)
             .child(icon("icons/check.svg", 12.0, theme.success))
             .child(tr!("computer_use.access_granted"))
+            .into_any_element()
     } else {
-        div()
-            .id(id)
-            .h(px(25.0))
-            .px(px(9.0))
-            .rounded(px(6.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .items_center()
-            .cursor_pointer()
-            .text_size(sp(12.5))
-            .text_color(theme.text_secondary)
-            .hover(|element| element.bg(theme.overlay).text_color(theme.text))
-            .child(tr!("computer_use.grant_access"))
-            .on_click(cx.listener(move |this, _, _, cx| {
+        Button::new(id, tr!("computer_use.grant_access"))
+            .button_style(ButtonStyle::Ghost)
+            .on_press(cx.listener(move |this, _, _, cx| {
                 this.request_computer_permissions(true, cx);
             }))
+            .into_any_element()
     };
 
     div()

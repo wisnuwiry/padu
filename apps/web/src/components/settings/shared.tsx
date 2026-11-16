@@ -31,13 +31,18 @@ export function Toggle({ checked, label, onChange }: { checked: boolean; label: 
       aria-label={label}
       className={cn(
         'flex h-5 w-9 shrink-0 items-center rounded-full border p-0.5 outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring',
-        checked ? 'justify-end border-foreground bg-foreground' : 'justify-start border-input bg-[var(--inset)]',
+        checked ? 'justify-end border-ring bg-ring' : 'justify-start border-input bg-[var(--inset)]',
       )}
       role="switch"
       type="button"
       onClick={() => onChange(!checked)}
     >
-      <span className={cn('size-3.5 rounded-full', checked ? 'bg-background' : 'bg-[var(--text-tertiary)]')} />
+      <span
+        className={cn(
+          'size-3.5 rounded-full',
+          checked ? 'bg-[var(--switch-knob-active,#ffffff)]' : 'bg-[var(--text-tertiary)]',
+        )}
+      />
     </button>
   )
 }

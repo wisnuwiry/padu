@@ -50,7 +50,7 @@ pub(super) fn working_wave_dots(color: Hsla) -> AnyElement {
     .into_any_element()
 }
 
-pub(crate) use crate::ui::{kbd_badge, kbd_badge_icon};
+pub(crate) use crate::ui::kbd_badge;
 
 pub(super) fn format_message_time(created_at: u64) -> String {
     format_message_time_at(created_at, Local::now())
@@ -177,7 +177,7 @@ impl Padu {
         .detach();
     }
 
-    fn show_message_copied(&mut self, message_id: Uuid, cx: &mut Context<Self>) {
+    pub(super) fn show_message_copied(&mut self, message_id: Uuid, cx: &mut Context<Self>) {
         self.copied_message_generation = self.copied_message_generation.wrapping_add(1);
         let generation = self.copied_message_generation;
         self.copied_message_feedback.insert(message_id, generation);
@@ -207,6 +207,7 @@ pub(super) fn render_message_footer(
     align_right: bool,
     assistant_message_action: Option<AssistantMessageAction>,
     user_message_action: Option<UserMessageAction>,
+    is_menu_open: bool,
     padu: gpui::WeakEntity<Padu>,
 ) -> AnyElement {
     let theme = *theme;
@@ -280,13 +281,43 @@ pub(super) fn render_message_footer(
                 this.add_content_to_new_note(note_content.as_ref(), cx);
             });
         });
+    let more_padu = padu.clone();
+    let note_padu_trigger = padu.clone();
+    let more_button = div()
+        .id(SharedString::from(format!(
+            "chat-message-action-{message_id}"
+        )))
+        .w(px(27.0))
+        .h(px(27.0))
+        .rounded(px(8.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .tab_index(0)
+        .focus_visible(|style| style.border_1().border_color(theme.accent))
+        .when(is_menu_open, |element| element.bg(theme.overlay_strong))
+        .hover(|element| element.bg(theme.overlay_strong))
+        .child(icon("icons/ellipsis.svg", 14.0, footer_color))
+        .tooltip(Tooltip::text(tr_cow!("transcript.message_actions")))
+        .capture_any_mouse_down(move |_, _, cx| {
+            let _ = note_padu_trigger.update(cx, |this, _| {
+                this.chat_message_menu.note_press(&message_id);
+            });
+        })
+        .on_click(move |event, window, cx| {
+            let _ = more_padu.update(cx, |this, cx| {
+                this.toggle_chat_message_context_menu(message_id, event.position(), window, cx);
+            });
+            cx.stop_propagation();
+        });
     let mut footer = div()
         .w_full()
         .h(px(27.0))
         .flex()
         .items_center()
         .gap(px(1.0))
-        .when(!force_visible, |element| {
+        .when(!force_visible && !is_menu_open, |element| {
             element
                 .invisible()
                 .group_hover(group_name, |element| element.visible())
@@ -299,6 +330,7 @@ pub(super) fn render_message_footer(
         if can_copy {
             footer = footer.child(copy_button);
         }
+        footer = footer.child(more_button);
     } else {
         footer = footer.child(copy_button);
         if message.role == MessageRole::Assistant {
@@ -346,6 +378,7 @@ pub(super) fn render_message_footer(
                 fork_button
             });
         }
+        footer = footer.child(more_button);
         footer = footer.child(timestamp);
     }
 
@@ -398,9 +431,8 @@ pub(super) struct MessageRender<'a> {
     /// The parsed human or assistant body. System messages remain verbatim.
     pub(super) markdown: Option<&'a MarkdownView>,
     pub(super) ctx: &'a MarkdownCtx<'a>,
-    pub(super) menu: ContextMenuHandle,
+    pub(super) is_menu_open: bool,
     pub(super) padu: gpui::WeakEntity<Padu>,
-    pub(super) composer: Entity<ComposerInput>,
 }
 
 fn render_embedded_notes(
@@ -760,19 +792,11 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         attachments_can_reveal,
         markdown,
         ctx,
-        menu,
+        is_menu_open,
         padu,
-        composer,
     } = params;
 
     let content = message.visible_content().to_owned();
-    // "Copy Message" must match what the row presents. The terminal part of a
-    // settled response stands in for the whole visible answer, so its menu
-    // shares the footer's copy content — parts hidden behind "Worked for X"
-    // stay out — rather than copying the final part alone.
-    let menu_copy_content = assistant_footer_copy_content
-        .clone()
-        .unwrap_or_else(|| SharedString::from(content.clone()));
     let message_id = message.id;
     let role = message.role;
     // User bubbles normally shrink to their content, but a fenced code block
@@ -918,6 +942,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                     true,
                     None,
                     user_message_action,
+                    is_menu_open,
                     padu.clone(),
                 ));
             }
@@ -952,6 +977,7 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
                     false,
                     assistant_message_action,
                     None,
+                    is_menu_open,
                     padu.clone(),
                 ));
             }
@@ -975,119 +1001,19 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
         ),
     };
 
-    let selection = ctx.selection().clone();
-    context_menu(
-        element.id(message_id),
-        SharedString::from(format!("message-menu-{message_id}")),
-        &menu,
-        move |cx| {
-            message_menu_items(
-                &menu_copy_content,
-                role,
-                user_message_action,
-                assistant_message_action,
-                &selection,
-                &composer,
-                &padu,
-                cx,
-            )
-        },
-    )
-}
-
-/// The message row's context menu. Rebuilt on each open, so availability checks
-/// here always reflect the current session state.
-#[allow(clippy::too_many_arguments)]
-fn message_menu_items(
-    content: &str,
-    role: MessageRole,
-    user_message_action: Option<UserMessageAction>,
-    assistant_message_action: Option<AssistantMessageAction>,
-    selection: &TranscriptSelection,
-    composer: &Entity<ComposerInput>,
-    padu: &gpui::WeakEntity<Padu>,
-    _cx: &mut App,
-) -> Vec<MenuItem> {
-    let mut items = Vec::new();
-
-    if let Some(selected) = selection.selection.borrow().selected_text() {
-        items.push(MenuItem::new(tr!("common.copy_selection"), move |_, cx| {
-            cx.write_to_clipboard(ClipboardItem::new_string(selected.clone()));
-        }));
-    }
-
-    let copy_content = content.to_owned();
-    items.push(MenuItem::new(
-        tr!("common.copy_message_title"),
-        move |_, cx| {
-            cx.write_to_clipboard(ClipboardItem::new_string(copy_content.clone()));
-        },
-    ));
-
-    let note_content = content.to_owned();
-    let padu_for_note = padu.clone();
-    items.push(MenuItem::new(tr!("notes.add_to_note"), move |_, cx| {
-        let _ = padu_for_note.update(cx, |this, cx| {
-            this.add_content_to_new_note(&note_content, cx);
-        });
-    }));
-
-    if role == MessageRole::User && user_message_action.is_none() {
-        let composer = composer.clone();
-        let edit_content = content.to_owned();
-        items.push(MenuItem::new(
-            tr!("common.copy_to_composer"),
-            move |window, cx| {
-                composer.update(cx, |composer, cx| {
-                    composer.set_content(edit_content.clone(), cx);
+    let right_click_padu = padu.clone();
+    element
+        .id(message_id)
+        .on_mouse_down(
+            MouseButton::Right,
+            move |event: &MouseDownEvent, window, cx| {
+                let _ = right_click_padu.update(cx, |this, cx| {
+                    this.open_chat_message_context_menu(message_id, event.position, window, cx);
                 });
-                let focus_handle = composer.read(cx).focus();
-                window.focus(&focus_handle, cx);
+                cx.stop_propagation();
             },
-        ));
-    }
-
-    if let Some(code) = fenced_code(content) {
-        items.push(MenuItem::new(tr!("common.copy_code"), move |_, cx| {
-            cx.write_to_clipboard(ClipboardItem::new_string(code.clone()));
-        }));
-    }
-
-    if let Some(action) = user_message_action {
-        let padu = padu.clone();
-        items.push(MenuItem::Separator);
-        items.push(
-            MenuItem::new(tr!("session.revert_to_here_title"), move |window, cx| {
-                let _ = padu.update(cx, |this, cx| {
-                    this.begin_message_edit(action, window, cx);
-                });
-            })
-            .icon("icons/rewind.svg"),
-        );
-    }
-
-    if let Some(action) = assistant_message_action {
-        let padu = padu.clone();
-        items.push(MenuItem::Separator);
-        items.push(
-            MenuItem::new(
-                if action.enabled {
-                    tr!("session.fork_task_title")
-                } else {
-                    tr!("session.forking_task_title")
-                },
-                move |_, cx| {
-                    let _ = padu.update(cx, |this, cx| {
-                        this.fork_session_from_response(action.session_id, action.turn_count, cx);
-                    });
-                },
-            )
-            .icon("icons/fork.svg")
-            .disabled(!action.enabled),
-        );
-    }
-
-    items
+        )
+        .into_any_element()
 }
 
 pub(super) fn fenced_code(content: &str) -> Option<String> {

@@ -5,6 +5,7 @@ use gpui::{
     img, point, prelude::*, px, rgb, svg,
 };
 
+pub mod button;
 pub mod dialog;
 pub mod editor;
 pub mod menu;
@@ -12,13 +13,31 @@ pub mod motion;
 pub mod scrollbar;
 pub mod shortcut_recorder;
 pub mod slider;
+pub mod switch;
 pub mod tag_input;
 pub mod text_field;
 pub mod tooltip;
 
 #[allow(unused_imports)]
+pub use button::{Button, ButtonKbd};
+#[allow(unused_imports)]
 pub use editor::{EditorLoader, RichEditor, SharedEditor, configure_editor, editor_theme};
+pub use slider::slider;
+pub use switch::Switch;
 pub use tag_input::TagInput;
+
+pub trait RestrictScrollExt: Sized {
+    fn restrict_scroll_to_axis(self) -> Self {
+        self
+    }
+}
+impl<T> RestrictScrollExt for T {}
+
+#[allow(unused_imports)]
+pub use bezel::ui::widgets::{
+    ButtonRole, ButtonStyle, Buttons, Content, Controls, Icons, Layout as BezelLayout, Scaffolding,
+    SliderDrag, Status, slider_fraction,
+};
 
 #[allow(unused_imports)]
 pub use dialog::ConfirmVariant;
@@ -65,6 +84,7 @@ pub fn kbd_badge(label: impl Into<SharedString>, theme: &Theme) -> AnyElement {
     )
 }
 
+#[allow(dead_code)]
 pub fn kbd_badge_icon(
     icon_path: &'static str,
     bg: Hsla,
@@ -233,55 +253,6 @@ impl ActivationExt for Stateful<Div> {
                 cx.stop_propagation();
             }
         }))
-    }
-}
-
-/// The shared pill switch used by settings and automation forms.
-///
-/// `activate` is ignored while `disabled` is true, but the control remains in
-/// the tab order so a pending operation does not move focus unexpectedly.
-pub fn toggle_switch<E>(
-    id: impl Into<ElementId>,
-    on: bool,
-    disabled: bool,
-    theme: Theme,
-    cx: &mut Context<E>,
-    activate: impl Fn(&mut E, &mut Window, &mut Context<E>) + 'static,
-) -> Stateful<Div>
-where
-    E: 'static,
-{
-    let base = div()
-        .id(id)
-        .tab_index(0)
-        .focus_visible(|style| style.border_color(theme.accent))
-        .w(px(36.0))
-        .h(px(20.0))
-        .p(px(2.0))
-        .flex_none()
-        .rounded_full()
-        .cursor_pointer()
-        .when(disabled, |element| element.opacity(0.55))
-        .bg(if on { theme.inverse } else { theme.inset })
-        .border_1()
-        .border_color(if on {
-            theme.inverse
-        } else {
-            theme.border_strong
-        })
-        .flex()
-        .items_center()
-        .when(on, |element| element.justify_end())
-        .child(div().w(px(14.0)).h(px(14.0)).rounded_full().bg(if on {
-            theme.on_inverse
-        } else {
-            theme.text_tertiary
-        }));
-
-    if disabled {
-        base
-    } else {
-        base.on_activation(cx, activate)
     }
 }
 

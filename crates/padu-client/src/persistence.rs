@@ -39,12 +39,89 @@ pub const DEFAULT_RIGHT_PANEL_WIDTH: f32 = 460.0;
 pub const DEFAULT_BACKGROUND_OPACITY: f32 = 0.18;
 pub const DEFAULT_BACKGROUND_HEIGHT: f32 = 50.0;
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConversationBackgroundEffect {
+    #[default]
+    None,
+    Dither,
+    Ascii,
+}
+
+impl ConversationBackgroundEffect {
+    pub const ALL: [Self; 3] = [Self::None, Self::Dither, Self::Ascii];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Dither => "dither",
+            Self::Ascii => "ascii",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DitherEffectConfig {
+    pub max_width: u32,
+    pub color_step: f32,
+    pub spread: f32,
+}
+
+impl Default for DitherEffectConfig {
+    fn default() -> Self {
+        Self {
+            max_width: 800,
+            color_step: 32.0,
+            spread: 40.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AsciiEffectConfig {
+    pub min_columns: u32,
+    pub max_columns: u32,
+    pub cell_size: u32,
+    pub color_step: f32,
+    pub spread: f32,
+    pub bg_dim: f32,
+}
+
+impl Default for AsciiEffectConfig {
+    fn default() -> Self {
+        Self {
+            min_columns: 80,
+            max_columns: 256,
+            cell_size: 8,
+            color_step: 32.0,
+            spread: 40.0,
+            bg_dim: 0.18,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BackgroundEffectFilterConfig {
+    pub dither: DitherEffectConfig,
+    pub ascii: AsciiEffectConfig,
+}
+
+pub static EFFECT_FILTER_CONFIG: std::sync::LazyLock<BackgroundEffectFilterConfig> =
+    std::sync::LazyLock::new(|| {
+        serde_json::from_str(include_str!("../../../background-effects.json")).unwrap_or_default()
+    });
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct ConversationBackgroundSettings {
     pub image_path: Option<PathBuf>,
     pub opacity: f32,
     pub height_percent: f32,
+    #[serde(default)]
+    pub effect: ConversationBackgroundEffect,
 }
 
 impl Default for ConversationBackgroundSettings {
@@ -53,6 +130,7 @@ impl Default for ConversationBackgroundSettings {
             image_path: None,
             opacity: DEFAULT_BACKGROUND_OPACITY,
             height_percent: DEFAULT_BACKGROUND_HEIGHT,
+            effect: ConversationBackgroundEffect::None,
         }
     }
 }
@@ -289,6 +367,8 @@ pub struct AppSettings {
     pub analytics_enabled: bool,
     pub favorite_models: Vec<FavoriteModel>,
     pub theme: ThemePreference,
+    #[serde(default)]
+    pub color_scheme: Option<String>,
     pub language: AppLanguage,
     /// Base text size for the interface, in pixels: chrome and prose are
     /// authored against the 14px default and scale from it. Hand-edited
@@ -329,6 +409,7 @@ impl Default for AppSettings {
             analytics_enabled: default_analytics_enabled(),
             favorite_models: Vec::new(),
             theme: ThemePreference::System,
+            color_scheme: None,
             language: AppLanguage::default(),
             ui_font_size: DEFAULT_UI_FONT_SIZE,
             code_font_size: DEFAULT_CODE_FONT_SIZE,
@@ -491,6 +572,8 @@ pub struct PersistedState {
     #[serde(default)]
     pub theme: ThemePreference,
     #[serde(default)]
+    pub color_scheme: Option<String>,
+    #[serde(default)]
     pub language: AppLanguage,
     #[serde(default = "default_ui_font_size")]
     pub ui_font_size: f32,
@@ -611,6 +694,7 @@ impl PersistedState {
             remembered_model_traits: Vec::new(),
             favorite_models: Vec::new(),
             theme: ThemePreference::System,
+            color_scheme: None,
             language: AppLanguage::default(),
             ui_font_size: DEFAULT_UI_FONT_SIZE,
             code_font_size: DEFAULT_CODE_FONT_SIZE,
@@ -744,6 +828,7 @@ impl PersistedState {
             analytics_enabled: self.analytics_enabled,
             favorite_models: self.favorite_models.clone(),
             theme: self.theme,
+            color_scheme: self.color_scheme.clone(),
             language: self.language,
             ui_font_size: self.ui_font_size,
             code_font_size: self.code_font_size,
@@ -789,6 +874,7 @@ impl PersistedState {
         self.analytics_enabled = settings.analytics_enabled;
         self.favorite_models = settings.favorite_models;
         self.theme = settings.theme;
+        self.color_scheme = settings.color_scheme;
         self.language = settings.language;
         self.ui_font_size = sanitized_ui_font_size(settings.ui_font_size);
         self.code_font_size = sanitized_code_font_size(settings.code_font_size);
@@ -1621,6 +1707,40 @@ mod tests {
         let mut applied_state = PersistedState::empty();
         applied_state.apply_app_settings(settings);
         assert!(!applied_state.sidebar_show_provider);
+    }
+
+    #[test]
+    fn conversation_background_effect_round_trips_and_defaults() {
+        let legacy: ConversationBackgroundSettings =
+            serde_json::from_str(r#"{"opacity":0.5,"height_percent":80.0}"#).unwrap();
+        assert_eq!(legacy.effect, ConversationBackgroundEffect::None);
+
+        let dither: ConversationBackgroundSettings =
+            serde_json::from_str(r#"{"opacity":0.5,"height_percent":80.0,"effect":"dither"}"#)
+                .unwrap();
+        assert_eq!(dither.effect, ConversationBackgroundEffect::Dither);
+
+        let ascii: ConversationBackgroundSettings =
+            serde_json::from_str(r#"{"opacity":0.5,"height_percent":80.0,"effect":"ascii"}"#)
+                .unwrap();
+        assert_eq!(ascii.effect, ConversationBackgroundEffect::Ascii);
+
+        let serialized = serde_json::to_string(&ascii).unwrap();
+        assert!(serialized.contains(r#""effect":"ascii""#));
+    }
+
+    #[test]
+    fn background_effect_filter_config_loads_from_root_json() {
+        let config = &*EFFECT_FILTER_CONFIG;
+        assert_eq!(config.dither.max_width, 800);
+        assert_eq!(config.dither.color_step, 32.0);
+        assert_eq!(config.dither.spread, 40.0);
+        assert_eq!(config.ascii.min_columns, 80);
+        assert_eq!(config.ascii.max_columns, 256);
+        assert_eq!(config.ascii.cell_size, 8);
+        assert_eq!(config.ascii.color_step, 32.0);
+        assert_eq!(config.ascii.spread, 40.0);
+        assert_eq!(config.ascii.bg_dim, 0.18);
     }
 }
 

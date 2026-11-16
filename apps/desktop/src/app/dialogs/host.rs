@@ -9,7 +9,9 @@ use padu_client::persistence::{
 use padu_client::transport::TailscaleConfig;
 
 use crate::app::*;
+use crate::ui::button::{Button, ButtonRole, ButtonStyle};
 use crate::ui::dialog::dialog_backdrop;
+use bezel::ui::widgets::Buttons;
 
 actions!(padu_host_dialog, [ConfirmHostDialog, DismissHostDialog]);
 
@@ -26,6 +28,7 @@ pub fn init(cx: &mut App) {
             Some(DIALOG_INPUT_CONTEXT),
         ),
         KeyBinding::new("secondary-enter", ConfirmHostDialog, Some(DIALOG_CONTEXT)),
+        KeyBinding::new("escape", DismissHostDialog, Some(DIALOG_INPUT_CONTEXT)),
         KeyBinding::new("escape", DismissHostDialog, Some(DIALOG_CONTEXT)),
     ]);
 }
@@ -782,7 +785,7 @@ impl Padu {
                     ),
             )
             // Transport selector
-            .child(self.render_transport_selector(tab, &theme, cx))
+            .child(self.render_transport_selector(tab, cx))
             // One column: what to connect to, then an optional code a phone
             // can scan. Collapsed by default so editing a host stays short.
             .child(
@@ -802,38 +805,12 @@ impl Padu {
                     .justify_between()
                     .when_some(delete_focus.clone(), |row, del_focus| {
                         row.child(
-                            div()
-                                .id("delete-host-button")
+                            Button::new("delete-host-button", tr!("host.remove_host"))
+                                .role(ButtonRole::Destructive)
                                 .track_focus(&del_focus)
-                                .tab_index(0)
-                                .h(px(30.0))
-                                .px(px(12.0))
-                                .rounded(px(7.0))
-                                .cursor_pointer()
-                                .text_size(sp(12.5))
-                                .text_color(gpui::hsla(0.0, 0.7, 0.55, 1.0))
-                                .focus_visible(|style| style.border_1().border_color(theme.accent))
-                                .hover(|e| e.bg(theme.overlay))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(tr!("host.remove_host"))
-                                .on_click(cx.listener(|this, _, window, cx| {
+                                .on_press(cx.listener(|this, _, window, cx| {
                                     this.host_dialog_delete(window, cx);
-                                }))
-                                .on_key_down(cx.listener(
-                                    |this, event: &KeyDownEvent, window, cx| {
-                                        if !event.keystroke.modifiers.modified()
-                                            && matches!(
-                                                event.keystroke.key.as_str(),
-                                                "enter" | "space"
-                                            )
-                                        {
-                                            this.host_dialog_delete(window, cx);
-                                            cx.stop_propagation();
-                                        }
-                                    },
-                                )),
+                                })),
                         )
                     })
                     .when(delete_focus.is_none(), |row| row.child(div()))
@@ -843,89 +820,23 @@ impl Padu {
                             .items_center()
                             .gap(px(8.0))
                             .child(
-                                div()
-                                    .id("cancel-host-dialog")
+                                Button::new("cancel-host-dialog", tr!("common.cancel"))
+                                    .button_style(ButtonStyle::Ghost)
+                                    .role(ButtonRole::Cancel)
+                                    .kbd("Esc")
                                     .track_focus(&cancel_focus)
-                                    .tab_index(0)
-                                    .h(px(30.0))
-                                    .px(px(12.0))
-                                    .gap(px(6.0))
-                                    .rounded(px(7.0))
-                                    .border_1()
-                                    .border_color(theme.border_strong)
-                                    .cursor_pointer()
-                                    .text_size(sp(12.5))
-                                    .text_color(theme.text_secondary)
-                                    .focus_visible(|style| {
-                                        style.border_1().border_color(theme.accent)
-                                    })
-                                    .hover(|e| e.bg(theme.overlay))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(tr!("common.cancel"))
-                                    .child(kbd_badge("Esc", &theme))
-                                    .on_click(cx.listener(|this, _, window, cx| {
+                                    .on_press(cx.listener(|this, _, window, cx| {
                                         this.close_host_dialog(window, cx);
-                                    }))
-                                    .on_key_down(cx.listener(
-                                        |this, event: &KeyDownEvent, window, cx| {
-                                            if !event.keystroke.modifiers.modified()
-                                                && matches!(
-                                                    event.keystroke.key.as_str(),
-                                                    "enter" | "space"
-                                                )
-                                            {
-                                                this.close_host_dialog(window, cx);
-                                                cx.stop_propagation();
-                                            }
-                                        },
-                                    )),
+                                    })),
                             )
                             .child(
-                                div()
-                                    .id("save-host-dialog")
+                                Button::new("save-host-dialog", save_label)
+                                    .button_style(ButtonStyle::Prominent)
+                                    .kbd_icon("icons/corner-down-left.svg")
                                     .track_focus(&save_focus)
-                                    .tab_index(0)
-                                    .h(px(30.0))
-                                    .px(px(14.0))
-                                    .gap(px(6.0))
-                                    .rounded(px(7.0))
-                                    .bg(theme.inverse)
-                                    .cursor_pointer()
-                                    .text_size(sp(12.5))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.on_inverse)
-                                    .focus_visible(|style| {
-                                        style.border_1().border_color(theme.accent)
-                                    })
-                                    .hover(|e| e.opacity(0.9))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(save_label)
-                                    .child(kbd_badge_icon(
-                                        "icons/corner-down-left.svg",
-                                        theme.inverse,
-                                        theme.on_inverse,
-                                        gpui::hsla(0.0, 0.0, 1.0, 0.2),
-                                    ))
-                                    .on_click(cx.listener(|this, _, window, cx| {
+                                    .on_press(cx.listener(|this, _, window, cx| {
                                         this.host_dialog_save(window, cx);
-                                    }))
-                                    .on_key_down(cx.listener(
-                                        |this, event: &KeyDownEvent, window, cx| {
-                                            if !event.keystroke.modifiers.modified()
-                                                && matches!(
-                                                    event.keystroke.key.as_str(),
-                                                    "enter" | "space"
-                                                )
-                                            {
-                                                this.host_dialog_save(window, cx);
-                                                cx.stop_propagation();
-                                            }
-                                        },
-                                    )),
+                                    })),
                             ),
                     ),
             );
@@ -939,62 +850,25 @@ impl Padu {
         ))
     }
 
-    fn render_transport_selector(
-        &self,
-        active: HostTab,
-        theme: &Theme,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        // Notes view-mode segmented style: one container, active option filled.
-        let mut row = div()
-            .flex()
-            .items_center()
-            .gap(px(1.0))
-            .p(px(2.0))
-            .rounded(px(7.0))
-            .bg(theme.overlay);
+    fn render_transport_selector(&self, active: HostTab, cx: &mut Context<Self>) -> Div {
+        let bezel_theme = bezel::theme::Theme::of(cx);
+        let mut row = bezel_theme.control_group();
         for tab in TRANSPORT_OPTIONS {
             let is_active = tab == active;
             let id = SharedString::from(format!("transport-option-{tab:?}"));
             row = row.child(
-                div()
-                    .id(id)
-                    .tab_index(0)
-                    .h(px(28.0))
-                    .px(px(10.0))
-                    .rounded(px(6.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .cursor_pointer()
-                    .text_size(sp(12.5))
-                    .text_color(if is_active {
-                        theme.text
+                Button::new(id, host_tab_label(tab))
+                    .button_style(if is_active {
+                        ButtonStyle::Prominent
                     } else {
-                        theme.text_secondary
+                        ButtonStyle::Ghost
                     })
-                    .when(is_active, |el| el.bg(theme.overlay_strong))
-                    .hover(|el| el.bg(theme.overlay_strong))
-                    .focus_visible(|style| style.border_color(theme.accent))
-                    .child(host_tab_label(tab))
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                    .on_press(cx.listener(move |this, _, _, cx| {
                         if let Some(dialog) = this.host_dialog.as_mut() {
                             dialog.tab = tab;
                             dialog.error = None;
                         }
                         cx.notify();
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                        if !event.keystroke.modifiers.modified()
-                            && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                        {
-                            if let Some(dialog) = this.host_dialog.as_mut() {
-                                dialog.tab = tab;
-                                dialog.error = None;
-                            }
-                            cx.notify();
-                            cx.stop_propagation();
-                        }
                     })),
             );
         }

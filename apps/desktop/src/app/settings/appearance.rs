@@ -1,10 +1,13 @@
-use super::*;
-use crate::ui::slider::slider;
+use std::cell::Cell;
 
-/// Sizes offered by the font-size dropdowns. A hand-edited `app.json` may
-/// hold values outside this list; they render as-is and simply select
-/// nothing here.
-const FONT_SIZES: [f32; 8] = [11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 18.0, 20.0];
+use super::*;
+use crate::theme::ColorScheme;
+use crate::ui::button::{Button, ButtonRole, ButtonStyle};
+use crate::ui::{Switch, slider};
+use bezel::ui::combobox::{Combobox, ComboboxEvent};
+use bezel::ui::widgets::{Controls, Scaffolding, SliderDrag, slider_fraction};
+use gpui::{Bounds, DragMoveEvent, ElementId, MouseButton, MouseDownEvent, SharedString, canvas};
+use padu_client::persistence::ConversationBackgroundEffect;
 
 fn font_size_label(size: f32) -> String {
     if size.fract() == 0.0 {
@@ -15,115 +18,192 @@ fn font_size_label(size: f32) -> String {
 }
 
 fn render_background_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) -> AnyElement {
+    let bezel_theme = bezel::theme::Theme::of(cx);
     let settings = &padu.state.conversation_background;
     let image = padu.conversation_background_image();
+    let has_image = settings.image_path.is_some();
     let weak = cx.entity().downgrade();
-    let choose = div()
-        .id("conversation-background-choose")
-        .tab_index(0)
-        .px(px(10.0))
-        .py(px(6.0))
-        .rounded(px(6.0))
-        .border_1()
-        .border_color(theme.border)
-        .text_size(sp(12.0))
-        .cursor_pointer()
-        .focus_visible(|style| style.border_color(theme.accent))
-        .hover(|style| style.bg(theme.overlay))
-        .flex()
-        .items_center()
-        .gap(px(6.0))
-        .child(icon("icons/folder-open.svg", 13.0, theme.text_secondary))
-        .child(tr!("settings.background_choose"))
-        .on_click({
+
+    let body = if has_image {
+        let opacity = (settings.opacity * 100.0).round() as i32;
+        let height = settings.height_percent.round() as i32;
+        let change = Button::new(
+            "conversation-background-choose",
+            tr!("settings.background_choose"),
+        )
+        .button_style(ButtonStyle::Ghost)
+        .icon("icons/folder-open.svg")
+        .on_press({
             let weak = weak.clone();
             move |_, _, cx| {
                 let _ = weak.update(cx, |this, cx| this.choose_conversation_background(cx));
             }
-        })
-        .on_key_down({
+        });
+        let remove = Button::new(
+            "conversation-background-remove",
+            tr!("settings.background_remove"),
+        )
+        .button_style(ButtonStyle::Ghost)
+        .role(ButtonRole::Destructive)
+        .icon("icons/trash.svg")
+        .on_press({
             let weak = weak.clone();
-            move |event: &KeyDownEvent, _, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    let _ = weak.update(cx, |this, cx| this.choose_conversation_background(cx));
-                }
+            move |_, _, cx| {
+                let _ = weak.update(cx, |this, cx| this.clear_conversation_background(cx));
             }
         });
-    let opacity = (settings.opacity * 100.0).round() as i32;
-    let height = settings.height_percent.round() as i32;
-    let preview = div()
-        .relative()
-        .w_full()
-        .aspect_ratio(188.0 / 142.0)
-        .min_h(px(240.0))
-        .overflow_hidden()
-        .rounded(px(8.0))
-        .bg(theme.surface)
-        .border_1()
-        .border_color(theme.border)
-        .children(
-            crate::app::conversation_background::render_conversation_background(
-                image.clone(),
-                settings,
-                &theme,
-                Some(px(8.0)),
-            ),
-        )
-        .child(
-            div()
-                .relative()
-                .h_full()
-                .p(px(16.0))
-                .flex()
-                .flex_col()
-                .justify_end()
-                .gap(px(3.0))
-                .child(render_preview_message(
-                    MessageRole::User,
-                    tr!("settings.background_preview_user"),
+        let preview = div()
+            .relative()
+            .w_full()
+            .aspect_ratio(188.0 / 142.0)
+            .min_h(px(240.0))
+            .overflow_hidden()
+            .rounded(px(Theme::control_radius()))
+            .bg(theme.surface)
+            .border_1()
+            .border_color(theme.border)
+            .children(
+                crate::app::conversation_background::render_conversation_background(
+                    image.clone(),
+                    settings,
                     &theme,
-                ))
-                .child(render_preview_message(
-                    MessageRole::Assistant,
-                    tr!("settings.background_preview_assistant"),
-                    &theme,
-                )),
-        );
-    let remove = settings.image_path.as_ref().map(|_| {
-        let weak = cx.entity().downgrade();
+                    Some(px(Theme::control_radius())),
+                ),
+            )
+            .child(
+                div()
+                    .relative()
+                    .h_full()
+                    .p(px(16.0))
+                    .flex()
+                    .flex_col()
+                    .justify_end()
+                    .gap(px(3.0))
+                    .child(render_preview_message(
+                        MessageRole::User,
+                        tr!("settings.background_preview_user"),
+                        &theme,
+                    ))
+                    .child(render_preview_message(
+                        MessageRole::Assistant,
+                        tr!("settings.background_preview_assistant"),
+                        &theme,
+                    )),
+            );
+
         div()
-            .id("conversation-background-remove")
-            .tab_index(0)
-            .px(px(8.0))
-            .py(px(6.0))
-            .text_size(sp(12.0))
-            .text_color(theme.text_secondary)
-            .cursor_pointer()
-            .focus_visible(|style| style.border_1().border_color(theme.accent))
+            .w_full()
+            .flex()
+            .items_start()
+            .gap(px(16.0))
+            .child(
+                div()
+                    .w(px(190.0))
+                    .flex_none()
+                    .flex()
+                    .flex_col()
+                    .gap(px(12.0))
+                    .child(background_adjuster(
+                        "background-opacity",
+                        tr!("settings.background_opacity"),
+                        opacity as f32,
+                        0.0,
+                        100.0,
+                        theme,
+                        bezel_theme,
+                        {
+                            let weak = cx.entity().downgrade();
+                            move |value, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.set_conversation_background_opacity(value / 100.0, cx)
+                                });
+                            }
+                        },
+                    ))
+                    .child(background_adjuster(
+                        "background-height",
+                        tr!("settings.background_height"),
+                        height as f32,
+                        20.0,
+                        100.0,
+                        theme,
+                        bezel_theme,
+                        {
+                            let weak = cx.entity().downgrade();
+                            move |value, cx| {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.set_conversation_background_height(value, cx)
+                                });
+                            }
+                        },
+                    ))
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .gap(px(4.0))
+                            .child(
+                                div()
+                                    .text_size(sp(12.0))
+                                    .text_color(theme.text_secondary)
+                                    .child(tr!("settings.background_effect")),
+                            )
+                            .child(padu.background_effect_combobox.clone()),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(10.0))
+                    .child(preview)
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(change.flex_1().w_full())
+                            .child(remove.flex_1().w_full()),
+                    ),
+            )
+            .into_any_element()
+    } else {
+        let upload = Button::new(
+            "conversation-background-choose",
+            tr!("settings.background_choose"),
+        )
+        .button_style(ButtonStyle::Ghost)
+        .icon("icons/folder-open.svg")
+        .on_press({
+            let weak = weak.clone();
+            move |_, _, cx| {
+                let _ = weak.update(cx, |this, cx| this.choose_conversation_background(cx));
+            }
+        });
+
+        div()
+            .id("conversation-background-empty")
+            .w_full()
+            .min_h(px(160.0))
+            .rounded(px(Theme::control_radius()))
+            .bg(theme.surface)
+            .border_1()
+            .border_color(theme.border)
             .flex()
             .items_center()
-            .gap(px(6.0))
-            .child(icon("icons/trash.svg", 13.0, theme.danger))
-            .child(tr!("settings.background_remove"))
-            .on_click({
-                let weak = weak.clone();
-                move |_, _, cx| {
-                    let _ = weak.update(cx, |this, cx| this.clear_conversation_background(cx));
-                }
-            })
-            .on_key_down(move |event: &KeyDownEvent, _, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    let _ = weak.update(cx, |this, cx| this.clear_conversation_background(cx));
-                }
-            })
+            .justify_center()
+            .child(upload)
             .into_any_element()
-    });
-    div()
+    };
+
+    bezel_theme
+        .group_box()
         .mt(px(15.0))
         .w_full()
-        .rounded(px(13.0))
-        .overflow_hidden()
-        .bg(theme.raised)
         .px(px(20.0))
         .py(px(16.0))
         .flex()
@@ -149,56 +229,107 @@ fn render_background_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) 
                         .child(tr!("settings.background_description")),
                 ),
         )
+        .child(body)
+        .into_any_element()
+}
+
+fn font_size_slider(
+    id_prefix: &'static str,
+    value: f32,
+    min: f32,
+    max: f32,
+    theme: Theme,
+    bezel_theme: &bezel::theme::Theme,
+    on_change: impl Fn(f32, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    let value = value.clamp(min, max);
+    let fraction = if max > min {
+        (value - min) / (max - min)
+    } else {
+        0.0
+    };
+    let on_change: Rc<dyn Fn(f32, &mut Window, &mut App)> = Rc::new(on_change);
+    let slider_id = format!("{id_prefix}-slider");
+    let control_id = format!("{id_prefix}-control");
+    let slider_on_change = on_change.clone();
+    let bounds_cell = Rc::new(Cell::new(None));
+
+    let bounds_ref = bounds_cell.clone();
+    let bounds_recorder = canvas(
+        move |bounds: Bounds<Pixels>, _, _| bounds_ref.set(Some(bounds)),
+        |_, _, _, _| (),
+    )
+    .absolute()
+    .inset_0();
+
+    let drag_id: ElementId = control_id.clone().into();
+    let drag_move_on_change = on_change.clone();
+    let mouse_down_on_change = on_change.clone();
+
+    let slider_control = slider(fraction, bezel_theme, theme.accent)
+        .child(bounds_recorder)
+        .id(control_id)
+        .on_drag(SliderDrag(drag_id.clone()), |_, _, _, cx| {
+            cx.new(|_| gpui::Empty)
+        })
+        .on_drag_move(move |event: &DragMoveEvent<SliderDrag>, window, cx| {
+            if let Some(fraction) = slider_fraction(event, drag_id.clone(), cx) {
+                let next = (min + fraction * (max - min)).round().clamp(min, max);
+                drag_move_on_change(next, window, cx);
+            }
+        })
+        .on_mouse_down(
+            MouseButton::Left,
+            move |event: &MouseDownEvent, window, cx| {
+                if let Some(bounds) = bounds_cell.get() {
+                    if bounds.size.width > px(0.0) {
+                        let fraction = ((event.position.x - bounds.left()) / bounds.size.width)
+                            .clamp(0.0, 1.0);
+                        let next = (min + fraction * (max - min)).round().clamp(min, max);
+                        mouse_down_on_change(next, window, cx);
+                    }
+                }
+            },
+        );
+
+    div()
+        .w(px(180.0))
+        .flex_none()
+        .flex()
+        .flex_col()
+        .gap(px(6.0))
         .child(
             div()
-                .w_full()
                 .flex()
-                .items_start()
-                .gap(px(16.0))
-                .child(
-                    div()
-                        .w(px(190.0))
-                        .flex_none()
-                        .flex()
-                        .flex_col()
-                        .gap(px(12.0))
-                        .child(choose)
-                        .children(remove)
-                        .child(div().w_full().h(px(1.0)).my(px(2.0)).bg(theme.border))
-                        .child(background_adjuster(
-                            "background-opacity",
-                            tr!("settings.background_opacity"),
-                            opacity as f32,
-                            0.0,
-                            100.0,
-                            theme,
-                            {
-                                let weak = cx.entity().downgrade();
-                                move |value, cx| {
-                                    let _ = weak.update(cx, |this, cx| {
-                                        this.set_conversation_background_opacity(value / 100.0, cx)
-                                    });
-                                }
-                            },
-                        ))
-                        .child(background_adjuster(
-                            "background-height",
-                            tr!("settings.background_height"),
-                            height as f32,
-                            20.0,
-                            100.0,
-                            theme,
-                            {
-                                let weak = cx.entity().downgrade();
-                                move |value, cx| {
-                                    let _ = weak.update(cx, |this, cx| {
-                                        this.set_conversation_background_height(value, cx)
-                                    });
-                                }
-                            },
-                        )),
-                )
-                .child(div().flex_1().min_w_0().child(preview)),
+                .items_center()
+                .justify_end()
+                .text_size(sp(12.0))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text)
+                .child(font_size_label(value)),
+        )
+        .child(
+            div()
+                .id(slider_id)
+                .w_full()
+                .tab_index(0)
+                .cursor_pointer()
+                .rounded(px(4.0))
+                .focus_visible(|style| style.bg(theme.overlay))
+                .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                    let next = match event.keystroke.key.as_str() {
+                        "left" | "down" => Some((value - 1.0).max(min)),
+                        "right" | "up" => Some((value + 1.0).min(max)),
+                        "home" => Some(min),
+                        "end" => Some(max),
+                        _ => None,
+                    };
+                    if let Some(next) = next {
+                        slider_on_change(next, window, cx);
+                        cx.stop_propagation();
+                    }
+                })
+                .child(slider_control),
         )
         .into_any_element()
 }
@@ -210,13 +341,56 @@ fn background_adjuster(
     min: f32,
     max: f32,
     theme: Theme,
+    bezel_theme: &bezel::theme::Theme,
     on_change: impl Fn(f32, &mut App) + 'static,
 ) -> AnyElement {
     let value = value.clamp(min, max);
     let value_label = format!("{value:.0}%");
+    let fraction = if max > min {
+        (value - min) / (max - min)
+    } else {
+        0.0
+    };
     let on_change: Rc<dyn Fn(f32, &mut App)> = Rc::new(on_change);
     let slider_id = format!("{id_prefix}-slider");
+    let control_id = format!("{id_prefix}-control");
     let slider_on_change = on_change.clone();
+    let bounds_cell = Rc::new(Cell::new(None));
+
+    let bounds_ref = bounds_cell.clone();
+    let bounds_recorder = canvas(
+        move |bounds: Bounds<Pixels>, _, _| bounds_ref.set(Some(bounds)),
+        |_, _, _, _| (),
+    )
+    .absolute()
+    .inset_0();
+
+    let drag_id: ElementId = control_id.clone().into();
+    let drag_move_on_change = on_change.clone();
+    let mouse_down_on_change = on_change.clone();
+
+    let slider_control = slider(fraction, bezel_theme, theme.accent)
+        .child(bounds_recorder)
+        .id(control_id)
+        .on_drag(SliderDrag(drag_id.clone()), |_, _, _, cx| {
+            cx.new(|_| gpui::Empty)
+        })
+        .on_drag_move(move |event: &DragMoveEvent<SliderDrag>, _, cx| {
+            if let Some(fraction) = slider_fraction(event, drag_id.clone(), cx) {
+                let next = (min + fraction * (max - min)).round().clamp(min, max);
+                drag_move_on_change(next, cx);
+            }
+        })
+        .on_mouse_down(MouseButton::Left, move |event: &MouseDownEvent, _, cx| {
+            if let Some(bounds) = bounds_cell.get() {
+                if bounds.size.width > px(0.0) {
+                    let fraction =
+                        ((event.position.x - bounds.left()) / bounds.size.width).clamp(0.0, 1.0);
+                    let next = (min + fraction * (max - min)).round().clamp(min, max);
+                    mouse_down_on_change(next, cx);
+                }
+            }
+        });
 
     div()
         .w_full()
@@ -265,16 +439,7 @@ fn background_adjuster(
                         cx.stop_propagation();
                     }
                 })
-                .child(
-                    slider(format!("{id_prefix}-control"), value)
-                        .range(min..=max)
-                        .step(1.0)
-                        .colors(theme.accent, theme.border, theme.text)
-                        .on_change({
-                            let on_change = on_change.clone();
-                            move |value, cx| on_change(value, cx)
-                        }),
-                ),
+                .child(slider_control),
         )
         .into_any_element()
 }
@@ -283,80 +448,57 @@ fn render_theme_section(
     theme: Theme,
     selected_theme: ThemePreference,
     weak: gpui::WeakEntity<Padu>,
+    cx: &mut Context<Padu>,
 ) -> AnyElement {
-    let theme_cards = ThemePreference::ALL
-        .into_iter()
-        .map(|preference| {
-            let selected = preference == selected_theme;
-            let weak = weak.clone();
-            let preference_id = match preference {
-                ThemePreference::System => "system",
-                ThemePreference::Light => "light",
-                ThemePreference::Dark => "dark",
-            };
-            let preview_path = match preference {
-                ThemePreference::System => "themes/system.svg",
-                ThemePreference::Light => "themes/light.svg",
-                ThemePreference::Dark => "themes/dark.svg",
-            };
-            let preview = div()
-                .w_full()
-                .aspect_ratio(188.0 / 142.0)
-                .rounded(px(6.0))
-                .overflow_hidden()
-                .border_1()
-                .border_color(theme.border)
-                .bg(theme.surface)
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    img(preview_path)
-                        .size_full()
-                        .rounded(px(6.0))
-                        .object_fit(ObjectFit::Contain),
-                );
+    let bezel_theme = bezel::theme::Theme::of(cx);
+    let selected_ix = match selected_theme {
+        ThemePreference::System => 0,
+        ThemePreference::Light => 1,
+        ThemePreference::Dark => 2,
+    };
+    let tiles = ThemePreference::ALL.into_iter().map(|pref| {
+        let preview_path = match pref {
+            ThemePreference::System => "themes/system.svg",
+            ThemePreference::Light => "themes/light.svg",
+            ThemePreference::Dark => "themes/dark.svg",
+        };
+        let preview = div()
+            .w(px(130.0))
+            .aspect_ratio(188.0 / 142.0)
+            .rounded(px(6.0))
+            .overflow_hidden()
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.surface)
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                img(preview_path)
+                    .size_full()
+                    .rounded(px(6.0))
+                    .object_fit(ObjectFit::Contain),
+            )
+            .into_any_element();
+        (preview, SharedString::from(pref.label()))
+    });
 
-            div()
-                .id(SharedString::from(format!("theme-card-{preference_id}")))
-                .tab_index(0)
-                .flex_1()
-                .max_w(px(140.0))
-                .min_w(px(0.0))
-                .p(px(7.0))
-                .rounded(px(10.0))
-                .border_1()
-                .border_color(if selected { theme.accent } else { theme.border })
-                .bg(if selected {
-                    theme.accent.opacity(0.08)
-                } else {
-                    theme.surface
-                })
-                .cursor_pointer()
-                .focus_visible(|style| style.border_1().border_color(theme.accent))
-                .hover(|el| el.bg(theme.overlay))
-                .on_click(move |_, window, cx| {
-                    let _ = weak.update(cx, |this, cx| {
-                        this.set_theme_preference(preference, window, cx);
-                    });
-                })
-                .child(preview)
-                .child(
-                    div()
-                        .mt(px(7.0))
-                        .text_size(sp(12.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme.text)
-                        .child(preference.label()),
-                )
-        })
-        .collect::<Vec<_>>();
-    let theme_selector = div()
-        .flex()
-        .w_full()
-        .justify_end()
-        .gap(px(8.0))
-        .children(theme_cards);
+    let weak_picker = weak.clone();
+    let theme_selector = bezel_theme.picture_picker(
+        "theme-preference-picker",
+        tiles,
+        selected_ix,
+        move |ix, window, cx| {
+            let pref = match ix {
+                0 => ThemePreference::System,
+                1 => ThemePreference::Light,
+                _ => ThemePreference::Dark,
+            };
+            let _ = weak_picker.update(cx, |this, cx| {
+                this.set_theme_preference(pref, window, cx);
+            });
+        },
+    );
 
     div()
         .w_full()
@@ -387,6 +529,113 @@ fn render_theme_section(
                 ),
         )
         .child(theme_selector)
+        .into_any_element()
+}
+
+fn scheme_label(scheme: ColorScheme) -> SharedString {
+    match scheme {
+        ColorScheme::Purple => tr!("settings.color_scheme_purple"),
+        ColorScheme::Blue => tr!("settings.color_scheme_blue"),
+        ColorScheme::Green => tr!("settings.color_scheme_green"),
+        ColorScheme::Amber => tr!("settings.color_scheme_amber"),
+        ColorScheme::Coral => tr!("settings.color_scheme_coral"),
+        ColorScheme::Rose => tr!("settings.color_scheme_rose"),
+        ColorScheme::Neutral => tr!("settings.color_scheme_neutral"),
+    }
+    .into()
+}
+
+fn render_color_scheme_section(
+    theme: Theme,
+    selected_scheme: ColorScheme,
+    weak: gpui::WeakEntity<Padu>,
+    _cx: &mut Context<Padu>,
+) -> AnyElement {
+    let swatches = ColorScheme::ALL.into_iter().map(|scheme| {
+        let is_selected = scheme == selected_scheme;
+        let (dark_accent, _) = scheme.dark_tokens();
+        let (light_accent, _) = scheme.light_tokens();
+        let accent_color = if theme.is_dark {
+            dark_accent
+        } else {
+            light_accent
+        };
+        let weak_click = weak.clone();
+        let weak_key = weak.clone();
+        let scheme_name = scheme_label(scheme);
+
+        div()
+            .id(SharedString::from(format!(
+                "color-scheme-{}",
+                scheme.as_str()
+            )))
+            .tab_index(0)
+            .cursor_pointer()
+            .tooltip(Tooltip::text(scheme_name))
+            .size(px(26.0))
+            .p(px(2.0))
+            .rounded_full()
+            .border_2()
+            .when(is_selected, |el| el.border_color(accent_color))
+            .when(!is_selected, |el| {
+                el.border_color(gpui::transparent_black())
+                    .hover(|el| el.border_color(theme.border_strong))
+            })
+            .focus_visible(|style| style.border_color(theme.accent))
+            .on_click(move |_, window, cx| {
+                let _ = weak_click.update(cx, |this, cx| {
+                    this.set_color_scheme(scheme, window, cx);
+                });
+            })
+            .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    let _ = weak_key.update(cx, |this, cx| {
+                        this.set_color_scheme(scheme, window, cx);
+                    });
+                    cx.stop_propagation();
+                }
+            })
+            .child(div().size_full().rounded_full().bg(accent_color))
+    });
+
+    div()
+        .w_full()
+        .min_h(px(60.0))
+        .px(px(20.0))
+        .py(px(14.0))
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(24.0))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .child(
+                    div()
+                        .text_size(sp(13.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.text)
+                        .child(tr!("settings.color_scheme")),
+                )
+                .child(
+                    div()
+                        .mt(px(5.0))
+                        .text_size(sp(12.5))
+                        .line_height(sp(18.0))
+                        .text_color(theme.text_secondary)
+                        .child(tr!("settings.color_scheme_description")),
+                ),
+        )
+        .child(
+            div()
+                .flex_none()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(8.0))
+                .children(swatches),
+        )
         .into_any_element()
 }
 
@@ -426,51 +675,33 @@ fn code_setting_row(title: String, description: String, control: AnyElement, the
 /// Code surfaces: text size and soft wrapping, shared by the file editor,
 /// diffs, and code blocks.
 fn render_code_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) -> AnyElement {
+    let bezel_theme = bezel::theme::Theme::of(cx);
     let selected_code_font_size = padu.state.code_font_size;
-    let weak = cx.entity().downgrade();
-    let code_font_size_handle = padu.menu_handle("code-font-size-selector", cx);
-    let code_font_size_selector = dropdown_menu(
-        MenuChip::new("code-font-size-selector")
-            .label(font_size_label(selected_code_font_size))
-            .outlined()
-            .selected(code_font_size_handle.is_open())
-            .w(px(116.0))
-            .justify_between(),
-        "code-font-size-selector-menu",
-        &code_font_size_handle,
-        MenuAlign::BelowRight,
-        move |_| {
-            FONT_SIZES
-                .into_iter()
-                .map(|size| {
-                    let weak = weak.clone();
-                    MenuItem::new(font_size_label(size), move |_, cx| {
-                        let _ = weak.update(cx, |this, cx| {
-                            this.set_code_font_size(size, cx);
-                        });
-                    })
-                    .selected(size == selected_code_font_size)
-                })
-                .collect()
+    let weak_code_font = cx.entity().downgrade();
+    let code_font_size_slider = font_size_slider(
+        "code-font-size",
+        selected_code_font_size,
+        11.0,
+        20.0,
+        theme,
+        bezel_theme,
+        move |size, _, cx| {
+            let _ = weak_code_font.update(cx, |this, cx| {
+                this.set_code_font_size(size, cx);
+            });
         },
     );
 
     let wrap = padu.state.code_word_wrap;
-    let wrap_toggle = toggle_switch(
-        "code-word-wrap-toggle",
-        wrap,
-        false,
-        theme,
-        cx,
-        move |this, _, cx| this.set_code_word_wrap(!wrap, cx),
-    );
+    let weak = cx.entity().downgrade();
+    let wrap_toggle = Switch::new("code-word-wrap-toggle", wrap).on_toggle(move |wrap, _, cx| {
+        let _ = weak.update(cx, |this, cx| this.set_code_word_wrap(wrap, cx));
+    });
 
-    div()
+    bezel_theme
+        .group_box()
         .mt(px(15.0))
         .w_full()
-        .rounded(px(13.0))
-        .overflow_hidden()
-        .bg(theme.raised)
         .child(
             div()
                 .w_full()
@@ -496,7 +727,7 @@ fn render_code_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) -> Any
         .child(code_setting_row(
             tr!("settings.code_font_size"),
             tr!("settings.code_font_size_description"),
-            code_font_size_selector,
+            code_font_size_slider,
             theme,
         ))
         .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
@@ -510,22 +741,18 @@ fn render_code_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) -> Any
 }
 
 fn render_sidebar_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) -> AnyElement {
+    let bezel_theme = bezel::theme::Theme::of(cx);
     let show_provider = padu.state.sidebar_show_provider;
-    let toggle = toggle_switch(
-        "sidebar-show-provider-toggle",
-        show_provider,
-        false,
-        theme,
-        cx,
-        move |this, _, cx| this.set_sidebar_show_provider(!show_provider, cx),
-    );
+    let weak = cx.entity().downgrade();
+    let toggle =
+        Switch::new("sidebar-show-provider-toggle", show_provider).on_toggle(move |show, _, cx| {
+            let _ = weak.update(cx, |this, cx| this.set_sidebar_show_provider(show, cx));
+        });
 
-    div()
+    bezel_theme
+        .group_box()
         .mt(px(15.0))
         .w_full()
-        .rounded(px(13.0))
-        .overflow_hidden()
-        .bg(theme.raised)
         .child(
             div()
                 .w_full()
@@ -585,77 +812,44 @@ fn render_sidebar_section(padu: &Padu, theme: Theme, cx: &mut Context<Padu>) -> 
 impl Padu {
     pub(super) fn render_appearance_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
+        let bezel_theme = bezel::theme::Theme::of(cx);
         let selected_theme = self.state.theme;
-        let selected_language = self.state.language;
         let weak = cx.entity().downgrade();
         let theme_weak = weak.clone();
 
         let selected_ui_font_size = self.state.ui_font_size;
-        let weak = cx.entity().downgrade();
-        let ui_font_size_handle = self.menu_handle("ui-font-size-selector", cx);
-        let ui_font_size_selector = dropdown_menu(
-            MenuChip::new("ui-font-size-selector")
-                .label(font_size_label(selected_ui_font_size))
-                .outlined()
-                .selected(ui_font_size_handle.is_open())
-                .w(px(116.0))
-                .justify_between(),
-            "ui-font-size-selector-menu",
-            &ui_font_size_handle,
-            MenuAlign::BelowRight,
-            move |_| {
-                FONT_SIZES
-                    .into_iter()
-                    .map(|size| {
-                        let weak = weak.clone();
-                        MenuItem::new(font_size_label(size), move |window, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.set_ui_font_size(size, window, cx);
-                            });
-                        })
-                        .selected(size == selected_ui_font_size)
-                    })
-                    .collect()
+        let weak_ui_font = cx.entity().downgrade();
+        let ui_font_size_slider = font_size_slider(
+            "ui-font-size",
+            selected_ui_font_size,
+            11.0,
+            20.0,
+            theme,
+            bezel_theme,
+            move |size, window, cx| {
+                let _ = weak_ui_font.update(cx, |this, cx| {
+                    this.set_ui_font_size(size, window, cx);
+                });
             },
         );
 
-        let weak = cx.entity().downgrade();
-        let language_handle = self.menu_handle("language-selector", cx);
-        let language_selector = dropdown_menu(
-            MenuChip::new("language-selector")
-                .label(selected_language.label())
-                .outlined()
-                .selected(language_handle.is_open())
-                .w(px(150.0))
-                .justify_between(),
-            "language-selector-menu",
-            &language_handle,
-            MenuAlign::BelowRight,
-            move |_| {
-                crate::i18n::AppLanguage::ALL
-                    .into_iter()
-                    .map(|language| {
-                        let weak = weak.clone();
-                        MenuItem::new(language.label(), move |window, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.set_language(language, window, cx);
-                            });
-                        })
-                        .selected(language == selected_language)
-                    })
-                    .collect()
-            },
-        );
-
-        let appearance_card = div()
+        let appearance_card = bezel_theme
+            .group_box()
             .mt(px(15.0))
             .w_full()
-            .flex()
-            .flex_col()
-            .rounded(px(13.0))
-            .overflow_hidden()
-            .bg(theme.raised)
-            .child(render_theme_section(theme, selected_theme, theme_weak))
+            .child(render_theme_section(
+                theme,
+                selected_theme,
+                theme_weak.clone(),
+                cx,
+            ))
+            .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
+            .child(render_color_scheme_section(
+                theme,
+                self.color_scheme(),
+                theme_weak,
+                cx,
+            ))
             .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
             .child(
                 div()
@@ -686,7 +880,12 @@ impl Padu {
                                     .child(tr!("language.description")),
                             ),
                     )
-                    .child(language_selector),
+                    .child(
+                        div()
+                            .w(px(180.0))
+                            .flex_none()
+                            .child(self.language_combobox.clone()),
+                    ),
             )
             .child(div().mx(px(20.0)).h(px(1.0)).bg(theme.border))
             .child(
@@ -718,7 +917,7 @@ impl Padu {
                                     .child(tr!("settings.ui_font_size_description")),
                             ),
                     )
-                    .child(ui_font_size_selector),
+                    .child(ui_font_size_slider),
             )
             .into_any_element();
 
@@ -811,15 +1010,109 @@ impl Padu {
             return;
         }
         self.state.theme = preference;
-        crate::theme::apply_theme_preference(preference, window, cx);
+        crate::theme::apply_theme(preference, self.color_scheme(), window, cx);
+        self.save();
+        self.refresh_conversation_background_effect(cx);
+        cx.notify();
+    }
+
+    fn set_color_scheme(
+        &mut self,
+        scheme: ColorScheme,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.color_scheme() == scheme {
+            return;
+        }
+        self.state.color_scheme = Some(scheme.as_str().to_string());
+        crate::theme::apply_theme(self.state.theme, scheme, window, cx);
         self.save();
         cx.notify();
     }
 
-    fn set_language(
+    pub(crate) fn create_language_combobox(
+        language: padu_protocol::i18n::AppLanguage,
+        cx: &mut Context<Self>,
+    ) -> Entity<Combobox> {
+        let items = padu_protocol::i18n::AppLanguage::ALL
+            .into_iter()
+            .map(|lang| SharedString::from(lang.label()))
+            .collect::<Vec<_>>();
+        let selected_index = padu_protocol::i18n::AppLanguage::ALL
+            .into_iter()
+            .position(|lang| lang == language);
+        let combobox = cx.new(|cx| {
+            let mut combo = Combobox::new(items, tr!("language.title"), cx);
+            if let Some(index) = selected_index {
+                combo = combo.with_selection(index);
+            }
+            combo
+        });
+
+        cx.subscribe(
+            &combobox,
+            |this: &mut Self, _, event: &ComboboxEvent, cx| match event {
+                ComboboxEvent::Selected(index) => {
+                    if let Some(&language) = padu_protocol::i18n::AppLanguage::ALL.get(*index) {
+                        this.set_language(language, None, cx);
+                    }
+                }
+            },
+        )
+        .detach();
+
+        combobox
+    }
+
+    pub(crate) fn create_background_effect_combobox(
+        effect: ConversationBackgroundEffect,
+        cx: &mut Context<Self>,
+    ) -> Entity<Combobox> {
+        let items = ConversationBackgroundEffect::ALL
+            .into_iter()
+            .map(|effect| match effect {
+                ConversationBackgroundEffect::None => {
+                    SharedString::from(tr!("settings.background_effect_none"))
+                }
+                ConversationBackgroundEffect::Dither => {
+                    SharedString::from(tr!("settings.background_effect_dither"))
+                }
+                ConversationBackgroundEffect::Ascii => {
+                    SharedString::from(tr!("settings.background_effect_ascii"))
+                }
+            })
+            .collect::<Vec<_>>();
+        let selected_index = ConversationBackgroundEffect::ALL
+            .into_iter()
+            .position(|e| e == effect);
+        let combobox = cx.new(|cx| {
+            let mut combo = Combobox::new(items, tr!("settings.background_effect"), cx);
+            if let Some(index) = selected_index {
+                combo = combo.with_selection(index);
+            }
+            combo
+        });
+
+        cx.subscribe(
+            &combobox,
+            |this: &mut Self, _, event: &ComboboxEvent, cx| match event {
+                ComboboxEvent::Selected(index) => {
+                    if let Some(&effect) = ConversationBackgroundEffect::ALL.get(*index) {
+                        this.set_conversation_background_effect(effect, cx);
+                    }
+                }
+            },
+        )
+        .detach();
+
+        combobox
+    }
+
+    pub(crate) fn set_language(
         &mut self,
         language: crate::i18n::AppLanguage,
-        window: &mut Window,
+        window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) {
         if self.state.language == language {
@@ -828,6 +1121,9 @@ impl Padu {
 
         self.state.language = language;
         crate::i18n::set_language(language);
+        self.language_combobox = Self::create_language_combobox(language, cx);
+        self.background_effect_combobox =
+            Self::create_background_effect_combobox(self.state.conversation_background.effect, cx);
 
         self.composer.update(cx, |input, cx| {
             input.set_placeholder(tr!("input.do_anything"), cx)
@@ -877,7 +1173,9 @@ impl Padu {
             .is_some();
         crate::set_app_menus(cx, updater_available);
         self.save();
-        window.refresh();
+        if let Some(window) = window {
+            window.refresh();
+        }
         cx.notify();
     }
 }

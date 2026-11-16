@@ -15,6 +15,7 @@ interface AccentTokens {
 
 interface SchemeDefinition {
   name: string;
+  tint?: { hue: number; chroma: number };
   light: AccentTokens;
   dark: AccentTokens;
 }
@@ -103,6 +104,7 @@ export interface AccentTokens {
 
 export interface SchemeDefinition {
   name: string;
+  tint?: { hue: number; chroma: number };
   light: AccentTokens;
   dark: AccentTokens;
 }
@@ -404,8 +406,8 @@ function generateRustPalette(config: ThemesConfig): string {
     .join("\n");
 
   const allVariants = schemeEntries
-    .map(([id]) => `ColorScheme::${pascalCase(id)}`)
-    .join(", ");
+    .map(([id]) => `        ColorScheme::${pascalCase(id)},`)
+    .join("\n");
 
   const asStrArms = schemeEntries
     .map(([id]) => `            ColorScheme::${pascalCase(id)} => "${id}",`)
@@ -416,6 +418,19 @@ function generateRustPalette(config: ThemesConfig): string {
       ([id]) =>
         `            "${id}" | "${pascalCase(id)}" => Some(ColorScheme::${pascalCase(id)}),`
     )
+    .join("\n");
+
+  const labelArms = schemeEntries
+    .map(([id, scheme]) => `            ColorScheme::${pascalCase(id)} => "${scheme.name}",`)
+    .join("\n");
+
+  const tintArms = schemeEntries
+    .map(([id, scheme]) => {
+      if (scheme.tint && scheme.tint.chroma > 0.0) {
+        return `            ColorScheme::${pascalCase(id)} => bezel::theme::Tint::new(${scheme.tint.hue.toFixed(3)}, ${scheme.tint.chroma.toFixed(3)}),`;
+      }
+      return `            ColorScheme::${pascalCase(id)} => bezel::theme::Tint::NONE,`;
+    })
     .join("\n");
 
   const darkTokenArms = schemeEntries
@@ -447,11 +462,25 @@ ${enumVariants}
 
 #[allow(dead_code)]
 impl ColorScheme {
-    pub const ALL: [Self; ${schemeEntries.length}] = [${allVariants}];
+    pub const ALL: [Self; ${schemeEntries.length}] = [
+${allVariants}
+    ];
 
     pub const fn as_str(self) -> &'static str {
         match self {
 ${asStrArms}
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+${labelArms}
+        }
+    }
+
+    pub const fn tint(self) -> bezel::theme::Tint {
+        match self {
+${tintArms}
         }
     }
 

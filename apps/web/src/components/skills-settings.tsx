@@ -6,6 +6,7 @@ import { Virtuoso } from 'react-virtuoso'
 import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
 import { ControlMenu } from '@/components/control-menu'
+import { Toggle } from '@/components/settings/shared'
 import { Button } from '@/components/ui/button'
 import { ProviderIcon, providerMeta, PaduIcon } from '@/components/padu-icon'
 import { useSkills } from '@/hooks/use-daemon-data'
@@ -313,24 +314,6 @@ function SkillGlyph({ skill, enabled, large = false }: { skill: SkillEntry; enab
   const className = cn(large ? 'size-[18px]' : 'size-[13px]', !enabled && 'opacity-45')
   if (source && source !== 'shared') return <ProviderIcon className={className} provider={source.provider} />
   return <PaduIcon className={cn(className, 'text-[var(--text-secondary)]')} name="package" />
-}
-
-function Toggle({ checked, label, onChange }: { checked: boolean; label: string; onChange: (checked: boolean) => void }) {
-  return (
-    <button
-      aria-checked={checked}
-      aria-label={label}
-      className={cn(
-        'flex h-5 w-9 shrink-0 items-center rounded-full border p-0.5 outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring',
-        checked ? 'justify-end border-foreground bg-foreground' : 'justify-start border-input bg-[var(--inset)]',
-      )}
-      role="switch"
-      type="button"
-      onClick={() => onChange(!checked)}
-    >
-      <span className={cn('size-3.5 rounded-full', checked ? 'bg-background' : 'bg-[var(--text-tertiary)]')} />
-    </button>
-  )
 }
 
 function EmptyLine({ children }: { children: React.ReactNode }) {

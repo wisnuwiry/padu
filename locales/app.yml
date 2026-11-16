@@ -196,6 +196,15 @@ language.system:
 language.description:
   en: Choose the language used throughout Padu
 
+settings.group_preferences:
+  en: Preferences
+settings.group_integration:
+  en: Integrations
+settings.group_agents:
+  en: Agents
+settings.group_system:
+  en: System
+
 settings.general:
   en: General
 settings.appearance:
@@ -248,6 +257,68 @@ settings.daemon_keywords:
   en: hosts host remote server devbox cloud daemon web network expose origin token port websocket ssh lan
 settings.notifications:
   en: Notifications
+settings.browser:
+  en: Browser
+settings.browser_keywords:
+  en: browser web webview search engine home page cookies cache data clear sites integrations
+settings.browser_search_engine:
+  en: Default Search Engine
+settings.browser_search_engine_description:
+  en: Searches from the address bar use %{engine}.
+settings.browser_add_search_engine:
+  en: Add Search Engine…
+settings.browser_add_search_engine_hint:
+  en: Enter the provider name and search URL with %s in place of the query.
+settings.browser_engine_name_placeholder:
+  en: Provider name (e.g. Brave)
+settings.browser_engine_url_placeholder:
+  en: Search URL (e.g. https://search.brave.com/search?q=%s)
+settings.browser_home:
+  en: Startup & Home Page
+settings.browser_home_description:
+  en: The initial webpage loaded whenever a new browser tab is opened.
+settings.browser_agents_read:
+  en: Agent Web Reading
+settings.browser_agents_read_description:
+  en: Allow AI agents to navigate tabs, inspect page structure, and extract text.
+settings.browser_agents_act:
+  en: Agent Web Interaction
+settings.browser_agents_act_description:
+  en: Allow AI agents to click buttons, type text, and submit forms. Requires web reading.
+settings.browser_blocked:
+  en: Restricted Domains
+settings.browser_blocked_description:
+  en: Websites and domains that AI agents are forbidden from visiting or inspecting.
+settings.browser_blocked_none:
+  en: No restricted domains. All reachable websites are permitted.
+settings.browser_keep_signed_in:
+  en: Remember Logins & Cookies
+settings.browser_keep_signed_in_description:
+  en: Keep authentication cookies and site data active across restarts. When disabled, tabs run in private browsing mode.
+settings.browser_data:
+  en: Browsing Data & Cache
+settings.browser_clear_data:
+  en: Clear Browsing Data
+settings.browser_clearing:
+  en: Clearing browsing data…
+settings.browser_clear_failed:
+  en: Failed to clear browsing data. Please try again.
+settings.browser_cleared:
+  en: Browsing data cleared successfully. Active browser tabs have been closed.
+settings.browser_clear_unavailable:
+  en: Clearing browsing data is only available on macOS.
+settings.browser_calculating:
+  en: Calculating storage usage…
+settings.browser_data_unavailable:
+  en: Storage usage data unavailable.
+settings.browser_no_data:
+  en: No stored website data found.
+settings.browser_one_site:
+  en: Storing cookies and cache from 1 website.
+settings.browser_sites_data:
+  en: Storing cookies and cache from %{count} websites.
+settings.browser_clear_footer:
+  en: Clearing deletes cookies, cache, and storage, closes all browser tabs, and signs you out.
 settings.computer_use_keywords:
   en: computer use screen recording accessibility apps control codex
 settings.notifications_keywords:
@@ -368,6 +439,8 @@ keybindings.section_files:
   en: Files
 keybindings.section_review:
   en: Review
+keybindings.section_terminal:
+  en: Terminal
 keybindings.new_task:
   en: New Task
 keybindings.new_task_desc:
@@ -552,6 +625,22 @@ keybindings.toggle_review_tree:
   en: Expand or Collapse Folders
 keybindings.toggle_review_tree_desc:
   en: Expand or collapse folders in the changed-file tree
+keybindings.terminal_split_horizontal:
+  en: Split Horizontal
+keybindings.terminal_split_horizontal_desc:
+  en: Split the active terminal pane horizontally
+keybindings.terminal_split_vertical:
+  en: Split Vertical
+keybindings.terminal_split_vertical_desc:
+  en: Split the active terminal pane vertically
+keybindings.terminal_toggle_expand:
+  en: Toggle Full Size
+keybindings.terminal_toggle_expand_desc:
+  en: Expand the active terminal pane or restore all panes
+keybindings.terminal_close_pane:
+  en: Close Terminal Pane
+keybindings.terminal_close_pane_desc:
+  en: Close the active terminal pane
 keybindings.search:
   en: Search keybindings...
 keybindings.no_results:
@@ -896,6 +985,24 @@ settings.theme_light:
   en: Light
 settings.theme_dark:
   en: Dark
+settings.color_scheme:
+  en: Color scheme
+settings.color_scheme_description:
+  en: Choose an accent color for interactive controls and highlights
+settings.color_scheme_purple:
+  en: Purple
+settings.color_scheme_blue:
+  en: Blue
+settings.color_scheme_green:
+  en: Green
+settings.color_scheme_amber:
+  en: Amber
+settings.color_scheme_coral:
+  en: Coral
+settings.color_scheme_rose:
+  en: Rose
+settings.color_scheme_neutral:
+  en: Neutral
 settings.sidebar:
   en: Sidebar
 settings.sidebar_description:
@@ -926,6 +1033,14 @@ settings.background_too_large:
   en: Choose an image smaller than 2 MB
 settings.background_unavailable:
   en: The background image could not be loaded
+settings.background_effect:
+  en: Effect
+settings.background_effect_none:
+  en: None
+settings.background_effect_dither:
+  en: Dither
+settings.background_effect_ascii:
+  en: ASCII
 
 input.do_anything:
   en: Do anything…
@@ -1264,6 +1379,10 @@ common.copy_code:
   en: Copy Code
 common.cancel:
   en: Cancel
+common.save:
+  en: Save
+common.change:
+  en: Change…
 common.edit:
   en: Edit
 common.send:
@@ -1276,6 +1395,8 @@ notes.edit:
   en: Edit
 notes.rich_editor:
   en: Rich Editor
+notes.headings:
+  en: Headings
 notes.code:
   en: Code
 notes.side_by_side:
@@ -2757,6 +2878,24 @@ terminal.no_workspace_description:
   en: Select a task before opening a terminal.
 terminal.process_exited:
   en: Process exited
+terminal.split_horizontal:
+  en: Split horizontal (%{shortcut})
+terminal.split_vertical:
+  en: Split vertical (%{shortcut})
+terminal.expand_full:
+  en: Expand full (%{shortcut})
+terminal.show_all_panes:
+  en: Show all panes (%{shortcut})
+terminal.close_pane:
+  en: Close terminal (%{shortcut})
+terminal.switch_to_terminal:
+  en: Switch to %{title}
+terminal.drag_to_dock:
+  en: Drag to dock pane
+terminal.terminals_count_one:
+  en: "%{count} terminal"
+terminal.terminals_count_many:
+  en: "%{count} terminals"
 
 browser.back:
   en: Back (%{shortcut})
@@ -2770,6 +2909,8 @@ browser.open_external:
   en: Open in default browser
 browser.browse_web:
   en: Browse the web
+browser.browse_web_hint:
+  en: Enter a URL or search in the address bar above to get started
 browser.start_hint:
   en: Enter a URL or search above — %{shortcut} focuses the address bar
 browser.unavailable:
@@ -2851,6 +2992,8 @@ transcript.turn_label:
   en: "Turn %{number}: %{prompt}"
 transcript.edit_message:
   en: Edit message
+transcript.message_actions:
+  en: Message actions
 
 duration.second:
   en: "%{count} second"
@@ -3268,6 +3411,8 @@ board.empty_done:
   en: No completed tasks
 board.filter_empty:
   en: No tasks match filters
+board.filters:
+  en: Filters
 board.clear_filters:
   en: Clear Filters
 board.clear_filters_short:

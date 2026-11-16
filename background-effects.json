@@ -1,0 +1,15 @@
+{
+  "dither": {
+    "maxWidth": 800,
+    "colorStep": 32.0,
+    "spread": 40.0
+  },
+  "ascii": {
+    "minColumns": 80,
+    "maxColumns": 256,
+    "cellSize": 8,
+    "colorStep": 32.0,
+    "spread": 40.0,
+    "bgDim": 0.18
+  }
+}
