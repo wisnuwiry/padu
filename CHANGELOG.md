@@ -16,6 +16,22 @@ the original feature bullet instead of adding separate entries for them.
 
 ## [unreleased]
 
+## [0.1.10] - 2026-11-16
+
+### Added
+
+- **Agent Profiles**: Agent profiles with 14 curated defaults and legacy import, editable on desktop and web.
+- **Built-in Browser**: A browser panel with address bar, exposed to agents as a `padu` MCP server over a loopback transport, auto-injected into opencode sessions, with workspace/browser prompt guidance.
+- **Terminal Split Panes**: Split, dock, and resize terminal panes, with terminal actions registered in the keybindings settings.
+- **Notes Rework**: A rich markdown block editor with Mermaid and LaTeX rendering, expanded highlight languages, rich/code layout modes, note tags, and a heading rail beside the editor.
+- **Conversation Backgrounds**: Color dither and ASCII effects selectable in appearance settings, plus frosted/vibrant surfaces reading through native macOS vibrancy and a color scheme picker.
+- **Settings**: Navigation grouped by category.
+
+### Improved
+
+- **Performance**: Cached rendered background effects, precomputed lookup tables, and fast PNG encoding keep background effects smooth on desktop and web.
+- **UI Modernization**: Bezel-native tooltips, buttons with leading/trailing icons and kbd shortcut badges, frosted settings and panel materials, and modernized sidebar session cards.
+
 ### Fixed
 
 - **Cloudflare Tunnel Detection**: `cloudflared` is now resolved from the platform's install locations in addition to `PATH`, so an app launched from Finder/Dock finds a Homebrew, winget, or manual install instead of reporting it missing; the tunnel instructions now show the platform install command and a copyable link to Cloudflare's install guide.
