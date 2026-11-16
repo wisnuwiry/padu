@@ -152,7 +152,7 @@ webview2-com = "0.38"
 # Same version GPUI is built against, so the portal's `IDCompositionVisual`
 # hands straight to `SetRootVisualTarget` with no ABI bridging. `windows-sys`
 # stays for the plain Win32 calls that do not need COM.
-windows = { version = "0.61", features = [
+windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_DirectComposition",
     "Win32_System_Com",
