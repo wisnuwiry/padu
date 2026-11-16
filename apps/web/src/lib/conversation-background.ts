@@ -103,6 +103,29 @@ function saveSettings(next: Partial<ConversationBackground>) {
   }
 }
 
+const BAYER_8X8 = [
+  [0 / 64, 32 / 64, 8 / 64, 40 / 64, 2 / 64, 34 / 64, 10 / 64, 42 / 64],
+  [48 / 64, 16 / 64, 56 / 64, 24 / 64, 50 / 64, 18 / 64, 58 / 64, 26 / 64],
+  [12 / 64, 44 / 64, 4 / 64, 36 / 64, 14 / 64, 46 / 64, 6 / 64, 38 / 64],
+  [60 / 64, 28 / 64, 52 / 64, 20 / 64, 62 / 64, 30 / 64, 54 / 64, 22 / 64],
+  [3 / 64, 35 / 64, 11 / 64, 43 / 64, 1 / 64, 33 / 64, 9 / 64, 41 / 64],
+  [51 / 64, 19 / 64, 59 / 64, 27 / 64, 49 / 64, 17 / 64, 57 / 64, 25 / 64],
+  [15 / 64, 47 / 64, 7 / 64, 39 / 64, 13 / 64, 45 / 64, 5 / 64, 37 / 64],
+  [63 / 64, 31 / 64, 55 / 64, 23 / 64, 61 / 64, 29 / 64, 53 / 64, 21 / 64],
+]
+
+const DITHER_LUT = new Uint8Array(64 * 256)
+for (let b = 0; b < 64; b++) {
+  const y = (b >> 3) & 7
+  const x = b & 7
+  const bayerVal = BAYER_8X8[y][x] - 0.5
+  const spread = bayerVal * 40
+  const offset = b * 256
+  for (let c = 0; c < 256; c++) {
+    DITHER_LUT[offset + c] = Math.min(255, Math.max(0, Math.round((c + spread) / 32) * 32))
+  }
+}
+
 function processDither(img: HTMLImageElement): string {
   const naturalW = img.naturalWidth || 1920
   const naturalH = img.naturalHeight || 1080
@@ -116,27 +139,17 @@ function processDither(img: HTMLImageElement): string {
   ctx.drawImage(img, 0, 0, targetW, targetH)
   const imgData = ctx.getImageData(0, 0, targetW, targetH)
   const data = imgData.data
-  const bayer = [
-    [0 / 64, 32 / 64, 8 / 64, 40 / 64, 2 / 64, 34 / 64, 10 / 64, 42 / 64],
-    [48 / 64, 16 / 64, 56 / 64, 24 / 64, 50 / 64, 18 / 64, 58 / 64, 26 / 64],
-    [12 / 64, 44 / 64, 4 / 64, 36 / 64, 14 / 64, 46 / 64, 6 / 64, 38 / 64],
-    [60 / 64, 28 / 64, 52 / 64, 20 / 64, 62 / 64, 30 / 64, 54 / 64, 22 / 64],
-    [3 / 64, 35 / 64, 11 / 64, 43 / 64, 1 / 64, 33 / 64, 9 / 64, 41 / 64],
-    [51 / 64, 19 / 64, 59 / 64, 27 / 64, 49 / 64, 17 / 64, 57 / 64, 25 / 64],
-    [15 / 64, 47 / 64, 7 / 64, 39 / 64, 13 / 64, 45 / 64, 5 / 64, 37 / 64],
-    [63 / 64, 31 / 64, 55 / 64, 23 / 64, 61 / 64, 29 / 64, 53 / 64, 21 / 64],
-  ]
-  const step = 32
+
   for (let y = 0; y < targetH; y++) {
-    const bayerRow = bayer[y & 7]
+    const yShift = (y & 7) << 3
+    const rowOffset = y * targetW * 4
     for (let x = 0; x < targetW; x++) {
-      const idx = (y * targetW + x) * 4
+      const idx = rowOffset + x * 4
       if (data[idx + 3] < 10) continue
-      const bayerVal = bayerRow[x & 7] - 0.5
-      const spread = bayerVal * 40
-      data[idx] = Math.min(255, Math.max(0, Math.round((data[idx] + spread) / step) * step))
-      data[idx + 1] = Math.min(255, Math.max(0, Math.round((data[idx + 1] + spread) / step) * step))
-      data[idx + 2] = Math.min(255, Math.max(0, Math.round((data[idx + 2] + spread) / step) * step))
+      const lutOffset = (yShift | (x & 7)) * 256
+      data[idx] = DITHER_LUT[lutOffset + data[idx]]
+      data[idx + 1] = DITHER_LUT[lutOffset + data[idx + 1]]
+      data[idx + 2] = DITHER_LUT[lutOffset + data[idx + 2]]
     }
   }
   ctx.putImageData(imgData, 0, 0)
@@ -168,41 +181,51 @@ function processAscii(img: HTMLImageElement): string {
   sampleCtx.drawImage(img, 0, 0, cols, rows)
   const sampleData = sampleCtx.getImageData(0, 0, cols, rows).data
 
+  const outW = cols * 8
+  const outH = rows * 8
   const outCanvas = document.createElement('canvas')
-  outCanvas.width = cols * 8
-  outCanvas.height = rows * 8
+  outCanvas.width = outW
+  outCanvas.height = outH
   const outCtx = outCanvas.getContext('2d')
   if (!outCtx) return ''
-  const outImgData = outCtx.createImageData(cols * 8, rows * 8)
-  const outData = outImgData.data
+  const outImgData = outCtx.createImageData(outW, outH)
+  const out32 = new Uint32Array(outImgData.data.buffer)
 
   for (let cy = 0; cy < rows; cy++) {
+    const sampleRowOffset = cy * cols * 4
     for (let cx = 0; cx < cols; cx++) {
-      const sampleIdx = (cy * cols + cx) * 4
-      const r = sampleData[sampleIdx]
-      const g = sampleData[sampleIdx + 1]
-      const b = sampleData[sampleIdx + 2]
+      const sampleIdx = sampleRowOffset + cx * 4
       const a = sampleData[sampleIdx + 3]
       if (a < 10) continue
 
-      const luma = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-      const glyphIdx = Math.min(7, Math.max(0, Math.round(luma * 7)))
+      const r = sampleData[sampleIdx]
+      const g = sampleData[sampleIdx + 1]
+      const b = sampleData[sampleIdx + 2]
+
+      const luma = (r * 77 + g * 150 + b * 29) >> 8
+      const glyphIdx = Math.min(7, (luma * 7 + 128) >> 8)
       const glyph = ASCII_GLYPHS_8X8[glyphIdx]
 
-      const bgR = Math.round(r * 0.18)
-      const bgG = Math.round(g * 0.18)
-      const bgB = Math.round(b * 0.18)
+      const bgR = (r * 46) >> 8
+      const bgG = (g * 46) >> 8
+      const bgB = (b * 46) >> 8
+
+      // Little-endian 32-bit RGBA: (A << 24) | (B << 16) | (G << 8) | R
+      const fg = (255 << 24) | (b << 16) | (g << 8) | r
+      const bg = (255 << 24) | (bgB << 16) | (bgG << 8) | bgR
+      const baseOutIdx = (cy * 8 * outW) + (cx * 8)
 
       for (let gy = 0; gy < 8; gy++) {
         const rowBits = glyph[gy]
-        for (let gx = 0; gx < 8; gx++) {
-          const isFg = ((rowBits >> (7 - gx)) & 1) !== 0
-          const outIdx = ((cy * 8 + gy) * (cols * 8) + (cx * 8 + gx)) * 4
-          outData[outIdx] = isFg ? r : bgR
-          outData[outIdx + 1] = isFg ? g : bgG
-          outData[outIdx + 2] = isFg ? b : bgB
-          outData[outIdx + 3] = 255
-        }
+        const rowOffset = baseOutIdx + (gy * outW)
+        out32[rowOffset] = (rowBits & 0x80) ? fg : bg
+        out32[rowOffset + 1] = (rowBits & 0x40) ? fg : bg
+        out32[rowOffset + 2] = (rowBits & 0x20) ? fg : bg
+        out32[rowOffset + 3] = (rowBits & 0x10) ? fg : bg
+        out32[rowOffset + 4] = (rowBits & 0x08) ? fg : bg
+        out32[rowOffset + 5] = (rowBits & 0x04) ? fg : bg
+        out32[rowOffset + 6] = (rowBits & 0x02) ? fg : bg
+        out32[rowOffset + 7] = (rowBits & 0x01) ? fg : bg
       }
     }
   }
@@ -210,8 +233,15 @@ function processAscii(img: HTMLImageElement): string {
   return outCanvas.toDataURL('image/png')
 }
 
+const effectCache = new Map<ConversationBackgroundEffect, string>()
+let cachedImageSourceUrl: string | null = null
+let cachedImageElement: HTMLImageElement | null = null
+
 async function processEffects(url: string | null) {
   if (typeof window === 'undefined' || !url) {
+    effectCache.clear()
+    cachedImageSourceUrl = null
+    cachedImageElement = null
     snapshot = { ...snapshot, processedImageUrl: null }
     emit()
     return
@@ -221,15 +251,34 @@ async function processEffects(url: string | null) {
     emit()
     return
   }
-  const img = new Image()
-  img.crossOrigin = 'anonymous'
-  await new Promise<void>((resolve, reject) => {
-    img.onload = () => resolve()
-    img.onerror = () => reject()
-    img.src = url
-  }).catch(() => {})
+  if (url !== cachedImageSourceUrl) {
+    effectCache.clear()
+    cachedImageSourceUrl = url
+    cachedImageElement = null
+  }
+  const cachedUrl = effectCache.get(snapshot.effect)
+  if (cachedUrl) {
+    snapshot = { ...snapshot, processedImageUrl: cachedUrl }
+    emit()
+    return
+  }
+
+  let img = cachedImageElement
+  if (!img) {
+    img = new Image()
+    img.crossOrigin = 'anonymous'
+    await new Promise<void>((resolve, reject) => {
+      img!.onload = () => resolve()
+      img!.onerror = () => reject()
+      img!.src = url
+    }).catch(() => {})
+    cachedImageElement = img
+  }
 
   const processed = snapshot.effect === 'dither' ? processDither(img) : processAscii(img)
+  if (processed) {
+    effectCache.set(snapshot.effect, processed)
+  }
   snapshot = { ...snapshot, processedImageUrl: processed }
   emit()
 }
