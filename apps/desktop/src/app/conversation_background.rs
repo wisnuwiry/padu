@@ -113,6 +113,23 @@ const ASCII_GLYPHS_8X8: [[u8; 8]; 8] = [
     [0x24, 0x7E, 0x24, 0x24, 0x7E, 0x24, 0x00, 0x00],
 ];
 
+static DITHER_LUT: std::sync::LazyLock<[[u8; 256]; 64]> = std::sync::LazyLock::new(|| {
+    let mut lut = [[0u8; 256]; 64];
+    const STEP: f32 = 32.0;
+    for y in 0..8 {
+        for x in 0..8 {
+            let bayer_idx = (y << 3) | x;
+            let bayer = BAYER_8X8[y][x] - 0.5;
+            let spread = bayer * 40.0;
+            for c in 0..=255 {
+                let quantized = ((c as f32 + spread).clamp(0.0, 255.0) / STEP).round() * STEP;
+                lut[bayer_idx][c] = quantized.clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    lut
+});
+
 fn encode_png_fast(img: &image::RgbaImage) -> Option<Vec<u8>> {
     let mut bytes = Vec::new();
     let encoder =
@@ -172,35 +189,30 @@ fn process_background_bytes(
             };
 
             let mut out = image::RgbaImage::new(target_w, target_h);
-            const STEP: f32 = 32.0;
+            let src_bytes = source.as_raw();
+            let out_bytes = out.as_mut();
+            let lut = &*DITHER_LUT;
+
             for y in 0..target_h {
-                let bayer_row = &BAYER_8X8[(y & 7) as usize];
-                for x in 0..target_w {
-                    let p = source.get_pixel(x, y);
-                    if p[3] < 10 {
-                        out.put_pixel(x, y, image::Rgba([0, 0, 0, 0]));
+                let y_shift = ((y & 7) << 3) as usize;
+                let row_start = (y * target_w * 4) as usize;
+                let row_end = row_start + (target_w * 4) as usize;
+                let src_row = &src_bytes[row_start..row_end];
+                let out_row = &mut out_bytes[row_start..row_end];
+
+                for x in 0..target_w as usize {
+                    let px_idx = x * 4;
+                    let a = src_row[px_idx + 3];
+                    if a < 10 {
+                        out_row[px_idx..px_idx + 4].copy_from_slice(&[0, 0, 0, 0]);
                         continue;
                     }
 
-                    // Bayer offset between -0.5 and +0.5
-                    let bayer = bayer_row[(x & 7) as usize] - 0.5;
-                    let dither_spread = bayer * 40.0;
-
-                    // Apply dither while keeping all RGB color channels vibrant
-                    let r = ((p[0] as f32 + dither_spread).clamp(0.0, 255.0) / STEP).round() * STEP;
-                    let g = ((p[1] as f32 + dither_spread).clamp(0.0, 255.0) / STEP).round() * STEP;
-                    let b = ((p[2] as f32 + dither_spread).clamp(0.0, 255.0) / STEP).round() * STEP;
-
-                    out.put_pixel(
-                        x,
-                        y,
-                        image::Rgba([
-                            r.clamp(0.0, 255.0) as u8,
-                            g.clamp(0.0, 255.0) as u8,
-                            b.clamp(0.0, 255.0) as u8,
-                            p[3],
-                        ]),
-                    );
+                    let lut_row = &lut[y_shift | (x & 7)];
+                    out_row[px_idx] = lut_row[src_row[px_idx] as usize];
+                    out_row[px_idx + 1] = lut_row[src_row[px_idx + 1] as usize];
+                    out_row[px_idx + 2] = lut_row[src_row[px_idx + 2] as usize];
+                    out_row[px_idx + 3] = a;
                 }
             }
 
@@ -242,40 +254,46 @@ fn process_background_bytes(
             let out_w = cols * 8;
             let out_h = rows * 8;
             let mut out = image::RgbaImage::new(out_w, out_h);
+            let out_bytes = out.as_mut();
+            let sampled_bytes = sampled.as_raw();
 
             for cy in 0..rows {
+                let sampled_row_offset = (cy * cols * 4) as usize;
                 for cx in 0..cols {
-                    let pixel = sampled.get_pixel(cx, cy);
-                    if pixel[3] < 10 {
+                    let s_idx = sampled_row_offset + (cx * 4) as usize;
+                    let a = sampled_bytes[s_idx + 3];
+                    if a < 10 {
                         continue;
                     }
 
-                    let r = pixel[0];
-                    let g = pixel[1];
-                    let b = pixel[2];
-                    let luma = (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32) / 255.0;
+                    let r = sampled_bytes[s_idx] as u32;
+                    let g = sampled_bytes[s_idx + 1] as u32;
+                    let b = sampled_bytes[s_idx + 2] as u32;
+                    let luma = (r * 77 + g * 150 + b * 29) >> 8;
 
-                    let glyph_idx = (luma * 7.0).round().clamp(0.0, 7.0) as usize;
+                    let glyph_idx = ((luma * 7 + 128) >> 8).min(7) as usize;
                     let glyph = ASCII_GLYPHS_8X8[glyph_idx];
 
                     // Keep original vibrant colors for glyph strokes, softly dim background
-                    let bg_r = (r as f32 * 0.18) as u8;
-                    let bg_g = (g as f32 * 0.18) as u8;
-                    let bg_b = (b as f32 * 0.18) as u8;
+                    let bg_r = ((r * 46) >> 8) as u8;
+                    let bg_g = ((g * 46) >> 8) as u8;
+                    let bg_b = ((b * 46) >> 8) as u8;
 
-                    let base_x = cx * 8;
+                    let fg = [r as u8, g as u8, b as u8, 255];
+                    let bg = [bg_r, bg_g, bg_b, 255];
+
                     let base_y = cy * 8;
+                    let base_x = cx * 8;
 
                     for gy in 0..8 {
                         let row_bits = glyph[gy];
+                        let row_start = (((base_y + gy as u32) * out_w + base_x) * 4) as usize;
+                        let row_slice = &mut out_bytes[row_start..row_start + 32];
                         for gx in 0..8 {
                             let is_fg = ((row_bits >> (7 - gx)) & 1) != 0;
-                            let px_color = if is_fg {
-                                image::Rgba([r, g, b, 255])
-                            } else {
-                                image::Rgba([bg_r, bg_g, bg_b, 255])
-                            };
-                            out.put_pixel(base_x + gx as u32, base_y + gy as u32, px_color);
+                            let color = if is_fg { &fg } else { &bg };
+                            let px = gx * 4;
+                            row_slice[px..px + 4].copy_from_slice(color);
                         }
                     }
                 }
