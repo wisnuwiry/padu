@@ -39,7 +39,7 @@ pub const DEFAULT_RIGHT_PANEL_WIDTH: f32 = 460.0;
 pub const DEFAULT_BACKGROUND_OPACITY: f32 = 0.18;
 pub const DEFAULT_BACKGROUND_HEIGHT: f32 = 50.0;
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConversationBackgroundEffect {
     #[default]
