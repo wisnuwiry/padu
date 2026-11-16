@@ -3177,9 +3177,9 @@ dependencies = [
 
 [[package]]
 name = "granit-parser"
-version = "1.0.0"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c60388b03522b86e24b6b45952255279936b08a871775156fc89c94e792d21d8"
+checksum = "05f05586d4d4df3d47123207826c40b252728b438a1a07bad3c01ee6bea401df"
 dependencies = [
  "arraydeque",
  "smallvec",
@@ -5120,7 +5120,7 @@ dependencies = [
  "rusqlite",
  "rust-i18n",
  "serde",
- "serde-saphyr 1.0.1",
+ "serde-saphyr 2.1.1",
  "serde_json",
  "sha2 0.10.9",
  "smol",
@@ -5167,7 +5167,7 @@ name = "padu-prompts"
 version = "0.1.0"
 dependencies = [
  "serde",
- "serde-saphyr 1.0.1",
+ "serde-saphyr 2.1.1",
 ]
 
 [[package]]
@@ -6637,13 +6637,13 @@ dependencies = [
 
 [[package]]
 name = "serde-saphyr"
-version = "1.0.1"
+version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af2c6921c8ce48fb1b052b457619d008834039d80325992ed3bc55bbe6c155ad"
+checksum = "d43fb82d550b07e6f929a58d7d0935182602f48ddead875f5ee313c41c8f07fe"
 dependencies = [
  "annotate-snippets",
  "encoding_rs_io",
- "granit-parser 1.0.0",
+ "granit-parser 2.1.0",
  "num-traits",
  "serde_core",
  "smallvec",
