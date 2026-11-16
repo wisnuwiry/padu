@@ -6,8 +6,8 @@ use std::rc::Rc;
 use bezel::theme::{ControlSize, Sizing, Theme};
 use bezel::ui::focus::pressable;
 use gpui::{
-    AnyElement, AnyView, App, ElementId, IntoElement, Refineable, RenderOnce, SharedString,
-    StyleRefinement, Styled, Window, div, prelude::*, px,
+    AnyElement, AnyView, App, ElementId, FocusHandle, IntoElement, Refineable, RenderOnce,
+    SharedString, StyleRefinement, Styled, Window, div, prelude::*, px,
 };
 
 pub use bezel::ui::widgets::{ButtonRole, ButtonStyle};
@@ -41,6 +41,7 @@ pub struct Button {
     enabled: bool,
     refinement: StyleRefinement,
     activate: Option<Rc<Activation>>,
+    focus_handle: Option<FocusHandle>,
 }
 
 #[allow(dead_code)]
@@ -61,6 +62,7 @@ impl Button {
             enabled: true,
             refinement: StyleRefinement::default(),
             activate: None,
+            focus_handle: None,
         }
     }
 
@@ -123,6 +125,11 @@ impl Button {
         self.activate = Some(Rc::new(activate));
         self
     }
+
+    pub fn track_focus(mut self, handle: &FocusHandle) -> Self {
+        self.focus_handle = Some(handle.clone());
+        self
+    }
 }
 
 impl Styled for Button {
@@ -133,8 +140,12 @@ impl Styled for Button {
 
 impl RenderOnce for Button {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let focus = window.use_keyed_state(self.id.clone(), cx, |_, cx| cx.focus_handle());
-        let focus = focus.read(cx).clone();
+        let focus = if let Some(focus) = self.focus_handle {
+            focus
+        } else {
+            let focus = window.use_keyed_state(self.id.clone(), cx, |_, cx| cx.focus_handle());
+            focus.read(cx).clone()
+        };
         let bezel_theme = Theme::of(cx);
         let enabled = self.enabled && self.activate.is_some();
         let destructive =

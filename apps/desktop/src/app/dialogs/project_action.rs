@@ -31,6 +31,12 @@ pub fn init(cx: &mut App) {
             ConfirmProjectActionDialog,
             Some(DIALOG_CONTEXT),
         ),
+        KeyBinding::new("enter", ConfirmProjectActionDialog, Some(DIALOG_CONTEXT)),
+        KeyBinding::new(
+            "escape",
+            DismissProjectActionDialog,
+            Some(DIALOG_INPUT_CONTEXT),
+        ),
         KeyBinding::new("escape", DismissProjectActionDialog, Some(DIALOG_CONTEXT)),
     ]);
 }
@@ -1374,10 +1380,11 @@ impl Padu {
                     .items_center()
                     .justify_between()
                     // Left: Delete Action (when editing)
-                    .when_some(delete_focus.clone(), |row, _del_focus| {
+                    .when_some(delete_focus.clone(), |row, del_focus| {
                         row.child(
                             Button::new("delete-project-action-button", tr!("actions.delete"))
                                 .role(ButtonRole::Destructive)
+                                .track_focus(&del_focus)
                                 .on_press(cx.listener(|this, _, window, cx| {
                                     this.project_action_dialog_delete(window, cx);
                                 })),
@@ -1396,6 +1403,7 @@ impl Padu {
                                     .button_style(ButtonStyle::Ghost)
                                     .role(ButtonRole::Cancel)
                                     .kbd("Esc")
+                                    .track_focus(&dialog.cancel_focus)
                                     .on_press(cx.listener(|this, _, window, cx| {
                                         this.close_project_action_dialog(window, cx);
                                     })),
@@ -1405,6 +1413,7 @@ impl Padu {
                                 Button::new("save-project-action-dialog", save_label)
                                     .button_style(ButtonStyle::Prominent)
                                     .kbd("⌘↵")
+                                    .track_focus(&dialog.save_focus)
                                     .on_press(cx.listener(|this, _, window, cx| {
                                         this.project_action_dialog_save(window, cx);
                                     })),

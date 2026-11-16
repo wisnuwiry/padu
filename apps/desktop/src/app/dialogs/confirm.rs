@@ -22,6 +22,7 @@ const DIALOG_CONTEXT: &str = "ConfirmDialog";
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("enter", ConfirmDialogAction, Some(DIALOG_CONTEXT)),
+        KeyBinding::new("secondary-enter", ConfirmDialogAction, Some(DIALOG_CONTEXT)),
         KeyBinding::new("escape", DismissDialogAction, Some(DIALOG_CONTEXT)),
     ]);
 }
@@ -60,14 +61,48 @@ pub(crate) struct ConfirmDialogState {
     pub variant: ConfirmVariant,
     pub icon_name: Option<&'static str>,
     pub action: ConfirmAction,
-    #[allow(dead_code)]
     pub cancel_focus: FocusHandle,
-    #[allow(dead_code)]
     pub confirm_focus: FocusHandle,
     pub previous_focus: Option<FocusHandle>,
 }
 
 impl Padu {
+    #[allow(clippy::too_many_arguments)]
+    fn open_confirm_dialog(
+        &mut self,
+        title: impl Into<SharedString>,
+        message: impl Into<SharedString>,
+        confirm_label: impl Into<SharedString>,
+        cancel_label: impl Into<SharedString>,
+        variant: ConfirmVariant,
+        icon_name: Option<&'static str>,
+        action: ConfirmAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let previous_focus = window.focused(cx);
+        let cancel_focus = cx.focus_handle();
+        let confirm_focus = cx.focus_handle();
+        let focus_target = confirm_focus.clone();
+        window.on_next_frame(move |window, _| {
+            window.on_next_frame(move |window, cx| window.focus(&focus_target, cx));
+        });
+
+        self.confirm_dialog = Some(ConfirmDialogState {
+            title: title.into(),
+            message: message.into(),
+            confirm_label: confirm_label.into(),
+            cancel_label: cancel_label.into(),
+            variant,
+            icon_name,
+            action,
+            cancel_focus,
+            confirm_focus,
+            previous_focus,
+        });
+        cx.notify();
+    }
+
     pub(crate) fn confirm_delete_session(
         &mut self,
         session_id: Uuid,
@@ -78,25 +113,17 @@ impl Padu {
             return;
         };
         let title = session.display_title().to_owned();
-        let previous_focus = window.focused(cx);
-        let cancel_focus = cx.focus_handle();
-        let confirm_focus = cx.focus_handle();
-        let focus_target = confirm_focus.clone();
-        window.on_next_frame(move |window, cx| window.focus(&focus_target, cx));
-
-        self.confirm_dialog = Some(ConfirmDialogState {
-            title: tr!("session.delete_title").into(),
-            message: tr!("session.delete_message", title = title).into(),
-            confirm_label: tr!("session.delete_confirm").into(),
-            cancel_label: tr!("common.cancel").into(),
-            variant: ConfirmVariant::Danger,
-            icon_name: Some("icons/trash.svg"),
-            action: ConfirmAction::DeleteSession { session_id },
-            cancel_focus,
-            confirm_focus,
-            previous_focus,
-        });
-        cx.notify();
+        self.open_confirm_dialog(
+            tr!("session.delete_title"),
+            tr!("session.delete_message", title = title),
+            tr!("session.delete_confirm"),
+            tr!("common.cancel"),
+            ConfirmVariant::Danger,
+            Some("icons/trash.svg"),
+            ConfirmAction::DeleteSession { session_id },
+            window,
+            cx,
+        );
     }
 
     pub(crate) fn confirm_delete_note(
@@ -113,25 +140,17 @@ impl Padu {
         } else {
             note.title.clone()
         };
-        let previous_focus = window.focused(cx);
-        let cancel_focus = cx.focus_handle();
-        let confirm_focus = cx.focus_handle();
-        let focus_target = confirm_focus.clone();
-        window.on_next_frame(move |window, cx| window.focus(&focus_target, cx));
-
-        self.confirm_dialog = Some(ConfirmDialogState {
-            title: tr!("notes.delete_title").into(),
-            message: tr!("notes.delete_message", title = title).into(),
-            confirm_label: tr!("notes.delete").into(),
-            cancel_label: tr!("common.cancel").into(),
-            variant: ConfirmVariant::Danger,
-            icon_name: Some("icons/trash.svg"),
-            action: ConfirmAction::DeleteNote { note_id },
-            cancel_focus,
-            confirm_focus,
-            previous_focus,
-        });
-        cx.notify();
+        self.open_confirm_dialog(
+            tr!("notes.delete_title"),
+            tr!("notes.delete_message", title = title),
+            tr!("notes.delete"),
+            tr!("common.cancel"),
+            ConfirmVariant::Danger,
+            Some("icons/trash.svg"),
+            ConfirmAction::DeleteNote { note_id },
+            window,
+            cx,
+        );
     }
 
     pub(crate) fn confirm_delete_task(
@@ -142,28 +161,20 @@ impl Padu {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let previous_focus = window.focused(cx);
-        let cancel_focus = cx.focus_handle();
-        let confirm_focus = cx.focus_handle();
-        let focus_target = confirm_focus.clone();
-        window.on_next_frame(move |window, cx| window.focus(&focus_target, cx));
-
-        self.confirm_dialog = Some(ConfirmDialogState {
-            title: tr!("board.delete_task").into(),
-            message: format!("{}\n\"{}\"", tr!("board.delete_task_confirm"), title).into(),
-            confirm_label: tr!("board.delete_task").into(),
-            cancel_label: tr!("board.cancel").into(),
-            variant: ConfirmVariant::Danger,
-            icon_name: Some("icons/trash.svg"),
-            action: ConfirmAction::DeleteTask {
+        self.open_confirm_dialog(
+            tr!("board.delete_task"),
+            format!("{}\n\"{}\"", tr!("board.delete_task_confirm"), title),
+            tr!("board.delete_task"),
+            tr!("board.cancel"),
+            ConfirmVariant::Danger,
+            Some("icons/trash.svg"),
+            ConfirmAction::DeleteTask {
                 task_id,
                 expected_version,
             },
-            cancel_focus,
-            confirm_focus,
-            previous_focus,
-        });
-        cx.notify();
+            window,
+            cx,
+        );
     }
 
     pub(crate) fn confirm_delete_path(
@@ -177,32 +188,27 @@ impl Padu {
             .and_then(|n| n.to_str())
             .unwrap_or_default()
             .to_owned();
-        let previous_focus = window.focused(cx);
-        let cancel_focus = cx.focus_handle();
-        let confirm_focus = cx.focus_handle();
-        let focus_target = confirm_focus.clone();
-        window.on_next_frame(move |window, cx| window.focus(&focus_target, cx));
-
-        self.confirm_dialog = Some(ConfirmDialogState {
-            title: tr!("files.delete").into(),
-            message: tr!("files.delete_confirm", name = name).into(),
-            confirm_label: tr!("files.delete").into(),
-            cancel_label: tr!("common.cancel").into(),
-            variant: ConfirmVariant::Danger,
-            icon_name: Some("icons/trash.svg"),
-            action: ConfirmAction::DeletePath { path },
-            cancel_focus,
-            confirm_focus,
-            previous_focus,
-        });
-        cx.notify();
+        self.open_confirm_dialog(
+            tr!("files.delete"),
+            tr!("files.delete_confirm", name = name),
+            tr!("files.delete"),
+            tr!("common.cancel"),
+            ConfirmVariant::Danger,
+            Some("icons/trash.svg"),
+            ConfirmAction::DeletePath { path },
+            window,
+            cx,
+        );
     }
 
     pub(crate) fn confirm_reinstall_agy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.open_agy_confirmation(
+        self.open_confirm_dialog(
             tr!("providers.agy_reinstall_title"),
             tr!("providers.agy_reinstall_confirm"),
             tr!("providers.agy_reinstall"),
+            tr!("common.cancel"),
+            ConfirmVariant::Danger,
+            Some("icons/trash.svg"),
             ConfirmAction::ReinstallAgy,
             window,
             cx,
@@ -210,10 +216,13 @@ impl Padu {
     }
 
     pub(crate) fn confirm_sign_out_agy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.open_agy_confirmation(
+        self.open_confirm_dialog(
             tr!("providers.agy_sign_out_title"),
             tr!("providers.agy_sign_out_confirm"),
             tr!("providers.agy_sign_out"),
+            tr!("common.cancel"),
+            ConfirmVariant::Danger,
+            Some("icons/trash.svg"),
             ConfirmAction::SignOutAgy,
             window,
             cx,
@@ -221,43 +230,17 @@ impl Padu {
     }
 
     pub(crate) fn confirm_remove_agy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.open_agy_confirmation(
+        self.open_confirm_dialog(
             tr!("providers.agy_remove_title"),
             tr!("providers.agy_remove_confirm"),
             tr!("providers.agy_remove_download"),
+            tr!("common.cancel"),
+            ConfirmVariant::Danger,
+            Some("icons/trash.svg"),
             ConfirmAction::RemoveAgy,
             window,
             cx,
         );
-    }
-
-    fn open_agy_confirmation(
-        &mut self,
-        title: impl Into<SharedString>,
-        message: impl Into<SharedString>,
-        confirm_label: impl Into<SharedString>,
-        action: ConfirmAction,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let previous_focus = window.focused(cx);
-        let cancel_focus = cx.focus_handle();
-        let confirm_focus = cx.focus_handle();
-        let focus_target = confirm_focus.clone();
-        window.on_next_frame(move |window, cx| window.focus(&focus_target, cx));
-        self.confirm_dialog = Some(ConfirmDialogState {
-            title: title.into(),
-            message: message.into(),
-            confirm_label: confirm_label.into(),
-            cancel_label: tr!("common.cancel").into(),
-            variant: ConfirmVariant::Danger,
-            icon_name: Some("icons/trash.svg"),
-            action,
-            cancel_focus,
-            confirm_focus,
-            previous_focus,
-        });
-        cx.notify();
     }
 
     pub(crate) fn confirm_delete_host(
@@ -280,25 +263,17 @@ impl Padu {
             })
             .unwrap_or_default();
 
-        let previous_focus = window.focused(cx);
-        let cancel_focus = cx.focus_handle();
-        let confirm_focus = cx.focus_handle();
-        let focus_target = confirm_focus.clone();
-        window.on_next_frame(move |window, cx| window.focus(&focus_target, cx));
-
-        self.confirm_dialog = Some(ConfirmDialogState {
-            title: tr!("host.delete_confirm_title").into(),
-            message: tr!("host.delete_confirm_message", name = host_name).into(),
-            confirm_label: tr!("host.remove_host").into(),
-            cancel_label: tr!("common.cancel").into(),
-            variant: ConfirmVariant::Danger,
-            icon_name: Some("icons/trash.svg"),
-            action: ConfirmAction::DeleteHost { profile_id },
-            cancel_focus,
-            confirm_focus,
-            previous_focus,
-        });
-        cx.notify();
+        self.open_confirm_dialog(
+            tr!("host.delete_confirm_title"),
+            tr!("host.delete_confirm_message", name = host_name),
+            tr!("host.remove_host"),
+            tr!("common.cancel"),
+            ConfirmVariant::Danger,
+            Some("icons/trash.svg"),
+            ConfirmAction::DeleteHost { profile_id },
+            window,
+            cx,
+        );
     }
 
     pub(crate) fn confirm_delete_project_script(
@@ -309,25 +284,20 @@ impl Padu {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let cancel_focus = cx.focus_handle();
-        let confirm_focus = cx.focus_handle();
-        let previous_focus = window.focused(cx);
-        self.confirm_dialog = Some(ConfirmDialogState {
-            title: tr!("actions.delete_confirm_title", name = &script_name).into(),
-            message: tr!("actions.delete_confirm_description").into(),
-            confirm_label: tr!("actions.delete_confirm_button").into(),
-            cancel_label: tr!("actions.cancel").into(),
-            variant: ConfirmVariant::Danger,
-            icon_name: Some("icons/trash.svg"),
-            action: ConfirmAction::DeleteProjectScript {
+        self.open_confirm_dialog(
+            tr!("actions.delete_confirm_title", name = &script_name),
+            tr!("actions.delete_confirm_description"),
+            tr!("actions.delete_confirm_button"),
+            tr!("actions.cancel"),
+            ConfirmVariant::Danger,
+            Some("icons/trash.svg"),
+            ConfirmAction::DeleteProjectScript {
                 project_id,
                 script_id,
             },
-            cancel_focus,
-            confirm_focus,
-            previous_focus,
-        });
-        cx.notify();
+            window,
+            cx,
+        );
     }
 
     pub(crate) fn close_confirm_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -417,6 +387,8 @@ impl Padu {
             dialog.variant,
             dialog.icon_name,
             &theme,
+            Some(&dialog.confirm_focus),
+            Some(&dialog.cancel_focus),
             cx,
             |padu, window, cx| padu.execute_confirm_dialog(window, cx),
             |padu, window, cx| padu.close_confirm_dialog(window, cx),
@@ -462,5 +434,97 @@ mod tests {
         };
         assert_eq!(state.title, "Delete Session");
         assert_eq!(state.variant, ConfirmVariant::Danger);
+    }
+
+    #[gpui::test]
+    fn confirm_dialog_card_keyboard_shortcuts(cx: &mut gpui::TestAppContext) {
+        use gpui::{IntoElement, Render};
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        static CONFIRMED: AtomicBool = AtomicBool::new(false);
+        static CANCELLED: AtomicBool = AtomicBool::new(false);
+
+        CONFIRMED.store(false, Ordering::SeqCst);
+        CANCELLED.store(false, Ordering::SeqCst);
+
+        cx.update(|cx| {
+            let _ = bezel::ui::register_fonts(cx);
+            bezel::theme::appearance::init(bezel::theme::appearance::AppearanceMode::Dark, cx);
+            bezel::ui::focus::init(cx);
+            init(cx);
+        });
+
+        struct DialogHarness {
+            confirm_focus: FocusHandle,
+            cancel_focus: FocusHandle,
+        }
+
+        impl Render for DialogHarness {
+            fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                let theme = Theme::current(cx);
+                render_confirm_dialog_card(
+                    "confirm-card",
+                    "Title".into(),
+                    "Message".into(),
+                    "Confirm".into(),
+                    "Cancel".into(),
+                    ConfirmVariant::Danger,
+                    None,
+                    &theme,
+                    Some(&self.confirm_focus),
+                    Some(&self.cancel_focus),
+                    cx,
+                    |_, _, _| CONFIRMED.store(true, Ordering::SeqCst),
+                    |_, _, _| CANCELLED.store(true, Ordering::SeqCst),
+                )
+                .key_context(DIALOG_CONTEXT)
+                .on_action(cx.listener(|_, _: &ConfirmDialogAction, _, _| {
+                    CONFIRMED.store(true, Ordering::SeqCst);
+                }))
+                .on_action(cx.listener(|_, _: &DismissDialogAction, _, _| {
+                    CANCELLED.store(true, Ordering::SeqCst);
+                }))
+            }
+        }
+
+        let confirm_focus = cx.update(|cx| cx.focus_handle());
+        let cancel_focus = cx.update(|cx| cx.focus_handle());
+
+        let harness = DialogHarness {
+            confirm_focus: confirm_focus.clone(),
+            cancel_focus: cancel_focus.clone(),
+        };
+
+        let (_view, cx) = cx.add_window_view(|_, _| harness);
+        cx.run_until_parked();
+
+        // Focus confirm button and press escape
+        cx.update(|window, cx| window.focus(&confirm_focus, cx));
+        cx.simulate_keystrokes("escape");
+        assert!(
+            CANCELLED.load(Ordering::SeqCst),
+            "Escape on confirm dialog should cancel"
+        );
+
+        cx.run_until_parked();
+
+        // Focus confirm button and press enter
+        cx.update(|window, cx| window.focus(&confirm_focus, cx));
+        cx.simulate_keystrokes("enter");
+        assert!(
+            CONFIRMED.load(Ordering::SeqCst),
+            "Enter on confirm button should confirm"
+        );
+
+        cx.run_until_parked();
+        CANCELLED.store(false, Ordering::SeqCst);
+
+        // Focus cancel button and press enter
+        cx.update(|window, cx| window.focus(&cancel_focus, cx));
+        cx.simulate_keystrokes("enter");
+        assert!(
+            CANCELLED.load(Ordering::SeqCst),
+            "Enter on cancel button should cancel"
+        );
     }
 }

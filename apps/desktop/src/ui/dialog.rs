@@ -1,7 +1,7 @@
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Context, ElementId, FontWeight, Hsla, KeyDownEvent, MouseButton, Pixels,
-    SharedString, Stateful, Window, div, px,
+    AnyElement, App, Context, ElementId, FocusHandle, FontWeight, Hsla, KeyDownEvent, MouseButton,
+    Pixels, SharedString, Stateful, Window, div, px,
 };
 
 use crate::theme::{Theme, sp};
@@ -116,6 +116,8 @@ pub fn render_confirm_dialog_card<V: 'static>(
     variant: ConfirmVariant,
     icon_name: Option<&'static str>,
     theme: &Theme,
+    confirm_focus: Option<&FocusHandle>,
+    cancel_focus: Option<&FocusHandle>,
     cx: &mut Context<V>,
     on_confirm: impl Fn(&mut V, &mut Window, &mut Context<V>) + Copy + 'static,
     on_cancel: impl Fn(&mut V, &mut Window, &mut Context<V>) + Copy + 'static,
@@ -132,18 +134,24 @@ pub fn render_confirm_dialog_card<V: 'static>(
         theme.overlay
     };
 
-    let cancel_button = dialog_cancel_button(
+    let mut cancel_button = dialog_cancel_button(
         "confirm-dialog-cancel",
         cancel_label,
         cx.listener(move |view, _, window, cx| on_cancel(view, window, cx)),
     );
+    if let Some(focus) = cancel_focus {
+        cancel_button = cancel_button.track_focus(focus);
+    }
 
-    let confirm_button = dialog_confirm_button(
+    let mut confirm_button = dialog_confirm_button(
         "confirm-dialog-confirm",
         confirm_label,
         variant,
         cx.listener(move |view, _, window, cx| on_confirm(view, window, cx)),
     );
+    if let Some(focus) = confirm_focus {
+        confirm_button = confirm_button.track_focus(focus);
+    }
 
     let card = dialog_card(id, theme, px(420.0))
         .child(

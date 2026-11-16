@@ -28,6 +28,7 @@ pub fn init(cx: &mut App) {
             Some(DIALOG_INPUT_CONTEXT),
         ),
         KeyBinding::new("secondary-enter", ConfirmHostDialog, Some(DIALOG_CONTEXT)),
+        KeyBinding::new("escape", DismissHostDialog, Some(DIALOG_INPUT_CONTEXT)),
         KeyBinding::new("escape", DismissHostDialog, Some(DIALOG_CONTEXT)),
     ]);
 }
@@ -650,7 +651,7 @@ impl Padu {
                 dialog.ssh_identity_input.clone(),
             )
         };
-        let (_save_focus, _cancel_focus, delete_focus) = {
+        let (save_focus, cancel_focus, delete_focus) = {
             let dialog = self.host_dialog.as_ref()?;
             (
                 dialog.save_focus.clone(),
@@ -802,10 +803,11 @@ impl Padu {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .when_some(delete_focus.clone(), |row, _del_focus| {
+                    .when_some(delete_focus.clone(), |row, del_focus| {
                         row.child(
                             Button::new("delete-host-button", tr!("host.remove_host"))
                                 .role(ButtonRole::Destructive)
+                                .track_focus(&del_focus)
                                 .on_press(cx.listener(|this, _, window, cx| {
                                     this.host_dialog_delete(window, cx);
                                 })),
@@ -822,6 +824,7 @@ impl Padu {
                                     .button_style(ButtonStyle::Ghost)
                                     .role(ButtonRole::Cancel)
                                     .kbd("Esc")
+                                    .track_focus(&cancel_focus)
                                     .on_press(cx.listener(|this, _, window, cx| {
                                         this.close_host_dialog(window, cx);
                                     })),
@@ -830,6 +833,7 @@ impl Padu {
                                 Button::new("save-host-dialog", save_label)
                                     .button_style(ButtonStyle::Prominent)
                                     .kbd_icon("icons/corner-down-left.svg")
+                                    .track_focus(&save_focus)
                                     .on_press(cx.listener(|this, _, window, cx| {
                                         this.host_dialog_save(window, cx);
                                     })),

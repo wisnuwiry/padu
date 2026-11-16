@@ -24,6 +24,8 @@ pub fn init(cx: &mut App) {
             Some(DIALOG_INPUT_CONTEXT),
         ),
         KeyBinding::new("secondary-enter", ConfirmCommitDialog, Some(DIALOG_CONTEXT)),
+        KeyBinding::new("enter", ConfirmCommitDialog, Some(DIALOG_CONTEXT)),
+        KeyBinding::new("escape", DismissCommitDialog, Some(DIALOG_INPUT_CONTEXT)),
         KeyBinding::new("escape", DismissCommitDialog, Some(DIALOG_CONTEXT)),
     ]);
 }
