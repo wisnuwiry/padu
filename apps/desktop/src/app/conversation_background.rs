@@ -370,9 +370,20 @@ impl Padu {
     }
 
     pub(super) fn refresh_conversation_background_effect(&mut self, cx: &mut Context<Self>) {
+        let effect = self.state.conversation_background.effect;
+        if let Some(cached) = self
+            .conversation_background_cache
+            .borrow()
+            .get(&effect)
+            .cloned()
+        {
+            *self.conversation_background_image.borrow_mut() = Some(cached);
+            cx.notify();
+            return;
+        }
+
         let raw = self.conversation_background_raw.borrow().clone();
         if let Some((format, bytes)) = raw {
-            let effect = self.state.conversation_background.effect;
             let generation = self
                 .conversation_background_generation
                 .get()
@@ -386,6 +397,11 @@ impl Padu {
                 let _ = this.update(cx, |this, cx| {
                     if this.conversation_background_generation.get() != generation {
                         return;
+                    }
+                    if let Some(img) = &processed {
+                        this.conversation_background_cache
+                            .borrow_mut()
+                            .insert(effect, img.clone());
                     }
                     *this.conversation_background_image.borrow_mut() = processed;
                     cx.notify();
@@ -431,6 +447,12 @@ impl Padu {
                     return;
                 }
                 if let Ok((format, raw_arc, processed)) = loaded {
+                    this.conversation_background_cache.borrow_mut().clear();
+                    if let Some(img) = &processed {
+                        this.conversation_background_cache
+                            .borrow_mut()
+                            .insert(effect, img.clone());
+                    }
                     *this.conversation_background_raw.borrow_mut() = Some((format, raw_arc));
                     *this.conversation_background_image.borrow_mut() = processed;
                     cx.notify();
@@ -486,6 +508,12 @@ impl Padu {
                     Ok((path, format, raw_arc, processed))
                         if !raw_arc.is_empty() && raw_arc.len() <= MAX_BACKGROUND_IMAGE_BYTES =>
                     {
+                        this.conversation_background_cache.borrow_mut().clear();
+                        if let Some(img) = &processed {
+                            this.conversation_background_cache
+                                .borrow_mut()
+                                .insert(effect, img.clone());
+                        }
                         this.state.conversation_background.image_path = Some(path);
                         *this.conversation_background_raw.borrow_mut() = Some((format, raw_arc));
                         *this.conversation_background_image.borrow_mut() = processed;
@@ -511,6 +539,7 @@ impl Padu {
         self.state.conversation_background.image_path = None;
         self.conversation_background_raw.borrow_mut().take();
         self.conversation_background_image.borrow_mut().take();
+        self.conversation_background_cache.borrow_mut().clear();
         self.save();
         cx.notify();
     }
