@@ -134,31 +134,40 @@ fn process_background_bytes(
                 return None;
             }
 
-            // Downscale to ~360px wide for crisp, chunky retro color dithering
-            let target_w = 360u32.min(orig_w);
-            let target_h = ((orig_h as f32 / orig_w as f32) * target_w as f32)
-                .round()
-                .max(1.0) as u32;
-            let resized = image::imageops::resize(
-                &rgba,
-                target_w,
-                target_h,
-                image::imageops::FilterType::Triangle,
-            );
+            // High resolution color dithering for crisp fidelity (up to 2048px or native)
+            let (target_w, target_h, source) = if orig_w <= 2048 {
+                (orig_w, orig_h, std::borrow::Cow::Borrowed(&rgba))
+            } else {
+                let target_w = 2048u32;
+                let target_h = ((orig_h as f32 / orig_w as f32) * target_w as f32)
+                    .round()
+                    .max(1.0) as u32;
+                (
+                    target_w,
+                    target_h,
+                    std::borrow::Cow::Owned(image::imageops::resize(
+                        &rgba,
+                        target_w,
+                        target_h,
+                        image::imageops::FilterType::Triangle,
+                    )),
+                )
+            };
 
             let mut out = image::RgbaImage::new(target_w, target_h);
-            const STEP: f32 = 36.0;
+            const STEP: f32 = 32.0;
             for y in 0..target_h {
+                let bayer_row = &BAYER_8X8[(y & 7) as usize];
                 for x in 0..target_w {
-                    let p = resized.get_pixel(x, y);
+                    let p = source.get_pixel(x, y);
                     if p[3] < 10 {
                         out.put_pixel(x, y, image::Rgba([0, 0, 0, 0]));
                         continue;
                     }
 
                     // Bayer offset between -0.5 and +0.5
-                    let bayer = BAYER_8X8[(y % 8) as usize][(x % 8) as usize] - 0.5;
-                    let dither_spread = bayer * 48.0;
+                    let bayer = bayer_row[(x & 7) as usize] - 0.5;
+                    let dither_spread = bayer * 40.0;
 
                     // Apply dither while keeping all RGB color channels vibrant
                     let r = ((p[0] as f32 + dither_spread).clamp(0.0, 255.0) / STEP).round() * STEP;
@@ -206,8 +215,8 @@ fn process_background_bytes(
             }
 
             // Cell size is 8x8 pixels per ASCII glyph
-            // Target ~40 to 60 glyph columns for readable ASCII art structure
-            let cols = (orig_w / 8).clamp(30, 60);
+            // High resolution ASCII art structure: target 80 to 256 glyph columns
+            let cols = (orig_w / 8).clamp(80, 256);
             let rows = ((orig_h as f32 / orig_w as f32) * cols as f32)
                 .round()
                 .max(1.0) as u32;

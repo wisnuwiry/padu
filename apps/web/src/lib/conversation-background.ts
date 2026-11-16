@@ -104,8 +104,10 @@ function saveSettings(next: Partial<ConversationBackground>) {
 }
 
 function processDither(img: HTMLImageElement): string {
-  const targetW = Math.min(360, img.naturalWidth || 360)
-  const targetH = Math.max(1, Math.round(((img.naturalHeight || 240) / (img.naturalWidth || 360)) * targetW))
+  const naturalW = img.naturalWidth || 1920
+  const naturalH = img.naturalHeight || 1080
+  const targetW = Math.min(2048, naturalW)
+  const targetH = Math.max(1, Math.round((naturalH / naturalW) * targetW))
   const canvas = document.createElement('canvas')
   canvas.width = targetW
   canvas.height = targetH
@@ -124,13 +126,14 @@ function processDither(img: HTMLImageElement): string {
     [15 / 64, 47 / 64, 7 / 64, 39 / 64, 13 / 64, 45 / 64, 5 / 64, 37 / 64],
     [63 / 64, 31 / 64, 55 / 64, 23 / 64, 61 / 64, 29 / 64, 53 / 64, 21 / 64],
   ]
-  const step = 36
+  const step = 32
   for (let y = 0; y < targetH; y++) {
+    const bayerRow = bayer[y & 7]
     for (let x = 0; x < targetW; x++) {
       const idx = (y * targetW + x) * 4
       if (data[idx + 3] < 10) continue
-      const bayerVal = bayer[y % 8][x % 8] - 0.5
-      const spread = bayerVal * 48
+      const bayerVal = bayerRow[x & 7] - 0.5
+      const spread = bayerVal * 40
       data[idx] = Math.min(255, Math.max(0, Math.round((data[idx] + spread) / step) * step))
       data[idx + 1] = Math.min(255, Math.max(0, Math.round((data[idx + 1] + spread) / step) * step))
       data[idx + 2] = Math.min(255, Math.max(0, Math.round((data[idx + 2] + spread) / step) * step))
@@ -152,8 +155,10 @@ const ASCII_GLYPHS_8X8 = [
 ]
 
 function processAscii(img: HTMLImageElement): string {
-  const cols = Math.min(60, Math.max(30, Math.round((img.naturalWidth || 480) / 8)))
-  const rows = Math.max(1, Math.round(((img.naturalHeight || 270) / (img.naturalWidth || 480)) * cols))
+  const naturalW = img.naturalWidth || 1920
+  const naturalH = img.naturalHeight || 1080
+  const cols = Math.min(256, Math.max(80, Math.round(naturalW / 8)))
+  const rows = Math.max(1, Math.round((naturalH / naturalW) * cols))
 
   const sampleCanvas = document.createElement('canvas')
   sampleCanvas.width = cols
