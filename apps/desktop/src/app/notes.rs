@@ -2382,7 +2382,6 @@ impl Padu {
             .size_full()
             .flex()
             .flex_col()
-            .bg(theme.frosted)
             .child(header)
             .child(card)
             .children(toolbar)
