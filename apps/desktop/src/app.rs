@@ -1595,7 +1595,9 @@ pub struct Padu {
     remote_images: RefCell<HashMap<String, RemoteImageState>>,
     conversation_background_image: RefCell<Option<Arc<gpui::Image>>>,
     conversation_background_raw: RefCell<Option<(gpui::ImageFormat, Arc<Vec<u8>>)>>,
-    conversation_background_cache: RefCell<HashMap<padu_client::persistence::ConversationBackgroundEffect, Arc<gpui::Image>>>,
+    #[allow(dead_code)]
+    conversation_background_cache:
+        RefCell<HashMap<padu_client::persistence::ConversationBackgroundEffect, Arc<gpui::Image>>>,
     conversation_background_generation: Cell<u64>,
     /// Coalesced edge trigger for provider and background result queues. The
     /// payloads stay in their typed channels; this channel only wakes the UI.
