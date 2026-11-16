@@ -235,9 +235,10 @@ impl Render for NotesHeadingRail {
         let rail = div()
             .id("notes-heading-navigation-rail")
             .absolute()
-            .right(px(16.0))
             .top(px(rail_top))
+            .left_0()
             .w(px(NAVIGATION_RAIL_WIDTH))
+            .max_w(px(NAVIGATION_RAIL_WIDTH))
             .h(px(rail_height))
             .relative()
             .overflow_hidden()
@@ -291,11 +292,10 @@ impl Render for NotesHeadingRail {
             div()
                 .id("notes-heading-preview")
                 .absolute()
-                .right(px(16.0
-                    + NAVIGATION_RAIL_WIDTH
-                    + NAVIGATION_RAIL_CONTENT_GAP))
+                .right(px(NAVIGATION_RAIL_WIDTH + 8.0))
                 .top(px(preview_top))
                 .w(px(280.0))
+                .max_w(px(320.0))
                 .max_h(px(preview_height))
                 .overflow_hidden()
                 .rounded(px(12.0))
@@ -327,6 +327,7 @@ impl Render for NotesHeadingRail {
                         .child(
                             div()
                                 .flex_1()
+                                .max_w(px(220.0))
                                 .truncate()
                                 .text_size(sp(13.0))
                                 .font_weight(FontWeight::SEMIBOLD)
@@ -350,10 +351,14 @@ impl Render for NotesHeadingRail {
         });
 
         div()
-            .absolute()
-            .top_0()
-            .left_0()
-            .size_full()
+            .id("notes-heading-rail-column")
+            .w(px(NAVIGATION_RAIL_WIDTH))
+            .max_w(px(NAVIGATION_RAIL_WIDTH))
+            .flex_none()
+            .h_full()
+            .relative()
+            .border_l_1()
+            .border_color(theme.border.opacity(0.35))
             .child(rail)
             .children(preview)
             .into_any_element()
@@ -420,11 +425,13 @@ impl NotesHeadingRail {
                 "notes-heading-turn-hit-{block_index}"
             )))
             .w(px(NAVIGATION_RAIL_WIDTH))
+            .max_w(px(NAVIGATION_RAIL_WIDTH))
             .h(px(NAVIGATION_RAIL_TURN_HEIGHT))
             .flex_none()
             .flex()
             .justify_end()
             .items_center()
+            .pr(px(6.0))
             .cursor_pointer()
             .on_hover(cx.listener(move |this, hovering: &bool, _, cx| {
                 if *hovering {
@@ -2172,7 +2179,7 @@ impl Padu {
                     headings.len(),
                     content_width,
                 );
-                let viewport_height = f32::from(window.viewport_size().height);
+                let viewport_height = (f32::from(window.viewport_size().height) - 220.0).max(180.0);
                 let active_heading = self.active_note_heading(&headings, cx);
                 let rail_snapshot = NotesHeadingRailSnapshot {
                     visible: rail_visible,
@@ -2187,26 +2194,24 @@ impl Padu {
                         rail.set_snapshot(rail_snapshot, cx);
                     });
                 }
+                let trailing = rail_visible.then(|| {
+                    self.notes_heading_rail
+                        .clone()
+                        .cached(
+                            StyleRefinement::default()
+                                .w(px(NAVIGATION_RAIL_WIDTH))
+                                .max_w(px(NAVIGATION_RAIL_WIDTH))
+                                .flex_none()
+                                .h_full(),
+                        )
+                        .into_any_element()
+                });
                 let edit_pane =
                     crate::ui::editor::RichEditor::new("note-editor-pane", self.notes_body.clone())
                         .track_scroll(&self.notes_editor_scroll_handle)
-                        .scrollbar(&self.notes_editor_scrollbar);
-                let rail_element = self.notes_heading_rail.clone().cached(
-                    StyleRefinement::default()
-                        .absolute()
-                        .top_0()
-                        .right_0()
-                        .size_full(),
-                );
-                Some(
-                    div()
-                        .id("notes-rich-content-container")
-                        .flex_1()
-                        .min_h_0()
-                        .relative()
-                        .child(edit_pane)
-                        .child(rail_element),
-                )
+                        .scrollbar(&self.notes_editor_scrollbar)
+                        .trailing(trailing);
+                Some(edit_pane.into_any_element())
             } else {
                 None
             };

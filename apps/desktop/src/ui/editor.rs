@@ -50,6 +50,7 @@ pub struct RichEditor {
     scroll_handle: ScrollHandle,
     scrollbar: Option<Rc<ScrollbarState>>,
     padding: Option<Pixels>,
+    trailing: Option<AnyElement>,
 }
 
 #[allow(dead_code)]
@@ -65,6 +66,7 @@ impl RichEditor {
             scroll_handle: ScrollHandle::new(),
             scrollbar: None,
             padding: None,
+            trailing: None,
         }
     }
 
@@ -86,6 +88,12 @@ impl RichEditor {
         self.padding = Some(padding);
         self
     }
+
+    /// Attaches a trailing element positioned to the right of the editor content.
+    pub fn trailing(mut self, trailing: Option<AnyElement>) -> Self {
+        self.trailing = trailing;
+        self
+    }
 }
 
 impl RenderOnce for RichEditor {
@@ -94,6 +102,7 @@ impl RenderOnce for RichEditor {
         let editor = self.editor.clone();
         let scrollbar_state = self.scrollbar.clone();
         let pad = self.padding.unwrap_or(px(14.0));
+        let trailing = self.trailing;
 
         div()
             .id(self.id)
@@ -110,16 +119,26 @@ impl RenderOnce for RichEditor {
             })
             .child(
                 div()
-                    .id("rich-editor-scroll-container")
                     .size_full()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll_handle)
-                    .p(pad)
-                    .child(self.editor),
+                    .flex()
+                    .flex_row()
+                    .child(
+                        div()
+                            .id("rich-editor-scroll-container")
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .relative()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.scroll_handle)
+                            .p(pad)
+                            .child(self.editor)
+                            .when_some(scrollbar_state, |parent, state| {
+                                parent.child(scrollbar::vertical(&self.scroll_handle, &state))
+                            }),
+                    )
+                    .children(trailing),
             )
-            .when_some(scrollbar_state, |parent, state| {
-                parent.child(scrollbar::vertical(&self.scroll_handle, &state))
-            })
     }
 }
 
