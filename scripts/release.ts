@@ -6,11 +6,12 @@ import {
   access,
   mkdir,
   mkdtemp,
+  readdir,
   readlink,
   rm,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { defaultDownloadUrlPrefix, generateAppcast } from "./appcast";
 import { extractReleaseNotes } from "./changelog";
@@ -389,6 +390,98 @@ async function verifyJavaScriptRepl(executable: string): Promise<void> {
   }
 }
 
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
+}
+
+/** create-dmg 1.3.0 locates the interstitial APFS volume by scanning
+ *  `hdiutil info` exactly once (create-dmg/create-dmg#164); on a busy CI
+ *  runner the volume often has not finished mounting at that instant and the
+ *  run aborts with "the interstitial disk image was not found". Retry, and
+ *  detach any interstitial mounts left behind by a failed attempt. */
+async function detachLeftoverInterstitialMounts(): Promise<void> {
+  const info = await $`hdiutil info`.quiet().nothrow().text();
+  const dmgBase = basename(outputPath);
+  for (const entity of info.split(/^={5,}\s*$/m)) {
+    const imageBase = entity
+      .match(/image-path\s*:\s*(\S+)/)?.[1]
+      ?.split("/")
+      .pop();
+    if (!imageBase?.startsWith("rw.") || !imageBase.endsWith(dmgBase)) {
+      continue;
+    }
+    // Prefer the volume's mount point; create-dmg can also fail before the
+    // volume mounts at all, leaving only raw /dev entries. Older macOS
+    // reports the disk as "dev-entry".
+    const deviceFields = entity
+      .split("\n")
+      .filter((line) => line.trimStart().startsWith("/dev/"))
+      .map((line) =>
+        line.trim().split(/\t+|\s{2,}/).filter(Boolean),
+      );
+    const devEntry = entity.match(/dev-entry\s*:\s*(\S+)/)?.[1];
+    const mountPoint = deviceFields.find((fields) =>
+      fields[2]?.startsWith("/Volumes/"),
+    )?.[2];
+    const lastDevice = deviceFields.at(-1)?.[0];
+    const candidates = [...new Set([mountPoint, devEntry, lastDevice])].filter(
+      (candidate): candidate is string => Boolean(candidate),
+    );
+    let detached = false;
+    for (const candidate of candidates) {
+      const result =
+        await $`hdiutil detach -force ${candidate}`.quiet().nothrow();
+      if (result.exitCode === 0) {
+        detached = true;
+        break;
+      }
+    }
+    if (!detached) {
+      console.warn(
+        `Unable to detach leftover interstitial image ${imageBase}.`,
+      );
+    }
+  }
+}
+
+async function removeLeftoverInterstitialImages(): Promise<void> {
+  const outputDirectory = dirname(outputPath);
+  const dmgBase = basename(outputPath);
+  let entries: string[];
+  try {
+    entries = await readdir(outputDirectory);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.startsWith("rw.") && entry.endsWith(dmgBase)) {
+      await rm(join(outputDirectory, entry), { force: true });
+    }
+  }
+}
+
+async function createStyledDmg(stagingDirectory: string): Promise<void> {
+  const maxAttempts = 3;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await $`create-dmg --volname ${volumeName} --window-pos 200 120 --window-size 660 400 --text-size 13 --icon-size 128 --icon ${`${appName}.app`} 180 178 --hide-extension ${`${appName}.app`} --app-drop-link 480 178 --filesystem APFS --format ULFO --no-internet-enable --overwrite ${outputPath} ${stagingDirectory}`;
+      return;
+    } catch (error) {
+      if (attempt >= maxAttempts) {
+        throw error;
+      }
+      const detail = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `create-dmg attempt ${attempt} failed: ${detail}\n` +
+          "Cleaning up leftover interstitial mounts and retrying...",
+      );
+      await detachLeftoverInterstitialMounts();
+      await removeLeftoverInterstitialImages();
+      await delay(2000 * attempt);
+    }
+  }
+}
+
 if (extname(outputPath).toLowerCase() !== ".dmg") {
   throw new Error(`Output path must end in .dmg: ${outputPath}`);
 }
@@ -477,7 +570,7 @@ try {
   await rm(outputPath, { force: true });
 
   logStep(`Creating the styled DMG at ${outputPath}`);
-  await $`create-dmg --volname ${volumeName} --window-pos 200 120 --window-size 660 400 --text-size 13 --icon-size 128 --icon ${`${appName}.app`} 180 178 --hide-extension ${`${appName}.app`} --app-drop-link 480 178 --filesystem APFS --format ULFO --no-internet-enable --overwrite ${outputPath} ${stagingDirectory}`;
+  await createStyledDmg(stagingDirectory);
 
   logStep(adhoc ? "Ad-hoc signing the DMG" : "Signing the DMG");
   if (adhoc) {
