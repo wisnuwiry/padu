@@ -598,6 +598,8 @@ pub enum ResponsePayload {
     ProviderProbe {
         probe: ProviderProbe,
         version: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binary_identity: Option<crate::composer::SkillBinaryIdentity>,
     },
     PlanUsage {
         usage: Option<PlanUsage>,

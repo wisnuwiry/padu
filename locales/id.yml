@@ -92,6 +92,7 @@ command_palette.no_resume_sessions_hint: Sesi yang sudah ada di Padu disembunyik
 command_palette.could_not_load_sessions: Tidak dapat memuat sesi terminal
 command_palette.loading_selected_session: Memuat percakapan…
 command_palette.resume_failed: "Tidak dapat melanjutkan sesi: %{error}"
+composer.skill_catalog_loading: Memuat skill… Coba kirim lagi setelah pencarian selesai.
 language.title: Bahasa
 language.system: Sistem
 language.description: Pilih bahasa yang digunakan di seluruh Padu

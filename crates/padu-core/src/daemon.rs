@@ -652,10 +652,24 @@ impl Backend for PaduBackend {
                             .and_then(crate::model::probe_provider_version)
                     })
                     .flatten();
+                let binary_identity = probe_version
+                    .then(|| {
+                        padu_protocol::composer::native_skill_syntax(provider).and_then(|_| {
+                            probe
+                                .path
+                                .as_deref()
+                                .and_then(crate::model::provider_binary_identity)
+                        })
+                    })
+                    .flatten();
                 if discover_models {
                     probe = crate::model::discover_provider_models(probe);
                 }
-                Ok(ResponsePayload::ProviderProbe { probe, version })
+                Ok(ResponsePayload::ProviderProbe {
+                    probe,
+                    version,
+                    binary_identity,
+                })
             }
             Command::FetchPlanUsage {
                 provider,

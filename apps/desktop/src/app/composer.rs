@@ -1991,6 +1991,9 @@ impl Padu {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.host_switch_pending {
+            return;
+        }
         if !self.stage_attachment_paths(paths.paths(), cx) {
             return;
         }
@@ -2003,18 +2006,21 @@ impl Padu {
         paths: &[PathBuf],
         cx: &mut Context<Self>,
     ) -> bool {
-        if paths.is_empty() {
+        if self.host_switch_pending || paths.is_empty() {
             return false;
         }
         let paths = paths.to_vec();
-        let daemon = self.daemon.clone();
+        let host_generation = self.host_switch_generation;
+        let daemon_client = self.daemon.client();
         let draft_owner = self.selected_composer_draft_key();
         cx.spawn(async move |padu, cx| {
+            let request_client = daemon_client.clone();
             let result = cx
                 .background_executor()
                 .spawn(async move {
                     let mut stored = Vec::with_capacity(paths.len());
                     for source_path in paths {
+                        let source_path = source_path;
                         let (name, upload, image_bytes) =
                             attachment_upload_from_path(&source_path)?;
                         let is_image = image_bytes.is_some();
@@ -2022,7 +2028,7 @@ impl Padu {
                             image_preview::image_format_for_name(&name)
                                 .map(|format| Arc::new(gpui::Image::from_bytes(format, bytes)))
                         });
-                        let response = daemon.client().request(
+                        let response = request_client.request(
                             Uuid::nil(),
                             Uuid::nil(),
                             padu_client::Command::ImportAttachment { name, upload },
@@ -2037,30 +2043,40 @@ impl Padu {
                     Ok::<_, anyhow::Error>(stored)
                 })
                 .await;
-            let _ = padu.update(cx, |padu, cx| match result {
-                Ok(stored) => {
-                    if padu.selected_composer_draft_key() != draft_owner {
-                        return;
+            let _ = padu.update(cx, |padu, cx| {
+                let current_client = padu.daemon.client();
+                if !attachment_request_is_current(
+                    host_generation,
+                    padu.host_switch_generation,
+                    &daemon_client,
+                    &current_client,
+                    |requested, current| requested.same_connection(current),
+                ) || padu.selected_composer_draft_key() != draft_owner
+                {
+                    return;
+                }
+                match result {
+                    Ok(stored) => {
+                        let mut changed = false;
+                        for (attachment, preview_image, is_image) in stored {
+                            changed |= padu.stage_daemon_attachment(
+                                attachment.path,
+                                attachment.name,
+                                attachment.is_dir,
+                                is_image,
+                                attachment.reference,
+                                preview_image,
+                            );
+                        }
+                        if changed {
+                            padu.schedule_composer_draft_save(cx);
+                            cx.notify();
+                        }
                     }
-                    let mut changed = false;
-                    for (attachment, preview_image, is_image) in stored {
-                        changed |= padu.stage_daemon_attachment(
-                            attachment.path,
-                            attachment.name,
-                            attachment.is_dir,
-                            is_image,
-                            attachment.reference,
-                            preview_image,
-                        );
-                    }
-                    if changed {
-                        padu.schedule_composer_draft_save(cx);
+                    Err(error) => {
+                        padu.show_toast(error.to_string());
                         cx.notify();
                     }
-                }
-                Err(error) => {
-                    padu.show_toast(error.to_string());
-                    cx.notify();
                 }
             });
         })
@@ -2077,6 +2093,9 @@ impl Padu {
         reference: String,
         client_preview_image: Option<Arc<gpui::Image>>,
     ) -> bool {
+        if self.host_switch_pending {
+            return false;
+        }
         if self.composer_attachments.iter().any(|attachment| {
             attachment.path == path
                 || attachment.blob_reference.as_deref() == Some(reference.as_str())
@@ -2106,6 +2125,9 @@ impl Padu {
         entries: Vec<ClipboardEntry>,
         cx: &mut Context<Self>,
     ) {
+        if self.host_switch_pending {
+            return;
+        }
         let mut paths = Vec::new();
         let mut images = Vec::new();
         for entry in entries {
@@ -2122,9 +2144,11 @@ impl Padu {
             return;
         }
 
-        let daemon = self.daemon.clone();
+        let host_generation = self.host_switch_generation;
+        let daemon_client = self.daemon.client();
         let draft_owner = self.selected_composer_draft_key();
         cx.spawn(async move |padu, cx| {
+            let request_client = daemon_client.clone();
             let stored = cx
                 .background_executor()
                 .spawn(async move {
@@ -2135,8 +2159,7 @@ impl Padu {
                         .map(|(index, image)| {
                             let preview_image = Arc::new(image);
                             let bytes = preview_image.bytes.clone();
-                            let response = daemon
-                                .client()
+                            let response = request_client
                                 .request(
                                     Uuid::nil(),
                                     Uuid::nil(),
@@ -2165,40 +2188,50 @@ impl Padu {
                         .collect::<Result<Vec<_>, _>>()
                 })
                 .await;
-            let _ = padu.update(cx, |padu, cx| match stored {
-                Ok(stored) => {
-                    if padu.selected_composer_draft_key() != draft_owner {
-                        return;
+            let _ = padu.update(cx, |padu, cx| {
+                let current_client = padu.daemon.client();
+                if !attachment_request_is_current(
+                    host_generation,
+                    padu.host_switch_generation,
+                    &daemon_client,
+                    &current_client,
+                    |requested, current| requested.same_connection(current),
+                ) || padu.selected_composer_draft_key() != draft_owner
+                {
+                    return;
+                }
+                match stored {
+                    Ok(stored) => {
+                        let mut staged = false;
+                        for (path, name, reference, preview_image) in stored {
+                            staged |= padu.stage_daemon_attachment(
+                                path,
+                                name,
+                                false,
+                                true,
+                                reference,
+                                Some(preview_image),
+                            );
+                        }
+                        if staged {
+                            padu.schedule_composer_draft_save(cx);
+                            cx.notify();
+                        }
                     }
-                    let mut staged = false;
-                    for (path, name, reference, preview_image) in stored {
-                        staged |= padu.stage_daemon_attachment(
-                            path,
-                            name,
-                            false,
-                            true,
-                            reference,
-                            Some(preview_image),
-                        );
-                    }
-                    if staged {
-                        padu.schedule_composer_draft_save(cx);
+                    Err(error) => {
+                        padu.show_toast(tr!("errors.store_pasted_image", error = error));
                         cx.notify();
                     }
-                }
-                Err(error) => {
-                    padu.show_toast(tr!("errors.store_pasted_image", error = error));
-                    cx.notify();
                 }
             });
         })
         .detach();
     }
 
-    /// The text and attachment presentation accepted from the composer. The
-    /// provider-facing prompt keeps Markdown file references and visible
-    /// command syntax, while sent-message UI uses `display_content` and
-    /// retained attachment metadata.
+    /// The text and attachment presentation accepted from the composer.
+    /// Provider-facing prompt text includes rendered skills and Markdown file
+    /// references, while `display_content` keeps the user's typed skill syntax
+    /// and the attachment metadata drives visible chips.
     pub(super) fn submission_with_attachments(
         &mut self,
         prompt: &str,
@@ -2214,6 +2247,21 @@ impl Padu {
         if self.model_picker_has_no_providers() {
             return None;
         }
+        let provider = self
+            .selected_session()
+            .map(|session| session.provider)
+            .unwrap_or(self.state.last_provider);
+        let visible_prompt = prompt.trim().to_owned();
+        let needs_skill_refresh = crate::composer_complete::has_skill_mentions(&visible_prompt);
+        let rendered = if needs_skill_refresh {
+            crate::composer_complete::SkillRenderResult {
+                provider_text: visible_prompt.clone(),
+                warnings: Vec::new(),
+            }
+        } else {
+            self.render_skill_submission(provider, &visible_prompt)
+        };
+        let skill_changed = rendered.provider_text != visible_prompt;
         for attachment in &self.composer_attachments {
             if let (Some(reference), Some(image)) = (
                 attachment.blob_reference.as_ref(),
@@ -2256,23 +2304,21 @@ impl Padu {
                 .collect::<Vec<_>>()
                 .join("\n\n")
         };
-        let submission = merged_submission(prompt, &mentions)
-            .map(|prompt| {
-                if note_reference.is_empty() {
-                    prompt
-                } else {
-                    format!("{prompt}\n\n{note_reference}")
-                }
-            })
-            .or_else(|| (!note_reference.is_empty()).then_some(note_reference))?;
-        let display_content = (!attachments.is_empty() || !embedded_notes.is_empty())
-            .then(|| prompt.trim().to_owned());
+        let submission =
+            merged_rendered_submission(&rendered.provider_text, &mentions, &note_reference)?;
+        let display_content = (skill_changed
+            || needs_skill_refresh
+            || !attachments.is_empty()
+            || !embedded_notes.is_empty())
+        .then_some(visible_prompt);
         self.discard_current_composer_draft(cx);
         Some(ComposerSubmission {
             prompt: submission,
             display_content,
             attachments,
             embedded_notes,
+            needs_skill_refresh,
+            skill_warnings: Vec::new(),
         })
     }
 
@@ -2575,7 +2621,7 @@ impl Padu {
                     .child(icon("icons/x.svg", 9.0, theme.text_secondary))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         cx.stop_propagation();
-                        if index < this.composer_attachments.len() {
+                        if !this.host_switch_pending && index < this.composer_attachments.len() {
                             this.composer_attachments.remove(index);
                             this.schedule_composer_draft_save(cx);
                             cx.notify();
@@ -2583,7 +2629,8 @@ impl Padu {
                     }))
                     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                         if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                            if index < this.composer_attachments.len() {
+                            if !this.host_switch_pending && index < this.composer_attachments.len()
+                            {
                                 this.composer_attachments.remove(index);
                                 this.schedule_composer_draft_save(cx);
                                 cx.notify();
@@ -2702,7 +2749,9 @@ impl Padu {
                             .child(icon("icons/x.svg", 10.0, theme.text_secondary))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 cx.stop_propagation();
-                                if index < this.composer_embedded_notes.len() {
+                                if !this.host_switch_pending
+                                    && index < this.composer_embedded_notes.len()
+                                {
                                     this.composer_embedded_notes.remove(index);
                                     this.schedule_composer_draft_save(cx);
                                     cx.notify();
@@ -2710,7 +2759,9 @@ impl Padu {
                             }))
                             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                                 if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                                    if index < this.composer_embedded_notes.len() {
+                                    if !this.host_switch_pending
+                                        && index < this.composer_embedded_notes.len()
+                                    {
                                         this.composer_embedded_notes.remove(index);
                                         this.schedule_composer_draft_save(cx);
                                         cx.notify();
@@ -2975,7 +3026,7 @@ impl Padu {
         // reads as unavailable and the submission path refuses too, so
         // `enter` cannot slip past a disabled control.
         let no_providers = self.model_picker_has_no_providers();
-        let can_send = has_draft && !no_providers;
+        let can_send = has_draft && !no_providers && !self.host_switch_pending;
         let (autocomplete, autocomplete_actionable) =
             match self.render_composer_autocomplete(window, cx) {
                 Some((element, actionable)) => (Some(element), actionable),
@@ -3153,6 +3204,9 @@ impl Padu {
                                                         "composer.queue_followup"
                                                     )))
                                                     .on_click(cx.listener(|this, _, _, cx| {
+                                                        if this.host_switch_pending {
+                                                            return;
+                                                        }
                                                         let prompt = this
                                                             .composer
                                                             .read(cx)
@@ -3167,8 +3221,8 @@ impl Padu {
                                                                 .update(cx, |input, cx| {
                                                                     input.clear(cx)
                                                                 });
-                                                            this.submit_composer_submission(
-                                                                submission, cx,
+                                                            this.dispatch_composer_submission(
+                                                                submission, false, cx,
                                                             );
                                                         }
                                                     })),
@@ -3210,6 +3264,9 @@ impl Padu {
                                             )))
                                         })
                                         .on_click(cx.listener(|this, _, _, cx| {
+                                            if this.host_switch_pending {
+                                                return;
+                                            }
                                             let prompt =
                                                 this.composer.read(cx).content(cx).to_owned();
                                             if let Some(submission) =
@@ -3217,7 +3274,9 @@ impl Padu {
                                             {
                                                 this.composer
                                                     .update(cx, |input, cx| input.clear(cx));
-                                                this.submit_composer_submission(submission, cx);
+                                                this.dispatch_composer_submission(
+                                                    submission, false, cx,
+                                                );
                                             }
                                         })),
                                 }),
@@ -3884,6 +3943,19 @@ pub(super) fn visible_branch_entries(
 // message limit until uploads move to a streaming content endpoint.
 const MAX_ATTACHMENT_BYTES: u64 = padu_client::attachments::MAX_ATTACHMENT_BYTES as u64;
 
+/// A completed attachment request may change UI state only on the host and
+/// daemon connection that accepted the request.
+fn attachment_request_is_current<T: ?Sized>(
+    request_generation: u64,
+    current_generation: u64,
+    request_connection: &T,
+    current_connection: &T,
+    same_connection: impl FnOnce(&T, &T) -> bool,
+) -> bool {
+    request_generation == current_generation
+        && same_connection(request_connection, current_connection)
+}
+
 /// Reads a client-local drop into an upload payload. This is the explicit
 /// client/daemon boundary: none of these source paths are persisted or handed
 /// to a provider.
@@ -4057,6 +4129,25 @@ pub(super) fn merged_submission(prompt: &str, mentions: &[String]) -> Option<Str
         (true, false) => Some(mentions),
         (false, false) => Some(format!("{prompt} {mentions}")),
     }
+}
+
+/// Append provider-only attachment and note text after the visible composer
+/// prompt has passed through skill rendering. Skill-like tokens in this hidden
+/// tail are data, not composer syntax, and must remain literal.
+pub(super) fn merged_rendered_submission(
+    rendered_prompt: &str,
+    mentions: &[String],
+    note_reference: &str,
+) -> Option<String> {
+    merged_submission(rendered_prompt, mentions)
+        .map(|prompt| {
+            if note_reference.is_empty() {
+                prompt
+            } else {
+                format!("{prompt}\n\n{note_reference}")
+            }
+        })
+        .or_else(|| (!note_reference.is_empty()).then(|| note_reference.to_owned()))
 }
 
 /// Where the picker's keyboard cursor lands, wrapping at both ends.
@@ -4314,4 +4405,46 @@ pub(super) fn visible_picker_models(
         });
     }
     models
+}
+
+#[cfg(test)]
+mod attachment_routing_tests {
+    use super::*;
+
+    #[test]
+    fn attachment_request_rejects_a_stale_host_generation() {
+        let connection = Arc::new(());
+        assert!(!attachment_request_is_current(
+            3,
+            4,
+            &connection,
+            &connection,
+            |left, right| Arc::ptr_eq(left, right),
+        ));
+    }
+
+    #[test]
+    fn attachment_request_rejects_a_replacement_connection() {
+        let requested_connection = Arc::new(());
+        let current_connection = Arc::new(());
+        assert!(!attachment_request_is_current(
+            4,
+            4,
+            &requested_connection,
+            &current_connection,
+            |left, right| Arc::ptr_eq(left, right),
+        ));
+    }
+
+    #[test]
+    fn attachment_request_accepts_the_current_generation_and_connection() {
+        let connection = Arc::new(());
+        assert!(attachment_request_is_current(
+            4,
+            4,
+            &connection,
+            &connection,
+            |left, right| Arc::ptr_eq(left, right),
+        ));
+    }
 }

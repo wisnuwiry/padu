@@ -88,6 +88,22 @@ describe('beginTurn', () => {
     expect(active.turns).toHaveLength(1)
     expect(draft.messages).toHaveLength(0)
   })
+
+  test('keeps visible and provider text distinct for an idle skill send', () => {
+    const draft = createSession('project', 'codex', false)
+    const active = beginTurn(
+      draft,
+      '$brainstroming explain this',
+      [],
+      [],
+      '[mandatory! open skill: /skills/brainstroming/SKILL.md] explain this',
+    )
+
+    expect(active.messages[0]).toMatchObject({
+      content: '[mandatory! open skill: /skills/brainstroming/SKILL.md] explain this',
+      display_content: '$brainstroming explain this',
+    })
+  })
 })
 
 describe('browseDaemonDirectory', () => {
@@ -228,6 +244,33 @@ describe('probeProvider', () => {
       discoverModels: false,
       probeVersion: false,
     })
+  })
+
+  test('keeps the exact binary identity alongside the probed version', async () => {
+    const identity = {
+      canonicalPath: '/opt/padu/codex',
+      contentSha256: 'a'.repeat(64),
+    }
+    const client = {
+      request: async () => ({
+        type: 'providerProbe',
+        probe: {
+          provider: 'codex',
+          installed: true,
+          path: '/opt/padu/codex',
+          models: [],
+          agent_presets: [],
+        },
+        version: '1.2.3',
+        binaryIdentity: identity,
+      }),
+    } as unknown as PaduClient
+
+    await expect(probeProvider(client, 'codex', {} as DaemonSettings))
+      .resolves.toMatchObject({
+        version: '1.2.3',
+        binaryIdentity: identity,
+      })
   })
 })
 

@@ -56,7 +56,6 @@ import { useI18n } from '@/lib/i18n'
 import {
   composerAutocompleteRows,
   detectComposerTrigger,
-  expandedComposerSubmission,
   isFastModeToggleSubmission,
   isResumeSubmission,
   mergeComposerCommands,
@@ -78,16 +77,17 @@ import {
   sameEscapeStopArm,
   type EscapeStopArm,
 } from '@/lib/escape-stop'
+import { awaitComposerSubmissionAcceptance } from '@/lib/runtime-submissions'
 import { usePrimaryShortcut } from '@/lib/platform'
 import { agentPresetDescription, agentPresetLabel } from '@/lib/agent-preset-presentation'
 import {
   atomicReferenceDeletion,
   insertInlineFileReference,
-  markdownFileReference,
 } from '@/lib/inline-file-references'
 import { isProjectlessProject, projectDisplayName } from '@/lib/project-presentation'
 import type { PendingUserInput } from '@/lib/event-reducer'
 import { useRuntime } from '@/lib/runtime-context'
+import { useWebProviderPromptResolver } from '@/lib/skill-submission'
 import { sessionHasStarted } from '@/lib/sidebar-presentation'
 import { cn } from '@/lib/utils'
 
@@ -231,6 +231,7 @@ export function Composer({
   const pendingCursor = useRef<number | null>(null)
   const escapeStopTimer = useRef<number | null>(null)
   const mounted = useRef(true)
+  const draftAcceptancePending = useRef(false)
   const draftChange = useRef(onComposerDraftChange)
   draftChange.current = onComposerDraftChange
   const busy = ['connecting', 'working', 'waiting'].includes(session.status)
@@ -256,8 +257,24 @@ export function Composer({
       ? workspace.branch
       : t('workspace.local')
   const availableCommands = mergeComposerCommands(
-    composerCommands.data ?? [],
+    composerCommands.data?.commands ?? [],
     session.available_commands ?? [],
+  )
+  const resolveProviderPrompt = useWebProviderPromptResolver(
+    composerCommands,
+    session.provider,
+    session.available_commands ?? [],
+    {
+      sessionId: session.id,
+      provider: session.provider,
+      projectId: project.id,
+      projectRoot: cwd,
+      binaryOverride: composerCommands.binaryOverride ?? null,
+      binaryVersion: composerCommands.binaryVersion,
+      binaryIdentity: composerCommands.binaryIdentity ?? null,
+      model: session.model ?? null,
+      hostAddress: config?.address ?? null,
+    },
   )
   const autocompleteTrigger = inputFocused ? detectComposerTrigger(prompt, cursor) : null
   const autocompleteKey = autocompleteTrigger
@@ -270,7 +287,10 @@ export function Composer({
         composerFiles.data ?? [],
       )
     : []
-  const autocompleteLoading = autocompleteTrigger?.kind === 'command'
+  const autocompleteLoading = (
+    autocompleteTrigger?.kind === 'command'
+    || autocompleteTrigger?.kind === 'skill'
+  )
     ? composerCommands.isPending || composerCommands.isFetching
     : autocompleteTrigger?.kind === 'file'
       ? composerFiles.isPending || composerFiles.isFetching
@@ -417,30 +437,13 @@ export function Composer({
   }, [embeddedNote, embeddedNotes])
 
   useEffect(() => {
+    if (draftAcceptancePending.current) return
     draftChange.current?.({ text: prompt, attachments, embedded_notes: embeddedNotes })
   }, [attachments, embeddedNotes, prompt])
 
   async function activateDraft() {
     if (!draft) return session
     return saveSession(session, project)
-  }
-
-  function providerPromptOverride(
-    submittedPrompt: string,
-    submittedAttachments: MessageAttachment[],
-    submittedNotes: EmbeddedNote[] = embeddedNotes,
-  ): string | undefined {
-    const expanded = expandedComposerSubmission(
-      session.provider,
-      submittedPrompt.trim(),
-      availableCommands,
-    )
-    if (expanded === null && !submittedAttachments.length && !submittedNotes.length) return undefined
-    return [
-      expanded ?? submittedPrompt.trim(),
-      submittedAttachments.map((attachment) => markdownFileReference(attachment.mention)).join(' '),
-      ...submittedNotes.map((note) => `${note.title || 'Untitled note'}\n${note.content}`),
-    ].filter(Boolean).join('\n\n')
   }
 
   function executeLocalComposerCommand(submittedPrompt = prompt): boolean {
@@ -540,14 +543,25 @@ export function Composer({
     setSubmitting(true)
     try {
       const target = await activateDraft()
+      const resolution = await resolveProviderPrompt(
+        submittedPrompt,
+        submittedAttachments,
+        submittedNotes,
+      )
+      resolution.assertCurrent()
+      draftChange.current?.({
+        text: submittedPrompt,
+        attachments: submittedAttachments,
+        embedded_notes: submittedNotes,
+      })
+      draftAcceptancePending.current = true
       const pending = sendPrompt(
         target,
         submittedPrompt,
         submittedAttachments,
-        providerPromptOverride(submittedPrompt, submittedAttachments, submittedNotes),
+        resolution.providerPrompt,
         submittedNotes,
       )
-      onComposerDraftSubmitted?.()
       setPrompt('')
       setCursor(0)
       setDismissedAutocomplete(null)
@@ -560,8 +574,16 @@ export function Composer({
           : undefined
         onActivated?.(optimistic ?? target)
       }
-      await pending
+      await awaitComposerSubmissionAcceptance(pending, () => {
+        onComposerDraftSubmitted?.()
+      })
     } catch (error) {
+      draftAcceptancePending.current = false
+      draftChange.current?.({
+        text: submittedPrompt,
+        attachments: submittedAttachments,
+        embedded_notes: submittedNotes,
+      })
       if (cleared && mounted.current) {
         setPrompt((current) => current || submittedPrompt)
         setAttachments((current) => current.length ? current : submittedAttachments)
@@ -569,6 +591,7 @@ export function Composer({
       }
       toast.error(errorMessage(error))
     } finally {
+      draftAcceptancePending.current = false
       setSubmitting(false)
     }
   }
@@ -582,22 +605,41 @@ export function Composer({
     let cleared = false
     setSubmitting(true)
     try {
+      const resolution = await resolveProviderPrompt(
+        submittedPrompt,
+        submittedAttachments,
+        submittedNotes,
+      )
+      resolution.assertCurrent()
+      draftChange.current?.({
+        text: submittedPrompt,
+        attachments: submittedAttachments,
+        embedded_notes: submittedNotes,
+      })
+      draftAcceptancePending.current = true
       const pending = steerPrompt(
         session,
         submittedPrompt,
         submittedAttachments,
-        providerPromptOverride(submittedPrompt, submittedAttachments, submittedNotes),
+        resolution.providerPrompt,
         submittedNotes,
       )
-      onComposerDraftSubmitted?.()
       setPrompt('')
       setCursor(0)
       setDismissedAutocomplete(null)
       setAttachments([])
       setEmbeddedNotes([])
       cleared = true
-      await pending
+      await awaitComposerSubmissionAcceptance(pending, () => {
+        onComposerDraftSubmitted?.()
+      })
     } catch (error) {
+      draftAcceptancePending.current = false
+      draftChange.current?.({
+        text: submittedPrompt,
+        attachments: submittedAttachments,
+        embedded_notes: submittedNotes,
+      })
       if (cleared && mounted.current) {
         setPrompt((current) => current || submittedPrompt)
         setAttachments((current) => current.length ? current : submittedAttachments)
@@ -605,6 +647,7 @@ export function Composer({
       }
       toast.error(errorMessage(error))
     } finally {
+      draftAcceptancePending.current = false
       setSubmitting(false)
     }
   }
@@ -812,16 +855,15 @@ export function Composer({
             )
           }
           onSteer={(message) => {
-            void removeQueuedMessage(session.id, message.id).catch((error) =>
-              toast.error(errorMessage(error)),
-            )
             void steerPrompt(
               session,
               message.display_content ?? message.content,
               message.attachments ?? [],
               message.content,
               message.embedded_notes ?? [],
-            ).catch((error) => toast.error(errorMessage(error)))
+            )
+              .then(() => removeQueuedMessage(session.id, message.id))
+              .catch((error) => toast.error(errorMessage(error)))
           }}
         />
 
@@ -1323,7 +1365,9 @@ function ComposerAutocomplete({
               className="size-full outline-none"
               computeItemKey={(_, row) => row.kind === 'command'
                 ? `command:${row.command.scope}:${row.command.name}`
-                : `file:${row.file.path}`}
+                : row.kind === 'skill'
+                  ? `skill:${row.command.name}`
+                  : `file:${row.file.path}`}
               data={rows}
               fixedItemHeight={30}
               increaseViewportBy={90}
@@ -1355,13 +1399,33 @@ function ComposerAutocomplete({
 }
 
 function AutocompleteRowContents({ row }: { row: ComposerAutocompleteRow }) {
+  if (row.kind === 'skill') {
+    return (
+      <>
+        <PaduIcon className="size-3 text-[var(--text-tertiary)]" name="sparkle" />
+        <span className="max-w-[260px] shrink-0 truncate text-[12px] font-medium">
+          ${row.command.name}
+        </span>
+        {row.command.argument_hint && (
+          <span className="shrink-0 text-[11px] text-[var(--text-ghost)]">
+            {row.command.argument_hint}
+          </span>
+        )}
+        <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--text-tertiary)]">
+          {row.command.description}
+        </span>
+        <span className="flex h-4 shrink-0 items-center rounded border px-1.5 text-[9px] font-semibold text-[var(--text-tertiary)]">
+          Skill
+        </span>
+      </>
+    )
+  }
+
   if (row.kind === 'command') {
     const { command } = row
     return (
       <>
-        {command.scope === 'Skill'
-          ? <PaduIcon className="size-3 text-[var(--text-tertiary)]" name="sparkle" />
-          : <PaduIcon className="size-3 text-[var(--text-tertiary)]" name="command" />}
+        <PaduIcon className="size-3 text-[var(--text-tertiary)]" name="command" />
         <span className="max-w-[260px] shrink-0 truncate text-[12px] font-medium">
           /{command.name}
         </span>

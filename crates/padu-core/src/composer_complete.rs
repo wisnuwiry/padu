@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use crate::model::{ProviderKind, ReportedCommand};
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Matcher, Utf32Str};
-pub use padu_protocol::composer::{CommandScope, FileEntry, SlashCommand};
+pub use padu_protocol::composer::{CommandScope, FileEntry, SkillCapabilityMetadata, SlashCommand};
 
 /// How many rows a filter pass returns. The popup shows a screenful and the
 /// keyboard walks the rest; past this the tail is noise, not choice.
@@ -134,14 +134,47 @@ pub fn discover_slash_commands(
     project_root: &Path,
     binary_override: Option<&str>,
 ) -> Vec<SlashCommand> {
-    let cli_commands = match binary_override {
+    discover_composer_catalog(provider, project_root, binary_override).commands
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ComposerCommandCatalog {
+    pub commands: Vec<SlashCommand>,
+    pub skill_capability: Option<SkillCapabilityMetadata>,
+}
+
+/// Discover the command list and exact-binary native skill evidence in one
+/// daemon-side pass. The executable identity is recomputed from the currently
+/// resolved path before the cache is read. The cache is read-only here;
+/// recording it is an explicit operator action performed by
+/// `padu-provider-test`.
+pub fn discover_composer_catalog(
+    provider: ProviderKind,
+    project_root: &Path,
+    binary_override: Option<&str>,
+) -> ComposerCommandCatalog {
+    let binary = match binary_override {
         Some(binary) => crate::command_env::resolve_binary_override(binary),
         None => crate::command_env::find_executable(provider.command()),
+    };
+    let cli_commands = binary
+        .as_deref()
+        .and_then(|binary| crate::slash_command_catalog::discover(provider, binary, project_root))
+        .unwrap_or_default();
+    let skill_capability = binary.as_deref().and_then(|binary| {
+        padu_protocol::composer::native_skill_syntax(provider)?;
+        let identity = crate::model::provider_binary_identity(binary)?;
+        let version = crate::model::probe_provider_version(binary);
+        crate::skill_capability::read_skill_capability_evidence(
+            provider,
+            version.as_deref(),
+            Some(&identity),
+        )
+    });
+    ComposerCommandCatalog {
+        commands: assemble_slash_commands(provider, project_root, cli_commands),
+        skill_capability,
     }
-    .as_deref()
-    .and_then(|binary| crate::slash_command_catalog::discover(provider, binary, project_root))
-    .unwrap_or_default();
-    assemble_slash_commands(provider, project_root, cli_commands)
 }
 
 fn assemble_slash_commands(
@@ -359,6 +392,7 @@ fn assemble_slash_commands(
         scope: CommandScope::Builtin,
         argument_hint: None,
         template: None,
+        skill_file: None,
     });
     sort_commands_for_display(&mut commands);
     commands
@@ -391,6 +425,7 @@ pub fn merge_reported_commands(
                 scope: CommandScope::Builtin,
                 argument_hint: None,
                 template: None,
+                skill_file: None,
             });
         }
     }
@@ -476,6 +511,7 @@ fn scan_command_files(
                 scope,
                 argument_hint: front.argument_hint,
                 template: expand.then(|| front.body.trim().to_owned()),
+                skill_file: None,
             });
         }
     }
@@ -502,13 +538,16 @@ fn scan_skill_files(provider: ProviderKind, root: &Path, commands: &mut Vec<Slas
         if dir_name.starts_with('.') {
             continue;
         }
-        let Ok(contents) = std::fs::read_to_string(entry.path().join("SKILL.md")) else {
+        let Ok(skill_dir) = std::fs::canonicalize(entry.path()) else {
+            continue;
+        };
+        let Ok(contents) = std::fs::read_to_string(skill_dir.join("SKILL.md")) else {
             continue;
         };
         let front = parse_frontmatter(&contents);
         let short_name = front.name.unwrap_or(dir_name);
         let plugin_name = (provider == ProviderKind::Codex)
-            .then(|| codex_plugin_name(&entry.path()))
+            .then(|| codex_plugin_name(&skill_dir))
             .flatten();
         let name = match plugin_name.as_deref() {
             Some(plugin_name) if !short_name.contains(':') => {
@@ -516,12 +555,21 @@ fn scan_skill_files(provider: ProviderKind, root: &Path, commands: &mut Vec<Slas
             }
             _ => short_name,
         };
+        // Canonicalize the skill directory, not the file: `SKILL.md` itself
+        // may be a symlink, but the provider contract requires that exact
+        // final path component.
+        let Some(skill_file) = skill_dir.join("SKILL.md").to_str().map(str::to_owned) else {
+            // The wire contract carries UTF-8 strings. A lossy conversion
+            // would point the provider at a different, nonexistent file.
+            continue;
+        };
         commands.push(SlashCommand {
             name,
             description: front.description.unwrap_or_default(),
             scope: CommandScope::Skill,
             argument_hint: None,
             template: None,
+            skill_file: Some(skill_file),
         });
     }
 }
@@ -1048,6 +1096,7 @@ mod tests {
                 scope: CommandScope::User,
                 argument_hint: None,
                 template: Some("Fix $ARGUMENTS carefully.".into()),
+                skill_file: None,
             },
             SlashCommand {
                 name: "compact".into(),
@@ -1055,6 +1104,7 @@ mod tests {
                 scope: CommandScope::Builtin,
                 argument_hint: None,
                 template: None,
+                skill_file: None,
             },
             SlashCommand {
                 name: "mattpocock-skills:to-spec".into(),
@@ -1062,6 +1112,7 @@ mod tests {
                 scope: CommandScope::Skill,
                 argument_hint: None,
                 template: None,
+                skill_file: Some("/skills/mattpocock-skills/to-spec/SKILL.md".into()),
             },
         ];
         assert_eq!(
@@ -1100,6 +1151,7 @@ mod tests {
                 scope: CommandScope::Builtin,
                 argument_hint: None,
                 template: None,
+                skill_file: None,
             },
             SlashCommand {
                 name: "bare".into(),
@@ -1107,6 +1159,7 @@ mod tests {
                 scope: CommandScope::Project,
                 argument_hint: None,
                 template: Some("body".into()),
+                skill_file: None,
             },
         ];
         let reported = vec![
@@ -1150,6 +1203,7 @@ mod tests {
                 scope: CommandScope::User,
                 argument_hint: None,
                 template: None,
+                skill_file: None,
             },
             SlashCommand {
                 name: "deploy".into(),
@@ -1157,6 +1211,7 @@ mod tests {
                 scope: CommandScope::Project,
                 argument_hint: None,
                 template: None,
+                skill_file: None,
             },
         ]);
         assert_eq!(commands.len(), 1);
@@ -1172,6 +1227,7 @@ mod tests {
                 scope: CommandScope::Skill,
                 argument_hint: None,
                 template: None,
+                skill_file: None,
             },
             SlashCommand {
                 name: "format".into(),
@@ -1179,6 +1235,7 @@ mod tests {
                 scope: CommandScope::User,
                 argument_hint: None,
                 template: None,
+                skill_file: None,
             },
             SlashCommand {
                 name: "lint".into(),
@@ -1186,6 +1243,7 @@ mod tests {
                 scope: CommandScope::Project,
                 argument_hint: None,
                 template: None,
+                skill_file: None,
             },
             SlashCommand {
                 name: "review".into(),
@@ -1193,6 +1251,7 @@ mod tests {
                 scope: CommandScope::Builtin,
                 argument_hint: None,
                 template: None,
+                skill_file: None,
             },
             SlashCommand {
                 name: "commit".into(),
@@ -1200,6 +1259,7 @@ mod tests {
                 scope: CommandScope::Builtin,
                 argument_hint: None,
                 template: None,
+                skill_file: None,
             },
         ]);
         assert_eq!(
@@ -1263,6 +1323,7 @@ mod tests {
             scope: CommandScope::Builtin,
             argument_hint: None,
             template: None,
+            skill_file: None,
         }];
         let mut matcher = matcher();
         let matched = filter_commands(&commands, "sec", &mut matcher);
@@ -1306,6 +1367,7 @@ mod tests {
                 scope: CommandScope::Builtin,
                 argument_hint: Some("[target]".into()),
                 template: None,
+                skill_file: None,
             }],
         );
         let command = commands
@@ -1337,6 +1399,23 @@ mod tests {
             assert!(
                 skill.template.is_none(),
                 "skills are sent raw, never expanded"
+            );
+            let skill_file = skill
+                .skill_file
+                .as_deref()
+                .expect("filesystem skills carry an absolute SKILL.md path");
+            let skill_file = Path::new(skill_file);
+            assert!(skill_file.is_absolute());
+            assert_eq!(
+                skill_file.file_name().and_then(|name| name.to_str()),
+                Some("SKILL.md")
+            );
+            assert_eq!(
+                skill_file
+                    .parent()
+                    .and_then(Path::file_name)
+                    .and_then(|name| name.to_str()),
+                Some("deploy-runbook")
             );
         }
         // Raw passthrough end to end: no expansion applies at submit.
@@ -1426,8 +1505,13 @@ mod tests {
         // dotfile-repo layout that a `DirEntry::file_type` check misses.
         std::fs::create_dir_all(root.join("real/my-skill")).unwrap();
         std::fs::write(
-            root.join("real/my-skill/SKILL.md"),
+            root.join("real/my-skill/skill-body.md"),
             "---\nname: my-skill\ndescription: linked skill\n---\nBody",
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(
+            root.join("real/my-skill/skill-body.md"),
+            root.join("real/my-skill/SKILL.md"),
         )
         .unwrap();
         std::fs::create_dir_all(root.join("real/commands")).unwrap();
@@ -1442,6 +1526,18 @@ mod tests {
         assert!(
             commands.iter().any(|c| c.name == "my-skill"),
             "symlinked skill missing: {commands:?}"
+        );
+        let skill = commands
+            .iter()
+            .find(|command| command.name == "my-skill")
+            .unwrap();
+        let expected = std::fs::canonicalize(root.join("real/my-skill"))
+            .unwrap()
+            .join("SKILL.md");
+        assert_eq!(
+            skill.skill_file.as_deref(),
+            expected.to_str(),
+            "symlinked skill must expose its canonical directory with SKILL.md"
         );
         scan_command_files(
             &root.join("commands"),

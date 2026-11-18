@@ -95,6 +95,7 @@ command_palette.no_resume_sessions_hint: Padu にすでにあるセッション�
 command_palette.could_not_load_sessions: ターミナルセッションを読み込めませんでした
 command_palette.loading_selected_session: 会話を読み込み中…
 command_palette.resume_failed: "セッションを再開できませんでした：%{error}"
+composer.skill_catalog_loading: スキルを読み込み中です。検出が完了してからもう一度送信してください。
 
 language.title: 言語
 language.system: システム

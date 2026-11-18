@@ -93,6 +93,7 @@ command_palette.no_resume_sessions_hint: 已在 Padu 中的会话不会显示。
 command_palette.could_not_load_sessions: 无法加载终端会话
 command_palette.loading_selected_session: 正在加载对话…
 command_palette.resume_failed: "无法恢复会话：%{error}"
+composer.skill_catalog_loading: 正在加载技能…请等待发现完成后再发送。
 language.title: 语言
 language.system: 跟随系统
 language.description: 选择 Padu 的界面语言

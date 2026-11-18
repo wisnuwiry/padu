@@ -11,6 +11,7 @@ import type {
   SequencedEvent,
   UserInputAnswer,
 } from '@padu/client'
+import { PendingSteerQueue } from '@padu/client'
 import {
   createContext,
   useCallback,
@@ -48,6 +49,10 @@ import {
   type PendingPermission,
   type PendingUserInput,
 } from './event-reducer'
+import {
+  drainQueuedSubmission,
+  queueSubmission,
+} from './runtime-submissions'
 
 interface RuntimeSummary {
   runtimeId: string
@@ -149,6 +154,8 @@ interface RuntimeContextValue {
     turnCount: number,
     prompt: string,
     attachments?: MessageAttachment[],
+    providerPromptOverride?: string,
+    embeddedNotes?: EmbeddedNote[],
   ) => Promise<{ session: AgentSession; cleanupWarning: string | null }>
   saveSession: (session: AgentSession, project?: Project) => Promise<AgentSession>
 }
@@ -168,17 +175,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const projectionPersistTimers = useRef(new Map<string, number>())
   const saveGenerations = useRef(new Map<string, number>())
   const sendPromptRef = useRef<RuntimeContextValue['sendPrompt'] | null>(null)
-  const pendingSteers = useRef(
-    new Map<
-      string,
-      Array<{
-        providerPrompt: string
-        displayContent: string
-        attachments: MessageAttachment[]
-        embeddedNotes: EmbeddedNote[]
-      }>
-    >(),
-  )
+  const pendingSteers = useRef(new PendingSteerQueue<{
+    displayContent: string
+    attachments: MessageAttachment[]
+    embeddedNotes: EmbeddedNote[]
+  }>())
   const responseForksInFlight = useRef(new Map<string, number>())
   const messageRewindsInFlight = useRef(new Map<string, number>())
   const [runtimes, setRuntimes] = useState<Record<string, RuntimeSummary>>({})
@@ -416,18 +417,28 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           ) ?? saved
           const nextQueued = latest.queued_messages?.[0]
           if (!nextQueued) return
-          const dequeued = {
-            ...latest,
-            queued_messages: latest.queued_messages?.slice(1),
-          }
-          cacheSession(dequeued)
-          const persisted = await persistOrdered(dequeued)
-          await sendPromptRef.current?.(
-            persisted,
-            nextQueued.display_content ?? nextQueued.content,
-            nextQueued.attachments ?? [],
-            nextQueued.content,
-            nextQueued.embedded_notes ?? [],
+          await drainQueuedSubmission(
+            latest,
+            nextQueued,
+            {
+              readCurrent: () => queryClient.getQueryData<AgentSession>(
+                daemonKeys.session(config.address, saved.id),
+              ),
+              send: async (_queuedSession, metadata) => {
+                if (!sendPromptRef.current) {
+                  throw new Error(translate(localeRef.current, 'errors.no_live_runtime'))
+                }
+                await sendPromptRef.current(
+                  latest,
+                  metadata.visiblePrompt,
+                  metadata.attachments,
+                  metadata.providerPrompt,
+                  metadata.embeddedNotes,
+                )
+              },
+              cache: cacheSession,
+              persist: persistOrdered,
+            },
           )
         })
         .catch((error) => toast.error(errorMessage(error)))
@@ -479,8 +490,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         }
         if (event.event.kind === 'steerAccepted') {
           const payload = event.event.payload as { message?: string }
-          const pending = pendingSteers.current.get(session.id)?.shift()
+          const pending = pendingSteers.current.take(session.id, payload.message)
           if (pending) {
+            const metadata = pending.value
             const turnId = current.turns.at(-1)?.id ?? null
             current = {
               ...current,
@@ -492,11 +504,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
                   role: 'user',
                   content: payload.message ?? pending.providerPrompt,
                   display_content:
-                    pending.attachments.length || pending.providerPrompt !== pending.displayContent
-                      ? pending.displayContent
+                    metadata.attachments.length || pending.providerPrompt !== metadata.displayContent
+                      ? metadata.displayContent
                       : null,
-                  attachments: pending.attachments,
-                  embedded_notes: pending.embeddedNotes,
+                  attachments: metadata.attachments,
+                  embedded_notes: metadata.embeddedNotes,
                   created_at: Math.floor(Date.now() / 1_000),
                   streaming: false,
                 },
@@ -504,14 +516,16 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             }
           }
         } else if (event.event.kind === 'steerRejected') {
-          const pending = pendingSteers.current.get(session.id)?.shift()
+          const payload = event.event.payload as { message?: string }
+          const pending = pendingSteers.current.take(session.id, payload.message)
           if (pending) {
+            const metadata = pending.value
             current = queueSubmission(
               current,
-              pending.displayContent,
+              metadata.displayContent,
               pending.providerPrompt,
-              pending.attachments,
-              pending.embeddedNotes,
+              metadata.attachments,
+              metadata.embeddedNotes,
             )
             cacheSession(current)
             void persistOrdered(current).catch((error) => toast.error(errorMessage(error)))
@@ -662,7 +676,13 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         await attachSession(currentSession)
       }
 
-      let session = beginTurn(currentSession, prompt, attachments, embeddedNotes)
+      let session = beginTurn(
+        currentSession,
+        prompt,
+        attachments,
+        embeddedNotes,
+        providerPrompt,
+      )
       cacheSession(session)
 
       let project: Project
@@ -1036,10 +1056,17 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         await sendPrompt(session, prompt, attachments, providerPrompt, embeddedNotes)
         return
       }
-      const pending = pendingSteers.current.get(session.id) ?? []
-      pending.push({ providerPrompt, displayContent: prompt, attachments, embeddedNotes })
-      pendingSteers.current.set(session.id, pending)
-      await client.request({ type: 'steer', prompt: providerPrompt }, session.id, runtime.runtimeId)
+      const pending = pendingSteers.current.enqueue(session.id, providerPrompt, {
+        displayContent: prompt,
+        attachments,
+        embeddedNotes,
+      })
+      try {
+        await client.request({ type: 'steer', prompt: providerPrompt }, session.id, runtime.runtimeId)
+      } catch (error) {
+        pendingSteers.current.remove(session.id, pending)
+        throw error
+      }
     },
     [client, phase, sendPrompt],
   )
@@ -1087,7 +1114,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       if (pendingCheckpoint) await pendingCheckpoint.catch(() => undefined)
       persistenceTails.current.delete(sessionId)
       saveGenerations.current.delete(sessionId)
-      pendingSteers.current.delete(sessionId)
+      pendingSteers.current.clearSession(sessionId)
       setPermissions((current) => removeRecordKey(current, sessionId))
       setUserInputs((current) => removeRecordKey(current, sessionId))
       setBackgroundWork((current) => removeRecordKey(current, sessionId))
@@ -1237,6 +1264,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       turnCount: number,
       prompt: string,
       attachments: MessageAttachment[] = [],
+      providerPromptOverride?: string,
+      embeddedNotes: EmbeddedNote[] = [],
     ) => {
       if (!client || !config || phase !== 'connected') {
         throw new Error(translate(localeRef.current, 'errors.daemon_disconnected'))
@@ -1278,7 +1307,13 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             queryKey: ['daemon', config.address, 'workspace-diff'],
           }),
         ]).catch(() => {})
-        await sendPrompt(response.session, prompt, attachments)
+        await sendPrompt(
+          response.session,
+          prompt,
+          attachments,
+          providerPromptOverride,
+          embeddedNotes,
+        )
         return {
           session: response.session,
           cleanupWarning: response.cleanupWarning,
@@ -1359,32 +1394,6 @@ function noticeObjective(objective: string): string {
   const characters = [...objective]
   if (characters.length <= 120) return objective
   return `${characters.slice(0, 119).join('').trimEnd()}…`
-}
-
-function queueSubmission(
-  session: AgentSession,
-  displayContent: string,
-  providerPrompt: string,
-  attachments: MessageAttachment[],
-  embeddedNotes: EmbeddedNote[] = [],
-): AgentSession {
-  return {
-    ...session,
-    updated_at: Math.floor(Date.now() / 1_000),
-    queued_messages: [
-      ...(session.queued_messages ?? []),
-      {
-        id: crypto.randomUUID(),
-        content: providerPrompt,
-        display_content: attachments.length || providerPrompt !== displayContent
-          ? displayContent
-          : null,
-        attachments,
-        embedded_notes: embeddedNotes,
-        created_at: Math.floor(Date.now() / 1_000),
-      },
-    ],
-  }
 }
 
 export function useRuntime() {

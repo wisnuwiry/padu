@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
-use crate::composer::{FileEntry, SlashCommand};
+use crate::composer::{FileEntry, SkillCapabilityMetadata, SlashCommand};
 use crate::git::{AgentInvocation, BranchSnapshot, CommitSnapshot, CreatedWorktree};
 use crate::model::{Checkpoint, ProviderKind};
 
@@ -249,6 +249,8 @@ pub enum WorkspaceResult {
     },
     SlashCommands {
         commands: Vec<SlashCommand>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        skill_capability: Option<SkillCapabilityMetadata>,
     },
     ProjectlessWorkspace {
         #[ts(type = "string")]

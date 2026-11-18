@@ -8,6 +8,8 @@ import type {
   ProviderProbe,
   ResponsePayload,
   PaduClient,
+  SkillBinaryIdentity,
+  SlashCommand,
   SidebarGroupView,
   SidebarGrouping,
   SidebarOrdering,
@@ -16,6 +18,10 @@ import type {
 
 export type TaskState = Extract<ResponsePayload, { type: 'taskState' }>;
 export type DaemonDirectory = Extract<WorkspaceResult, { type: 'directory' }>;
+export type ComposerCommandCatalog = Extract<
+  WorkspaceResult,
+  { type: 'slashCommands' }
+>;
 
 export const daemonKeys = {
   taskState: (profileId: string) => ['daemon', profileId, 'task-state'] as const,
@@ -43,6 +49,25 @@ export const daemonKeys = {
     profileId,
     'branches',
     cwd,
+  ] as const,
+  slashCommands: (
+    profileId: string,
+    provider: ProviderKind,
+    cwd: string,
+    binaryOverride: string | null,
+    binaryVersion: string | null,
+    binaryIdentity: SkillBinaryIdentity | null = null,
+  ) => [
+    'daemon',
+    profileId,
+    'composer',
+    'slash-commands',
+    provider,
+    cwd,
+    binaryOverride,
+    binaryVersion,
+    binaryIdentity?.canonicalPath ?? null,
+    binaryIdentity?.contentSha256 ?? null,
   ] as const,
   sidebarGroups: (
     profileId: string,
@@ -140,7 +165,10 @@ export async function probeProvider(
   provider: ProviderKind,
   settings: DaemonSettings,
   options: { discoverModels?: boolean; probeVersion?: boolean } = {},
-): Promise<ProviderProbe & { version: string | null }> {
+): Promise<ProviderProbe & {
+  version: string | null;
+  binaryIdentity: SkillBinaryIdentity | null;
+}> {
   const response = expectResponse(
     await client.request({
       type: 'probeProvider',
@@ -151,7 +179,11 @@ export async function probeProvider(
     }),
     'providerProbe',
   );
-  return { ...response.probe, version: response.version ?? null };
+  return {
+    ...response.probe,
+    version: response.version ?? null,
+    binaryIdentity: response.binaryIdentity ?? null,
+  };
 }
 
 export async function browseDaemonDirectory(
@@ -164,6 +196,34 @@ export async function browseDaemonDirectory(
   );
   if (response.result.type !== 'directory') {
     throw new Error('The daemon returned an unexpected directory response');
+  }
+  return response.result;
+}
+
+/**
+ * Discover the active daemon host's provider-neutral command and skill
+ * catalog. This is a normal workspace query and never starts a provider turn.
+ */
+export async function discoverComposerCommands(
+  client: PaduClient,
+  provider: ProviderKind,
+  projectRoot: string,
+  binaryOverride: string | null,
+): Promise<ComposerCommandCatalog> {
+  const response = expectResponse(
+    await client.request({
+      type: 'workspace',
+      operation: {
+        type: 'discoverSlashCommands',
+        provider,
+        project_root: projectRoot,
+        binary_override: binaryOverride,
+      },
+    }),
+    'workspace',
+  );
+  if (response.result.type !== 'slashCommands') {
+    throw new Error('The daemon returned an unexpected slash-command response');
   }
   return response.result;
 }

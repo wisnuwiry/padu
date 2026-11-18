@@ -30,6 +30,7 @@ import type {
   SidebarGroupView,
   SidebarGrouping,
   SidebarOrdering,
+  SkillBinaryIdentity,
   SlashCommand,
   SkillsCatalog,
   CreateTask,
@@ -48,6 +49,7 @@ import { normalizeSessionTitle, promptFallbackTitle } from '@padu/client/event-r
 
 export type TaskState = Extract<ResponsePayload, { type: 'taskState' }>
 export type DaemonDirectory = Extract<WorkspaceResult, { type: 'directory' }>
+export type ComposerCommandCatalog = Extract<WorkspaceResult, { type: 'slashCommands' }>
 
 export const daemonKeys = {
   taskState: (address: string) => ['daemon', address, 'task-state'] as const,
@@ -84,7 +86,18 @@ export const daemonKeys = {
     provider: ProviderKind,
     cwd: string,
     binaryOverride: string | null,
-  ) => [...daemonKeys.composerSources(address), 'commands', provider, cwd, binaryOverride] as const,
+    binaryVersion: string | null,
+    binaryIdentity: SkillBinaryIdentity | null = null,
+  ) => [
+    ...daemonKeys.composerSources(address),
+    'commands',
+    provider,
+    cwd,
+    binaryOverride,
+    binaryVersion,
+    binaryIdentity?.canonicalPath ?? null,
+    binaryIdentity?.contentSha256 ?? null,
+  ] as const,
   workspaceTree: (address: string, cwd: string, expanded: string[], showHidden = false) =>
     ['daemon', address, 'workspace-tree', cwd, showHidden ? 'hidden' : 'visible', ...[...expanded].sort()] as const,
   directory: (address: string, path: string | null) =>
@@ -378,7 +391,10 @@ export async function probeProvider(
   provider: ProviderKind,
   settings: DaemonSettings,
   options: { discoverModels?: boolean; probeVersion?: boolean } = {},
-): Promise<ProviderProbe & { version: string | null }> {
+): Promise<ProviderProbe & {
+  version: string | null
+  binaryIdentity: SkillBinaryIdentity | null
+}> {
   const { discoverModels = true, probeVersion = true } = options
   const response = expectResponse(
     await client.request({
@@ -390,7 +406,11 @@ export async function probeProvider(
     }),
     'providerProbe',
   )
-  return { ...response.probe, version: response.version }
+  return {
+    ...response.probe,
+    version: response.version ?? null,
+    binaryIdentity: response.binaryIdentity ?? null,
+  }
 }
 
 export async function loadSkills(
@@ -664,7 +684,7 @@ export async function discoverComposerCommands(
   provider: ProviderKind,
   projectRoot: string,
   binaryOverride: string | null,
-): Promise<SlashCommand[]> {
+): Promise<ComposerCommandCatalog> {
   const result = await workspaceRequest(client, {
     type: 'discoverSlashCommands',
     provider,
@@ -674,7 +694,7 @@ export async function discoverComposerCommands(
   if (result.type !== 'slashCommands') {
     throw new Error('The daemon returned an unexpected slash-command response')
   }
-  return result.commands
+  return result
 }
 
 export async function checkoutWorkspaceBranch(
@@ -958,12 +978,15 @@ export function beginTurn(
   prompt: string,
   attachments: MessageAttachment[] = [],
   embeddedNotes: EmbeddedNote[] = [],
+  providerPromptOverride?: string,
 ): AgentSession {
   const now = unixTime()
   const turnId = crypto.randomUUID()
   const visiblePrompt = prompt.trim()
   const mentions = attachments.map((attachment) => `@${attachment.mention}`).join(' ')
-  const providerPrompt = [visiblePrompt, mentions].filter(Boolean).join(' ')
+  const providerPrompt = providerPromptOverride === undefined
+    ? [visiblePrompt, mentions].filter(Boolean).join(' ')
+    : providerPromptOverride.trim()
   const autoTitle =
     session.messages.length === 0 && session.title === 'New task' && !session.auto_title
       ? promptTitle(visiblePrompt || attachments[0]?.name || '')
@@ -981,7 +1004,7 @@ export function beginTurn(
         turn_id: turnId,
         role: 'user',
         content: providerPrompt,
-        display_content: attachments.length || embeddedNotes.length ? visiblePrompt : null,
+        display_content: providerPrompt === visiblePrompt ? null : visiblePrompt,
         attachments,
         embedded_notes: embeddedNotes,
         created_at: now,

@@ -1,5 +1,330 @@
 use super::*;
 
+fn submission_needs_skill_rendering(submission: &ComposerSubmission) -> bool {
+    submission.display_content.is_none()
+}
+
+/// A queued follow-up removed for dispatch but not yet accepted by a provider.
+///
+/// Keeping the exact `QueuedMessage` here means every failure path can put the
+/// original item back at the front of its session's queue, even after the user
+/// has selected another session or the preparation ran in the background.
+#[derive(Clone, Debug)]
+struct QueuedDrain {
+    message: QueuedMessage,
+}
+
+impl QueuedDrain {
+    fn restore(self, sessions: &mut [AgentSession], session_id: Uuid) -> bool {
+        let Some(session) = sessions.iter_mut().find(|session| session.id == session_id) else {
+            return false;
+        };
+        // A same-id item can only be an older copy from interrupted state.
+        // Replace it so the restored provider payload and presentation are
+        // exactly the item that failed to drain, and keep it at the front.
+        session
+            .queued_messages
+            .retain(|queued| queued.id != self.message.id);
+        session.queued_messages.insert(0, self.message);
+        session.updated_at = unix_time();
+        true
+    }
+}
+
+/// A queued follow-up moving through the production drain state machine.
+///
+/// `begin` removes only the front row. The same captured object then either
+/// reaches dispatch or is passed to one of the named failure transitions,
+/// which restore that exact row to its original session.
+#[derive(Clone, Debug)]
+struct QueuedFollowUpDrain {
+    session_id: Uuid,
+    queued: QueuedDrain,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum QueuedDrainFailure {
+    Disconnect,
+    Deferred,
+    Preparation,
+    Dispatch,
+}
+
+impl QueuedFollowUpDrain {
+    fn begin(session: &mut AgentSession) -> Option<Self> {
+        let message = if session.queued_messages.is_empty() {
+            return None;
+        } else {
+            session.queued_messages.remove(0)
+        };
+        Some(Self {
+            session_id: session.id,
+            queued: QueuedDrain { message },
+        })
+    }
+
+    fn submission(&self) -> ComposerSubmission {
+        ComposerSubmission::from_queued_message(self.queued.message.clone())
+    }
+
+    fn fail(self, sessions: &mut [AgentSession], failure: QueuedDrainFailure) -> bool {
+        // The failure stage is part of the runtime transition even though all
+        // three paths share one invariant: the original row goes back first.
+        match failure {
+            QueuedDrainFailure::Disconnect
+            | QueuedDrainFailure::Deferred
+            | QueuedDrainFailure::Preparation
+            | QueuedDrainFailure::Dispatch => self.queued.restore(sessions, self.session_id),
+        }
+    }
+}
+
+/// Resolve a live steering message and retain the typed prompt whenever the
+/// provider receives different syntax. Slash-form skills take this path: the
+/// provider may acknowledge `$name` or `/skill:name`, while the transcript
+/// must still show the `/name` text the user submitted.
+pub(super) fn prepare_steering_submission_for_transport(
+    provider: ProviderKind,
+    mut submission: ComposerSubmission,
+    commands: &[SlashCommand],
+) -> (String, ComposerSubmission) {
+    let provider_prompt =
+        crate::composer_complete::resolved_skill_submission(provider, &submission.prompt, commands)
+            .unwrap_or_else(|| submission.prompt.clone());
+    if provider_prompt != submission.prompt && submission.display_content.is_none() {
+        submission.display_content = Some(submission.prompt.clone());
+    }
+    (provider_prompt, submission)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SkillDispatchContext {
+    session_id: Uuid,
+    project_id: Uuid,
+    host_generation: u64,
+    provider: ProviderKind,
+    project_path: PathBuf,
+    binary_override: Option<String>,
+}
+
+fn skill_dispatch_context_is_current(
+    captured: &SkillDispatchContext,
+    current_host_generation: u64,
+    current: Option<&SkillDispatchContext>,
+) -> bool {
+    captured.host_generation == current_host_generation && current == Some(captured)
+}
+
+/// Skill resolution captured before dispatching a prompt. The exact binary
+/// observation and catalog must be read from the same daemon turn as the
+/// session/project that accepted the prompt; drawing or resolving through a
+/// later selection can point at another host's skills or executable.
+struct FreshSkillSnapshot {
+    binary: ProviderBinaryObservation,
+    catalog: Option<SlashCommandCatalog>,
+}
+
+impl FreshSkillSnapshot {
+    fn render(
+        &self,
+        provider: ProviderKind,
+        prompt: &str,
+    ) -> crate::composer_complete::SkillRenderResult {
+        render_skill_mentions_for_catalog(
+            provider,
+            prompt,
+            self.catalog
+                .as_ref()
+                .map(|catalog| catalog.commands.as_slice())
+                .unwrap_or_default(),
+            self.catalog
+                .as_ref()
+                .and_then(|catalog| catalog.skill_capability.as_ref()),
+            self.binary.version.as_deref(),
+            self.binary.identity.as_ref(),
+            self.unavailable(),
+        )
+    }
+
+    fn unavailable(&self) -> bool {
+        self.catalog.is_none()
+    }
+}
+
+/// Provider binary and catalog probes must run in this order, off the UI
+/// thread. The catalog's native-syntax evidence is valid only for the exact
+/// version and executable identity returned by the first request.
+fn fetch_fresh_skill_snapshot(
+    daemon: padu_client::DaemonSupervisor,
+    provider: ProviderKind,
+    project_path: PathBuf,
+    binary_override: Option<String>,
+) -> FreshSkillSnapshot {
+    let client = daemon.client();
+    let binary = match client.request(
+        Uuid::nil(),
+        Uuid::nil(),
+        padu_client::Command::ProbeProvider {
+            provider,
+            binary_override: binary_override.clone(),
+            discover_models: false,
+            probe_version: true,
+        },
+    ) {
+        Ok(padu_client::ResponsePayload::ProviderProbe {
+            version,
+            binary_identity,
+            ..
+        }) => ProviderBinaryObservation {
+            version,
+            identity: binary_identity,
+        },
+        _ => ProviderBinaryObservation::default(),
+    };
+    let workspace = padu_client::WorkspaceClient::new(daemon.client());
+    let catalog = workspace
+        .request(padu_client::WorkspaceOperation::DiscoverSlashCommands {
+            provider,
+            project_root: project_path,
+            binary_override,
+        })
+        .ok()
+        .and_then(|result| match result {
+            padu_client::WorkspaceResult::SlashCommands {
+                commands,
+                skill_capability,
+            } => Some(SlashCommandCatalog {
+                commands,
+                skill_capability,
+                unavailable: false,
+            }),
+            _ => None,
+        });
+    FreshSkillSnapshot { binary, catalog }
+}
+
+/// A failed catalog refresh is a portable fallback, never permission to use
+/// commands or paths from an older response. A failed or incomplete binary
+/// observation can use discovered paths but cannot authorize native provider
+/// syntax.
+fn render_skill_mentions_for_catalog(
+    provider: ProviderKind,
+    prompt: &str,
+    commands: &[SlashCommand],
+    evidence: Option<&crate::composer_complete::SkillCapabilityMetadata>,
+    binary_version: Option<&str>,
+    binary_identity: Option<&padu_client::skill_probe::SkillBinaryIdentity>,
+    catalog_unavailable: bool,
+) -> crate::composer_complete::SkillRenderResult {
+    if catalog_unavailable {
+        return crate::composer_complete::render_skill_mentions_with_capability(
+            crate::composer_complete::provider_skill_capability(provider),
+            prompt,
+            &[],
+        );
+    }
+    crate::composer_complete::render_skill_mentions_with_capability(
+        padu_client::skill_probe::verified_skill_capability(
+            evidence,
+            provider,
+            binary_version,
+            binary_identity,
+        ),
+        prompt,
+        commands,
+    )
+}
+
+pub(super) fn skill_render_warning_messages(
+    visible_prompt: &str,
+    rendered: &crate::composer_complete::SkillRenderResult,
+    catalog_unavailable: bool,
+) -> Vec<String> {
+    let mut warnings = rendered
+        .warnings
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    if catalog_unavailable
+        && rendered.provider_text == visible_prompt
+        && rendered.warnings.is_empty()
+    {
+        warnings.push(crate::composer_complete::SKILL_CATALOG_UNAVAILABLE_WARNING.into());
+    }
+    warnings
+}
+
+fn take_skill_warning_message(skill_warnings: &mut Vec<String>) -> Option<String> {
+    let warnings = std::mem::take(skill_warnings);
+    (!warnings.is_empty()).then(|| warnings.join("\n"))
+}
+
+/// Rebuild the provider prompt from the captured snapshot while preserving the
+/// hidden attachment and note tail assembled by the composer.
+fn render_submission_with_fresh_skills(
+    mut submission: ComposerSubmission,
+    provider: ProviderKind,
+    snapshot: &FreshSkillSnapshot,
+) -> (
+    ComposerSubmission,
+    crate::composer_complete::SkillRenderResult,
+) {
+    let visible = submission
+        .display_content
+        .clone()
+        .unwrap_or_else(|| submission.prompt.clone());
+    let hidden_suffix = submission
+        .prompt
+        .strip_prefix(&visible)
+        .unwrap_or_default()
+        .to_owned();
+    let rendered = snapshot.render(provider, &visible);
+    submission.prompt = format!("{}{hidden_suffix}", rendered.provider_text);
+    submission.skill_warnings =
+        skill_render_warning_messages(&visible, &rendered, snapshot.unavailable());
+    submission.display_content = Some(visible);
+    submission.needs_skill_refresh = false;
+    (submission, rendered)
+}
+
+fn should_adopt_fresh_skill_catalog(
+    captured_host_generation: u64,
+    current_host_generation: u64,
+    captured_key: &(ProviderKind, PathBuf, Option<String>),
+    current_key: Option<&(ProviderKind, PathBuf, Option<String>)>,
+) -> bool {
+    captured_host_generation == current_host_generation && current_key == Some(captured_key)
+}
+
+pub(super) fn composer_draft_key_for_recovery(
+    captured_session_id: Uuid,
+    captured_project_id: Uuid,
+    sessions: &[AgentSession],
+    projects: &[Project],
+    fallback: Option<crate::persistence::ComposerDraftKey>,
+    host_switch_pending: bool,
+) -> Option<crate::persistence::ComposerDraftKey> {
+    if host_switch_pending {
+        return None;
+    }
+    sessions
+        .iter()
+        .find(|session| session.id == captured_session_id)
+        .map(crate::persistence::ComposerDraftKey::for_session)
+        .or_else(|| {
+            projects
+                .iter()
+                .any(|project| project.id == captured_project_id)
+                .then_some(crate::persistence::ComposerDraftKey::NewSession(
+                    captured_project_id,
+                ))
+        })
+        // A host switch can remove both the captured task and project. Use the
+        // destination currently visible in the composer so rejected text is
+        // never stranded under an old host's project id.
+        .or(fallback)
+}
+
 fn workspace_ack(
     workspace: &padu_client::WorkspaceClient,
     operation: padu_client::WorkspaceOperation,
@@ -960,6 +1285,7 @@ impl Padu {
         let clients = self.daemon.subscribe_clients();
         let results = self.task_state_sync_tx.clone();
         let event_wake = self.event_wake_tx.clone();
+        let host_generation = self.host_switch_generation;
         std::thread::Builder::new()
             .name("padu-task-state-sync".into())
             .spawn(move || {
@@ -972,7 +1298,7 @@ impl Padu {
                     }
                     let revisions = client.subscribe_task_state();
                     let result = load_remote_task_state(&client).map_err(|error| error.to_string());
-                    if results.send(result).is_err() {
+                    if results.send((host_generation, result)).is_err() {
                         return;
                     }
                     signal_event_pump(&event_wake);
@@ -1001,7 +1327,7 @@ impl Padu {
                                 while revisions.try_recv().is_ok() {}
                                 let result = load_remote_task_state(&client)
                                     .map_err(|error| error.to_string());
-                                if results.send(result).is_err() {
+                                if results.send((host_generation, result)).is_err() {
                                     return;
                                 }
                                 signal_event_pump(&event_wake);
@@ -1015,8 +1341,10 @@ impl Padu {
 
     fn drain_task_state_sync_events(&mut self, cx: &mut Context<Self>) -> bool {
         let mut latest = None;
-        while let Ok(result) = self.task_state_sync_events.try_recv() {
-            latest = Some(result);
+        while let Ok((generation, result)) = self.task_state_sync_events.try_recv() {
+            if generation == self.host_switch_generation {
+                latest = Some(result);
+            }
         }
         let Some(result) = latest else {
             return false;
@@ -1121,6 +1449,7 @@ impl Padu {
                 self.create_session_for(project_id, self.state.last_provider, cx);
             }
         }
+        self.flush_pending_composer_recoveries(cx);
     }
 
     pub(super) fn start_runtime_attachment(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
@@ -1445,9 +1774,10 @@ impl Padu {
         self.request_provider_model_discovery(provider);
     }
 
-    /// Ask every installed CLI for its version, one short-lived subprocess per
-    /// provider on its own thread. Answers land in `provider_versions` through
-    /// the drain loop; render reads only that map.
+    /// Ask every installed CLI for its version and exact executable identity,
+    /// one short-lived subprocess per provider on its own thread. Answers land
+    /// in `provider_versions` through the drain loop; render reads only that
+    /// map.
     pub(super) fn request_provider_version_probes(&mut self) {
         let targets = self
             .probes
@@ -1466,7 +1796,7 @@ impl Padu {
             if std::thread::Builder::new()
                 .name(format!("padu-{}-version-probe", provider.id()))
                 .spawn(move || {
-                    let version = match daemon.request(
+                    let binary = match daemon.request(
                         Uuid::nil(),
                         Uuid::nil(),
                         padu_client::Command::ProbeProvider {
@@ -1476,10 +1806,17 @@ impl Padu {
                             probe_version: true,
                         },
                     ) {
-                        Ok(padu_client::ResponsePayload::ProviderProbe { version, .. }) => version,
-                        _ => None,
+                        Ok(padu_client::ResponsePayload::ProviderProbe {
+                            version,
+                            binary_identity,
+                            ..
+                        }) => ProviderBinaryObservation {
+                            version,
+                            identity: binary_identity,
+                        },
+                        _ => ProviderBinaryObservation::default(),
                     };
-                    if provider_version_tx.send((provider, version)).is_ok() {
+                    if provider_version_tx.send((provider, binary)).is_ok() {
                         signal_event_pump(&event_wake);
                     }
                 })
@@ -1492,9 +1829,16 @@ impl Padu {
 
     pub(super) fn drain_provider_version_events(&mut self) -> bool {
         let mut changed = false;
-        while let Ok((provider, version)) = self.provider_version_events.try_recv() {
+        while let Ok((provider, binary)) = self.provider_version_events.try_recv() {
             self.provider_version_probes_pending.remove(&provider);
-            self.provider_versions.insert(provider, version);
+            apply_provider_version_observation(
+                &mut self.provider_versions,
+                provider,
+                binary,
+                &mut self.slash_commands,
+                &mut self.slash_skill_capability,
+                &mut self.composer_sources_stale,
+            );
             changed = true;
         }
         changed
@@ -1704,6 +2048,13 @@ impl Padu {
 
     pub(super) fn save(&mut self) {
         self.last_stream_save = Instant::now();
+        match self.save_for_quit() {
+            Ok(()) => {}
+            Err(error) => self.show_toast(tr!("errors.save_local_state", error = error)),
+        }
+    }
+
+    pub(super) fn save_for_quit(&mut self) -> Result<(), String> {
         let daemon_error = self
             .daemon
             .update_settings(self.state.daemon_settings())
@@ -1715,10 +2066,10 @@ impl Padu {
             .err()
             .map(|error| error.to_string());
         if let Some(error) = daemon_error.or(app_error) {
-            self.show_toast(tr!("errors.save_local_state", error = error));
-        } else {
-            self.stream_state_dirty = false;
+            return Err(error);
         }
+        self.stream_state_dirty = false;
+        Ok(())
     }
 
     fn checkpoint_capture_pending(&self, session_id: Uuid, turn_count: usize) -> bool {
@@ -2261,19 +2612,146 @@ impl Padu {
             .iter()
             .map(|attachment| attachment.mention.clone())
             .collect::<Vec<_>>();
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == edit.session_id)
+            .cloned()
+        else {
+            self.show_toast(tr!("session.message_unavailable"));
+            cx.notify();
+            return;
+        };
+        self.hide_toast();
         let provider_prompt = composer::merged_submission(&prompt, &mentions)
             .expect("edited text or retained attachments always form a submission");
-        let display_content = (!edit.attachments.is_empty()).then_some(prompt);
-        self.start_message_rewind(
-            edit.clone(),
-            ComposerSubmission {
-                prompt: provider_prompt,
-                display_content,
-                attachments: edit.attachments,
-                embedded_notes: edit.embedded_notes,
-            },
-            cx,
-        );
+        let needs_skill_refresh = crate::composer_complete::has_skill_mentions(&prompt);
+        let submission = ComposerSubmission {
+            prompt: provider_prompt,
+            display_content: (needs_skill_refresh || !edit.attachments.is_empty())
+                .then_some(prompt.clone()),
+            attachments: edit.attachments.clone(),
+            embedded_notes: edit.embedded_notes.clone(),
+            needs_skill_refresh,
+            skill_warnings: Vec::new(),
+        };
+        if !needs_skill_refresh {
+            self.start_message_rewind(edit, submission, cx);
+            return;
+        }
+        if !self.submission_preparations.insert(edit.session_id) {
+            return;
+        }
+        cx.notify();
+        let project_id = session.project_id;
+        let provider = session.provider;
+        let host_generation = self.host_switch_generation;
+        let Some(project_path) = self
+            .workspace_path_for_session(&session)
+            .map(std::path::Path::to_path_buf)
+        else {
+            self.submission_preparations.remove(&edit.session_id);
+            self.recover_message_edit_submission(edit, project_id, submission, cx);
+            self.show_toast(tr!("errors.task_project_not_found"));
+            return;
+        };
+        let binary_override = self.state.provider_binary_overrides.get(&provider).cloned();
+        let command_key = (provider, project_path.clone(), binary_override.clone());
+        let dispatch_context = SkillDispatchContext {
+            session_id: edit.session_id,
+            project_id,
+            host_generation,
+            provider,
+            project_path: project_path.clone(),
+            binary_override: binary_override.clone(),
+        };
+        let daemon = self.daemon.clone();
+        cx.spawn(async move |this, cx| {
+            let snapshot = cx
+                .background_executor()
+                .spawn(async move {
+                    fetch_fresh_skill_snapshot(daemon, provider, project_path, binary_override)
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                let current_context = this.skill_dispatch_context_for_session(edit.session_id);
+                let context_current = skill_dispatch_context_is_current(
+                    &dispatch_context,
+                    this.host_switch_generation,
+                    current_context.as_ref(),
+                );
+                let active_edit = this.message_edit.as_ref().is_some_and(|active| {
+                    active.session_id == edit.session_id && active.message_id == edit.message_id
+                });
+                if !context_current
+                    || this.state.selected_session != Some(edit.session_id)
+                    || !active_edit
+                {
+                    this.submission_preparations.remove(&edit.session_id);
+                    this.recover_message_edit_submission(edit, project_id, submission, cx);
+                    return;
+                }
+                if should_adopt_fresh_skill_catalog(
+                    host_generation,
+                    this.host_switch_generation,
+                    &command_key,
+                    this.selected_composer_command_key().as_ref(),
+                ) {
+                    this.apply_fresh_skill_catalog(&command_key, &snapshot);
+                }
+                let (submission, _) =
+                    render_submission_with_fresh_skills(submission, provider, &snapshot);
+                this.submission_preparations.remove(&edit.session_id);
+                this.start_message_rewind(edit, submission, cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn recover_message_edit_submission(
+        &mut self,
+        edit: MessageEdit,
+        project_id: Uuid,
+        submission: ComposerSubmission,
+        cx: &mut Context<Self>,
+    ) {
+        let active_edit = self.message_edit.as_ref().is_some_and(|active| {
+            active.session_id == edit.session_id && active.message_id == edit.message_id
+        }) && self.state.selected_session == Some(edit.session_id);
+        if !active_edit {
+            self.recover_composer_submission(edit.session_id, project_id, submission, cx);
+            return;
+        }
+
+        let visible = submission
+            .display_content
+            .clone()
+            .unwrap_or_else(|| submission.prompt.clone());
+        let active = self
+            .message_edit
+            .as_mut()
+            .expect("the active edit was checked above");
+        let current = active.input.read(cx).content(cx).to_owned();
+        let recovered = super::drafts::merge_recovered_text(current, visible);
+        active
+            .input
+            .update(cx, |input, cx| input.set_content(recovered, cx));
+        for attachment in submission.attachments {
+            if !active.attachments.iter().any(|existing| {
+                existing.path == attachment.path
+                    && existing.blob_reference == attachment.blob_reference
+            }) {
+                active.attachments.push(attachment);
+            }
+        }
+        for note in submission.embedded_notes {
+            if !active.embedded_notes.contains(&note) {
+                active.embedded_notes.push(note);
+            }
+        }
+        cx.notify();
     }
 
     fn start_message_rewind(
@@ -2283,6 +2761,12 @@ impl Padu {
         cx: &mut Context<Self>,
     ) {
         let session_id = edit.session_id;
+        let project_id = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .map(|session| session.project_id);
         let turn_count = edit.turn_count;
         let retained_turn_count = turn_count.saturating_sub(1);
         let Some(source) = self
@@ -2452,7 +2936,6 @@ impl Padu {
         };
         self.message_edit = None;
         self.submission_preparations.insert(session_id);
-        self.hide_toast();
         self.remeasure_transcript_message(edited_message_index);
         cx.notify();
 
@@ -2464,6 +2947,7 @@ impl Padu {
             let _ = padu.update(cx, move |padu, cx| {
                 padu.finish_message_rewind(
                     edit,
+                    project_id.expect("the source session was captured before rewinding"),
                     submission,
                     edited_message_id,
                     original_message,
@@ -2479,6 +2963,7 @@ impl Padu {
     fn finish_message_rewind(
         &mut self,
         edit: MessageEdit,
+        project_id: Uuid,
         submission: ComposerSubmission,
         edited_message_id: Uuid,
         original_message: Message,
@@ -2489,6 +2974,7 @@ impl Padu {
         let session_id = edit.session_id;
         let turn_count = edit.turn_count;
         if !self.submission_preparations.remove(&session_id) {
+            self.recover_composer_submission(session_id, project_id, submission, cx);
             return;
         }
         let selected = self.state.selected_session == Some(session_id);
@@ -2520,8 +3006,8 @@ impl Padu {
                 {
                     self.remeasure_transcript_message(message_index);
                 }
+                self.recover_message_edit_submission(edit, project_id, submission, cx);
                 self.show_toast(error);
-                cx.notify();
                 return;
             }
         };
@@ -2545,6 +3031,9 @@ impl Padu {
                 )
             });
         let Some((provider, removed_turns)) = provider_and_removed_turns else {
+            self.recover_composer_submission(session_id, project_id, submission, cx);
+            self.show_toast(tr!("session.message_unavailable"));
+            cx.notify();
             return;
         };
         if selected {
@@ -3036,12 +3525,18 @@ impl Padu {
         handle
     }
 
-    pub(super) fn submit_composer_submission(
+    fn submit_composer_submission_for_session(
         &mut self,
+        session_id: Uuid,
         submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
-        let Some(session) = self.selected_session() else {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
             return;
         };
         if self.response_fork_preparations.contains_key(&session.id) {
@@ -3056,6 +3551,205 @@ impl Padu {
         self.submit_submission_for_session(session.id, submission, cx);
     }
 
+    fn selected_composer_command_key(&self) -> Option<(ProviderKind, PathBuf, Option<String>)> {
+        let session = self.selected_session()?;
+        let project_path = self.workspace_path_for_session(session)?;
+        let provider = session.provider;
+        let binary_override = self.state.provider_binary_overrides.get(&provider).cloned();
+        Some((provider, project_path.to_path_buf(), binary_override))
+    }
+
+    fn skill_dispatch_context_for_session(&self, session_id: Uuid) -> Option<SkillDispatchContext> {
+        let session = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)?;
+        let provider = session.provider;
+        Some(SkillDispatchContext {
+            session_id,
+            project_id: session.project_id,
+            host_generation: self.host_switch_generation,
+            provider,
+            project_path: self.workspace_path_for_session(session)?.to_path_buf(),
+            binary_override: self.state.provider_binary_overrides.get(&provider).cloned(),
+        })
+    }
+
+    /// Adopt a fresh probe result only while the selected composer still names
+    /// the same provider, project, binary, and daemon generation. A selection
+    /// change keeps its own catalog; the accepted prompt still renders from
+    /// its captured snapshot.
+    fn apply_fresh_skill_catalog(
+        &mut self,
+        command_key: &(ProviderKind, PathBuf, Option<String>),
+        snapshot: &FreshSkillSnapshot,
+    ) {
+        let provider = command_key.0;
+        let binary_changed = self.provider_versions.get(&provider) != Some(&snapshot.binary);
+        self.provider_versions
+            .insert(provider, snapshot.binary.clone());
+        if binary_changed {
+            self.slash_commands.clear();
+            self.slash_skill_capability = None;
+            self.slash_command_index = Rc::new(Vec::new());
+            self.slash_command_index_key = None;
+            self.slash_command_index_unavailable = false;
+        }
+
+        let unavailable = snapshot.unavailable();
+        let discovered = snapshot
+            .catalog
+            .as_ref()
+            .map(|catalog| catalog.commands.as_slice())
+            .unwrap_or_default();
+        let reported = self
+            .selected_session()
+            .map(|session| session.available_commands.clone())
+            .unwrap_or_default();
+        let mut commands = crate::composer_complete::merge_reported_commands(discovered, &reported);
+        if !commands.iter().any(|command| command.name == "note") {
+            commands.push(SlashCommand {
+                name: "note".into(),
+                description: tr!("notes.command_description"),
+                scope: crate::composer_complete::CommandScope::Builtin,
+                argument_hint: Some("<text>".into()),
+                template: None,
+                skill_file: None,
+            });
+        }
+        let skill_capability = snapshot
+            .catalog
+            .as_ref()
+            .and_then(|catalog| catalog.skill_capability.clone());
+        let cached_catalog = SlashCommandCatalog {
+            commands: discovered.to_vec(),
+            skill_capability: skill_capability.clone(),
+            unavailable,
+        };
+        self.slash_commands.invalidate(command_key);
+        if let Query::Missing(token) = self.slash_commands.read(command_key) {
+            let _ = self.slash_commands.fulfill(token, cached_catalog);
+        }
+        self.slash_command_index = Rc::new(commands);
+        self.slash_skill_capability = skill_capability;
+        self.slash_command_index_key = Some(command_key.clone());
+        self.slash_command_index_loading = false;
+        self.slash_command_index_unavailable = unavailable;
+    }
+
+    /// Refresh provider-native skill evidence and the host catalog immediately
+    /// before a newly composed prompt crosses into send or steer. This runs off
+    /// the UI thread and renders from the captured snapshot before dispatch.
+    pub(super) fn dispatch_composer_submission(
+        &mut self,
+        submission: ComposerSubmission,
+        steer: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.host_switch_pending {
+            if let Some((session_id, project_id)) = self
+                .selected_session()
+                .map(|session| (session.id, session.project_id))
+            {
+                self.recover_composer_submission(session_id, project_id, submission, cx);
+            } else {
+                self.restore_composer_submission(submission, cx);
+            }
+            return;
+        }
+        let Some(session_id) = self.selected_session().map(|session| session.id) else {
+            self.restore_composer_submission(submission, cx);
+            return;
+        };
+        if !submission.needs_skill_refresh {
+            if steer {
+                self.steer_composer_submission_for_session(session_id, submission, cx);
+            } else {
+                self.submit_composer_submission_for_session(session_id, submission, cx);
+            }
+            return;
+        }
+        let Some(dispatch_context) = self.skill_dispatch_context_for_session(session_id) else {
+            let Some(project_id) = self
+                .state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .map(|session| session.project_id)
+            else {
+                self.restore_composer_submission(submission, cx);
+                return;
+            };
+            self.recover_composer_submission(session_id, project_id, submission, cx);
+            return;
+        };
+        let command_key = (
+            dispatch_context.provider,
+            dispatch_context.project_path.clone(),
+            dispatch_context.binary_override.clone(),
+        );
+        let daemon = self.daemon.clone();
+        cx.spawn(async move |this, cx| {
+            let provider = dispatch_context.provider;
+            let project_path = dispatch_context.project_path.clone();
+            let binary_override = dispatch_context.binary_override.clone();
+            let snapshot = cx
+                .background_executor()
+                .spawn(async move {
+                    fetch_fresh_skill_snapshot(daemon, provider, project_path, binary_override)
+                })
+                .await;
+
+            this.update(cx, |this, cx| {
+                let current_context =
+                    this.skill_dispatch_context_for_session(dispatch_context.session_id);
+                if !skill_dispatch_context_is_current(
+                    &dispatch_context,
+                    this.host_switch_generation,
+                    current_context.as_ref(),
+                ) {
+                    this.recover_composer_submission(
+                        dispatch_context.session_id,
+                        dispatch_context.project_id,
+                        submission,
+                        cx,
+                    );
+                    return;
+                }
+                if should_adopt_fresh_skill_catalog(
+                    dispatch_context.host_generation,
+                    this.host_switch_generation,
+                    &command_key,
+                    this.selected_composer_command_key().as_ref(),
+                ) {
+                    this.apply_fresh_skill_catalog(&command_key, &snapshot);
+                }
+
+                let (submission, _) = render_submission_with_fresh_skills(
+                    submission,
+                    dispatch_context.provider,
+                    &snapshot,
+                );
+                if steer {
+                    this.steer_composer_submission_for_session(
+                        dispatch_context.session_id,
+                        submission,
+                        cx,
+                    );
+                } else {
+                    this.submit_composer_submission_for_session(
+                        dispatch_context.session_id,
+                        submission,
+                        cx,
+                    );
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// Deliver a steering message into the running turn. Providers without a
     /// live-turn transport (or a session that is not actively working) fall
     /// back to queueing a follow-up.
@@ -3064,11 +3758,29 @@ impl Padu {
         submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
-        let Some(session) = self.selected_session().cloned() else {
+        let Some(session_id) = self.selected_session().map(|session| session.id) else {
+            return;
+        };
+        self.steer_composer_submission_for_session(session_id, submission, cx);
+    }
+
+    fn steer_composer_submission_for_session(
+        &mut self,
+        session_id: Uuid,
+        submission: ComposerSubmission,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .cloned()
+        else {
             return;
         };
         if !session.is_busy() {
-            self.submit_composer_submission(submission, cx);
+            self.submit_submission_for_session(session_id, submission, cx);
             return;
         }
         // A turn that has not reached the provider yet cannot be steered; the
@@ -3078,12 +3790,28 @@ impl Padu {
             self.enqueue_follow_up_submission(session.id, submission, cx);
             return;
         }
-        let provider_prompt = self.resolve_skill_submission(session.provider, &submission.prompt);
-        if let Some(runtime) = self.runtimes.get_mut(&session.id) {
-            runtime.driver.steer(provider_prompt);
-            runtime.pending_steers.push_back(submission);
+        let submission = self.prepare_submission_for_transport(session.provider, submission);
+        let commands = if self.slash_command_index_unavailable {
+            &[][..]
+        } else {
+            self.slash_command_index.as_slice()
+        };
+        let (provider_prompt, mut submission) =
+            prepare_steering_submission_for_transport(session.provider, submission, commands);
+        let skill_warning = if let Some(runtime) = self.runtimes.get_mut(&session.id) {
+            runtime.driver.steer(provider_prompt.clone());
+            let skill_warning = take_skill_warning_message(&mut submission.skill_warnings);
+            runtime.pending_steers.push_back(PendingSteer {
+                wire_prompt: provider_prompt,
+                submission,
+            });
+            skill_warning
         } else {
             self.enqueue_follow_up_submission(session.id, submission, cx);
+            None
+        };
+        if let Some(warning) = skill_warning {
+            self.show_toast(warning);
         }
         cx.notify();
     }
@@ -3096,21 +3824,79 @@ impl Padu {
                 .is_some_and(|runtime| runtime.driver.supports_steer())
     }
 
-    /// Resolve presentation-preserving composer syntax immediately before a
-    /// prompt crosses into a provider transport.
+    /// Resolve slash templates and legacy slash skill invocations immediately
+    /// before a prompt crosses into a provider transport. Dollar skill
+    /// mentions have already been rendered against the active host catalog.
     fn resolve_provider_submission(&self, provider: ProviderKind, prompt: &str) -> String {
-        crate::composer_complete::resolved_submission(provider, prompt, &self.slash_command_index)
+        let commands = if self.slash_command_index_unavailable {
+            &[][..]
+        } else {
+            self.slash_command_index.as_slice()
+        };
+        crate::composer_complete::resolved_submission(provider, prompt, commands)
             .unwrap_or_else(|| prompt.to_owned())
     }
 
-    /// Resolve only provider-native skill syntax for a live steering message.
-    fn resolve_skill_submission(&self, provider: ProviderKind, prompt: &str) -> String {
-        crate::composer_complete::resolved_skill_submission(
+    /// Render `$skill` mentions against the active daemon's cached catalog and
+    /// surface any non-fatal path warnings at the user action that accepted
+    /// the prompt.
+    fn skill_render_result(
+        &self,
+        provider: ProviderKind,
+        prompt: &str,
+    ) -> crate::composer_complete::SkillRenderResult {
+        let binary = self.provider_versions.get(&provider);
+        let commands = if self.slash_command_index_unavailable {
+            &[][..]
+        } else {
+            self.slash_command_index.as_slice()
+        };
+        render_skill_mentions_for_catalog(
             provider,
             prompt,
-            &self.slash_command_index,
+            commands,
+            self.slash_skill_capability.as_ref(),
+            binary.and_then(|observation| observation.version.as_deref()),
+            binary.and_then(|observation| observation.identity.as_ref()),
+            self.slash_command_index_unavailable,
         )
-        .unwrap_or_else(|| prompt.to_owned())
+    }
+
+    pub(super) fn render_skill_submission(
+        &self,
+        provider: ProviderKind,
+        prompt: &str,
+    ) -> crate::composer_complete::SkillRenderResult {
+        self.skill_render_result(provider, prompt)
+    }
+
+    /// Resolve skill syntax before a prompt enters a provider transport and
+    /// retain the user's prompt separately for every visible surface. A
+    /// presentation-bearing submission was rendered before hidden attachment
+    /// and note text was appended, so re-rendering its provider text could
+    /// treat hidden content as composer syntax or resolve a fallback again.
+    fn prepare_submission_for_transport(
+        &mut self,
+        provider: ProviderKind,
+        mut submission: ComposerSubmission,
+    ) -> ComposerSubmission {
+        if !submission_needs_skill_rendering(&submission) {
+            return submission;
+        }
+        let visible_prompt = submission.prompt.clone();
+        let rendered = self.render_skill_submission(provider, &submission.prompt);
+        let catalog_unavailable = self.slash_command_index_unavailable
+            && crate::composer_complete::has_skill_mentions(&visible_prompt);
+        if rendered.provider_text != submission.prompt || !rendered.warnings.is_empty() {
+            submission.skill_warnings =
+                skill_render_warning_messages(&visible_prompt, &rendered, catalog_unavailable);
+            submission.display_content = Some(visible_prompt);
+            submission.prompt = rendered.provider_text;
+        } else if catalog_unavailable {
+            submission.skill_warnings =
+                skill_render_warning_messages(&visible_prompt, &rendered, true);
+        }
+        submission
     }
 
     pub(super) fn enqueue_follow_up_submission(
@@ -3123,6 +3909,17 @@ impl Padu {
         if submission.prompt.is_empty() {
             return;
         }
+        let Some(provider) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .map(|session| session.provider)
+        else {
+            return;
+        };
+        let mut submission = self.prepare_submission_for_transport(provider, submission);
+        let skill_warning = take_skill_warning_message(&mut submission.skill_warnings);
         if let Some(session) = self.state.session_mut(session_id) {
             session
                 .queued_messages
@@ -3130,6 +3927,9 @@ impl Padu {
             session.updated_at = unix_time();
         }
         self.save();
+        if let Some(warning) = skill_warning {
+            self.show_toast(warning);
+        }
         cx.notify();
     }
 
@@ -3139,6 +3939,9 @@ impl Padu {
         message_id: Uuid,
         cx: &mut Context<Self>,
     ) {
+        if self.host_switch_pending {
+            return;
+        }
         if let Some(session) = self.state.session_mut(session_id) {
             session
                 .queued_messages
@@ -3157,6 +3960,9 @@ impl Padu {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.host_switch_pending {
+            return;
+        }
         let Some(message) = self.state.session_mut(session_id).and_then(|session| {
             let index = session
                 .queued_messages
@@ -3183,6 +3989,9 @@ impl Padu {
         message_id: Uuid,
         cx: &mut Context<Self>,
     ) {
+        if self.host_switch_pending {
+            return;
+        }
         let Some(message) = self.state.session_mut(session_id).and_then(|session| {
             let index = session
                 .queued_messages
@@ -3200,6 +4009,9 @@ impl Padu {
     /// When that control is unavailable, leave the queue untouched rather
     /// than removing and re-queueing its first message at the back.
     pub(super) fn steer_oldest_queued_message(&mut self, cx: &mut Context<Self>) {
+        if self.host_switch_pending {
+            return;
+        }
         let Some((session_id, message_id)) = self.selected_session().and_then(|session| {
             if !self.session_can_steer(session) {
                 return None;
@@ -3214,7 +4026,7 @@ impl Padu {
     /// Start the next queued follow-up as a fresh turn. Only called once a
     /// settled turn has been fully closed, so the session is Idle.
     fn drain_queued_message(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        if self.response_fork_preparations.contains_key(&session_id) {
+        if self.host_switch_pending || self.response_fork_preparations.contains_key(&session_id) {
             return;
         }
         let Some(session) = self
@@ -3234,16 +4046,18 @@ impl Padu {
         {
             return;
         }
-        let Some(message) = self
+        let Some(queued_drain) = self
             .state
             .session_mut(session_id)
-            .map(|session| session.queued_messages.remove(0))
+            .and_then(QueuedFollowUpDrain::begin)
         else {
             return;
         };
-        self.submit_submission_for_session(
+        let submission = queued_drain.submission();
+        self.submit_submission_for_session_with_drain(
             session_id,
-            ComposerSubmission::from_queued_message(message),
+            submission,
+            Some(queued_drain),
             cx,
         );
     }
@@ -3254,20 +4068,115 @@ impl Padu {
         submission: ComposerSubmission,
         cx: &mut Context<Self>,
     ) {
+        self.submit_submission_for_session_with_drain(session_id, submission, None, cx);
+    }
+
+    fn restore_queued_drain(
+        &mut self,
+        queued_drain: Option<QueuedFollowUpDrain>,
+        failure: QueuedDrainFailure,
+    ) -> bool {
+        queued_drain
+            .is_some_and(|queued_drain| queued_drain.fail(&mut self.state.sessions, failure))
+    }
+
+    fn restore_failed_queued_submission(
+        &mut self,
+        session_id: Uuid,
+        queued_drain: Option<QueuedFollowUpDrain>,
+        failure: QueuedDrainFailure,
+        selected: bool,
+    ) -> bool {
+        let restored_to_queue = self.restore_queued_drain(queued_drain, failure);
+        if selected {
+            self.sync_transcript_rows();
+        }
+        let previous_kinds = if selected {
+            self.transcript_row_kinds.borrow().clone()
+        } else {
+            Vec::new()
+        };
+        if let Some(session) = self.state.session_mut(session_id)
+            && session.status == SessionStatus::Connecting
+        {
+            if let Some(turn_id) = session.active_turn_id() {
+                session.unwind_unstarted_turn(turn_id);
+            }
+            session.status = SessionStatus::Idle;
+        }
+        if selected {
+            if self
+                .transcript_anchor
+                .get()
+                .is_some_and(|anchor| anchor.session_id == session_id)
+            {
+                self.transcript_anchor.set(None);
+                self.transcript_anchor_following.set(false);
+            }
+            self.splice_transcript_rows_after_visibility_change(&previous_kinds);
+        }
+        restored_to_queue
+    }
+
+    fn recover_failed_submission(
+        &mut self,
+        session_id: Uuid,
+        project_id: Uuid,
+        submission: ComposerSubmission,
+        queued_drain: Option<QueuedFollowUpDrain>,
+        failure: QueuedDrainFailure,
+        selected: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let restored_to_queue =
+            self.restore_failed_queued_submission(session_id, queued_drain, failure, selected);
+        if !restored_to_queue {
+            self.recover_composer_submission(session_id, project_id, submission, cx);
+        }
+        cx.notify();
+    }
+
+    fn submit_submission_for_session_with_drain(
+        &mut self,
+        session_id: Uuid,
+        submission: ComposerSubmission,
+        mut queued_drain: Option<QueuedFollowUpDrain>,
+        cx: &mut Context<Self>,
+    ) {
         if self.response_fork_preparations.contains_key(&session_id) {
+            self.restore_queued_drain(queued_drain.take(), QueuedDrainFailure::Disconnect);
             return;
         }
         let selected = self.state.selected_session == Some(session_id);
+        if selected {
+            self.hide_toast();
+        }
+        let Some(provider) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .map(|session| session.provider)
+        else {
+            self.restore_queued_drain(queued_drain.take(), QueuedDrainFailure::Disconnect);
+            return;
+        };
+        let mut submission = self.prepare_submission_for_transport(provider, submission);
         let Some(session) = self
             .state
             .sessions
             .iter()
             .find(|session| session.id == session_id)
         else {
+            self.restore_queued_drain(queued_drain.take(), QueuedDrainFailure::Disconnect);
             return;
         };
         if self.ending_checkpoint_pending(session_id) {
-            self.enqueue_follow_up_submission(session_id, submission, cx);
+            if let Some(queued_drain) = queued_drain.take() {
+                self.restore_queued_drain(Some(queued_drain), QueuedDrainFailure::Deferred);
+            } else {
+                self.enqueue_follow_up_submission(session_id, submission, cx);
+            }
             self.defer_queue_drain(session_id);
             return;
         }
@@ -3275,12 +4184,20 @@ impl Padu {
         // Queue the message so it lands on that thread — after the goal —
         // instead of racing a second provider process into existence.
         if self.goal_runtime_starts.contains(&session_id) {
-            self.enqueue_follow_up_submission(session_id, submission, cx);
+            if let Some(queued_drain) = queued_drain.take() {
+                self.restore_queued_drain(Some(queued_drain), QueuedDrainFailure::Deferred);
+            } else {
+                self.enqueue_follow_up_submission(session_id, submission, cx);
+            }
             self.defer_queue_drain(session_id);
             return;
         }
         if session.status.is_busy() {
-            self.enqueue_follow_up_submission(session_id, submission, cx);
+            if let Some(queued_drain) = queued_drain.take() {
+                self.restore_queued_drain(Some(queued_drain), QueuedDrainFailure::Deferred);
+            } else {
+                self.enqueue_follow_up_submission(session_id, submission, cx);
+            }
             return;
         }
         let prompt = submission.prompt.clone();
@@ -3292,7 +4209,6 @@ impl Padu {
             .trim()
             .is_empty();
         let next_turn_count = session.turns.len() + 1;
-        let provider = session.provider.id();
         let model = self
             .session_options(session)
             .model
@@ -3319,14 +4235,17 @@ impl Padu {
             .find(|project| project.id == project_id)
             .cloned()
         else {
-            if selected {
+            if let Some(queued_drain) = queued_drain.take() {
+                self.restore_queued_drain(Some(queued_drain), QueuedDrainFailure::Preparation);
+            } else if selected {
                 self.restore_composer_submission(submission, cx);
-                self.show_toast(tr!("errors.prepare_task_project_not_found"));
             }
+            self.show_toast(tr!("errors.prepare_task_project_not_found"));
             cx.notify();
             return;
         };
         let projectless = project.is_projectless();
+        let skill_warning = take_skill_warning_message(&mut submission.skill_warnings);
         // Busy is visible before any Git work begins. The separate transient
         // set keeps this non-cancellable phase visually distinct from a
         // connecting provider, whose runtime already has a working Stop path.
@@ -3363,7 +4282,7 @@ impl Padu {
         };
         self.analytics
             .track(crate::analytics::Event::TurnSubmitted {
-                provider,
+                provider: provider.id(),
                 model,
                 turn_number: next_turn_count,
                 workspace: workspace_kind,
@@ -3380,7 +4299,6 @@ impl Padu {
             self.expanded_changed_files.clear();
             self.transcript_control_focuses.borrow_mut().clear();
             self.message_edit = None;
-            self.hide_toast();
             self.transcript_anchor.set(transcript_anchor);
             // Provisional reservation: the anchored list has no measured
             // bounds until its first paint, and a zero end space cannot hold
@@ -3397,6 +4315,9 @@ impl Padu {
             self.transcript_anchor_following.set(true);
             self.splice_transcript_rows_after_visibility_change(&previous_kinds);
             self.scroll_transcript_to_anchor();
+        }
+        if let Some(warning) = skill_warning {
+            self.show_toast(warning);
         }
         cx.notify();
 
@@ -3418,7 +4339,14 @@ impl Padu {
                 })
                 .await;
             let _ = padu.update(cx, move |padu, cx| {
-                padu.finish_submission_preparation(session_id, submission, prepared, cx);
+                padu.finish_submission_preparation(
+                    session_id,
+                    project_id,
+                    submission,
+                    queued_drain,
+                    prepared,
+                    cx,
+                );
             });
         })
         .detach();
@@ -3427,14 +4355,25 @@ impl Padu {
     fn finish_submission_preparation(
         &mut self,
         session_id: Uuid,
+        project_id: Uuid,
         submission: ComposerSubmission,
+        mut queued_drain: Option<QueuedFollowUpDrain>,
         prepared: anyhow::Result<PreparedSubmission>,
         cx: &mut Context<Self>,
     ) {
+        let selected = self.state.selected_session == Some(session_id);
         if !self.submission_preparations.contains(&session_id) {
+            self.recover_failed_submission(
+                session_id,
+                project_id,
+                submission,
+                queued_drain,
+                QueuedDrainFailure::Disconnect,
+                selected,
+                cx,
+            );
             return;
         }
-        let selected = self.state.selected_session == Some(session_id);
         let prepared = match prepared {
             Ok(prepared) => prepared,
             Err(error) => {
@@ -3443,39 +4382,16 @@ impl Padu {
                     session_id,
                     crate::analytics::TurnOutcome::PreparationFailed,
                 );
-                if selected {
-                    self.sync_transcript_rows();
-                }
-                let previous_kinds = if selected {
-                    self.transcript_row_kinds.borrow().clone()
-                } else {
-                    Vec::new()
-                };
-                if let Some(session) = self.state.session_mut(session_id)
-                    && session.status == SessionStatus::Connecting
-                {
-                    // The submission never reached a provider and its prompt
-                    // returns to the composer, so the eagerly-begun turn and
-                    // its message leave the transcript with it.
-                    if let Some(turn_id) = session.active_turn_id() {
-                        session.unwind_unstarted_turn(turn_id);
-                    }
-                    session.status = SessionStatus::Idle;
-                }
-                if selected {
-                    if self
-                        .transcript_anchor
-                        .get()
-                        .is_some_and(|anchor| anchor.session_id == session_id)
-                    {
-                        self.transcript_anchor.set(None);
-                        self.transcript_anchor_following.set(false);
-                    }
-                    self.splice_transcript_rows_after_visibility_change(&previous_kinds);
-                    self.restore_composer_submission(submission, cx);
-                    self.show_toast(tr!("errors.create_worktree", error = error));
-                }
-                cx.notify();
+                self.recover_failed_submission(
+                    session_id,
+                    project_id,
+                    submission,
+                    queued_drain.take(),
+                    QueuedDrainFailure::Preparation,
+                    selected,
+                    cx,
+                );
+                self.show_toast(tr!("errors.create_worktree", error = error));
                 return;
             }
         };
@@ -3501,7 +4417,15 @@ impl Padu {
             });
         if !can_start {
             self.submission_preparations.remove(&session_id);
-            cx.notify();
+            self.recover_failed_submission(
+                session_id,
+                project_id,
+                submission,
+                queued_drain.take(),
+                QueuedDrainFailure::Preparation,
+                selected,
+                cx,
+            );
             return;
         }
 
@@ -3560,17 +4484,31 @@ impl Padu {
         match driver {
             Ok(driver) => driver.prompt(driver_prompt),
             Err(error) => {
-                failed_to_start = true;
                 let message = tr!("errors.start_agent", error = error);
-                if let Some(session) = self.state.session_mut(session_id) {
-                    session.status = SessionStatus::Failed;
-                    session.push_message(MessageRole::Assistant, message);
+                if queued_drain.is_some() {
+                    self.track_active_turn_outcome(
+                        session_id,
+                        crate::analytics::TurnOutcome::StartFailed,
+                    );
+                    self.restore_failed_queued_submission(
+                        session_id,
+                        queued_drain.take(),
+                        QueuedDrainFailure::Dispatch,
+                        selected,
+                    );
+                    self.show_toast(message);
+                } else {
+                    failed_to_start = true;
+                    if let Some(session) = self.state.session_mut(session_id) {
+                        session.status = SessionStatus::Failed;
+                        session.push_message(MessageRole::Assistant, message);
+                    }
+                    self.finish_active_turn_with_analytics(
+                        session_id,
+                        TurnStatus::Failed,
+                        crate::analytics::TurnOutcome::StartFailed,
+                    );
                 }
-                self.finish_active_turn_with_analytics(
-                    session_id,
-                    TurnStatus::Failed,
-                    crate::analytics::TurnOutcome::StartFailed,
-                );
             }
         }
         // From this point onward `cancel_turn` has either a live driver to
@@ -3777,6 +4715,34 @@ impl Padu {
     }
 }
 
+fn provider_version_changed(
+    previous: Option<&ProviderBinaryObservation>,
+    next: &ProviderBinaryObservation,
+) -> bool {
+    previous != Some(next)
+}
+
+fn apply_provider_version_observation(
+    provider_versions: &mut HashMap<ProviderKind, ProviderBinaryObservation>,
+    provider: ProviderKind,
+    binary: ProviderBinaryObservation,
+    slash_commands: &mut QueryCache<(ProviderKind, PathBuf, Option<String>), SlashCommandCatalog>,
+    slash_skill_capability: &mut Option<crate::composer_complete::SkillCapabilityMetadata>,
+    composer_sources_stale: &mut bool,
+) -> bool {
+    let previous = provider_versions.insert(provider, binary.clone());
+    let changed = provider_version_changed(previous.as_ref(), &binary);
+    if changed {
+        // Skill capability is valid only for the exact executable identity
+        // and version that produced it. Drop the catalog so the next
+        // event-pump turn re-discovers both commands and evidence.
+        slash_commands.clear();
+        *slash_skill_capability = None;
+        *composer_sources_stale = true;
+    }
+    changed
+}
+
 #[cfg(test)]
 mod response_fork_title_tests {
     use super::next_response_fork_title;
@@ -3839,5 +4805,781 @@ mod version_tests {
             parse_cli_version("cursor-agent 2025.09.12-4f8d8e2"),
             Some("2025.09.12-4f8d8e2".to_owned())
         );
+    }
+}
+
+#[cfg(test)]
+mod skill_submission_tests {
+    use super::*;
+    use crate::composer_complete::{
+        CommandScope, SKILL_CAPABILITY_PROBE_VERSION, SkillCapabilityMetadata, SkillNativeSyntax,
+        SkillProviderCapability, SlashCommand, render_skill_mentions,
+    };
+    use padu_client::skill_probe::SkillBinaryIdentity;
+
+    fn binary_identity(digest: char) -> SkillBinaryIdentity {
+        SkillBinaryIdentity {
+            canonical_path: "/opt/codex/bin/codex".into(),
+            content_sha256: digest.to_string().repeat(64),
+        }
+    }
+
+    fn binary_observation(version: &str, digest: char) -> ProviderBinaryObservation {
+        ProviderBinaryObservation {
+            version: Some(version.into()),
+            identity: Some(binary_identity(digest)),
+        }
+    }
+
+    fn dispatch_context(session: &AgentSession) -> SkillDispatchContext {
+        SkillDispatchContext {
+            session_id: session.id,
+            project_id: session.project_id,
+            host_generation: 7,
+            provider: session.provider,
+            project_path: PathBuf::from("/captured-project"),
+            binary_override: None,
+        }
+    }
+
+    fn project(id: Uuid) -> Project {
+        Project {
+            id,
+            name: "replacement".into(),
+            path: PathBuf::from("/replacement"),
+            created_at: 0,
+            scripts: Vec::new(),
+            linked_repo: None,
+        }
+    }
+
+    #[test]
+    fn skill_refresh_keeps_the_captured_session_and_host_generation() {
+        let target = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        let captured = dispatch_context(&target);
+
+        assert!(
+            skill_dispatch_context_is_current(&captured, 7, Some(&captured)),
+            "selection changes do not alter the captured session's dispatch context"
+        );
+    }
+
+    #[test]
+    fn pending_host_switch_defers_recovery_even_when_old_state_still_exists() {
+        let target = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        let sessions = [target.clone()];
+        let projects = [project(target.project_id)];
+        let captured = dispatch_context(&target);
+        let fallback = crate::persistence::ComposerDraftKey::NewSession(Uuid::new_v4());
+
+        assert!(
+            !skill_dispatch_context_is_current(&captured, 8, Some(&captured)),
+            "a host switch invalidates the daemon catalog and capability pair"
+        );
+        assert_eq!(
+            composer_draft_key_for_recovery(
+                target.id,
+                target.project_id,
+                &sessions,
+                &projects,
+                Some(fallback),
+                true,
+            ),
+            None,
+            "the old host's session must not receive a draft while its replacement is loading"
+        );
+    }
+
+    #[test]
+    fn missing_captured_session_recovers_to_the_project_draft() {
+        let target = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        let sessions = [target.clone()];
+        let projects = [project(target.project_id)];
+        let missing_session = Uuid::new_v4();
+        let mut captured = dispatch_context(&target);
+        captured.session_id = missing_session;
+        let fallback = crate::persistence::ComposerDraftKey::NewSession(Uuid::new_v4());
+
+        assert!(!skill_dispatch_context_is_current(&captured, 7, None));
+        assert_eq!(
+            composer_draft_key_for_recovery(
+                missing_session,
+                target.project_id,
+                &sessions,
+                &projects,
+                Some(fallback),
+                false,
+            ),
+            Some(crate::persistence::ComposerDraftKey::NewSession(
+                target.project_id
+            )),
+            "a vanished task must leave its prompt recoverable from the project"
+        );
+    }
+
+    #[test]
+    fn host_switch_without_the_captured_task_or_project_recovers_to_the_visible_task() {
+        let captured_session = Uuid::new_v4();
+        let captured_project = Uuid::new_v4();
+        let replacement = AgentSession::new(Uuid::new_v4(), ProviderKind::Claude);
+        let replacement_project = project(replacement.project_id);
+        let visible_key = crate::persistence::ComposerDraftKey::for_session(&replacement);
+
+        assert_eq!(
+            composer_draft_key_for_recovery(
+                captured_session,
+                captured_project,
+                &[replacement],
+                &[replacement_project],
+                Some(visible_key),
+                false,
+            ),
+            Some(visible_key),
+            "the new host has neither captured identity, so recovery must target the visible composer"
+        );
+    }
+
+    #[test]
+    fn empty_recovery_destination_defers_to_a_visible_target() {
+        assert_eq!(
+            composer_draft_key_for_recovery(Uuid::new_v4(), Uuid::new_v4(), &[], &[], None, false,),
+            None,
+            "an empty or loading host must not persist under stale host identities"
+        );
+    }
+
+    #[test]
+    fn provider_change_during_probe_rejects_the_captured_snapshot() {
+        let target = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        let captured = dispatch_context(&target);
+        let mut current = captured.clone();
+        current.provider = ProviderKind::Claude;
+
+        assert!(!skill_dispatch_context_is_current(
+            &captured,
+            7,
+            Some(&current)
+        ));
+    }
+
+    #[test]
+    fn project_change_during_probe_rejects_the_captured_snapshot() {
+        let target = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        let captured = dispatch_context(&target);
+        let mut current = captured.clone();
+        current.project_path = PathBuf::from("/new-project");
+
+        assert!(!skill_dispatch_context_is_current(
+            &captured,
+            7,
+            Some(&current)
+        ));
+    }
+
+    #[test]
+    fn binary_override_change_during_probe_rejects_the_captured_snapshot() {
+        let target = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        let captured = dispatch_context(&target);
+        let mut current = captured.clone();
+        current.binary_override = Some("/new/codex".into());
+
+        assert!(!skill_dispatch_context_is_current(
+            &captured,
+            7,
+            Some(&current)
+        ));
+    }
+
+    #[test]
+    fn selection_changes_do_not_change_the_captured_skill_render() {
+        let visible = "$brainstroming inspect this\n\nnotes/plan.md";
+        let captured_key = (
+            ProviderKind::Claude,
+            PathBuf::from("/captured-project"),
+            None,
+        );
+        let other_key = (ProviderKind::Claude, PathBuf::from("/other-project"), None);
+        assert!(should_adopt_fresh_skill_catalog(
+            7,
+            7,
+            &captured_key,
+            Some(&captured_key)
+        ));
+        assert!(
+            !should_adopt_fresh_skill_catalog(7, 7, &captured_key, Some(&other_key)),
+            "a selection change must not let the captured catalog overwrite the new composer"
+        );
+        assert!(
+            !should_adopt_fresh_skill_catalog(7, 8, &captured_key, Some(&captured_key)),
+            "a host switch invalidates the captured catalog even at the same path"
+        );
+        let captured = FreshSkillSnapshot {
+            binary: binary_observation("1.2.3", 'a'),
+            catalog: Some(SlashCommandCatalog {
+                commands: vec![SlashCommand {
+                    name: "brainstroming".into(),
+                    description: String::new(),
+                    scope: CommandScope::Skill,
+                    argument_hint: None,
+                    template: None,
+                    skill_file: Some("/captured/SKILL.md".into()),
+                }],
+                skill_capability: None,
+                unavailable: false,
+            }),
+        };
+        let submission = ComposerSubmission {
+            prompt: visible.into(),
+            display_content: Some("$brainstroming inspect this".into()),
+            attachments: Vec::new(),
+            embedded_notes: Vec::new(),
+            needs_skill_refresh: true,
+            skill_warnings: Vec::new(),
+        };
+
+        let (rendered, result) =
+            render_submission_with_fresh_skills(submission, ProviderKind::Claude, &captured);
+
+        assert!(rendered.prompt.contains("/captured/SKILL.md"));
+        assert!(rendered.prompt.ends_with("\n\nnotes/plan.md"));
+        assert_eq!(
+            rendered.display_content.as_deref(),
+            Some("$brainstroming inspect this")
+        );
+        assert_eq!(result.warnings, Vec::new());
+    }
+
+    #[test]
+    fn native_skill_evidence_must_match_the_exact_binary_and_probe_version() {
+        let capability = SkillProviderCapability {
+            native_syntax: Some(SkillNativeSyntax::Dollar),
+            leading_invocation: true,
+            inline_mentions: true,
+            repeated_mentions: true,
+        };
+        let identity = binary_identity('a');
+        let evidence = SkillCapabilityMetadata {
+            binary_version: "1.2.3".into(),
+            binary_identity: Some(identity.clone()),
+            probe_version: SKILL_CAPABILITY_PROBE_VERSION,
+            capability,
+        };
+        assert_eq!(
+            padu_client::skill_probe::verified_skill_capability(
+                Some(&evidence),
+                ProviderKind::Codex,
+                Some("1.2.3"),
+                Some(&identity),
+            ),
+            capability
+        );
+        assert_eq!(
+            padu_client::skill_probe::verified_skill_capability(
+                Some(&evidence),
+                ProviderKind::Codex,
+                Some("1.2.4"),
+                Some(&identity),
+            ),
+            crate::composer_complete::provider_skill_capability(ProviderKind::Codex)
+        );
+        assert_eq!(
+            padu_client::skill_probe::verified_skill_capability(
+                Some(&evidence),
+                ProviderKind::Codex,
+                Some("1.2.3"),
+                Some(&binary_identity('b')),
+            ),
+            crate::composer_complete::provider_skill_capability(ProviderKind::Codex)
+        );
+        assert_eq!(
+            padu_client::skill_probe::verified_skill_capability(
+                Some(&evidence),
+                ProviderKind::Codex,
+                Some("1.2.3"),
+                None,
+            ),
+            crate::composer_complete::provider_skill_capability(ProviderKind::Codex)
+        );
+    }
+
+    #[test]
+    fn provider_version_events_invalidate_for_install_upgrade_or_loss() {
+        let binary = binary_observation("1.2.3", 'a');
+        assert!(provider_version_changed(None, &binary));
+        assert!(!provider_version_changed(
+            Some(&binary),
+            &binary_observation("1.2.3", 'a')
+        ));
+        assert!(provider_version_changed(
+            Some(&binary),
+            &binary_observation("1.2.4", 'a')
+        ));
+        assert!(provider_version_changed(
+            Some(&binary),
+            &binary_observation("1.2.3", 'b')
+        ));
+        assert!(provider_version_changed(
+            Some(&binary),
+            &ProviderBinaryObservation::default()
+        ));
+    }
+
+    #[test]
+    fn provider_version_event_clears_skill_catalog_and_requests_refresh() {
+        let binary = binary_observation("1.2.3", 'a');
+        let mut versions = HashMap::from([(ProviderKind::Codex, binary.clone())]);
+        let key = (ProviderKind::Codex, PathBuf::from("/tmp/project"), None);
+        let mut catalog = QueryCache::new(8);
+        let token = match catalog.read(&key) {
+            crate::query::Query::Missing(token) => token,
+            _ => panic!("first read must claim the catalog fetch"),
+        };
+        assert!(catalog.fulfill(
+            token,
+            SlashCommandCatalog {
+                commands: Vec::new(),
+                skill_capability: None,
+                unavailable: false,
+            },
+        ));
+        let mut capability = Some(SkillCapabilityMetadata {
+            binary_version: "1.2.3".into(),
+            binary_identity: Some(binary_identity('a')),
+            probe_version: SKILL_CAPABILITY_PROBE_VERSION,
+            capability: SkillProviderCapability {
+                native_syntax: Some(SkillNativeSyntax::Dollar),
+                leading_invocation: true,
+                inline_mentions: false,
+                repeated_mentions: false,
+            },
+        });
+        let mut stale = false;
+
+        assert!(!apply_provider_version_observation(
+            &mut versions,
+            ProviderKind::Codex,
+            binary_observation("1.2.3", 'a'),
+            &mut catalog,
+            &mut capability,
+            &mut stale,
+        ));
+        assert_eq!(catalog.len(), 1);
+        assert!(capability.is_some());
+        assert!(!stale);
+
+        assert!(apply_provider_version_observation(
+            &mut versions,
+            ProviderKind::Codex,
+            binary_observation("1.2.4", 'a'),
+            &mut catalog,
+            &mut capability,
+            &mut stale,
+        ));
+        assert_eq!(catalog.len(), 0);
+        assert!(capability.is_none());
+        assert!(stale);
+    }
+
+    #[test]
+    fn visible_and_provider_skill_text_survive_the_queue_round_trip() {
+        let visible = "$brainstroming explain this";
+        let commands = [SlashCommand {
+            name: "brainstroming".into(),
+            description: String::new(),
+            scope: CommandScope::Skill,
+            argument_hint: None,
+            template: None,
+            skill_file: Some("/home/remote/.agents/skills/brainstroming/SKILL.md".into()),
+        }];
+        let rendered = render_skill_mentions(ProviderKind::Claude, visible, &commands);
+        assert_ne!(rendered.provider_text, visible);
+
+        let queued = ComposerSubmission {
+            prompt: rendered.provider_text.clone(),
+            display_content: Some(visible.into()),
+            attachments: Vec::new(),
+            embedded_notes: Vec::new(),
+            needs_skill_refresh: false,
+            skill_warnings: Vec::new(),
+        }
+        .into_queued_message();
+        assert_eq!(queued.content, rendered.provider_text);
+        assert_eq!(queued.visible_content(), visible);
+
+        let restored = ComposerSubmission::from_queued_message(queued);
+        assert_eq!(restored.prompt, rendered.provider_text);
+        assert_eq!(restored.display_content.as_deref(), Some(visible));
+    }
+
+    #[test]
+    fn hidden_note_and_attachment_text_is_appended_after_skill_rendering() {
+        let visible = "$brainstroming inspect this";
+        let commands = [
+            SlashCommand {
+                name: "brainstroming".into(),
+                description: String::new(),
+                scope: CommandScope::Skill,
+                argument_hint: None,
+                template: None,
+                skill_file: Some("/remote/skills/brainstroming/SKILL.md".into()),
+            },
+            SlashCommand {
+                name: "other".into(),
+                description: String::new(),
+                scope: CommandScope::Skill,
+                argument_hint: None,
+                template: None,
+                skill_file: Some("/remote/skills/other/SKILL.md".into()),
+            },
+        ];
+        let rendered = render_skill_mentions(ProviderKind::Claude, visible, &commands);
+        let note = "Reference note: literal example\nKeep $other in the documentation.";
+        let provider_prompt = composer::merged_rendered_submission(
+            &rendered.provider_text,
+            &["notes/literal.md".into()],
+            note,
+        )
+        .expect("the rendered prompt has content");
+
+        assert!(provider_prompt.contains(&composer::markdown_file_reference("notes/literal.md")));
+        assert!(provider_prompt.contains("$other"));
+        assert!(!provider_prompt.contains("/remote/skills/other/SKILL.md"));
+
+        let submission = ComposerSubmission {
+            prompt: provider_prompt,
+            display_content: Some(visible.into()),
+            attachments: Vec::new(),
+            embedded_notes: Vec::new(),
+            needs_skill_refresh: false,
+            skill_warnings: Vec::new(),
+        };
+        let reprocessed =
+            render_skill_mentions(ProviderKind::Claude, &submission.prompt, &commands);
+        assert!(
+            reprocessed
+                .provider_text
+                .contains("/remote/skills/other/SKILL.md")
+        );
+        assert!(
+            !submission_needs_skill_rendering(&submission),
+            "hidden provider-only text must not be rendered again at the seam"
+        );
+    }
+
+    fn fresh_render_for_skill(skill_file: Option<&str>) -> (ComposerSubmission, String) {
+        let visible = "$deploy release";
+        let snapshot = FreshSkillSnapshot {
+            binary: binary_observation("1.2.3", 'a'),
+            catalog: Some(SlashCommandCatalog {
+                commands: vec![SlashCommand {
+                    name: "deploy".into(),
+                    description: String::new(),
+                    scope: CommandScope::Skill,
+                    argument_hint: None,
+                    template: None,
+                    skill_file: skill_file.map(str::to_owned),
+                }],
+                skill_capability: None,
+                unavailable: false,
+            }),
+        };
+        let submission = ComposerSubmission {
+            prompt: visible.into(),
+            display_content: Some(visible.into()),
+            attachments: Vec::new(),
+            embedded_notes: Vec::new(),
+            needs_skill_refresh: true,
+            skill_warnings: Vec::new(),
+        };
+        let (submission, rendered) =
+            render_submission_with_fresh_skills(submission, ProviderKind::Claude, &snapshot);
+        let expected = rendered
+            .warnings
+            .first()
+            .expect("the fixture must exercise a skill warning")
+            .to_string();
+        (submission, expected)
+    }
+
+    fn assert_route_delivers_warning(skill_file: Option<&str>, expected_fragment: &str) {
+        let (mut submission, expected) = fresh_render_for_skill(skill_file);
+        assert!(expected.contains(expected_fragment));
+        let delivered = take_skill_warning_message(&mut submission.skill_warnings)
+            .expect("the accepted route must retain the warning after state clearing");
+        assert_eq!(delivered, expected);
+        assert!(submission.skill_warnings.is_empty());
+    }
+
+    #[test]
+    fn idle_send_surfaces_missing_skill_path_warning() {
+        assert_route_delivers_warning(None, "has no SKILL.md path");
+    }
+
+    #[test]
+    fn idle_send_surfaces_invalid_skill_path_warning() {
+        assert_route_delivers_warning(Some("relative/SKILL.md"), "cannot be represented safely");
+    }
+
+    #[test]
+    fn busy_queue_surfaces_missing_skill_path_warning() {
+        assert_route_delivers_warning(None, "has no SKILL.md path");
+    }
+
+    #[test]
+    fn busy_queue_surfaces_invalid_skill_path_warning() {
+        assert_route_delivers_warning(Some("relative/SKILL.md"), "cannot be represented safely");
+    }
+
+    #[test]
+    fn steer_surfaces_missing_skill_path_warning() {
+        assert_route_delivers_warning(None, "has no SKILL.md path");
+    }
+
+    #[test]
+    fn steer_surfaces_invalid_skill_path_warning() {
+        assert_route_delivers_warning(Some("relative/SKILL.md"), "cannot be represented safely");
+    }
+
+    #[test]
+    fn message_edit_surfaces_missing_skill_path_warning() {
+        assert_route_delivers_warning(None, "has no SKILL.md path");
+    }
+
+    #[test]
+    fn message_edit_surfaces_invalid_skill_path_warning() {
+        assert_route_delivers_warning(Some("relative/SKILL.md"), "cannot be represented safely");
+    }
+
+    #[test]
+    fn failed_catalog_ignores_stale_commands_and_capability() {
+        let commands = [SlashCommand {
+            name: "deploy".into(),
+            description: String::new(),
+            scope: CommandScope::Skill,
+            argument_hint: None,
+            template: None,
+            skill_file: Some("/stale/remote/SKILL.md".into()),
+        }];
+        let identity = binary_identity('a');
+        let evidence = SkillCapabilityMetadata {
+            binary_version: "1.2.3".into(),
+            binary_identity: Some(identity.clone()),
+            probe_version: SKILL_CAPABILITY_PROBE_VERSION,
+            capability: SkillProviderCapability {
+                native_syntax: Some(SkillNativeSyntax::Dollar),
+                leading_invocation: true,
+                inline_mentions: true,
+                repeated_mentions: true,
+            },
+        };
+
+        let rendered = render_skill_mentions_for_catalog(
+            ProviderKind::Codex,
+            "$deploy now",
+            &commands,
+            Some(&evidence),
+            Some("1.2.3"),
+            Some(&identity),
+            true,
+        );
+
+        assert_eq!(rendered.provider_text, "$deploy now");
+        assert_eq!(
+            skill_render_warning_messages("$deploy now", &rendered, true),
+            vec![crate::composer_complete::SKILL_CATALOG_UNAVAILABLE_WARNING]
+        );
+    }
+
+    #[test]
+    fn failed_version_probe_uses_path_fallback_instead_of_native_syntax() {
+        let commands = [SlashCommand {
+            name: "deploy".into(),
+            description: String::new(),
+            scope: CommandScope::Skill,
+            argument_hint: None,
+            template: None,
+            skill_file: Some("/remote/skills/deploy/SKILL.md".into()),
+        }];
+        let identity = binary_identity('a');
+        let evidence = SkillCapabilityMetadata {
+            binary_version: "1.2.3".into(),
+            binary_identity: Some(identity.clone()),
+            probe_version: SKILL_CAPABILITY_PROBE_VERSION,
+            capability: SkillProviderCapability {
+                native_syntax: Some(SkillNativeSyntax::Dollar),
+                leading_invocation: true,
+                inline_mentions: true,
+                repeated_mentions: true,
+            },
+        };
+
+        let rendered = render_skill_mentions_for_catalog(
+            ProviderKind::Codex,
+            "$deploy now",
+            &commands,
+            Some(&evidence),
+            None,
+            None,
+            false,
+        );
+
+        assert_eq!(
+            rendered.provider_text,
+            "[mandatory! open skill: /remote/skills/deploy/SKILL.md] now"
+        );
+        assert!(!rendered.provider_text.starts_with("$deploy"));
+    }
+}
+
+#[cfg(test)]
+mod queued_drain_tests {
+    use super::*;
+
+    fn queued_fixture() -> QueuedMessage {
+        QueuedMessage::with_presentation(
+            "Provider-facing $deploy payload",
+            Some("$deploy visible prompt".into()),
+            vec![MessageAttachment {
+                path: PathBuf::from("/remote/plan.md"),
+                mention: "plan.md".into(),
+                name: "plan.md".into(),
+                is_dir: false,
+                is_image: false,
+                blob_reference: Some("blob-plan".into()),
+            }],
+        )
+        .with_embedded_notes(vec![padu_protocol::notes::EmbeddedNote {
+            id: Uuid::new_v4(),
+            title: "Queue note".into(),
+            content: "Keep this note with the queued prompt.".into(),
+            revision: 3,
+        }])
+    }
+
+    fn later_fixture() -> QueuedMessage {
+        let mut later = QueuedMessage::with_presentation(
+            "later provider text",
+            Some("$later visible prompt".into()),
+            vec![MessageAttachment {
+                path: PathBuf::from("/remote/later.md"),
+                mention: "later.md".into(),
+                name: "later.md".into(),
+                is_dir: false,
+                is_image: false,
+                blob_reference: Some("blob-later".into()),
+            }],
+        )
+        .with_embedded_notes(vec![padu_protocol::notes::EmbeddedNote {
+            id: Uuid::new_v4(),
+            title: "Later note".into(),
+            content: "This row must not move.".into(),
+            revision: 8,
+        }]);
+        later.created_at = 42;
+        later
+    }
+
+    fn session_with_queue(message: QueuedMessage, provider: ProviderKind) -> AgentSession {
+        let mut session = AgentSession::new(Uuid::new_v4(), provider);
+        session.queued_messages.push(message);
+        session
+    }
+
+    fn assert_same_queued_message(actual: &QueuedMessage, expected: &QueuedMessage) {
+        assert_eq!(actual.id, expected.id);
+        assert_eq!(actual.content, expected.content);
+        assert_eq!(actual.display_content, expected.display_content);
+        assert_eq!(actual.attachments, expected.attachments);
+        assert_eq!(actual.embedded_notes, expected.embedded_notes);
+        assert_eq!(actual.created_at, expected.created_at);
+    }
+
+    #[test]
+    fn queued_drain_captures_the_exact_submission_and_removes_only_the_front_row() {
+        let original = queued_fixture();
+        let mut session = session_with_queue(original.clone(), ProviderKind::Codex);
+        let later = later_fixture();
+        session.queued_messages.push(later.clone());
+
+        let queued_drain =
+            QueuedFollowUpDrain::begin(&mut session).expect("the session has a queued prompt");
+        let submission = queued_drain.submission();
+
+        assert_eq!(session.queued_messages.len(), 1);
+        assert_same_queued_message(&session.queued_messages[0], &later);
+        assert_eq!(submission.prompt, original.content);
+        assert_eq!(
+            submission.display_content.as_deref(),
+            Some("$deploy visible prompt")
+        );
+        assert_eq!(submission.attachments, original.attachments);
+        assert_eq!(submission.embedded_notes, original.embedded_notes);
+    }
+
+    #[test]
+    fn selected_drain_failures_restore_the_exact_original_row_before_a_later_row() {
+        for failure in [
+            QueuedDrainFailure::Disconnect,
+            QueuedDrainFailure::Preparation,
+            QueuedDrainFailure::Dispatch,
+        ] {
+            let original = queued_fixture();
+            let later = later_fixture();
+            let mut session = session_with_queue(original.clone(), ProviderKind::Codex);
+            session.queued_messages.push(later.clone());
+            let queued_drain = QueuedFollowUpDrain::begin(&mut session)
+                .expect("the selected session has a queued prompt");
+
+            // A stale same-ID copy may arrive from interrupted persistence.
+            // The failure transition must replace it with the captured row.
+            let mut stale = original.clone();
+            stale.content = "stale provider text".into();
+            stale.display_content = Some("$stale visible prompt".into());
+            stale.created_at = 99;
+            session.queued_messages.push(stale);
+
+            assert!(queued_drain.fail(std::slice::from_mut(&mut session), failure));
+            assert_eq!(session.queued_messages.len(), 2);
+            assert_same_queued_message(&session.queued_messages[0], &original);
+            assert_same_queued_message(&session.queued_messages[1], &later);
+        }
+    }
+
+    #[test]
+    fn background_drain_failures_restore_the_captured_session_not_the_selection() {
+        let selected = session_with_queue(
+            QueuedMessage::new("selected queue stays put"),
+            ProviderKind::Claude,
+        );
+        let selected_id = selected.id;
+
+        for failure in [
+            QueuedDrainFailure::Disconnect,
+            QueuedDrainFailure::Preparation,
+            QueuedDrainFailure::Dispatch,
+        ] {
+            let original = queued_fixture();
+            let later = later_fixture();
+            let mut background = session_with_queue(original.clone(), ProviderKind::Codex);
+            background.queued_messages.push(later.clone());
+            let background_id = background.id;
+            let mut sessions = vec![selected.clone(), background];
+            let queued_drain = QueuedFollowUpDrain::begin(&mut sessions[1])
+                .expect("the background session has a queued prompt");
+
+            assert!(queued_drain.fail(&mut sessions, failure));
+            assert_eq!(sessions[0].id, selected_id);
+            assert_eq!(
+                sessions[0].queued_messages[0].content,
+                "selected queue stays put"
+            );
+            let restored = sessions
+                .iter()
+                .find(|session| session.id == background_id)
+                .expect("the captured background session remains present");
+            assert_eq!(restored.queued_messages.len(), 2);
+            assert_same_queued_message(&restored.queued_messages[0], &original);
+            assert_same_queued_message(&restored.queued_messages[1], &later);
+        }
     }
 }

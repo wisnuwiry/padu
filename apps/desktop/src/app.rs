@@ -17,10 +17,11 @@ use gpui::{
     div, ease_out_quint, fill, font, img, linear_color_stop, linear_gradient, list, point,
     prelude::*, pulsating_between, px, rgb,
 };
+use padu_client::skill_probe::SkillBinaryIdentity;
 use uuid::Uuid;
 
 use crate::checkpoint;
-use crate::composer_complete::{FileEntry, SlashCommand};
+use crate::composer_complete::{FileEntry, SkillCapabilityMetadata, SlashCommand};
 use crate::computer_use::{
     ComputerPermissions, ComputerTarget, ComputerUsePhase, ComputerUseState,
     PendingComputerApproval,
@@ -144,6 +145,18 @@ pub(crate) fn task_notification_tag(session_id: Uuid) -> String {
 
 pub(crate) fn task_id_from_notification_tag(tag: &str) -> Option<Uuid> {
     tag.strip_prefix(TASK_NOTIFICATION_TAG_PREFIX)?.parse().ok()
+}
+
+struct SlashCommandCatalog {
+    commands: Vec<SlashCommand>,
+    skill_capability: Option<SkillCapabilityMetadata>,
+    unavailable: bool,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct ProviderBinaryObservation {
+    version: Option<String>,
+    identity: Option<SkillBinaryIdentity>,
 }
 
 fn signal_event_pump(wake: &smol::channel::Sender<()>) {
@@ -394,16 +407,21 @@ enum RemoteImageState {
     Unavailable,
 }
 
-/// One accepted composer submission. `prompt` preserves the composer and
-/// transcript syntax; provider-specific command syntax resolves only at the
-/// transport boundary. Presentation metadata keeps appended attachment
-/// mentions out of the user bubble.
+/// One accepted composer submission. `prompt` is the provider-facing text
+/// after any fresh skill render; `display_content` keeps the user's visible
+/// syntax. Remaining command syntax resolves at the transport boundary.
+/// Presentation metadata keeps appended attachment mentions out of the user
+/// bubble.
 #[derive(Clone, Debug)]
 struct ComposerSubmission {
     prompt: String,
     display_content: Option<String>,
     attachments: Vec<MessageAttachment>,
     embedded_notes: Vec<padu_protocol::notes::EmbeddedNote>,
+    needs_skill_refresh: bool,
+    /// Non-fatal skill rendering problems retained until the accepted route
+    /// (send, queue, steer, or edit) has finished clearing transient UI.
+    skill_warnings: Vec<String>,
 }
 
 impl ComposerSubmission {
@@ -413,6 +431,8 @@ impl ComposerSubmission {
             display_content: None,
             attachments: Vec::new(),
             embedded_notes: Vec::new(),
+            needs_skill_refresh: false,
+            skill_warnings: Vec::new(),
         }
     }
 
@@ -427,6 +447,8 @@ impl ComposerSubmission {
             display_content: message.display_content,
             attachments: message.attachments,
             embedded_notes: message.embedded_notes,
+            needs_skill_refresh: false,
+            skill_warnings: Vec::new(),
         }
     }
 
@@ -927,6 +949,13 @@ struct MessageEdit {
     embedded_notes: Vec<padu_protocol::notes::EmbeddedNote>,
 }
 
+#[derive(Clone, Debug)]
+struct PendingComposerRecovery {
+    captured_session_id: Uuid,
+    captured_project_id: Uuid,
+    submission: ComposerSubmission,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct TranscriptAnchor {
     session_id: Uuid,
@@ -938,6 +967,14 @@ struct NavigationRailVisualState {
     emphasized_turn: Option<Uuid>,
 }
 
+#[derive(Clone)]
+struct PendingSteer {
+    /// Exact provider-facing text handed to the driver.
+    wire_prompt: String,
+    /// Visible text and metadata retained for the transcript acknowledgement.
+    submission: ComposerSubmission,
+}
+
 struct SessionRuntime {
     driver: DriverHandle,
     /// Invalidates stale ApplyOptions responses when settings change again or
@@ -946,8 +983,8 @@ struct SessionRuntime {
     events: Receiver<DriverEvent>,
     pending_events: VecDeque<DriverEvent>,
     /// Presentation metadata for steering messages awaiting the provider's
-    /// accepted/rejected acknowledgement, in transport order.
-    pending_steers: VecDeque<ComposerSubmission>,
+    /// accepted/rejected acknowledgement, keyed by the exact wire prompt.
+    pending_steers: VecDeque<PendingSteer>,
     stream_phase: Option<StreamPhase>,
     stream_remeasure_pending: bool,
     pending_permission: Option<PendingPermission>,
@@ -1214,11 +1251,11 @@ pub struct Padu {
     provider_probe_events: Receiver<ProviderProbe>,
     provider_model_discoveries: HashSet<ProviderKind>,
     provider_model_discoveries_pending: HashSet<ProviderKind>,
-    /// CLI version per provider, probed off-thread. Missing key means the
-    /// probe has not answered yet; `None` means it ran and found nothing.
-    provider_versions: HashMap<ProviderKind, Option<String>>,
-    provider_version_tx: Sender<(ProviderKind, Option<String>)>,
-    provider_version_events: Receiver<(ProviderKind, Option<String>)>,
+    /// CLI version and exact executable identity per provider, probed
+    /// off-thread. Missing key means the probe has not answered yet.
+    provider_versions: HashMap<ProviderKind, ProviderBinaryObservation>,
+    provider_version_tx: Sender<(ProviderKind, ProviderBinaryObservation)>,
+    provider_version_events: Receiver<(ProviderKind, ProviderBinaryObservation)>,
     /// Providers with a version probe in flight, so a re-detect cannot stack
     /// a second subprocess on one that has not answered.
     provider_version_probes_pending: HashSet<ProviderKind>,
@@ -1391,6 +1428,7 @@ pub struct Padu {
     /// host switch and on app shutdown.
     host_transports: padu_client::transport::TransportRegistry,
     host_switch_pending: bool,
+    /// Active host deletion is committed only after the Local switch succeeds.
     host_switch_generation: u64,
     onboarding: onboarding::OnboardingState,
     /// Post-update release notes. `Some` while the modal is open; the
@@ -1415,13 +1453,17 @@ pub struct Padu {
     commit_operation: Option<dialogs::commit::CommitOperationState>,
     /// Slash commands discovered per (provider, project root, CLI override).
     /// Filesystem and CLI probes live off the UI thread; frames read this cache.
-    slash_commands: QueryCache<(ProviderKind, PathBuf, Option<String>), Vec<SlashCommand>>,
+    slash_commands: QueryCache<(ProviderKind, PathBuf, Option<String>), SlashCommandCatalog>,
     /// The merged command list the autocomplete popup draws, and the key it
     /// was built for — a stale key means "no commands", never another
     /// provider's list.
     slash_command_index: Rc<Vec<SlashCommand>>,
+    /// Probe-backed native skill support returned with the same catalog
+    /// response. Missing evidence always selects the portable fallback.
+    slash_skill_capability: Option<SkillCapabilityMetadata>,
     slash_command_index_key: Option<(ProviderKind, PathBuf, Option<String>)>,
     slash_command_index_loading: bool,
+    slash_command_index_unavailable: bool,
     /// Workspace file index per project root, for `@` mentions.
     mention_files: QueryCache<PathBuf, Vec<FileEntry>>,
     mention_file_index: Rc<Vec<FileEntry>>,
@@ -1451,8 +1493,8 @@ pub struct Padu {
     /// Coalesced edge trigger for provider and background result queues. The
     /// payloads stay in their typed channels; this channel only wakes the UI.
     event_wake_tx: smol::channel::Sender<()>,
-    task_state_sync_tx: Sender<Result<RemoteTaskStateSnapshot, String>>,
-    task_state_sync_events: Receiver<Result<RemoteTaskStateSnapshot, String>>,
+    task_state_sync_tx: Sender<(u64, Result<RemoteTaskStateSnapshot, String>)>,
+    task_state_sync_events: Receiver<(u64, Result<RemoteTaskStateSnapshot, String>)>,
     runtimes: HashMap<Uuid, SessionRuntime>,
     runtime_attach_pending: HashSet<Uuid>,
     runtime_attach_misses: HashMap<Uuid, u8>,
@@ -1466,6 +1508,13 @@ pub struct Padu {
     /// session is busy immediately, while the composer draws a spinner until
     /// the non-cancellable preparation is complete.
     submission_preparations: HashSet<Uuid>,
+    /// Prompts rejected while a host switch temporarily leaves no visible
+    /// task or project. They stay outside a stale host-scoped draft until the
+    /// destination selects a real recovery target.
+    pending_composer_recoveries: Vec<PendingComposerRecovery>,
+    /// Avoids spawning duplicate projectless workspaces while the destination
+    /// daemon is still returning an empty task catalog.
+    composer_recovery_target_pending: bool,
     /// First Escape press for the current turn. A matching second press stops
     /// the response; otherwise this returns to the ordinary Stop icon after a
     /// short timeout.
@@ -2335,6 +2384,8 @@ impl Padu {
     }
 
     fn apply_new_daemon(&mut self, daemon: padu_client::DaemonSupervisor, cx: &mut Context<Self>) {
+        // Terminals belong to the previous daemon and must be closed before
+        // the new connection becomes visible to the rest of the app.
         self.agy_install_progress_events = daemon.client().subscribe_provider_install_progress();
         self.agy_auth_url_events = daemon.client().subscribe_provider_auth_url();
         self.card_updated_events = daemon.client().subscribe_card_updated();
@@ -2379,6 +2430,22 @@ impl Padu {
         }
 
         self.state = new_state;
+        self.restore_selected_composer_draft(cx);
+        self.flush_pending_composer_recoveries(cx);
+        // Command and file catalogs are daemon-scoped. The project path and
+        // provider can be identical on two hosts, but their absolute paths
+        // and filesystem contents are not interchangeable. Drop the old
+        // cache before discovering from the newly connected daemon.
+        self.slash_commands.clear();
+        self.slash_command_index = Rc::new(Vec::new());
+        self.slash_skill_capability = None;
+        self.slash_command_index_key = None;
+        self.slash_command_index_loading = false;
+        self.slash_command_index_unavailable = false;
+        self.mention_files.clear();
+        self.mention_file_index = Rc::new(Vec::new());
+        self.mention_file_index_path = None;
+        self.mention_file_index_loading = false;
         // Notes belong to the active daemon. Retain the page entities and
         // sidebar, but invalidate the daemon-backed Notes snapshot on host
         // changes so a later activation cannot show another host's data.
@@ -2404,6 +2471,7 @@ impl Padu {
         self.restart_task_state_sync();
         self.refresh_composer_sources(cx);
         self.refresh_provider_detection(None, cx);
+        self.ensure_right_panel_terminals(cx);
 
         cx.notify();
     }
@@ -3110,51 +3178,76 @@ impl Padu {
             // caret is exactly what the Performance guidance forbids.
             cx.subscribe(
                 &composer,
-                |this: &mut Self, _, event: &ComposerEvent, cx| match event {
-                    ComposerEvent::Submit(prompt) => {
-                        if let Some(session_id) = this.selected_session().and_then(|session| {
-                            this.response_fork_preparations
-                                .contains_key(&session.id)
-                                .then_some(session.id)
-                        }) {
-                            this.defer_restore_composer_after_fork(session_id, prompt.clone(), cx);
-                        } else if let Some(submission) =
-                            this.submission_with_attachments(prompt, cx)
+                |this: &mut Self, _, event: &ComposerEvent, cx| {
+                    if this.host_switch_pending {
+                        if let ComposerEvent::Submit(prompt) | ComposerEvent::SubmitSteer(prompt) =
+                            event
                         {
-                            this.submit_composer_submission(submission, cx);
+                            this.composer.update(cx, |input, cx| {
+                                input.set_content(prompt.clone(), cx);
+                            });
+                        }
+                        if !matches!(event, ComposerEvent::Focus) {
+                            return;
                         }
                     }
-                    ComposerEvent::SubmitSteer(prompt) => {
-                        if let Some(session_id) = this.selected_session().and_then(|session| {
-                            this.response_fork_preparations
-                                .contains_key(&session.id)
-                                .then_some(session.id)
-                        }) {
-                            this.defer_restore_composer_after_fork(session_id, prompt.clone(), cx);
-                        } else if let Some(submission) =
-                            this.submission_with_attachments(prompt, cx)
-                        {
-                            this.steer_composer_submission(submission, cx);
+                    if matches!(event, ComposerEvent::Focus) {
+                        return;
+                    }
+                    match event {
+                        ComposerEvent::Submit(prompt) => {
+                            if let Some(session_id) = this.selected_session().and_then(|session| {
+                                this.response_fork_preparations
+                                    .contains_key(&session.id)
+                                    .then_some(session.id)
+                            }) {
+                                this.defer_restore_composer_after_fork(
+                                    session_id,
+                                    prompt.clone(),
+                                    cx,
+                                );
+                            } else if let Some(submission) =
+                                this.submission_with_attachments(prompt, cx)
+                            {
+                                this.dispatch_composer_submission(submission, false, cx);
+                            }
                         }
-                    }
-                    ComposerEvent::SteerQueued => {
-                        // Staged attachments make this a real draft even when
-                        // the text field is empty. Preserve the shortcut's
-                        // previous no-op behavior until that draft is sent or
-                        // cleared.
-                        if this.composer_attachments.is_empty() {
-                            this.steer_oldest_queued_message(cx);
+                        ComposerEvent::SubmitSteer(prompt) => {
+                            if let Some(session_id) = this.selected_session().and_then(|session| {
+                                this.response_fork_preparations
+                                    .contains_key(&session.id)
+                                    .then_some(session.id)
+                            }) {
+                                this.defer_restore_composer_after_fork(
+                                    session_id,
+                                    prompt.clone(),
+                                    cx,
+                                );
+                            } else if let Some(submission) =
+                                this.submission_with_attachments(prompt, cx)
+                            {
+                                this.dispatch_composer_submission(submission, true, cx);
+                            }
                         }
-                    }
-                    ComposerEvent::Edited => {
-                        this.schedule_composer_draft_save(cx);
-                        cx.notify();
-                    }
-                    ComposerEvent::Focus => {}
-                    ComposerEvent::BackspaceOnEmpty => {
-                        if this.composer_attachments.pop().is_some() {
+                        ComposerEvent::SteerQueued => {
+                            // Staged attachments make this a real draft even when
+                            // the text field is empty. Preserve the shortcut's
+                            // previous no-op behavior until that draft is sent or
+                            // cleared.
+                            if this.composer_attachments.is_empty() {
+                                this.steer_oldest_queued_message(cx);
+                            }
+                        }
+                        ComposerEvent::Edited => {
                             this.schedule_composer_draft_save(cx);
                             cx.notify();
+                        }
+                        ComposerEvent::Focus => {}
+                        ComposerEvent::BackspaceOnEmpty => {
+                            if this.composer_attachments.pop().is_some() {
+                                this.schedule_composer_draft_save(cx);
+                                cx.notify();
+                            }
                         }
                     }
                 },
@@ -3182,36 +3275,12 @@ impl Padu {
             cx.subscribe(
                 &composer,
                 |this: &mut Self, _, event: &ComposerAttachmentPaste, cx| {
+                    if this.host_switch_pending {
+                        return;
+                    }
                     this.stage_pasted_attachments(event.0.clone(), cx);
                 },
             )
-            .detach();
-
-            // A normal Cmd-Q waits briefly for this future, so even an edit
-            // made inside the debounce window is durable before the process
-            // exits. Filesystem work still stays off the UI thread.
-            cx.on_app_quit(|this, cx| {
-                this.capture_current_composer_draft(cx);
-                this.composer_draft_save_generation =
-                    this.composer_draft_save_generation.saturating_add(1);
-                let generation = this.composer_draft_save_generation;
-                let store = this.composer_draft_store.clone();
-                let drafts = this.composer_drafts.clone();
-                let save = cx
-                    .background_executor()
-                    .spawn(async move { store.save(drafts, generation) });
-                async move {
-                    let _ = save.await;
-                }
-            })
-            .detach();
-
-            // Window-frame changes are only mirrored in memory; the quit save
-            // is what lands the final position and size on disk.
-            cx.on_app_quit(|this, _| {
-                this.save();
-                async {}
-            })
             .detach();
 
             // A changed query re-filters the picker rows and renumbers them,
@@ -3703,8 +3772,10 @@ impl Padu {
                 // only exists to keep them off the frame path.
                 slash_commands: QueryCache::new(2 * MAX_CACHED_WORKSPACES),
                 slash_command_index: Rc::new(Vec::new()),
+                slash_skill_capability: None,
                 slash_command_index_key: None,
                 slash_command_index_loading: false,
+                slash_command_index_unavailable: false,
                 mention_files: QueryCache::new(MAX_CACHED_WORKSPACES),
                 mention_file_index: Rc::new(Vec::new()),
                 mention_file_index_path: None,
@@ -3729,6 +3800,8 @@ impl Padu {
                 background_work: HashMap::new(),
                 last_background_work_tick: Instant::now(),
                 submission_preparations: HashSet::new(),
+                pending_composer_recoveries: Vec::new(),
+                composer_recovery_target_pending: false,
                 escape_stop_confirmation: EscapeStopConfirmation::default(),
                 response_fork_preparations: HashMap::new(),
                 pending_queue_drains: Vec::new(),
