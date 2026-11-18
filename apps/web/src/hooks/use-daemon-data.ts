@@ -107,15 +107,20 @@ export function useComposerCommands(
 ) {
   const { client, config, phase } = useDaemon()
   const settings = useDaemonSettings()
+  const probe = useProviderProbe(provider)
   const binaryOverride = settings.data && provider
     ? settings.data.provider_binary_overrides?.[provider] ?? null
     : null
-  return useQuery({
+  const binaryVersion = probe.data?.version ?? null
+  const binaryIdentity = probe.data?.binaryIdentity ?? null
+  const catalog = useQuery({
     queryKey: daemonKeys.slashCommands(
       config?.address ?? 'disconnected',
       provider ?? 'codex',
       cwd ?? 'none',
       binaryOverride,
+      binaryVersion,
+      binaryIdentity,
     ),
     queryFn: () => discoverComposerCommands(
       requireClient(client),
@@ -126,8 +131,17 @@ export function useComposerCommands(
     enabled: phase === 'connected' && Boolean(
       client && config && provider && cwd && settings.data,
     ),
-    staleTime: Number.POSITIVE_INFINITY,
+    // Catalog evidence is scoped to this version. Refetch on focus/mount so
+    // an in-place provider upgrade cannot keep stale native capability forever.
+    staleTime: 30_000,
   })
+  return {
+    ...catalog,
+    binaryVersion,
+    binaryIdentity,
+    binaryOverride,
+    refetchBinary: probe.refetch,
+  }
 }
 
 export function useSession(sessionId: string | undefined) {

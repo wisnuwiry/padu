@@ -8,6 +8,7 @@ import {
 
 import {
   daemonKeys,
+  discoverComposerCommands,
   fetchSidebarGroups,
   hydrateSession,
   loadDaemonSettings,
@@ -150,6 +151,70 @@ export function useDaemonSettings() {
     enabled: phase === 'connected' && Boolean(activeProfile && client),
     staleTime: 60_000,
   });
+}
+
+/**
+ * Host/provider/project-scoped composer catalog. Discovery is an ordinary
+ * daemon workspace query; opening a composer must never probe or start the
+ * provider CLI.
+ */
+export function useComposerCommands(
+  provider: ProviderKind | null,
+  cwd: string | null,
+) {
+  const { activeProfile, client, phase } = useDaemon();
+  const settings = useDaemonSettings();
+  const binaryOverride = provider && settings.data
+    ? settings.data.provider_binary_overrides?.[provider] ?? null
+    : null;
+  const versionProbe = useQuery({
+    queryKey: [
+      ...daemonKeys.provider(activeProfile?.id ?? 'disconnected', provider ?? 'codex'),
+      'skill-capability-version',
+      binaryOverride,
+    ],
+    queryFn: async () => probeProvider(
+      requireClient(client),
+      provider!,
+      settings.data!,
+      { discoverModels: false, probeVersion: true },
+    ),
+    enabled: phase === 'connected' && Boolean(
+      activeProfile && client && provider && settings.data,
+    ),
+    staleTime: 30_000,
+  });
+  const binaryVersion = versionProbe.data?.version ?? null;
+  const binaryIdentity = versionProbe.data?.binaryIdentity ?? null;
+  const catalog = useQuery({
+    queryKey: daemonKeys.slashCommands(
+      activeProfile?.id ?? 'disconnected',
+      provider ?? 'codex',
+      cwd ?? 'missing',
+      binaryOverride,
+      binaryVersion,
+      binaryIdentity,
+    ),
+    queryFn: () => discoverComposerCommands(
+      requireClient(client),
+      provider!,
+      cwd!,
+      binaryOverride,
+    ),
+    enabled: phase === 'connected' && Boolean(
+      activeProfile && client && provider && cwd && settings.data,
+    ),
+    // The daemon re-reads the probe cache for this exact binary version on
+    // refetch, so a replaced CLI cannot leave stale native evidence forever.
+    staleTime: 30_000,
+  });
+  return {
+    ...catalog,
+    binaryOverride,
+    binaryVersion,
+    binaryIdentity,
+    refetchBinary: versionProbe.refetch,
+  };
 }
 
 /** Web's probe-query recipe: seed from the persistent probe cache so model

@@ -1,8 +1,11 @@
 //! Daemon-only provider discovery layered over shared protocol models.
 
+use std::io::Read;
 use std::path::Path;
 
+use padu_protocol::composer::SkillBinaryIdentity;
 pub use padu_protocol::model::*;
+use sha2::{Digest, Sha256};
 
 pub fn provider_probe(provider: ProviderKind, binary_override: Option<&str>) -> ProviderProbe {
     let path = match binary_override {
@@ -70,9 +73,47 @@ pub fn probe_provider_version(binary: &Path) -> Option<String> {
     parse_cli_version(&combined)
 }
 
+/// Identify the exact provider executable used for capability evidence.
+///
+/// The path is canonicalized first, so relative paths and symlink aliases
+/// resolve to the same absolute target. The content hash is SHA-256 over every
+/// byte of that target. A path or digest that cannot be computed is unknown,
+/// and callers must keep native skill syntax disabled.
+pub fn provider_binary_identity(binary: &Path) -> Option<SkillBinaryIdentity> {
+    let canonical = std::fs::canonicalize(binary).ok()?;
+    if !canonical.is_file() {
+        return None;
+    }
+    let canonical_path = canonical.to_str()?.to_owned();
+    let mut file = std::fs::File::open(&canonical).ok()?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer).ok()?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Some(SkillBinaryIdentity {
+        canonical_path,
+        content_sha256: format!("{:x}", hasher.finalize()),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    fn temporary_binary(label: &str, contents: &[u8]) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "padu-provider-identity-{}-{label}",
+            std::process::id()
+        ));
+        std::fs::write(&path, contents).unwrap();
+        path
+    }
 
     #[test]
     fn cached_catalog_replaces_fallback_before_live_discovery() {
@@ -89,5 +130,41 @@ mod tests {
 
         assert_eq!(probe.models.len(), 1);
         assert_eq!(probe.models[0].id, "cached-model");
+    }
+
+    #[test]
+    fn binary_identity_is_canonical_path_plus_full_content_sha256() {
+        let path = temporary_binary("hash", b"abc");
+        let identity = provider_binary_identity(&path).expect("hash executable contents");
+        assert_eq!(
+            identity.content_sha256,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(
+            identity.canonical_path,
+            std::fs::canonicalize(&path).unwrap().to_str().unwrap()
+        );
+        assert!(identity.is_valid());
+
+        std::fs::write(&path, b"abcd").unwrap();
+        let changed = provider_binary_identity(&path).expect("hash changed executable");
+        assert_eq!(changed.canonical_path, identity.canonical_path);
+        assert_ne!(changed.content_sha256, identity.content_sha256);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn identical_contents_at_different_paths_have_different_identities() {
+        let first_path = temporary_binary("first", b"same executable");
+        let second_path = temporary_binary("second", b"same executable");
+        let first = provider_binary_identity(&first_path).expect("hash first executable");
+        let second = provider_binary_identity(&second_path).expect("hash second executable");
+
+        assert_eq!(first.content_sha256, second.content_sha256);
+        assert_ne!(first.canonical_path, second.canonical_path);
+        assert_ne!(first, second);
+
+        let _ = std::fs::remove_file(first_path);
+        let _ = std::fs::remove_file(second_path);
     }
 }

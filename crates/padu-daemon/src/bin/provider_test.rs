@@ -3,16 +3,22 @@
 //! Verifies binary detection, model discovery, live session connection,
 //! token streaming, mid-session model switching, forking, rollback, and resume.
 
-use std::time::{Duration, Instant};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
 use crossbeam_channel::Receiver;
+use padu_client::skill_probe::{
+    SkillBinaryIdentity, SkillInvocationEvidence, SkillNativeSyntax,
+    evaluate_skill_capability_probe, native_skill_syntax, skill_capability_cache_path,
+    write_skill_capability_evidence,
+};
 use padu_core::driver::{
     DriverHandle, DriverStartOptions, SessionOptions, event_channel, start_local,
 };
 use padu_core::model::{
     DriverEvent, InteractionMode, ProviderKind, ProviderResumeCursor, RuntimeMode,
-    discover_provider_models, probe_provider_version, provider_probe,
+    discover_provider_models, probe_provider_version, provider_binary_identity, provider_probe,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -91,6 +97,7 @@ COMMANDS:
     fork <PROVIDER>              Test conversation forking capability
     rollback <PROVIDER>          Test conversation rollback capability
     resume <PROVIDER> <SESS_ID>  Test session re-attachment from resume cursor
+    skill-capability <PROVIDER>  Opt-in disposable-session skill mention probe
     suite <PROVIDER>             Run complete automated diagnostic test matrix
 
 OPTIONS:
@@ -106,6 +113,7 @@ EXAMPLES:
     padu-provider-test connect claude
     padu-provider-test turn cursor "Reply with PONG"
     padu-provider-test switch-model cursor gpt-4o
+    padu-provider-test skill-capability codex --json
     padu-provider-test suite cursor --json
 "#
     );
@@ -291,6 +299,22 @@ fn start_session(
     effort: Option<String>,
     resume_cursor: Option<ProviderResumeCursor>,
 ) -> anyhow::Result<DriverSession> {
+    start_session_in(
+        provider,
+        model,
+        effort,
+        resume_cursor,
+        std::env::current_dir()?,
+    )
+}
+
+fn start_session_in(
+    provider: ProviderKind,
+    model: Option<String>,
+    effort: Option<String>,
+    resume_cursor: Option<ProviderResumeCursor>,
+    cwd: PathBuf,
+) -> anyhow::Result<DriverSession> {
     let probe = provider_probe(provider, None);
     let binary = probe.path.ok_or_else(|| {
         anyhow!(
@@ -298,8 +322,6 @@ fn start_session(
             provider.command()
         )
     })?;
-    let cwd = std::env::current_dir()?;
-
     let (wake_tx, _wake_rx) = smol::channel::bounded(1);
     let (event_sender, receiver) = event_channel(wake_tx);
 
@@ -347,6 +369,219 @@ fn start_session(
         receiver,
         cursor,
     })
+}
+
+fn run_probe_turn(
+    session: &DriverSession,
+    prompt: &str,
+    timeout: Duration,
+) -> anyhow::Result<Vec<DriverEvent>> {
+    session.handle.prompt(prompt.to_owned());
+    let started = Instant::now();
+    let mut events = Vec::new();
+    while started.elapsed() < timeout {
+        if let Ok(event) = session.receiver.recv_timeout(Duration::from_millis(50)) {
+            events.push(event.clone());
+            match event {
+                DriverEvent::TurnFinished { success, summary } => {
+                    if success {
+                        return Ok(events);
+                    }
+                    return Err(anyhow!(
+                        "skill probe turn failed: {}",
+                        summary.unwrap_or_else(|| "provider reported failure".into())
+                    ));
+                }
+                DriverEvent::Error(error) => {
+                    return Err(anyhow!("skill probe turn error: {error}"));
+                }
+                DriverEvent::ProcessExited => {
+                    return Err(anyhow!("provider exited during skill probe"));
+                }
+                _ => {}
+            }
+        }
+    }
+    Err(anyhow!("skill probe turn did not settle before timeout"))
+}
+
+fn structured_skill_invocation_evidence(
+    provider: ProviderKind,
+    binary_version: &str,
+    binary_identity: &SkillBinaryIdentity,
+    events: &[DriverEvent],
+) -> Vec<SkillInvocationEvidence> {
+    // No DriverEvent variant currently represents a provider-emitted native
+    // skill invocation. TextDelta and ReasoningDelta are model-authored text,
+    // so marker-shaped output must remain ordinary transcript content rather
+    // than becoming capability evidence. Add a typed provider event here only
+    // when its wire payload directly proves that the provider interpreted the
+    // probe skill.
+    let _ = (provider, binary_version, binary_identity, events);
+    Vec::new()
+}
+
+fn write_probe_skill(root: &Path, name: &str) {
+    let roots = [
+        ".agents/skills",
+        ".codex/skills",
+        ".claude/skills",
+        ".pi/skills",
+        ".omp/skills",
+        ".cursor/skills",
+        ".fx/skills",
+        ".amp/skills",
+        ".opencode/skills",
+        ".config/agents/skills",
+    ];
+    for relative in roots {
+        let directory = root.join(relative).join(name);
+        std::fs::create_dir_all(&directory).expect("create disposable skill directory");
+        std::fs::write(
+            directory.join("SKILL.md"),
+            format!(
+                "---\nname: {name}\ndescription: Padu disposable skill capability probe\n---\nThis disposable skill exists only for provider capability probing.\n"
+            ),
+        )
+        .expect("write disposable skill");
+    }
+}
+
+fn skill_probe_invocation(provider: ProviderKind, name: &str) -> String {
+    match native_skill_syntax(provider) {
+        Some(SkillNativeSyntax::Dollar) | None => format!("${name}"),
+        Some(SkillNativeSyntax::SkillSlash) => format!("/skill:{name}"),
+    }
+}
+
+fn run_skill_capability(
+    provider: ProviderKind,
+    model: Option<String>,
+    effort: Option<String>,
+    timeout_secs: u64,
+    json: bool,
+) -> anyhow::Result<()> {
+    let probe = provider_probe(provider, None);
+    let binary = probe
+        .path
+        .as_deref()
+        .ok_or_else(|| anyhow!("provider binary is not installed"))?;
+    let binary_version = probe_provider_version(binary)
+        .ok_or_else(|| anyhow!("provider binary version is unavailable"))?;
+    let binary_identity = provider_binary_identity(binary)
+        .ok_or_else(|| anyhow!("provider binary identity is unavailable"))?;
+    let nonce = format!(
+        "{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+    );
+    let root = std::env::temp_dir().join(format!("padu-skill-probe-{}-{nonce}", provider.id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root)?;
+
+    write_probe_skill(&root, "padu-probe-leading");
+    write_probe_skill(&root, "padu-probe-inline");
+    write_probe_skill(&root, "padu-probe-repeat");
+    write_probe_skill(&root, "padu-probe-alpha");
+    write_probe_skill(&root, "padu-probe-beta");
+    let leading_invocation = skill_probe_invocation(provider, "padu-probe-leading");
+    let inline_invocation = skill_probe_invocation(provider, "padu-probe-inline");
+    let repeated_invocation = skill_probe_invocation(provider, "padu-probe-repeat");
+    let alpha_invocation = skill_probe_invocation(provider, "padu-probe-alpha");
+    let beta_invocation = skill_probe_invocation(provider, "padu-probe-beta");
+
+    let result = (|| -> anyhow::Result<_> {
+        let session = start_session_in(provider, model, effort, None, root.clone())?;
+        let timeout = Duration::from_secs(timeout_secs);
+        let mut driver_events = run_probe_turn(&session, &leading_invocation, timeout)?;
+        driver_events.append(&mut run_probe_turn(
+            &session,
+            &format!("Please inspect this project, then {inline_invocation}."),
+            timeout,
+        )?);
+        driver_events.append(&mut run_probe_turn(
+            &session,
+            &format!("{repeated_invocation} first, then {repeated_invocation} second."),
+            timeout,
+        )?);
+        driver_events.append(&mut run_probe_turn(
+            &session,
+            &format!("{alpha_invocation} and {beta_invocation}."),
+            timeout,
+        )?);
+        // Existing DriverEvent activity describes model and tool work; none of
+        // it proves that the provider interpreted a native skill mention. Keep
+        // the probe fail-closed until a driver exposes provider-emitted
+        // invocation evidence.
+        let observations = structured_skill_invocation_evidence(
+            provider,
+            &binary_version,
+            &binary_identity,
+            &driver_events,
+        );
+        let evidence = evaluate_skill_capability_probe(
+            provider,
+            Some(&binary_version),
+            Some(&binary_identity),
+            &observations,
+        )
+        .ok_or_else(|| anyhow!("provider identity disappeared during probe"))?;
+        let cache_path = skill_capability_cache_path()
+            .ok_or_else(|| anyhow!("provider skill capability cache path is unavailable"))?;
+        write_skill_capability_evidence(&cache_path, &evidence)?;
+        Ok((evidence, cache_path))
+    })();
+    let _ = std::fs::remove_dir_all(&root);
+    let (evidence, cache_path) = result?;
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "provider": provider.id(),
+                "binary": binary.display().to_string(),
+                "binaryVersion": evidence.binary_version,
+                "binaryIdentity": evidence.binary_identity.clone(),
+                "evidenceSource": "structured provider invocation events (none observed)",
+                "observations": evidence.observations,
+                "capability": evidence.capability,
+                "cachePath": cache_path.display().to_string(),
+            }))?
+        );
+    } else {
+        println!(
+            "\n=== Skill Mention Capability: {} ===",
+            provider.display_name()
+        );
+        println!("Binary version:        {}", evidence.binary_version);
+        if let Some(identity) = evidence.binary_identity.as_ref() {
+            println!("Binary path:           {}", identity.canonical_path);
+            println!("Binary SHA-256:        {}", identity.content_sha256);
+        }
+        println!("Evidence source:       structured provider invocation events (none observed)");
+        println!(
+            "Leading invocation:    {}",
+            evidence.observations.leading_invocation
+        );
+        println!(
+            "Inline mention:        {}",
+            evidence.observations.inline_mention
+        );
+        println!(
+            "Repeated same mention: {}",
+            evidence.observations.repeated_same_mention
+        );
+        println!(
+            "Repeated different:    {}",
+            evidence.observations.repeated_different_mentions
+        );
+        println!("Cache:                 {}", cache_path.display());
+        println!();
+    }
+    Ok(())
 }
 
 fn run_connect(
@@ -1004,6 +1239,20 @@ fn main() -> anyhow::Result<()> {
                 .ok_or_else(|| anyhow!("resume requires a session-id"))?;
             run_resume(provider, session_id, args.json)
         }
+        "skill-capability" => {
+            let provider = parse_provider(
+                args.provider_raw
+                    .as_deref()
+                    .ok_or_else(|| anyhow!("skill-capability requires a provider name"))?,
+            )?;
+            run_skill_capability(
+                provider,
+                args.model,
+                args.effort,
+                args.timeout_secs,
+                args.json,
+            )
+        }
         "suite" => {
             let provider = parse_provider(
                 args.provider_raw
@@ -1016,5 +1265,89 @@ fn main() -> anyhow::Result<()> {
             print_help();
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capability_probe_uses_each_providers_native_skill_spelling() {
+        assert_eq!(
+            skill_probe_invocation(ProviderKind::Codex, "deploy"),
+            "$deploy"
+        );
+        assert_eq!(
+            skill_probe_invocation(ProviderKind::Fx, "deploy"),
+            "$deploy"
+        );
+        assert_eq!(
+            skill_probe_invocation(ProviderKind::Pi, "deploy"),
+            "/skill:deploy"
+        );
+        assert_eq!(
+            skill_probe_invocation(ProviderKind::OhMyPi, "deploy"),
+            "/skill:deploy"
+        );
+    }
+
+    #[test]
+    fn model_authored_marker_text_cannot_enable_native_invocation() {
+        let model_output = "PADU_SKILL_LEADING_TEST PADU_SKILL_INLINE_TEST";
+        let binary_identity = SkillBinaryIdentity {
+            canonical_path: "/opt/codex/bin/codex".into(),
+            content_sha256: "a".repeat(64),
+        };
+        let events = [DriverEvent::TextDelta(model_output.into())];
+        let observations = structured_skill_invocation_evidence(
+            ProviderKind::Codex,
+            "1.2.3",
+            &binary_identity,
+            &events,
+        );
+        assert!(observations.is_empty());
+        assert!(matches!(
+            &events[0],
+            DriverEvent::TextDelta(text) if text == model_output
+        ));
+
+        let evidence = evaluate_skill_capability_probe(
+            ProviderKind::Codex,
+            Some("1.2.3"),
+            Some(&binary_identity),
+            &observations,
+        )
+        .expect("matching provider identity");
+        assert!(!evidence.observations.leading_invocation);
+        assert!(!evidence.observations.inline_mention);
+        assert!(!evidence.observations.repeated_same_mention);
+        assert!(!evidence.observations.repeated_different_mentions);
+        assert!(!evidence.capability.leading_invocation);
+        assert!(!evidence.capability.inline_mentions);
+        assert!(!evidence.capability.repeated_mentions);
+    }
+
+    #[test]
+    fn structured_evidence_requires_an_explicit_provider_event() {
+        let binary_identity = SkillBinaryIdentity {
+            canonical_path: "/opt/codex/bin/codex".into(),
+            content_sha256: "b".repeat(64),
+        };
+        let explicit = SkillInvocationEvidence::new(
+            ProviderKind::Codex,
+            "1.2.3",
+            binary_identity.clone(),
+            padu_client::skill_probe::SKILL_CAPABILITY_PROBE_VERSION,
+            padu_client::skill_probe::SkillInvocationObservation::LeadingInvocation,
+        );
+        let evidence = evaluate_skill_capability_probe(
+            ProviderKind::Codex,
+            Some("1.2.3"),
+            Some(&binary_identity),
+            &[explicit],
+        )
+        .expect("matching provider identity");
+        assert!(evidence.capability.leading_invocation);
     }
 }

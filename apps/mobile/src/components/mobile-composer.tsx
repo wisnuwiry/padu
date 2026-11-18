@@ -1,9 +1,18 @@
 import type {
   AgentSession,
+  EmbeddedNote,
+  MessageAttachment,
   PendingPermission,
   PendingUserInput,
   UserInputAnswer,
 } from '@padu/client';
+import {
+  detectSkillTrigger,
+  filterSkillCommands,
+  replaceSkillTrigger,
+  SKILL_AUTOCOMPLETE_CAP,
+  type SkillCommand,
+} from '@padu/client/composer-skills';
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
@@ -14,6 +23,8 @@ import {
   Text,
   TextInput,
   View,
+  type ScrollViewInstance,
+  type TextInputKeyPressEvent,
   type TextInputProps,
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
@@ -22,8 +33,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PaduIcon, type PaduIconName } from './padu-icon';
 import { ContextGauge } from './context-gauge';
 import { AccessSheet, ModelSheet } from './session-option-sheets';
-import { MonoFont, NativeTint, Radius } from '@/constants/theme';
-import { useTaskState } from '@/hooks/use-daemon-data';
+import { MonoFont, NativeTint, Radius, Spacing } from '@/constants/theme';
+import { useComposerCommands, useTaskState } from '@/hooks/use-daemon-data';
 import { useTheme } from '@/hooks/use-theme';
 import {
   applyComposerDraftChanges,
@@ -32,8 +43,28 @@ import {
   loadComposerDrafts,
 } from '@/lib/daemon-api';
 import { useDaemon } from '@/lib/daemon-context';
-import { sessionBusy } from '@/lib/mobile-runtime';
+import {
+  createDraftFlushScheduler,
+} from '@/lib/draft-flush';
+import {
+  composerDraftSnapshot,
+  composeMobileProviderPrompt,
+  queuedMessageMetadata,
+  queuedVisiblePrompt,
+  sessionBusy,
+  sessionCwd,
+} from '@/lib/mobile-runtime';
+import { reconcileSkillWarningSession } from '@/lib/skill-warning-state';
+import {
+  mobilePromptSelectionContext,
+  renderSkillSubmissionPrompt,
+  useMobilePromptResolutionGuard,
+} from '@/lib/skill-submission';
 import { useRuntime } from '@/lib/runtime-context';
+
+const COMPOSER_HIT_TARGET = 44;
+const AUTOCOMPLETE_BLUR_DELAY_MS = 300;
+const EMPTY_SKILL_WARNINGS: readonly string[] = [];
 
 /**
  * The composer surface shared by the session screen and the new-task screen:
@@ -160,12 +191,14 @@ function ComposerStatusCard({
   session,
   queued,
   canSteer,
+  onEditMessage,
   onSteerMessage,
   onRemoveMessage,
 }: {
   session: AgentSession;
   queued: QueuedMessage[];
   canSteer: boolean;
+  onEditMessage: (message: QueuedMessage) => void;
   onSteerMessage: (message: QueuedMessage) => void;
   onRemoveMessage: (messageId: string) => void;
 }) {
@@ -207,17 +240,27 @@ function ComposerStatusCard({
 
   return (
     <View style={[styles.statusCard, { backgroundColor: theme.composer, borderColor: theme.border }]}>
-      {queued.map((message, index) => (
+      {queued.map((message) => (
         <View key={message.id}>
           <View style={styles.queuedItem}>
-            <PaduIcon
-              name="clock"
-              size={12}
-              tintColor={theme.textTertiary}
-            />
-            <Text numberOfLines={1} style={[styles.queuedText, { color: theme.textSecondary }]}>
-              {message.display_content ?? message.content}
-            </Text>
+            <Pressable
+              accessibilityHint="Restores this queued message to the composer"
+              accessibilityLabel={`Edit queued message: ${queuedVisiblePrompt(message)}`}
+              accessibilityRole="button"
+              onPress={() => onEditMessage(message)}
+              style={({ pressed }) => [
+                styles.queuedEdit,
+                { opacity: pressed ? 0.55 : 1 },
+              ]}>
+              <PaduIcon
+                name="clock"
+                size={12}
+                tintColor={theme.textTertiary}
+              />
+              <Text numberOfLines={1} style={[styles.queuedText, { color: theme.textSecondary }]}>
+                {queuedVisiblePrompt(message)}
+              </Text>
+            </Pressable>
             <View style={styles.queueActions}>
               {canSteer && (
                 <Pressable
@@ -282,6 +325,89 @@ function ComposerStatusCard({
   );
 }
 
+export function ComposerSkillAutocomplete({
+  commands,
+  highlight,
+  loading,
+  onAccept,
+  onHighlight,
+}: {
+  commands: SkillCommand[];
+  highlight: number;
+  loading: boolean;
+  onAccept: (index: number) => void;
+  onHighlight: (index: number) => void;
+}) {
+  const theme = useTheme();
+  const listRef = useRef<ScrollViewInstance>(null);
+  useEffect(() => {
+    listRef.current?.scrollTo({ y: highlight * COMPOSER_HIT_TARGET, animated: false });
+  }, [highlight]);
+  return (
+    <View
+      accessibilityLabel="Skill suggestions"
+      accessibilityLiveRegion="polite"
+      style={[
+        styles.skillAutocomplete,
+        {
+          backgroundColor: theme.surface,
+          borderColor: theme.border,
+        },
+      ]}>
+      {loading && !commands.length ? (
+        <View style={styles.skillLoading}>
+          <PaduIcon name="clock" size={14} tintColor={theme.textTertiary} />
+          <Text style={[styles.skillLoadingText, { color: theme.textTertiary }]}>
+            Loading skills…
+          </Text>
+        </View>
+      ) : (
+        <ScrollView
+          keyboardShouldPersistTaps="always"
+          ref={listRef}
+          style={styles.skillList}>
+          {commands.map((command, index) => (
+            <Pressable
+              accessibilityHint={command.description || undefined}
+              accessibilityLabel={`Use skill ${command.name}`}
+              accessibilityRole="button"
+              accessibilityState={{ selected: highlight === index }}
+              key={command.name}
+              onPress={() => onAccept(index)}
+              onPressIn={() => onHighlight(index)}
+              style={({ pressed }) => [
+                styles.skillRow,
+                {
+                  backgroundColor: highlight === index
+                    ? theme.backgroundSelected
+                    : pressed
+                      ? theme.overlayStrong
+                      : 'transparent',
+                  borderColor: theme.separator,
+                },
+              ]}>
+              <PaduIcon name="sparkle" size={14} tintColor={theme.textTertiary} />
+              <View style={styles.skillRowCopy}>
+                <Text numberOfLines={1} style={[styles.skillRowName, { color: theme.text }]}>
+                  ${command.name}
+                </Text>
+                {command.description ? (
+                  <Text
+                    numberOfLines={2}
+                    style={[styles.skillRowDescription, { color: theme.textSecondary }]}>
+                    {command.description}
+                  </Text>
+                ) : null}
+              </View>
+              <Text style={[styles.skillRowScope, { color: theme.textTertiary }]}>Skill</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      )}
+    </View>
+  );
+}
+
 /**
  * Read-only context-window meter below the composer card, shrunk to its
  * content and hugging the right edge. Renders nothing until the daemon
@@ -327,16 +453,31 @@ function formatTokens(tokens: number) {
   return tokens >= 1_000 ? `${(tokens / 1_000).toFixed(1)}k` : `${tokens}`;
 }
 
-export function MobileComposer({ session }: { session: AgentSession }) {
+export function MobileComposer({
+  session,
+  initialSkillWarnings = EMPTY_SKILL_WARNINGS,
+}: {
+  session: AgentSession;
+  initialSkillWarnings?: readonly string[];
+}) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const daemon = useDaemon();
   const runtime = useRuntime();
   const [draft, setDraft] = useState('');
+  const [preservedAttachments, setPreservedAttachments] = useState<MessageAttachment[]>([]);
+  const [preservedEmbeddedNotes, setPreservedEmbeddedNotes] = useState<EmbeddedNote[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [skillWarnings, setSkillWarnings] = useState<readonly string[]>(
+    initialSkillWarnings,
+  );
   const [modelSheetOpen, setModelSheetOpen] = useState(false);
   const [accessSheetOpen, setAccessSheetOpen] = useState(false);
+  const [cursor, setCursor] = useState(0);
+  const [inputFocused, setInputFocused] = useState(false);
+  const [skillSelection, setSkillSelection] = useState({ key: '', index: 0 });
+  const [dismissedSkillAutocomplete, setDismissedSkillAutocomplete] = useState<string | null>(null);
   const busy = sessionBusy(session);
   const liveRuntime = runtime.runtimes[session.id];
   const canSteer = busy && Boolean(liveRuntime?.supportsSteer) && session.status !== 'connecting';
@@ -344,39 +485,152 @@ export function MobileComposer({ session }: { session: AgentSession }) {
   const userInput = runtime.userInputs[session.id];
   const runtimeError = runtime.errors[session.id];
   const queued = session.queued_messages ?? [];
+  const project = useTaskState().data?.projects.find(
+    (candidate) => candidate.id === session.project_id,
+  );
+  const composerCwd = project ? sessionCwd(session, project) : null;
+  const composerCommands = useComposerCommands(session.provider, composerCwd);
+  const skillCatalog = composerCommands.data;
+  const skillCommands = skillCatalog?.commands ?? [];
+  const promptResolutionContext = {
+    hostId: daemon.activeProfile?.id ?? null,
+    hostAddress: daemon.activeProfile?.address ?? null,
+    sessionId: session.id,
+    projectId: session.project_id,
+    projectRoot: composerCwd ?? '',
+    provider: session.provider,
+    binaryOverride: composerCommands.binaryOverride,
+    binaryVersion: composerCommands.binaryVersion,
+    binaryIdentity: composerCommands.binaryIdentity,
+    selection: mobilePromptSelectionContext(session.workspace, {
+      model: session.model ?? null,
+      reasoningEffort: session.reasoning_effort ?? null,
+      runtimeMode: session.runtime_mode,
+      interactionMode: session.interaction_mode,
+      agentPreset: session.agent_preset ?? null,
+      serviceTier: session.service_tier ?? null,
+      isolated: session.workspace?.kind === 'newWorktree',
+      baseBranch: session.workspace?.kind === 'newWorktree'
+        ? session.workspace.baseBranch ?? null
+        : null,
+    }),
+  };
+  const resolvePromptInStableContext = useMobilePromptResolutionGuard(
+    promptResolutionContext,
+  );
+  const skillTrigger = inputFocused
+    ? detectSkillTrigger(draft, cursor)
+    : null;
+  const skillAutocompleteKey = skillTrigger
+    ? `${skillTrigger.start}:${skillTrigger.end}:${skillTrigger.query}`
+    : null;
+  const skillRows = skillTrigger
+    ? filterSkillCommands(
+        skillCommands,
+        skillTrigger.query,
+        SKILL_AUTOCOMPLETE_CAP,
+      )
+    : [];
+  const skillAutocompleteLoading = Boolean(
+    skillTrigger && (composerCommands.isPending || composerCommands.isFetching),
+  );
+  const skillAutocompleteVisible = Boolean(
+    skillAutocompleteKey
+      && skillAutocompleteKey !== dismissedSkillAutocomplete
+      && (skillRows.length || skillAutocompleteLoading),
+  );
+  const skillAutocompleteOpen = skillAutocompleteVisible && skillRows.length > 0;
+  const skillHighlight = skillSelection.key === skillAutocompleteKey
+    ? Math.min(skillSelection.index, Math.max(0, skillRows.length - 1))
+    : 0;
 
-  useEffect(() => setLocalError(null), [session.id]);
+  const warningSession = useRef({
+    sessionId: session.id,
+    warnings: initialSkillWarnings,
+  });
+  useEffect(() => {
+    setLocalError(null);
+    const next = reconcileSkillWarningSession(
+      warningSession.current,
+      session.id,
+      initialSkillWarnings,
+    );
+    if (next !== warningSession.current) {
+      warningSession.current = next;
+      setSkillWarnings(next.warnings);
+    }
+    setDismissedSkillAutocomplete(null);
+  }, [initialSkillWarnings, session.id]);
+  useEffect(() => {
+    setDismissedSkillAutocomplete(null);
+    setSkillSelection({ key: '', index: 0 });
+  }, [composerCwd, session.provider]);
+  useEffect(() => {
+    setPreservedAttachments([]);
+    setPreservedEmbeddedNotes([]);
+  }, [session.id]);
 
   // Cross-device draft, persisted on the daemon like the desktop composer:
   // prefill once per session, save edits debounced, clear on send.
-  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autocompleteBlurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftLoadedFor = useRef<string | null>(null);
+  const draftLoadingFor = useRef<string | null>(null);
+  const [draftHydrationRevision, setDraftHydrationRevision] = useState(0);
+  const draftFlush = useRef(createDraftFlushScheduler()).current;
   const draftRef = useRef(draft);
+  const attachmentsRef = useRef(preservedAttachments);
+  const embeddedNotesRef = useRef(preservedEmbeddedNotes);
   draftRef.current = draft;
+  attachmentsRef.current = preservedAttachments;
+  embeddedNotesRef.current = preservedEmbeddedNotes;
+  useEffect(() => () => {
+    if (autocompleteBlurTimer.current) clearTimeout(autocompleteBlurTimer.current);
+  }, []);
   useEffect(() => {
     const client = daemon.client;
     if (!client || daemon.phase !== 'connected' || draftLoadedFor.current === session.id) return;
-    draftLoadedFor.current = session.id;
+    if (draftLoadingFor.current === session.id) return;
+    draftLoadingFor.current = session.id;
     void loadComposerDrafts(client).then((drafts) => {
-      const text = drafts.sessions?.[session.id]?.text;
-      if (text && !draftRef.current.trim()) setDraft(text);
-    }).catch(() => {});
+      const saved = drafts.sessions?.[session.id];
+      const text = saved?.text;
+      if (text && !draftRef.current.trim()) {
+        setDraft(text);
+        setCursor(text.length);
+      }
+      if (saved?.attachments?.length && !attachmentsRef.current.length) {
+        setPreservedAttachments(saved.attachments);
+      }
+      if (saved?.embedded_notes?.length && !embeddedNotesRef.current.length) {
+        setPreservedEmbeddedNotes(saved.embedded_notes);
+      }
+    }).catch(() => {}).finally(() => {
+      if (draftLoadingFor.current !== session.id) return;
+      draftLoadingFor.current = null;
+      draftLoadedFor.current = session.id;
+      setDraftHydrationRevision((value) => value + 1);
+    });
   }, [daemon.client, daemon.phase, session.id]);
   useEffect(() => {
     const client = daemon.client;
     if (!client || draftLoadedFor.current !== session.id) return;
-    if (draftTimer.current) clearTimeout(draftTimer.current);
-    draftTimer.current = setTimeout(() => {
-      void applyComposerDraftChanges(client, [{
+    draftFlush.schedule(`session:${session.id}`, () => applyComposerDraftChanges(client, [{
         target: { type: 'session', sessionId: session.id },
-        draft: draft.trim() ? { text: draft } : null,
-      }]).catch(() => {});
-    }, 800);
-    return () => {
-      if (draftTimer.current) clearTimeout(draftTimer.current);
-    };
-  }, [daemon.client, draft, session.id]);
-
+        draft: composerDraftSnapshot(
+          draft,
+          preservedAttachments,
+          preservedEmbeddedNotes,
+        ),
+      }]));
+  }, [
+    daemon.client,
+    draft,
+    draftFlush,
+    preservedAttachments,
+    preservedEmbeddedNotes,
+    draftHydrationRevision,
+    session.id,
+  ]);
   const requestSignature = permission?.requestId ?? userInput?.requestId;
   const lastRequest = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -386,21 +640,125 @@ export function MobileComposer({ session }: { session: AgentSession }) {
     lastRequest.current = requestSignature;
   }, [requestSignature]);
 
+  function acceptSkill(index = skillHighlight) {
+    if (!skillTrigger) return;
+    const command = skillRows[index];
+    if (!command) return;
+    const replacement = replaceSkillTrigger(
+      draft,
+      skillTrigger,
+      command,
+    );
+    setDraft(replacement.text);
+    setCursor(replacement.cursor);
+    setDismissedSkillAutocomplete(null);
+    setSkillSelection({ key: '', index: 0 });
+  }
+
+  function moveSkill(direction: -1 | 1) {
+    if (!skillAutocompleteKey || !skillRows.length) return;
+    const next = (
+      skillHighlight + direction + skillRows.length
+    ) % skillRows.length;
+    setSkillSelection({ key: skillAutocompleteKey, index: next });
+  }
+
+  function handleComposerKeyPress(
+    event: TextInputKeyPressEvent,
+  ) {
+    if (!skillAutocompleteVisible) return;
+    if (event.nativeEvent.key === 'Escape') {
+      event.preventDefault();
+      setDismissedSkillAutocomplete(skillAutocompleteKey);
+      return;
+    }
+    if (!skillAutocompleteOpen) return;
+    if (
+      event.nativeEvent.key === 'ArrowDown'
+      || event.nativeEvent.key === 'ArrowUp'
+    ) {
+      event.preventDefault();
+      moveSkill(event.nativeEvent.key === 'ArrowDown' ? 1 : -1);
+      return;
+    }
+    if (event.nativeEvent.key === 'Enter' || event.nativeEvent.key === 'Tab') {
+      event.preventDefault();
+      acceptSkill();
+    }
+  }
+
+  async function renderProviderPrompt(
+    visiblePrompt: string,
+    attachments: readonly MessageAttachment[] = [],
+    embeddedNotes: readonly EmbeddedNote[] = [],
+  ) {
+    return resolvePromptInStableContext(async (context) => {
+      const rendered = await renderSkillSubmissionPrompt({
+        visiblePrompt,
+        provider: context.provider,
+        catalog: skillCatalog,
+        binaryVersion: composerCommands.binaryVersion,
+        binaryIdentity: composerCommands.binaryIdentity,
+        refetchBinary: () => composerCommands.refetchBinary(),
+        refetchCatalog: () => composerCommands.refetch(),
+      });
+      return {
+        providerText: composeMobileProviderPrompt(
+          rendered.providerText,
+          attachments,
+          embeddedNotes,
+        ),
+        warnings: rendered.warnings,
+      };
+    });
+  }
+
   async function submit() {
     const prompt = draft.trim();
     if (!prompt || submitting) return;
+    const submittedSession = session;
     setSubmitting(true);
     setLocalError(null);
+    setSkillWarnings([]);
     try {
+      if (daemon.client) {
+        await applyComposerDraftChanges(daemon.client, [{
+          target: { type: 'session', sessionId: submittedSession.id },
+          draft: composerDraftSnapshot(
+            draft,
+            preservedAttachments,
+            preservedEmbeddedNotes,
+          ),
+        }]).catch(() => {});
+      }
       // While the agent is busy, always queue — never steer directly from
       // the composer. Steering is reserved for the steer action on existing
       // queued messages. sendPrompt detects sessionBusy internally and calls
       // queueSubmission, so the message lands at the bottom of the queue list.
-      await runtime.sendPrompt(session, prompt);
+      const resolution = await renderProviderPrompt(
+        prompt,
+        preservedAttachments,
+        preservedEmbeddedNotes,
+      );
+      resolution.assertCurrent();
+      setSkillWarnings(resolution.result.warnings);
+      resolution.assertCurrent();
+      await runtime.sendPrompt(
+        submittedSession,
+        prompt,
+        resolution.result.providerText,
+        preservedAttachments,
+        preservedEmbeddedNotes,
+      );
       setDraft('');
-      if (draftTimer.current) clearTimeout(draftTimer.current);
+      setPreservedAttachments([]);
+      setPreservedEmbeddedNotes([]);
+      setCursor(0);
+      setDismissedSkillAutocomplete(null);
+      setSkillSelection({ key: '', index: 0 });
+      await draftFlush.flush();
       if (daemon.client) {
-        void applyComposerDraftChanges(daemon.client, [{
+        await applyComposerDraftChanges(daemon.client, [{
           target: { type: 'session', sessionId: session.id },
           draft: null,
         }]).catch(() => {});
@@ -427,7 +785,14 @@ export function MobileComposer({ session }: { session: AgentSession }) {
   async function steerQueued(message: QueuedMessage) {
     setLocalError(null);
     try {
-      await runtime.steerPrompt(session, message.display_content ?? message.content);
+      const metadata = queuedMessageMetadata(message);
+      await runtime.steerPrompt(
+        session,
+        metadata.visiblePrompt,
+        metadata.providerPrompt,
+        metadata.attachments,
+        metadata.embeddedNotes,
+      );
       await runtime.removeQueuedMessage(session.id, message.id);
       await Haptics.selectionAsync();
     } catch (cause) {
@@ -441,6 +806,18 @@ export function MobileComposer({ session }: { session: AgentSession }) {
     void runtime.removeQueuedMessage(session.id, messageId).catch((cause) => {
       setLocalError(cause instanceof Error ? cause.message : String(cause));
     });
+  }
+
+  function editQueued(message: QueuedMessage) {
+    const metadata = queuedMessageMetadata(message);
+    void Haptics.selectionAsync();
+    setDraft(metadata.visiblePrompt);
+    setCursor(metadata.visiblePrompt.length);
+    setPreservedAttachments(metadata.attachments);
+    setPreservedEmbeddedNotes(metadata.embeddedNotes);
+    setSkillWarnings([]);
+    setLocalError(null);
+    removeQueued(message.id);
   }
 
   function applyOptions(changes: Parameters<typeof runtime.updateSessionOptions>[1]) {
@@ -494,13 +871,65 @@ export function MobileComposer({ session }: { session: AgentSession }) {
           </Pressable>
         </View>
       )}
+      {skillWarnings.length > 0 && (
+        <View
+          accessibilityLiveRegion="polite"
+          style={[styles.warningBanner, { backgroundColor: theme.warningSoft }]}>
+          <PaduIcon name="bell" size={13} tintColor={theme.warning} />
+          <Text style={[styles.errorText, { color: theme.warning }]}>
+            {skillWarnings.join(' ')}
+          </Text>
+          <Pressable
+            accessibilityLabel="Dismiss skill warning"
+            accessibilityRole="button"
+            onPress={() => setSkillWarnings([])}
+            style={({ pressed }) => [
+              styles.warningDismiss,
+              { opacity: pressed ? 0.5 : 1 },
+            ]}>
+            <PaduIcon name="x" size={12} tintColor={theme.warning} />
+          </Pressable>
+        </View>
+      )}
       <ComposerStatusCard
         canSteer={canSteer}
+        onEditMessage={editQueued}
         onRemoveMessage={removeQueued}
         onSteerMessage={(message) => void steerQueued(message)}
         queued={queued}
         session={session}
       />
+      {skillAutocompleteVisible && (
+        <ComposerSkillAutocomplete
+          commands={skillRows}
+          highlight={skillHighlight}
+          loading={skillAutocompleteLoading}
+          onAccept={acceptSkill}
+          onHighlight={(index) => {
+            if (skillAutocompleteKey) {
+              setSkillSelection({ key: skillAutocompleteKey, index });
+            }
+          }}
+        />
+      )}
+      {(preservedAttachments.length > 0 || preservedEmbeddedNotes.length > 0) && (
+        <View
+          accessibilityLiveRegion="polite"
+          style={[styles.preservedMetadata, {
+            backgroundColor: theme.surfaceMuted,
+            borderColor: theme.border,
+          }]}>
+          <PaduIcon name="paperclip" size={13} tintColor={theme.textTertiary} />
+          <Text style={[styles.preservedMetadataText, { color: theme.textSecondary }]}>
+            {preservedAttachments.length + preservedEmbeddedNotes.length}
+            {' '}
+            queued item
+            {preservedAttachments.length + preservedEmbeddedNotes.length === 1 ? '' : 's'}
+            {' '}
+            will be kept with this message.
+          </Text>
+        </View>
+      )}
       <ComposerCard
         accessibilityLabel="Message agent"
         editable={!disconnected && !submitting}
@@ -557,7 +986,25 @@ export function MobileComposer({ session }: { session: AgentSession }) {
           </>
         )}
         value={draft}
-        onChangeText={setDraft}
+        onBlur={() => {
+          if (autocompleteBlurTimer.current) clearTimeout(autocompleteBlurTimer.current);
+          autocompleteBlurTimer.current = setTimeout(() => {
+            setInputFocused(false);
+          }, AUTOCOMPLETE_BLUR_DELAY_MS);
+        }}
+        onChangeText={(value) => {
+          setDraft(value);
+          if (cursor > value.length) setCursor(value.length);
+        }}
+        onFocus={() => {
+          if (autocompleteBlurTimer.current) clearTimeout(autocompleteBlurTimer.current);
+          setInputFocused(true);
+          if (cursor === 0 && draft.length > 0) setCursor(draft.length);
+        }}
+        onKeyPress={handleComposerKeyPress}
+        onSelectionChange={(event) => {
+          setCursor(event.nativeEvent.selection.end);
+        }}
       />
       <ComposerContextRow session={session} />
 
@@ -887,18 +1334,86 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderRadius: Radius.small,
     flexDirection: 'row',
-    gap: 9,
-    marginBottom: 7,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
+    gap: Spacing.two,
+    marginBottom: Spacing.two,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.two,
   },
   errorText: { flex: 1, fontSize: 12, fontWeight: '600', lineHeight: 17 },
+  warningBanner: {
+    alignItems: 'center',
+    borderRadius: Radius.small,
+    flexDirection: 'row',
+    gap: Spacing.two,
+    marginBottom: Spacing.two,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.two,
+  },
+  warningDismiss: {
+    alignItems: 'center',
+    height: COMPOSER_HIT_TARGET,
+    justifyContent: 'center',
+    width: COMPOSER_HIT_TARGET,
+  },
+  preservedMetadata: {
+    alignItems: 'center',
+    borderRadius: Radius.small,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: Spacing.two,
+    marginBottom: Spacing.two,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.two,
+  },
+  preservedMetadataText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 17,
+  },
+  skillAutocomplete: {
+    borderRadius: Radius.medium,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginBottom: Spacing.two,
+    marginHorizontal: Spacing.three,
+    overflow: 'hidden',
+  },
+  skillLoading: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: Spacing.two,
+    minHeight: COMPOSER_HIT_TARGET,
+    paddingHorizontal: Spacing.three,
+  },
+  skillLoadingText: { fontSize: 12.5, fontWeight: '500' },
+  skillList: { maxHeight: Spacing.six * 4 },
+  skillRow: {
+    alignItems: 'center',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: Spacing.two,
+    minHeight: COMPOSER_HIT_TARGET,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
+  skillRowCopy: { flex: 1, minWidth: 0 },
+  skillRowName: { fontSize: 14, fontWeight: '600', lineHeight: 18 },
+  skillRowDescription: { fontSize: 11.5, lineHeight: 16 },
+  skillRowScope: { fontSize: 10.5, fontWeight: '600' },
   queuedItem: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 8,
-    minHeight: 20,
+    gap: Spacing.two,
+    minHeight: COMPOSER_HIT_TARGET,
     paddingVertical: 2,
+  },
+  queuedEdit: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    gap: Spacing.two,
+    minHeight: COMPOSER_HIT_TARGET,
+    minWidth: 0,
   },
   queuedText: { flex: 1, fontSize: 12.5 },
   queueSeparator: {
@@ -915,7 +1430,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 3,
     justifyContent: 'center',
-    minHeight: 28,
+    minHeight: COMPOSER_HIT_TARGET,
     paddingHorizontal: 4,
   },
   requestPanel: {

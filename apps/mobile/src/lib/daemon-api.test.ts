@@ -1,7 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import type { PaduClient } from '@padu/client';
+import type { DaemonSettings, PaduClient } from '@padu/client';
 
-import { browseDaemonDirectory, createProject, persistProject } from './daemon-api';
+import {
+  browseDaemonDirectory,
+  createProject,
+  discoverComposerCommands,
+  persistProject,
+  probeProvider,
+} from './daemon-api';
 
 describe('mobile daemon API', () => {
   test('browses a directory on the remote host', async () => {
@@ -37,6 +43,71 @@ describe('mobile daemon API', () => {
     });
     expect(createProject('C:\\dev\\padu\\', 'two', 10).name).toBe('padu');
     expect(() => createProject('dev/padu', 'three')).toThrow('absolute path');
+  });
+
+  test('discovers slash commands through the daemon workspace query', async () => {
+    let command: unknown;
+    const commands = [{
+      name: 'brainstroming',
+      description: 'Brainstorm',
+      scope: 'Skill' as const,
+      argument_hint: null,
+      template: null,
+      skill_file: '/skills/brainstroming/SKILL.md',
+    }];
+    const client = {
+      request: async (next: unknown) => {
+        command = next;
+        return { type: 'workspace', result: { type: 'slashCommands', commands } };
+      },
+    } as unknown as PaduClient;
+
+    const catalog = { type: 'slashCommands' as const, commands };
+    await expect(discoverComposerCommands(
+      client,
+      'codex',
+      '/srv/padu',
+      '/opt/codex',
+    )).resolves.toEqual(catalog);
+    expect(command).toEqual({
+      type: 'workspace',
+      operation: {
+        type: 'discoverSlashCommands',
+        provider: 'codex',
+        project_root: '/srv/padu',
+        binary_override: '/opt/codex',
+      },
+    });
+  });
+
+  test('keeps the exact binary identity alongside the probed version', async () => {
+    const identity = {
+      canonicalPath: '/opt/padu/codex',
+      contentSha256: 'a'.repeat(64),
+    };
+    const client = {
+      request: async () => ({
+        type: 'providerProbe',
+        probe: {
+          provider: 'codex',
+          installed: true,
+          path: '/opt/padu/codex',
+          models: [],
+          agent_presets: [],
+        },
+        version: '1.2.3',
+        binaryIdentity: identity,
+      }),
+    } as unknown as PaduClient;
+
+    await expect(probeProvider(
+      client,
+      'codex',
+      { provider_binary_overrides: {} } as DaemonSettings,
+    )).resolves.toMatchObject({
+      version: '1.2.3',
+      binaryIdentity: identity,
+    });
   });
 
   test('persists a project without replacing sessions', async () => {

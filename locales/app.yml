@@ -189,6 +189,9 @@ command_palette.loading_selected_session:
 command_palette.resume_failed:
   en: "Couldn’t resume session: %{error}"
 
+composer.skill_catalog_loading:
+  en: Loading skills… Try sending again when discovery finishes.
+
 language.title:
   en: Language
 language.system:

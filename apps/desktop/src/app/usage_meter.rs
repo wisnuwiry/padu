@@ -69,8 +69,7 @@ impl Padu {
             let claude_version = self
                 .provider_versions
                 .get(&ProviderKind::Claude)
-                .cloned()
-                .flatten();
+                .and_then(|observation| observation.version.clone());
             let binary_override = self.state.provider_binary_overrides.get(&provider).cloned();
             let daemon = self.daemon.client();
             cx.background_executor()

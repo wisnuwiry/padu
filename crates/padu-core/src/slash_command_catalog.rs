@@ -236,6 +236,7 @@ fn parse_codex_command_features(value: &Value) -> Vec<SlashCommand> {
                     scope: CommandScope::Builtin,
                     argument_hint: None,
                     template: None,
+                    skill_file: None,
                 }),
                 "goals" => Some(SlashCommand {
                     name: "goal".to_owned(),
@@ -243,6 +244,7 @@ fn parse_codex_command_features(value: &Value) -> Vec<SlashCommand> {
                     scope: CommandScope::Builtin,
                     argument_hint: Some("[<objective>|clear|edit|pause|resume]".to_owned()),
                     template: None,
+                    skill_file: None,
                 }),
                 _ => None,
             },
@@ -402,6 +404,7 @@ fn command(
             .map(str::trim)
             .filter(|template| !template.is_empty())
             .map(str::to_owned),
+        skill_file: None,
     })
 }
 

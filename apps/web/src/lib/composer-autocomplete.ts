@@ -3,24 +3,32 @@ import type {
   ProviderKind,
   ProviderModelOption,
   ReportedCommand,
+  SkillProviderCapability,
   SlashCommand,
 } from '@padu/client'
+import {
+  detectSkillTrigger,
+  filterSkillCommands,
+  renderSkillMentions,
+  replaceSkillTrigger,
+  SKILL_AUTOCOMPLETE_CAP,
+  type SkillCommand,
+  type SkillTrigger,
+} from '@padu/client/composer-skills'
 import { markdownFileReference } from './inline-file-references'
 import { fuzzyScore } from './palette-search'
 
 export const COMPOSER_AUTOCOMPLETE_CAP = 64
 
-export type ComposerTriggerKind = 'command' | 'file'
+export type ComposerTriggerKind = 'command' | 'skill' | 'file'
 
-export interface ComposerTrigger {
-  kind: ComposerTriggerKind
-  query: string
-  start: number
-  end: number
-}
+export type ComposerTrigger =
+  | { kind: Exclude<ComposerTriggerKind, 'skill'>; query: string; start: number; end: number }
+  | SkillTrigger
 
 export type ComposerAutocompleteRow =
   | { kind: 'command'; command: SlashCommand }
+  | { kind: 'skill'; command: SkillCommand }
   | { kind: 'file'; file: FileEntry }
 
 export function detectComposerTrigger(text: string, cursor: number): ComposerTrigger | null {
@@ -29,9 +37,13 @@ export function detectComposerTrigger(text: string, cursor: number): ComposerTri
   const linePrefix = text.slice(lineStart, end)
   if (linePrefix.startsWith('/')) {
     const query = linePrefix.slice(1)
-    if (/\s/u.test(query)) return null
-    return { kind: 'command', query, start: lineStart, end }
+    if (!/\s/u.test(query)) {
+      return { kind: 'command', query, start: lineStart, end }
+    }
   }
+
+  const skillTrigger = detectSkillTrigger(text, end)
+  if (skillTrigger) return skillTrigger
 
   let tokenStart = end
   while (tokenStart > 0 && !/\s/u.test(text[tokenStart - 1]!)) tokenStart -= 1
@@ -147,6 +159,14 @@ export function composerAutocompleteRows(
   files: FileEntry[],
   cap = COMPOSER_AUTOCOMPLETE_CAP,
 ): ComposerAutocompleteRow[] {
+  if (trigger.kind === 'skill') {
+    return filterSkillCommands(
+      commands,
+      trigger.query,
+      Math.min(cap, SKILL_AUTOCOMPLETE_CAP),
+    ).map((command) => ({ kind: 'skill' as const, command }))
+  }
+
   const source = trigger.kind === 'command'
     ? commands.map((command) => ({
         row: { kind: 'command' as const, command },
@@ -178,9 +198,17 @@ export function replaceComposerTrigger(
 ): { text: string; cursor: number } {
   const before = text.slice(0, trigger.start)
   const after = text.slice(trigger.end)
+  if (trigger.kind === 'skill') {
+    if (row.kind !== 'skill') {
+      throw new Error('Skill autocomplete requires a skill row')
+    }
+    return replaceSkillTrigger(text, trigger, row.command)
+  }
   const value = row.kind === 'command'
     ? `/${row.command.name}`
-    : markdownFileReference(row.file.path)
+    : row.kind === 'file'
+      ? markdownFileReference(row.file.path)
+      : `$${row.command.name}`
   const prefix = before.length && !/\s$/u.test(before) ? ' ' : ''
   const suffix = after.length && !/^\s/u.test(after) ? ' ' : ''
   const insert = `${prefix}${value}${suffix}`
@@ -240,6 +268,34 @@ export function expandedComposerSubmission(
   return command?.template === null || command?.template === undefined
     ? null
     : expandCommandTemplate(command.template, args)
+}
+
+export interface RenderedComposerSubmission {
+  text: string
+  warnings: string[]
+}
+
+/**
+ * Render `$skill` mentions before slash-template expansion. This keeps the
+ * existing leading `/skill` behavior intact while still translating `$`
+ * mentions supplied as command arguments.
+ */
+export function renderedComposerSubmission(
+  provider: ProviderKind,
+  prompt: string,
+  commands: SlashCommand[],
+  capability?: SkillProviderCapability,
+): RenderedComposerSubmission {
+  const rendered = renderSkillMentions(prompt, provider, commands, { capability })
+  const expanded = expandedComposerSubmission(
+    provider,
+    rendered.providerText,
+    commands,
+  )
+  return {
+    text: expanded ?? rendered.providerText,
+    warnings: rendered.warnings,
+  }
 }
 
 function commandScopeRank(scope: SlashCommand['scope']): number {

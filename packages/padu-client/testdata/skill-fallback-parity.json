@@ -1,0 +1,94 @@
+[
+  {
+    "provider": "codex",
+    "text": "$deploy please",
+    "command": "deploy",
+    "path": "/home/remote/.agents/skills/deploy/SKILL.md",
+    "expected": "[mandatory! open skill: /home/remote/.agents/skills/deploy/SKILL.md] please"
+  },
+  {
+    "provider": "pi",
+    "text": "$deploy and $deploy",
+    "command": "deploy",
+    "path": "/home/remote/.agents/skills/deploy/SKILL.md",
+    "expected": "[mandatory! open skill: /home/remote/.agents/skills/deploy/SKILL.md] and [mandatory! open skill: /home/remote/.agents/skills/deploy/SKILL.md]"
+  },
+  {
+    "provider": "claude",
+    "text": "`$deploy` then $deploy",
+    "command": "deploy",
+    "path": "/home/remote/.agents/skills/deploy/SKILL.md",
+    "expected": "`$deploy` then [mandatory! open skill: /home/remote/.agents/skills/deploy/SKILL.md]"
+  },
+  {
+    "provider": "codex",
+    "text": "$deploy then please $deploy",
+    "command": "deploy",
+    "path": "/home/remote/.agents/skills/deploy/SKILL.md",
+    "capability": {
+      "nativeSyntax": "dollar",
+      "leadingInvocation": true,
+      "inlineMentions": false,
+      "repeatedMentions": true
+    },
+    "expected": "[mandatory! open skill: /home/remote/.agents/skills/deploy/SKILL.md] then please [mandatory! open skill: /home/remote/.agents/skills/deploy/SKILL.md]"
+  },
+  {
+    "provider": "codex",
+    "text": "please $deploy and $deploy",
+    "command": "deploy",
+    "path": "/home/remote/.agents/skills/deploy/SKILL.md",
+    "capability": {
+      "nativeSyntax": "dollar",
+      "leadingInvocation": true,
+      "inlineMentions": true,
+      "repeatedMentions": false
+    },
+    "expected": "please [mandatory! open skill: /home/remote/.agents/skills/deploy/SKILL.md] and [mandatory! open skill: /home/remote/.agents/skills/deploy/SKILL.md]"
+  },
+  {
+    "provider": "codex",
+    "text": "please $deploy and $deploy",
+    "command": "deploy",
+    "path": "/home/remote/.agents/skills/deploy/SKILL.md",
+    "capability": {
+      "nativeSyntax": "dollar",
+      "leadingInvocation": true,
+      "inlineMentions": true,
+      "repeatedMentions": true
+    },
+    "expected": "please $deploy and $deploy"
+  },
+  {
+    "provider": "pi",
+    "text": "please $deploy and $deploy",
+    "command": "deploy",
+    "path": "/home/remote/.agents/skills/deploy/SKILL.md",
+    "capability": {
+      "nativeSyntax": "skillSlash",
+      "leadingInvocation": true,
+      "inlineMentions": true,
+      "repeatedMentions": true
+    },
+    "expected": "please /skill:deploy and /skill:deploy"
+  },
+  {
+    "provider": "claude",
+    "text": "$deploy and $deploy",
+    "command": "deploy",
+    "path": "/home/remote/skills/bad]/SKILL.md",
+    "expected": "$deploy and $deploy",
+    "warnings": [
+      "Skill \"deploy\" was left unchanged because its SKILL.md path cannot be represented safely."
+    ]
+  },
+  {
+    "provider": "claude",
+    "text": "$deploy then $deploy",
+    "command": "deploy",
+    "expected": "$deploy then $deploy",
+    "warnings": [
+      "Skill \"deploy\" was left unchanged because it has no SKILL.md path."
+    ]
+  }
+]
