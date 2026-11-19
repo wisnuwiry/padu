@@ -36,6 +36,7 @@ import { MonoFont, Radius, Spacing } from '@/constants/theme';
 import { useSession, useTaskState } from '@/hooks/use-daemon-data';
 import { useTheme } from '@/hooks/use-theme';
 import { useDaemon } from '@/lib/daemon-context';
+import { messageCopyText } from '@/lib/message-presentation';
 import { sessionBusy } from '@/lib/mobile-runtime';
 import { useRuntime } from '@/lib/runtime-context';
 import {
@@ -49,14 +50,18 @@ import {
  * Kept in a constant because the transcript clearance math depends on it.
  */
 const COMPOSER_FADE_LEAD = 44;
+const EMPTY_SKILL_WARNINGS: readonly string[] = [];
 
 export function SessionView({
   sessionId,
   showBack = true,
+  initialSkillWarnings = EMPTY_SKILL_WARNINGS,
 }: {
   sessionId: string | undefined;
   /** False when embedded in the wide two-pane, which has no back stack. */
   showBack?: boolean;
+  /** Transport warnings produced before the first session render. */
+  initialSkillWarnings?: readonly string[];
 }) {
   const theme = useTheme();
   const daemon = useDaemon();
@@ -269,7 +274,10 @@ export function SessionView({
             </Svg>
           </View>
           <View style={styles.composerFadeSpacer} />
-          <MobileComposer session={session} />
+          <MobileComposer
+            initialSkillWarnings={initialSkillWarnings}
+            session={session}
+          />
         </View>
       )}
 
@@ -397,7 +405,7 @@ function MessageRow({
   const content = message.display_content ?? message.content;
 
   async function copy() {
-    await Clipboard.setStringAsync(message.content);
+    await Clipboard.setStringAsync(messageCopyText(message));
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   }
 

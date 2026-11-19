@@ -1,5 +1,20 @@
 use super::*;
 
+/// Consume only the pending steer whose provider prompt exactly matches the
+/// acknowledgement. A mismatched or duplicate echo becomes a plain message;
+/// it must never steal attachment metadata from an older steer.
+fn take_matching_pending_steer(
+    pending_steers: &mut VecDeque<PendingSteer>,
+    message: &str,
+) -> ComposerSubmission {
+    pending_steers
+        .iter()
+        .position(|pending| pending.wire_prompt == message)
+        .and_then(|index| pending_steers.remove(index))
+        .map(|pending| pending.submission)
+        .unwrap_or_else(|| ComposerSubmission::plain(message.to_owned()))
+}
+
 impl Padu {
     pub(super) fn finish_streaming_assistant(&mut self, session_id: Uuid) {
         if let Some(session) = self.state.session_mut(session_id) {
@@ -376,16 +391,7 @@ impl Padu {
                 }
             }
             DriverEvent::SteerAccepted { message } => {
-                let submission = runtime
-                    .pending_steers
-                    .iter()
-                    .position(|submission| submission.prompt == message)
-                    .and_then(|index| runtime.pending_steers.remove(index))
-                    // Providers normally echo the exact transport text, but a
-                    // normalized echo still acknowledges the oldest pending
-                    // steer. Preserve its attachment presentation metadata.
-                    .or_else(|| runtime.pending_steers.pop_front())
-                    .unwrap_or_else(|| ComposerSubmission::plain(message.clone()));
+                let submission = take_matching_pending_steer(&mut runtime.pending_steers, &message);
                 // The provider folded the message into the live turn. Append
                 // it to the same turn so the transcript mirrors the provider
                 // conversation (no new turn boundary).
@@ -400,13 +406,7 @@ impl Padu {
                 }
             }
             DriverEvent::SteerRejected { message, reason } => {
-                let submission = runtime
-                    .pending_steers
-                    .iter()
-                    .position(|submission| submission.prompt == message)
-                    .and_then(|index| runtime.pending_steers.remove(index))
-                    .or_else(|| runtime.pending_steers.pop_front())
-                    .unwrap_or_else(|| ComposerSubmission::plain(message));
+                let submission = take_matching_pending_steer(&mut runtime.pending_steers, &message);
                 let (busy, settled_cleanly) = self
                     .state
                     .sessions
@@ -904,4 +904,91 @@ pub(super) fn append_text_delta_to_session(
         session.messages.push(message);
     }
     session.updated_at = unix_time();
+}
+
+#[cfg(test)]
+mod pending_steer_cleanup_tests {
+    use super::*;
+
+    fn pending(prompt: &str) -> ComposerSubmission {
+        let mut submission = ComposerSubmission::plain(prompt.into());
+        submission.display_content = Some(format!("visible {prompt}"));
+        submission
+    }
+
+    fn pending_wire(wire_prompt: &str, submission: ComposerSubmission) -> PendingSteer {
+        PendingSteer {
+            wire_prompt: wire_prompt.into(),
+            submission,
+        }
+    }
+
+    #[test]
+    fn mismatched_echo_leaves_every_pending_steer_untouched() {
+        let mut pending_steers = VecDeque::from([
+            pending_wire("first", pending("first")),
+            pending_wire("second", pending("second")),
+        ]);
+
+        let unexpected = take_matching_pending_steer(&mut pending_steers, "unexpected");
+
+        assert_eq!(unexpected.prompt, "unexpected");
+        assert!(unexpected.display_content.is_none());
+        assert_eq!(pending_steers.len(), 2);
+        assert_eq!(pending_steers[0].wire_prompt, "first");
+        assert_eq!(pending_steers[1].wire_prompt, "second");
+    }
+
+    #[test]
+    fn duplicate_echoes_consume_only_their_exact_pending_metadata() {
+        let mut pending_steers = VecDeque::from([
+            pending_wire("duplicate", pending("duplicate")),
+            pending_wire("duplicate", pending("duplicate")),
+            pending_wire("later", pending("later")),
+        ]);
+
+        let first = take_matching_pending_steer(&mut pending_steers, "duplicate");
+        let second = take_matching_pending_steer(&mut pending_steers, "duplicate");
+        let third = take_matching_pending_steer(&mut pending_steers, "duplicate");
+
+        assert_eq!(first.display_content.as_deref(), Some("visible duplicate"));
+        assert_eq!(second.display_content.as_deref(), Some("visible duplicate"));
+        assert!(third.display_content.is_none());
+        assert_eq!(pending_steers.len(), 1);
+        assert_eq!(
+            pending_steers[0].wire_prompt, "later",
+            "a duplicate echo must not consume unrelated metadata"
+        );
+    }
+
+    #[test]
+    fn transformed_slash_steer_matches_the_exact_wire_prompt() {
+        let commands = [crate::composer_complete::SlashCommand {
+            name: "deploy".into(),
+            description: String::new(),
+            scope: crate::composer_complete::CommandScope::Skill,
+            argument_hint: None,
+            template: None,
+            skill_file: Some("/remote/skills/deploy/SKILL.md".into()),
+        }];
+        for (provider, expected_wire_prompt) in [
+            (ProviderKind::Codex, "$deploy now"),
+            (ProviderKind::Pi, "/skill:deploy now"),
+        ] {
+            let (wire_prompt, submission) =
+                crate::app::runtime::prepare_steering_submission_for_transport(
+                    provider,
+                    ComposerSubmission::plain("/deploy now".into()),
+                    &commands,
+                );
+            let mut pending_steers = VecDeque::from([pending_wire(&wire_prompt, submission)]);
+
+            let accepted = take_matching_pending_steer(&mut pending_steers, &wire_prompt);
+
+            assert_eq!(wire_prompt, expected_wire_prompt);
+            assert_eq!(accepted.prompt, "/deploy now");
+            assert_eq!(accepted.display_content.as_deref(), Some("/deploy now"));
+            assert!(pending_steers.is_empty());
+        }
+    }
 }

@@ -99,6 +99,32 @@ Install and authenticate at least one supported agent CLI before starting Padu.
 Padu detects available CLIs automatically and uses each provider's native
 structured protocol and session continuity.
 
+## Composer commands and skills
+
+The composer has separate shortcuts for commands, skills, and files:
+
+| Trigger | Picker | Result |
+| :--- | :--- | :--- |
+| `/` at the start of a line | Slash commands, including existing skill entries | Inserts `/name` |
+| `$` at any token boundary | Skills only | Inserts `$name` |
+| `@` at any token boundary | Project files | Inserts a file reference |
+
+`$skill` mentions stay visible in your draft and transcript. Padu translates
+them to the active agent's provider syntax, or to the skill's `SKILL.md` path
+when the provider has no verified inline skill syntax. Mentions inside
+Markdown code spans and fenced code blocks are left as written.
+
+Native inline and repeated skill syntax remains disabled until an operator
+records evidence with a disposable provider session:
+
+```sh
+bun run provider:test skill-capability codex --json
+```
+
+The opt-in probe spends provider turns, writes version-scoped capability
+evidence, and never runs during normal composer startup. Missing, failed, or
+incomplete evidence keeps the safe `SKILL.md` fallback.
+
 ## Highlights
 
 - **Unified workspace** — Keep projects and independent agent sessions in one

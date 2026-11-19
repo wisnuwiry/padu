@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import type { FileEntry, ReportedCommand, SlashCommand } from '@padu/client'
 import {
+  SKILL_CATALOG_UNAVAILABLE_WARNING,
+  skillSubmissionWarnings,
+  type SkillCommand,
+} from '@padu/client/composer-skills'
+import {
   composerAutocompleteRows,
   detectComposerTrigger,
   expandCommandTemplate,
@@ -9,6 +14,7 @@ import {
   isResumeSubmission,
   mergeComposerCommands,
   parseGoalSubmission,
+  renderedComposerSubmission,
   replaceComposerTrigger,
   toggledFastServiceTier,
 } from './composer-autocomplete'
@@ -23,6 +29,12 @@ describe('composer autocomplete', () => {
     })
     expect(detectComposerTrigger('intro /rev', 10)).toBeNull()
     expect(detectComposerTrigger('/review now', 11)).toBeNull()
+    expect(detectComposerTrigger('/review $bra', 12)).toEqual({
+      kind: 'skill',
+      query: 'bra',
+      start: 8,
+      end: 12,
+    })
   })
 
   test('detects the current whitespace-delimited file mention', () => {
@@ -35,12 +47,35 @@ describe('composer autocomplete', () => {
     expect(detectComposerTrigger('email@example.com', 17)).toBeNull()
   })
 
+  test('detects $ skill mentions at whitespace boundaries only', () => {
+    expect(detectComposerTrigger('use $bra', 8)).toEqual({
+      kind: 'skill',
+      query: 'bra',
+      start: 4,
+      end: 8,
+    })
+    expect(detectComposerTrigger('email$bra', 9)).toBeNull()
+    expect(detectComposerTrigger('`$bra`', 5)).toBeNull()
+  })
+
   test('replaces only the active token and keeps one separator before following text', () => {
     const trigger = detectComposerTrigger('read @app then', 9)!
     expect(replaceComposerTrigger('read @app then', trigger, {
       kind: 'file',
       file: { path: 'src/app.ts', is_dir: false },
     })).toEqual({ text: 'read [app.ts](src/app.ts) then', cursor: 26 })
+  })
+
+  test('replaces a $ trigger with the exact skill name', () => {
+    const text = 'please $bra then'
+    const trigger = detectComposerTrigger(text, 11)!
+    expect(replaceComposerTrigger(text, trigger, {
+      kind: 'skill',
+      command: skill('brainstroming', '/skills/brainstroming/SKILL.md'),
+    })).toEqual({
+      text: 'please $brainstroming then',
+      cursor: 22,
+    })
   })
 
   test('merges live provider commands without losing discovered templates', () => {
@@ -100,6 +135,33 @@ describe('composer autocomplete', () => {
     expect(rows).toHaveLength(3)
     expect(rows.every((row) => row.kind === 'file')).toBe(true)
   })
+
+  test('keeps slash commands complete while $ opens only skills', () => {
+    const commands = [
+      skill('brainstroming', '/skills/brainstroming/SKILL.md'),
+      command('review', 'Project', 'Review changes', 'Review $ARGUMENTS'),
+    ]
+    const slashRows = composerAutocompleteRows(
+      { kind: 'command', query: '', start: 0, end: 1 },
+      commands,
+      [],
+    )
+    const skillRows = composerAutocompleteRows(
+      { kind: 'skill', query: '', start: 0, end: 1 },
+      commands,
+      [],
+    )
+    expect(slashRows).toHaveLength(2)
+    expect(slashRows[0]).toMatchObject({
+      kind: 'command',
+      command: { name: 'brainstroming', scope: 'Skill' },
+    })
+    expect(slashRows[1]).toMatchObject({
+      kind: 'command',
+      command: { name: 'review' },
+    })
+    expect(skillRows).toEqual([{ kind: 'skill', command: commands[0] }])
+  })
 })
 
 describe('slash command templates', () => {
@@ -127,6 +189,46 @@ describe('slash command templates', () => {
     expect(expandedComposerSubmission('pi', '/deploy production', commands))
       .toBe('/skill:deploy production')
   })
+
+  test('renders $ mentions with the shared fallback and preserves slash commands', () => {
+    const commands = [
+      skill('brainstroming', '/skills/Brain Stroming/SKILL.md'),
+      command('review', 'Project', '', 'Review $ARGUMENTS'),
+    ]
+    expect(renderedComposerSubmission('claude', '$brainstroming explain', commands)).toEqual({
+      text: '[mandatory! open skill: /skills/Brain Stroming/SKILL.md] explain',
+      warnings: [],
+    })
+    expect(renderedComposerSubmission('openCode', '/review $brainstroming', commands)).toEqual({
+      text: 'Review [mandatory! open skill: /skills/Brain Stroming/SKILL.md]',
+      warnings: [],
+    })
+  })
+
+  test('warns when a failed catalog refresh leaves a stale mention unresolved', () => {
+    const rendered = renderedComposerSubmission(
+      'codex',
+      '$missing',
+      [{
+        name: 'deploy',
+        description: '',
+        scope: 'Skill',
+        argument_hint: null,
+        template: null,
+        skill_file: '/remote/.agents/skills/deploy/SKILL.md',
+      }],
+    )
+    expect(
+      skillSubmissionWarnings('$missing', rendered.text, rendered.warnings, true),
+    ).toEqual([SKILL_CATALOG_UNAVAILABLE_WARNING])
+  })
+
+  test('returns invalid-path warnings without changing visible text', () => {
+    const commands = [skill('brainstroming', '/skills/bad]/SKILL.md')]
+    const rendered = renderedComposerSubmission('codex', '$brainstroming', commands)
+    expect(rendered.text).toBe('$brainstroming')
+    expect(rendered.warnings).toHaveLength(1)
+  })
 })
 
 function command(
@@ -136,6 +238,21 @@ function command(
   template: string | null,
 ): SlashCommand {
   return { name, scope, description, template, argument_hint: null }
+}
+
+function skill(
+  name: string,
+  skillFile: string,
+  description = '',
+): SlashCommand & SkillCommand {
+  return {
+    name,
+    scope: 'Skill',
+    description,
+    argument_hint: null,
+    template: null,
+    skill_file: skillFile,
+  }
 }
 
 describe('parseGoalSubmission', () => {

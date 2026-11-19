@@ -50,6 +50,7 @@ import { addContentToNewNote } from '@/components/notes-page'
 import { PaduIcon, ProviderIcon } from '@/components/padu-icon'
 import {
   useComposerDrafts,
+  useComposerCommands,
   useComposerFiles,
   useSession,
   useSessionTurnRefs,
@@ -115,6 +116,7 @@ import {
   type BackgroundWorkKey,
   type BackgroundWorkStatus,
 } from '@/lib/runtime-context'
+import { useWebProviderPromptResolver } from '@/lib/skill-submission'
 
 interface RetainedPanelSession {
   session: AgentSession
@@ -246,6 +248,23 @@ export function PaduApp() {
   const currentCwd = current && currentProject
     ? sessionCwd(current, currentProject)
     : undefined
+  const rewindComposerCommands = useComposerCommands(current?.provider, currentCwd)
+  const resolveRewindProviderPrompt = useWebProviderPromptResolver(
+    rewindComposerCommands,
+    current?.provider ?? 'codex',
+    current?.available_commands ?? [],
+    {
+      sessionId: current?.id ?? '',
+      provider: current?.provider ?? 'codex',
+      projectId: currentProject?.id ?? '',
+      projectRoot: currentCwd ?? '',
+      binaryOverride: rewindComposerCommands.binaryOverride ?? null,
+      binaryVersion: rewindComposerCommands.binaryVersion,
+      binaryIdentity: rewindComposerCommands.binaryIdentity ?? null,
+      model: current?.model ?? null,
+      hostAddress: config?.address ?? null,
+    },
+  )
   const composerFiles = useComposerFiles(currentCwd)
   const sessionTurnRefs = useSessionTurnRefs(currentCwd, current?.id)
   const selectedReady = current?.id === search.session
@@ -1005,13 +1024,22 @@ export function PaduApp() {
     turnCount: number,
     prompt: string,
     attachments: MessageAttachment[],
+    embeddedNotes: EmbeddedNote[],
   ) {
     try {
+      const resolution = await resolveRewindProviderPrompt(
+        prompt,
+        attachments,
+        embeddedNotes,
+      )
+      resolution.assertCurrent()
       const result = await rewindSessionToMessage(
         session,
         turnCount,
         prompt,
         attachments,
+        resolution.providerPrompt,
+        embeddedNotes,
       )
       if (result.cleanupWarning) {
         toast.warning(t('session.rewound_with_stale_refs', {
@@ -1566,8 +1594,8 @@ export function PaduApp() {
                 onOpenBackgroundWork={openBackgroundWork}
                 onOpenLink={openTranscriptLink}
                 onForkResponse={(turnCount) => void forkResponse(current, turnCount)}
-                onRewindMessage={(turnCount, prompt, attachments) =>
-                  rewindMessage(current, turnCount, prompt, attachments)}
+                onRewindMessage={(turnCount, prompt, attachments, embeddedNotes) =>
+                  rewindMessage(current, turnCount, prompt, attachments, embeddedNotes)}
                 onReviewChanges={(source) => openPanel('changes', source)}
               />
               {currentProject && (

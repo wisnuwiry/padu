@@ -5141,6 +5141,7 @@ dependencies = [
  "anyhow",
  "crossbeam-channel",
  "libc",
+ "padu-client",
  "padu-core",
  "padu-protocol",
  "serde",

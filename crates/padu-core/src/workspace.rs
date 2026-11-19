@@ -111,13 +111,17 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
             provider,
             project_root,
             binary_override,
-        } => WorkspaceResult::SlashCommands {
-            commands: crate::composer_complete::discover_slash_commands(
+        } => {
+            let catalog = crate::composer_complete::discover_composer_catalog(
                 provider,
                 &project_root,
                 binary_override.as_deref(),
-            ),
-        },
+            );
+            WorkspaceResult::SlashCommands {
+                commands: catalog.commands,
+                skill_capability: catalog.skill_capability,
+            }
+        }
         WorkspaceOperation::CreateProjectlessWorkspace { prompt } => {
             WorkspaceResult::ProjectlessWorkspace {
                 cwd: crate::projectless::create_workspace(prompt.as_deref())?.cwd,

@@ -1,13 +1,17 @@
-import type { ProviderKind, ProviderProbe } from './generated'
+import { isValidSkillBinaryIdentity } from './composer-skills'
+import type { ProviderKind, ProviderProbe, SkillBinaryIdentity } from './generated'
 
-const CACHE_KEY = 'padu.provider-probes.v1'
-const CACHE_VERSION = 1
+const CACHE_KEY = 'padu.provider-probes.v2'
+const CACHE_VERSION = 2
 const CACHE_MAX_AGE = 30 * 24 * 60 * 60 * 1_000
 const CACHE_MAX_ENTRIES = 32
 
 export const PROVIDER_PROBE_CACHE_STALE_TIME = 24 * 60 * 60 * 1_000
 
-export type ProviderProbeResult = ProviderProbe & { version: string | null }
+export type ProviderProbeResult = ProviderProbe & {
+  version: string | null
+  binaryIdentity?: SkillBinaryIdentity | null
+}
 
 export interface CachedProviderProbe {
   binaryOverride: string | null
@@ -99,6 +103,11 @@ function isCachedProviderProbe(value: unknown): value is CachedProviderProbe {
     && Array.isArray(data.models)
     && Array.isArray(data.agent_presets)
     && (data.version === null || typeof data.version === 'string')
+    && (
+      data.binaryIdentity === undefined
+      || data.binaryIdentity === null
+      || isValidSkillBinaryIdentity(data.binaryIdentity)
+    )
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

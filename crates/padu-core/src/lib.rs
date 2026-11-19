@@ -57,6 +57,7 @@ pub mod projectless;
 pub mod redact;
 pub mod secret_store;
 pub mod settings;
+mod skill_capability;
 pub mod skills;
 mod slash_command_catalog;
 pub mod terminal;

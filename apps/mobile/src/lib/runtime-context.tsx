@@ -1,11 +1,14 @@
 import { useQueryClient } from '@tanstack/react-query';
 import type {
   AgentSession,
+  EmbeddedNote,
+  MessageAttachment,
   PendingPermission,
   PendingUserInput,
   ProviderKind,
   UserInputAnswer,
 } from '@padu/client';
+import { PendingSteerQueue } from '@padu/client';
 import { reduceRuntimeEvent } from '@padu/client/event-reducer';
 import { writeProviderProbeCache } from '@padu/client/provider-probe-cache';
 import * as Crypto from 'expo-crypto';
@@ -36,15 +39,21 @@ import {
 import { persistentStorageSync } from './composer-preferences-store';
 import { useDaemon } from './daemon-context';
 import {
+  applyAcceptedSteer,
   applySessionOptions,
   beginTurn,
+  createTaskWithRecovery,
   createSession,
+  drainQueuedSubmission,
   queueSubmission,
+  restoreRejectedSteer,
   sessionBusy,
   sessionCwd,
   shouldApplyRuntimeEvent,
+  type MobilePendingSteerMetadata,
   type NewSessionOptions,
   type SessionOptionChanges,
+  type CreateTaskResult,
 } from './mobile-runtime';
 
 export interface MobileRuntime {
@@ -64,15 +73,28 @@ interface RuntimeContextValue {
   userInputs: Record<string, PendingUserInput | undefined>;
   errors: Record<string, string | undefined>;
   attachSession: (session: AgentSession) => Promise<boolean>;
-  sendPrompt: (session: AgentSession, prompt: string) => Promise<AgentSession>;
-  steerPrompt: (session: AgentSession, prompt: string) => Promise<void>;
+  sendPrompt: (
+    session: AgentSession,
+    prompt: string,
+    providerPromptOverride?: string,
+    attachments?: MessageAttachment[],
+    embeddedNotes?: EmbeddedNote[],
+  ) => Promise<AgentSession>;
+  steerPrompt: (
+    session: AgentSession,
+    prompt: string,
+    providerPromptOverride?: string,
+    attachments?: MessageAttachment[],
+    embeddedNotes?: EmbeddedNote[],
+  ) => Promise<void>;
   createTask: (
     projectId: string,
     provider: ProviderKind,
     isolated: boolean,
     prompt: string,
     options?: NewSessionOptions,
-  ) => Promise<AgentSession>;
+    providerPrompt?: string,
+  ) => Promise<CreateTaskResult>;
   cancel: (sessionId: string) => Promise<void>;
   respond: (sessionId: string, requestId: string, optionId: string) => Promise<void>;
   respondUserInput: (
@@ -107,10 +129,16 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const attachRequests = useRef(new Map<string, Promise<boolean>>());
   const persistTails = useRef(new Map<string, Promise<AgentSession>>());
   const persistTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
-  const pendingSteers = useRef(new Map<string, string[]>());
+  const pendingSteers = useRef(new PendingSteerQueue<MobilePendingSteerMetadata>());
   const drainingQueues = useRef(new Set<string>());
   const sendPromptRef = useRef<
-    ((session: AgentSession, prompt: string) => Promise<AgentSession>) | null
+    ((
+      session: AgentSession,
+      prompt: string,
+      providerPromptOverride?: string,
+      attachments?: MessageAttachment[],
+      embeddedNotes?: EmbeddedNote[],
+    ) => Promise<AgentSession>) | null
   >(null);
 
   const cacheSession = useCallback((session: AgentSession) => {
@@ -182,7 +210,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const entry = entries.current.get(sessionId);
     entry?.unsubscribe();
     entries.current.delete(sessionId);
-    pendingSteers.current.delete(sessionId);
+    pendingSteers.current.clearSession(sessionId);
     setRuntimes((current) => removeKey(current, sessionId));
   }, []);
 
@@ -199,13 +227,29 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     if (!next) return;
     drainingQueues.current.add(sessionId);
     try {
-      const dequeued = {
-        ...latest,
-        queued_messages: latest.queued_messages?.slice(1),
-      };
-      cacheSession(dequeued);
-      const persisted = await persistOrdered(dequeued);
-      await sendPromptRef.current?.(persisted, next.display_content ?? next.content);
+      await drainQueuedSubmission(
+        latest,
+        next,
+        {
+          readCurrent: () => queryClient.getQueryData<AgentSession>(
+            daemonKeys.session(profileId, sessionId),
+          ),
+          send: async (_queuedSession, metadata) => {
+            if (!sendPromptRef.current) {
+              throw new Error('This task has no live agent runtime');
+            }
+            await sendPromptRef.current(
+              latest,
+              metadata.visiblePrompt,
+              metadata.providerPrompt,
+              metadata.attachments,
+              metadata.embeddedNotes,
+            );
+          },
+          cache: cacheSession,
+          persist: persistOrdered,
+        },
+      );
     } catch (cause) {
       setErrors((values) => ({ ...values, [sessionId]: errorMessage(cause) }));
     } finally {
@@ -247,27 +291,15 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       }
       if (event.event.kind === 'steerAccepted') {
         const payload = event.event.payload as { message?: string };
-        const pending = pendingSteers.current.get(session.id)?.shift();
+        const pending = pendingSteers.current.take(session.id, payload.message);
         if (pending) {
-          current = {
-            ...current,
-            messages: [
-              ...current.messages,
-              {
-                id: clock.randomUUID(),
-                turn_id: current.turns.at(-1)?.id ?? null,
-                role: 'user',
-                content: payload.message ?? pending,
-                created_at: clock.nowSeconds(),
-                streaming: false,
-              },
-            ],
-          };
+          current = applyAcceptedSteer(current, pending, payload.message, clock);
         }
       } else if (event.event.kind === 'steerRejected') {
-        const pending = pendingSteers.current.get(session.id)?.shift();
+        const payload = event.event.payload as { message?: string };
+        const pending = pendingSteers.current.take(session.id, payload.message);
         if (pending) {
-          current = queueSubmission(current, pending, clock);
+          current = restoreRejectedSteer(current, pending, clock);
           cacheSession(current);
           void persistOrdered(current).catch(() => {});
           setErrors((values) => ({
@@ -330,6 +362,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const sendPrompt = useCallback(async (
     inputSession: AgentSession,
     rawPrompt: string,
+    providerPromptOverride?: string,
+    attachments: MessageAttachment[] = [],
+    embeddedNotes: EmbeddedNote[] = [],
   ): Promise<AgentSession> => {
     const client = daemon.client;
     const profileId = daemon.activeProfile?.id;
@@ -338,11 +373,19 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     }
     const prompt = rawPrompt.trim();
     if (!prompt) return inputSession;
+    const providerPrompt = providerPromptOverride?.trim() || prompt;
     let current = queryClient.getQueryData<AgentSession>(
       daemonKeys.session(profileId, inputSession.id),
     ) ?? inputSession;
     if (sessionBusy(current)) {
-      const queued = queueSubmission(current, prompt, clock);
+      const queued = queueSubmission(
+        current,
+        prompt,
+        clock,
+        providerPrompt,
+        attachments,
+        embeddedNotes,
+      );
       cacheSession(queued);
       return persistOrdered(queued);
     }
@@ -376,7 +419,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       startup = { binary: probe.path, cwd: sessionCwd(current, project) };
     }
 
-    current = beginTurn(current, prompt, clock);
+    current = beginTurn(current, prompt, clock, {
+      providerPrompt,
+      attachments,
+      embeddedNotes,
+    });
     cacheSession(current);
     current = await persistOrdered(current);
     try {
@@ -407,7 +454,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         runtime.starting = false;
         setRuntimes((values) => ({ ...values, [current.id]: publicRuntime(runtime!) }));
       }
-      await client.request({ type: 'prompt', prompt }, current.id, runtime.runtimeId);
+      await client.request(
+        { type: 'prompt', prompt: providerPrompt },
+        current.id,
+        runtime.runtimeId,
+      );
       setErrors((values) => removeKey(values, current.id));
       return current;
     } catch (cause) {
@@ -435,23 +486,47 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
 
   /** Inject a prompt into the running turn when the provider supports it;
    * otherwise fall through to sendPrompt, which queues while busy. */
-  const steerPrompt = useCallback(async (session: AgentSession, rawPrompt: string) => {
+  const steerPrompt = useCallback(async (
+    session: AgentSession,
+    rawPrompt: string,
+    providerPromptOverride?: string,
+    attachments: MessageAttachment[] = [],
+    embeddedNotes: EmbeddedNote[] = [],
+  ) => {
     const client = daemon.client;
     const prompt = rawPrompt.trim();
     if (!prompt) return;
+    const providerPrompt = providerPromptOverride?.trim() || prompt;
     if (!client || daemon.phase !== 'connected') throw new Error('Padu daemon is disconnected');
     const runtime = entries.current.get(session.id);
     if (
       !runtime || !runtime.supportsSteer ||
       session.status === 'connecting' || session.status === 'idle' || session.status === 'failed'
     ) {
-      await sendPrompt(session, prompt);
+      await sendPrompt(
+        session,
+        prompt,
+        providerPrompt,
+        attachments,
+        embeddedNotes,
+      );
       return;
     }
-    const pending = pendingSteers.current.get(session.id) ?? [];
-    pending.push(prompt);
-    pendingSteers.current.set(session.id, pending);
-    await client.request({ type: 'steer', prompt }, session.id, runtime.runtimeId);
+    const pending = pendingSteers.current.enqueue(session.id, providerPrompt, {
+      displayContent: prompt,
+      attachments,
+      embeddedNotes,
+    });
+    try {
+      await client.request(
+        { type: 'steer', prompt: providerPrompt },
+        session.id,
+        runtime.runtimeId,
+      );
+    } catch (error) {
+      pendingSteers.current.remove(session.id, pending);
+      throw error;
+    }
   }, [daemon.client, daemon.phase, sendPrompt]);
 
   const createTask = useCallback(async (
@@ -460,22 +535,24 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     isolated: boolean,
     prompt: string,
     options: NewSessionOptions = {},
-  ): Promise<AgentSession> => {
+    providerPrompt?: string,
+  ): Promise<CreateTaskResult> => {
     const profileId = daemon.activeProfile?.id;
     if (!profileId || !daemon.client || daemon.phase !== 'connected') {
       throw new Error('Padu daemon is disconnected');
     }
-    const draft = createSession(projectId, provider, isolated, clock, options);
-    cacheSession(draft);
-    const saved = await persistOrdered(draft);
-    try {
-      return await sendPrompt(saved, prompt);
-    } catch (cause) {
-      setErrors((values) => ({ ...values, [saved.id]: errorMessage(cause) }));
-      return queryClient.getQueryData<AgentSession>(
-        daemonKeys.session(profileId, saved.id),
-      ) ?? saved;
-    }
+    return createTaskWithRecovery({
+      createDraft: () => createSession(projectId, provider, isolated, clock, options),
+      cache: cacheSession,
+      persist: persistOrdered,
+      send: (draft) => sendPrompt(draft, prompt, providerPrompt),
+      latest: (fallback) => queryClient.getQueryData<AgentSession>(
+        daemonKeys.session(profileId, fallback.id),
+      ) ?? fallback,
+      reportError: (sessionId, error) => {
+        setErrors((values) => ({ ...values, [sessionId]: error }));
+      },
+    });
   }, [cacheSession, daemon.activeProfile?.id, daemon.client, daemon.phase, persistOrdered, queryClient, sendPrompt]);
 
   const cancel = useCallback(async (sessionId: string) => {

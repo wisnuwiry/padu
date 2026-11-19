@@ -4,6 +4,18 @@ import {
   readProviderProbeCache,
   writeProviderProbeCache,
 } from './provider-probe-cache'
+import {
+  catalogSkillCapability,
+  DEFAULT_PROVIDER_SKILL_CAPABILITIES,
+  refetchedBinaryIdentity,
+  SKILL_CAPABILITY_PROBE_VERSION,
+  type SkillCommandCatalog,
+} from '@padu/client/composer-skills'
+
+const IDENTITY = {
+  canonicalPath: '/usr/local/bin/codex',
+  contentSha256: 'a'.repeat(64),
+}
 
 class MemoryStorage {
   private readonly values = new Map<string, string>()
@@ -31,6 +43,7 @@ const probe: ProviderProbeResult = {
   }],
   agent_presets: [],
   version: '1.2.3',
+  binaryIdentity: IDENTITY,
 }
 
 describe('provider probe cache', () => {
@@ -61,5 +74,46 @@ describe('provider probe cache', () => {
 
     storage.setItem('padu.provider-probes.v1', '{bad json')
     expect(readProviderProbeCache(storage, 'ws://daemon-a', 'codex')).toBeUndefined()
+  })
+
+  test('a version-only cached probe cannot authorize native capability', () => {
+    const storage = new MemoryStorage()
+    writeProviderProbeCache(storage, 'ws://daemon-a', 'codex', null, {
+      ...probe,
+      binaryIdentity: null,
+    }, 10_000)
+    const cached = readProviderProbeCache(
+      storage,
+      'ws://daemon-a',
+      'codex',
+      null,
+      20_000,
+    )
+    const catalog: SkillCommandCatalog = {
+      commands: [],
+      skill_capability: {
+        binaryVersion: '1.2.3',
+        binaryIdentity: IDENTITY,
+        probeVersion: SKILL_CAPABILITY_PROBE_VERSION,
+        capability: {
+          nativeSyntax: 'dollar',
+          leadingInvocation: true,
+          inlineMentions: true,
+          repeatedMentions: true,
+        },
+      },
+    }
+    const refreshed = refetchedBinaryIdentity({
+      isError: false,
+      data: cached?.data ?? null,
+    })
+
+    expect(refreshed).toBeNull()
+    expect(catalogSkillCapability(
+      catalog,
+      'codex',
+      cached?.data.version,
+      refreshed?.binaryIdentity ?? null,
+    )).toEqual(DEFAULT_PROVIDER_SKILL_CAPABILITIES.codex)
   })
 })

@@ -44,7 +44,7 @@ impl Padu {
             let version = self
                 .provider_versions
                 .get(&kind)
-                .and_then(|version| version.clone());
+                .and_then(|observation| observation.version.clone());
             let disabled = self.state.disabled_providers.contains(&kind);
             let profile = self.agent_profile(kind);
             // The registry is the source of truth once loaded; the local

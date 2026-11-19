@@ -1,4 +1,5 @@
-//! The composer's autocompletion popup: slash commands and `@` file mentions.
+//! The composer's autocompletion popup: slash commands, `$` skills, and `@`
+//! file mentions.
 //!
 //! The popup is a pure view over prefetched data. Command and file indexes are
 //! discovered on the background executor into `QueryCache`s and mirrored into
@@ -51,6 +52,29 @@ pub fn init(cx: &mut App) {
 pub(super) enum AutocompleteRow {
     Command(Scored<SlashCommand>),
     File(Scored<FileEntry>),
+}
+
+fn command_text(kind: TriggerKind, command: &SlashCommand) -> String {
+    match kind {
+        TriggerKind::Skill => composer_complete::skill_composer_text(command),
+        TriggerKind::Command | TriggerKind::File => {
+            composer_complete::command_composer_text(command)
+        }
+    }
+}
+
+fn command_rows(
+    kind: TriggerKind,
+    commands: &[SlashCommand],
+    query: &str,
+    matcher: &mut Matcher,
+) -> Vec<Scored<SlashCommand>> {
+    match kind {
+        TriggerKind::Skill => composer_complete::filter_skill_commands(commands, query, matcher),
+        TriggerKind::Command | TriggerKind::File => {
+            composer_complete::filter_commands(commands, query, matcher)
+        }
+    }
 }
 
 /// Filter results for one (kind, query, source index) — the popup's rows are
@@ -113,8 +137,10 @@ impl Padu {
             .map(std::path::Path::to_path_buf)
         else {
             self.slash_command_index = Rc::new(Vec::new());
+            self.slash_skill_capability = None;
             self.slash_command_index_key = None;
             self.slash_command_index_loading = false;
+            self.slash_command_index_unavailable = false;
             self.mention_file_index = Rc::new(Vec::new());
             self.mention_file_index_path = None;
             self.mention_file_index_loading = false;
@@ -132,8 +158,9 @@ impl Padu {
 
         let command_key = (provider, project_path.clone(), binary_override.clone());
         match self.slash_commands.read(&command_key) {
-            Query::Ready(commands) => {
-                let mut commands = composer_complete::merge_reported_commands(&commands, &reported);
+            Query::Ready(catalog) => {
+                let mut commands =
+                    composer_complete::merge_reported_commands(&catalog.commands, &reported);
                 if !commands.iter().any(|command| command.name == "note") {
                     commands.push(SlashCommand {
                         name: "note".into(),
@@ -141,11 +168,14 @@ impl Padu {
                         scope: composer_complete::CommandScope::Builtin,
                         argument_hint: Some("<text>".into()),
                         template: None,
+                        skill_file: None,
                     });
                 }
                 self.slash_command_index = Rc::new(commands);
+                self.slash_skill_capability = catalog.skill_capability.clone();
                 self.slash_command_index_key = Some(command_key);
                 self.slash_command_index_loading = false;
+                self.slash_command_index_unavailable = catalog.unavailable;
             }
             Query::Pending => {
                 self.slash_command_index_loading = true;
@@ -153,19 +183,23 @@ impl Padu {
                 // meanwhile must not be another provider's list.
                 if self.slash_command_index_key.as_ref() != Some(&command_key) {
                     self.slash_command_index = Rc::new(Vec::new());
+                    self.slash_skill_capability = None;
                     self.slash_command_index_key = None;
+                    self.slash_command_index_unavailable = false;
                 }
             }
             Query::Missing(token) => {
                 self.slash_command_index_loading = true;
                 if self.slash_command_index_key.as_ref() != Some(&command_key) {
                     self.slash_command_index = Rc::new(Vec::new());
+                    self.slash_skill_capability = None;
                     self.slash_command_index_key = None;
+                    self.slash_command_index_unavailable = false;
                 }
                 let path = project_path.clone();
                 let workspace = padu_client::WorkspaceClient::new(self.daemon.client());
                 cx.spawn(async move |padu, cx| {
-                    let commands = cx
+                    let catalog = cx
                         .background_executor()
                         .spawn(async move {
                             match workspace.request(
@@ -175,15 +209,24 @@ impl Padu {
                                     binary_override,
                                 },
                             ) {
-                                Ok(padu_client::WorkspaceResult::SlashCommands { commands }) => {
-                                    commands
-                                }
-                                Ok(_) | Err(_) => Vec::new(),
+                                Ok(padu_client::WorkspaceResult::SlashCommands {
+                                    commands,
+                                    skill_capability,
+                                }) => SlashCommandCatalog {
+                                    commands,
+                                    skill_capability,
+                                    unavailable: false,
+                                },
+                                Ok(_) | Err(_) => SlashCommandCatalog {
+                                    commands: Vec::new(),
+                                    skill_capability: None,
+                                    unavailable: true,
+                                },
                             }
                         })
                         .await;
                     padu.update(cx, |padu, cx| {
-                        if padu.slash_commands.fulfill(token, commands) {
+                        if padu.slash_commands.fulfill(token, catalog) {
                             padu.refresh_composer_sources(cx);
                             cx.notify();
                         }
@@ -293,6 +336,7 @@ impl Padu {
     fn autocomplete_rows(&self, trigger: &Trigger) -> Rc<Vec<AutocompleteRow>> {
         let source = match trigger.kind {
             TriggerKind::Command => Rc::as_ptr(&self.slash_command_index) as usize,
+            TriggerKind::Skill => Rc::as_ptr(&self.slash_command_index) as usize,
             TriggerKind::File => Rc::as_ptr(&self.mention_file_index) as usize,
         };
         {
@@ -305,7 +349,8 @@ impl Padu {
         }
         let mut matcher = self.composer_autocomplete.matcher.borrow_mut();
         let rows = match trigger.kind {
-            TriggerKind::Command => composer_complete::filter_commands(
+            TriggerKind::Command | TriggerKind::Skill => command_rows(
+                trigger.kind,
                 &self.slash_command_index,
                 &trigger.query,
                 &mut matcher,
@@ -361,6 +406,9 @@ impl Padu {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
+        if self.host_switch_pending {
+            return;
+        }
         let Some(trigger) = self.composer_trigger(window, cx) else {
             return;
         };
@@ -376,7 +424,7 @@ impl Padu {
         };
         let insert = match row {
             AutocompleteRow::Command(scored) => {
-                let composer_text = composer_complete::command_composer_text(&scored.item);
+                let composer_text = command_text(trigger.kind, &scored.item);
                 format!("{composer_text} ")
             }
             AutocompleteRow::File(scored) => {
@@ -386,7 +434,7 @@ impl Padu {
                 )
             }
         };
-        if matches!(row, AutocompleteRow::Command(_)) {
+        if trigger.kind == TriggerKind::Command && matches!(row, AutocompleteRow::Command(_)) {
             let mut submission = self.composer.read(cx).content(cx).to_owned();
             submission.replace_range(trigger.range.clone(), &insert);
             if self.execute_local_composer_command(&submission, cx) {
@@ -416,6 +464,7 @@ impl Padu {
         let rows = self.autocomplete_rows(&trigger);
         let loading = match trigger.kind {
             TriggerKind::Command => self.slash_command_index_loading,
+            TriggerKind::Skill => self.slash_command_index_loading,
             TriggerKind::File => self.mention_file_index_loading,
         };
         if rows.is_empty() && !loading {
@@ -457,8 +506,15 @@ impl Padu {
             );
         } else {
             for (index, row) in rows.iter().enumerate() {
-                list = list
-                    .child(self.render_autocomplete_row(index, row, highlight, &theme, window, cx));
+                list = list.child(self.render_autocomplete_row(
+                    index,
+                    trigger.kind,
+                    row,
+                    highlight,
+                    &theme,
+                    window,
+                    cx,
+                ));
             }
         }
 
@@ -496,6 +552,7 @@ impl Padu {
     fn render_autocomplete_row(
         &self,
         index: usize,
+        trigger_kind: TriggerKind,
         row: &AutocompleteRow,
         highlight: usize,
         theme: &Theme,
@@ -524,7 +581,7 @@ impl Padu {
         match row {
             AutocompleteRow::Command(scored) => {
                 let command = &scored.item;
-                let composer_text = composer_complete::command_composer_text(command);
+                let composer_text = command_text(trigger_kind, command);
                 let icon_path = if command.scope == composer_complete::CommandScope::Skill {
                     "icons/sparkle.svg"
                 } else {
@@ -699,6 +756,68 @@ pub(super) fn composer_card_bounds_probe(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    fn command(name: &str, scope: composer_complete::CommandScope) -> SlashCommand {
+        SlashCommand {
+            name: name.into(),
+            description: String::new(),
+            scope,
+            argument_hint: None,
+            template: None,
+            skill_file: None,
+        }
+    }
+
+    #[test]
+    fn skill_trigger_shows_only_skills_and_inserts_dollar_syntax() {
+        let trigger = composer_complete::detect_trigger("ask $br", 7)
+            .expect("a dollar token should open autocomplete");
+        assert_eq!(trigger.kind, TriggerKind::Skill);
+        assert_eq!(trigger.query, "br");
+        assert_eq!(trigger.range, 4..7);
+
+        let text = "/review $br";
+        let trigger = composer_complete::detect_trigger(text, text.len())
+            .expect("a skill after slash arguments should open autocomplete");
+        assert_eq!(trigger.kind, TriggerKind::Skill);
+        assert_eq!(trigger.query, "br");
+        assert_eq!(trigger.range, 8..text.len());
+
+        let commands = vec![
+            command("review", composer_complete::CommandScope::Builtin),
+            command("format", composer_complete::CommandScope::User),
+            command("brainstroming", composer_complete::CommandScope::Skill),
+        ];
+        let mut matcher = composer_complete::matcher();
+
+        let skill_rows = command_rows(TriggerKind::Skill, &commands, "", &mut matcher);
+        assert_eq!(
+            skill_rows
+                .iter()
+                .map(|row| row.item.name.as_str())
+                .collect::<Vec<_>>(),
+            ["brainstroming"]
+        );
+        assert_eq!(
+            command_text(TriggerKind::Skill, &skill_rows[0].item),
+            "$brainstroming"
+        );
+        assert_eq!(
+            command_text(TriggerKind::Command, &skill_rows[0].item),
+            "/brainstroming"
+        );
+
+        let command_rows = command_rows(TriggerKind::Command, &commands, "", &mut matcher);
+        assert_eq!(
+            command_rows
+                .iter()
+                .map(|row| row.item.name.as_str())
+                .collect::<Vec<_>>(),
+            ["review", "format", "brainstroming"]
+        );
+    }
+
     /// The popup renders on every keystroke frame; discovery walks the
     /// filesystem and forks subprocesses. The two must never meet: everything
     /// the render path shows comes from the prefetched indexes.

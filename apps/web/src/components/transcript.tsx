@@ -88,6 +88,7 @@ type MessageEdit = {
   turnCount: number
   content: string
   attachments: MessageAttachment[]
+  embeddedNotes: EmbeddedNote[]
 }
 
 export function ConversationBackgroundLayer() {
@@ -147,6 +148,7 @@ export function Transcript({
     turnCount: number,
     prompt: string,
     attachments: MessageAttachment[],
+    embeddedNotes: EmbeddedNote[],
   ) => Promise<void>
   forkingTurnCount?: number
   rewindTurnCounts?: readonly number[]
@@ -299,6 +301,7 @@ export function Transcript({
                 turnCount,
                 content: message.display_content ?? message.content,
                 attachments: message.attachments ?? [],
+                embeddedNotes: message.embedded_notes ?? [],
               })}
               onCancelMessageEdit={() => {
                 if (messageEdit?.turnCount !== rewindingTurnCount) setMessageEdit(null)
@@ -311,6 +314,7 @@ export function Transcript({
                     editing.turnCount,
                     prompt,
                     editing.attachments,
+                    editing.embeddedNotes,
                   )
                   setMessageEdit((current) => current?.messageId === editing.messageId ? null : current)
                 } catch {
