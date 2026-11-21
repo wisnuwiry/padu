@@ -24,7 +24,7 @@ import type { UsageHistory } from "./UsageHistory";
 import type { WorkspaceResult } from "./WorkspaceResult";
 import type { JsonValue } from "./serde_json/JsonValue";
 
-export type ResponsePayload = { "type": "ack" } | { "type": "sessionRuntime", runtimeId: string | null, supportsSteer: boolean, } | { "type": "started", supportsSteer: boolean, } | { "type": "optionsApplied", applied: boolean, } | { "type": "cursor", cursor: JsonValue | null, } | { "type": "settings", settings: DaemonSettings, } | { "type": "providerInstalled", provider: ProviderKind, path: string, } | { "type": "agyAuthStatus", authenticated: boolean,
+export type ResponsePayload = { "type": "ack" } | { "type": "sessionRuntime", runtimeId: string | null, supportsSteer: boolean, } | { "type": "started", supportsSteer: boolean, } | { "type": "optionsApplied", applied: boolean, } | { "type": "cursor", cursor: JsonValue | null, } | { "type": "settings", settings: DaemonSettings, } | { "type": "compactionAck", sessionId: string, } | { "type": "providerInstalled", provider: ProviderKind, path: string, } | { "type": "agyAuthStatus", authenticated: boolean,
 /**
  * Google account identity when the local credential exposes one;
  * `None` means unknown and clients hide the account row.

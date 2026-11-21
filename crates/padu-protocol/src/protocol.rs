@@ -138,6 +138,14 @@ pub enum Command {
     Fork {
         turns_to_remove: usize,
     },
+    /// Request context compaction for a session.
+    /// Strictly validated by daemon for Claude, Antigravity, and Codex.
+    CompactSession {
+        #[serde(default)]
+        session_id: Option<Uuid>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        focus: Option<String>,
+    },
     GetSettings,
     UpdateSettings {
         settings: DaemonSettings,
@@ -546,6 +554,25 @@ pub enum ServerMessage {
         provider: ProviderKind,
         url: String,
     },
+    /// Compaction initiated for a session.
+    CompactionStarted {
+        session_id: Uuid,
+        started_at: u64,
+    },
+    /// Compaction settled successfully.
+    SessionCompacted {
+        session_id: Uuid,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tokens_before: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tokens_after: Option<u64>,
+        completed_at: u64,
+    },
+    /// Compaction failed or rejected.
+    CompactionFailed {
+        session_id: Uuid,
+        reason: String,
+    },
     ShuttingDown,
 }
 
@@ -583,6 +610,9 @@ pub enum ResponsePayload {
     },
     Settings {
         settings: DaemonSettings,
+    },
+    CompactionAck {
+        session_id: Uuid,
     },
     ProviderInstalled {
         provider: ProviderKind,

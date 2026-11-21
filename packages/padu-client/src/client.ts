@@ -77,6 +77,7 @@ export class PaduClient {
   private providerAuthUrlListeners = new Set<
     (auth: { provider: string; url: string }) => void
   >();
+  private compactionListeners = new Set<(message: ServerMessage) => void>();
   private connectionStateListeners = new Set<ConnectionStateListener>();
   private sequences = new Map<string, LastSequence>();
   private connectionGeneration = 0;
@@ -219,6 +220,22 @@ export class PaduClient {
     return this.requestWithTimeout(command, this.requestTimeoutMs, sessionId, runtimeId);
   }
 
+  compactSession(
+    sessionId: string,
+    focus?: string | null,
+    runtimeId = NIL_UUID,
+  ): Promise<ResponsePayload> {
+    return this.request(
+      {
+        type: "compactSession",
+        sessionId,
+        focus: focus ?? null,
+      },
+      sessionId,
+      runtimeId,
+    );
+  }
+
   requestWithTimeout(
     command: Command,
     timeoutMs: number,
@@ -315,6 +332,11 @@ export class PaduClient {
   ): () => void {
     this.providerAuthUrlListeners.add(listener);
     return () => this.providerAuthUrlListeners.delete(listener);
+  }
+
+  subscribeCompaction(listener: (message: ServerMessage) => void): () => void {
+    this.compactionListeners.add(listener);
+    return () => this.compactionListeners.delete(listener);
   }
 
   /** Observes connection changes, including remote socket closure. */
@@ -429,6 +451,14 @@ export class PaduClient {
           url: message.url,
         });
       }
+      return;
+    }
+    if (
+      message.type === "compactionStarted" ||
+      message.type === "sessionCompacted" ||
+      message.type === "compactionFailed"
+    ) {
+      for (const listener of this.compactionListeners) listener(message);
       return;
     }
     if (message.type === "shuttingDown") {

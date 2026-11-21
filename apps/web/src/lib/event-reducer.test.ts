@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { AgentSession, SequencedEvent } from '@padu/client'
-import { reduceRuntimeEvent } from './event-reducer'
+import { reduceRuntimeEvent, supportsCompaction } from './event-reducer'
 
 const clock = {
   nowSeconds: () => 200,
@@ -255,6 +255,48 @@ describe('thread goals', () => {
     const next = apply(active, 'turnStarted', null)
     expect(next.turns).toHaveLength(1)
     expect(next.turns[0]?.id).toBe('turn')
+  })
+
+  test('manages compaction state and records compaction markers', () => {
+    let session = runningSession()
+    expect(session.compacting).toBeFalsy()
+
+    session = apply(session, 'compactionStarted', null)
+    expect(session.compacting).toBe(true)
+
+    const compactedResult = reduceRuntimeEvent(
+      session,
+      event('sessionCompacted', { tokensBefore: 80_000, tokensAfter: 8_000 }),
+      clock,
+    )
+    expect(compactedResult.session.compacting).toBe(false)
+    expect(compactedResult.session.compactions).toHaveLength(1)
+    expect(compactedResult.session.compactions[0]?.tokensBefore).toBe(80_000)
+    expect(compactedResult.session.compactions[0]?.tokensAfter).toBe(8_000)
+    expect(compactedResult.session.context_usage?.contextTokens).toBe(8_000)
+
+    // Compaction failed settles compacting flag
+    session = apply(session, 'compactionStarted', null)
+    expect(session.compacting).toBe(true)
+    session = apply(session, 'compactionFailed', { reason: 'Refused' })
+    expect(session.compacting).toBe(false)
+
+    // Turn finished settles compacting flag
+    session = apply(session, 'compactionStarted', null)
+    expect(session.compacting).toBe(true)
+    session = apply(session, 'turnFinished', { success: true, summary: null })
+    expect(session.compacting).toBe(false)
+  })
+
+  test('supportsCompaction is true only for claude, agy, and codex', () => {
+    expect(supportsCompaction('claude')).toBe(true)
+    expect(supportsCompaction('agy')).toBe(true)
+    expect(supportsCompaction('codex')).toBe(true)
+    expect(supportsCompaction('opencode')).toBe(false)
+    expect(supportsCompaction('deepSeek')).toBe(false)
+    expect(supportsCompaction('cursor')).toBe(false)
+    expect(supportsCompaction('amp')).toBe(false)
+    expect(supportsCompaction(undefined)).toBe(false)
   })
 })
 

@@ -2,6 +2,7 @@ import type {
   ActivityItem,
   ActivityKind,
   AgentSession,
+  CompactionMarker,
   ProviderResumeCursor,
   ReportedCommand,
   SequencedEvent,
@@ -211,6 +212,7 @@ export function reduceRuntimeEvent(
     case 'turnFinished': {
       const value = asRecord(payload)
       const success = value?.success === true
+      session.compacting = false
       result.settled = settleTurn(
         session,
         success ? 'completed' : 'failed',
@@ -219,6 +221,39 @@ export function reduceRuntimeEvent(
       )
       result.permission = null
       result.userInput = null
+      break
+    }
+    case 'compactionStarted': {
+      session.compacting = true
+      break
+    }
+    case 'sessionCompacted': {
+      session.compacting = false
+      const payloadObj = asRecord(payload)
+      const tokensBefore = typeof payloadObj?.tokensBefore === 'number' ? payloadObj.tokensBefore : null
+      const tokensAfter = typeof payloadObj?.tokensAfter === 'number' ? payloadObj.tokensAfter : null
+      const marker: CompactionMarker = {
+        id: clock.randomUUID(),
+        turnCount: session.turns.length,
+        tokensBefore,
+        tokensAfter,
+        compactedAt: clock.nowSeconds(),
+      }
+      if (!session.compactions) {
+        session.compactions = []
+      }
+      session.compactions.push(marker)
+      if (tokensAfter != null) {
+        if (!session.context_usage) {
+          session.context_usage = { contextTokens: tokensAfter, contextWindow: null }
+        } else {
+          session.context_usage.contextTokens = tokensAfter
+        }
+      }
+      break
+    }
+    case 'compactionFailed': {
+      session.compacting = false
       break
     }
     case 'error': {
@@ -793,4 +828,8 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
+}
+
+export function supportsCompaction(provider: string | null | undefined): boolean {
+  return provider === 'claude' || provider === 'agy' || provider === 'codex'
 }

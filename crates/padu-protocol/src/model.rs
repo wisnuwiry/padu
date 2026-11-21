@@ -183,6 +183,12 @@ impl ProviderKind {
                 | Self::Qoder
         )
     }
+
+    /// Whether this provider supports context compaction.
+    /// Strictly limited to Claude Code, Antigravity, and Codex CLI.
+    pub fn supports_compaction(self) -> bool {
+        matches!(self, Self::Agy | Self::Claude | Self::Codex)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
@@ -1050,6 +1056,18 @@ pub struct RuntimeEventCursor {
     pub sequence: u64,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CompactionMarker {
+    pub id: Uuid,
+    pub turn_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens_before: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens_after: Option<u64>,
+    pub compacted_at: u64,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 pub struct AgentSession {
     pub id: Uuid,
@@ -1128,6 +1146,10 @@ pub struct AgentSession {
     pub turns: Vec<AgentTurn>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queued_messages: Vec<QueuedMessage>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub compacting: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub compactions: Vec<CompactionMarker>,
     /// Whether the transcript has been read from the database.
     ///
     /// Startup loads only the columns the session list needs, so a session
@@ -1180,6 +1202,8 @@ impl AgentSession {
             transcript_blocks: Vec::new(),
             turns: Vec::new(),
             queued_messages: Vec::new(),
+            compacting: false,
+            compactions: Vec::new(),
         }
     }
 
@@ -1219,6 +1243,8 @@ impl AgentSession {
             transcript_blocks: Vec::new(),
             turns: Vec::new(),
             queued_messages: Vec::new(),
+            compacting: false,
+            compactions: Vec::new(),
             detail_loaded: false,
         }
     }
@@ -2370,6 +2396,14 @@ pub enum DriverEvent {
     TurnFinished {
         success: bool,
         summary: Option<String>,
+    },
+    CompactionStarted,
+    SessionCompacted {
+        tokens_before: Option<u64>,
+        tokens_after: Option<u64>,
+    },
+    CompactionFailed {
+        reason: String,
     },
     Error(String),
     ProcessExited,
