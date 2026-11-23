@@ -246,6 +246,24 @@ impl DriverControl for RemoteDriverControl {
         self.notify(padu_client::Command::Steer { prompt });
     }
 
+    fn supports_compaction(&self) -> bool {
+        // The daemon validates the provider before dispatching this request.
+        true
+    }
+
+    fn compact(&self, focus: Option<&str>) -> anyhow::Result<()> {
+        let client = self.client.lock().clone();
+        client.request(
+            self.session_id,
+            self.runtime_id,
+            padu_client::Command::CompactSession {
+                session_id: self.session_id,
+                focus: focus.map(str::to_owned),
+            },
+        )?;
+        Ok(())
+    }
+
     fn cancel(&self) {
         self.notify(padu_client::Command::Cancel);
     }

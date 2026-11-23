@@ -10,6 +10,7 @@ import {
   detectComposerTrigger,
   expandCommandTemplate,
   expandedComposerSubmission,
+  filterComposerCommandsForProvider,
   isFastModeToggleSubmission,
   isResumeSubmission,
   mergeComposerCommands,
@@ -35,6 +36,19 @@ describe('composer autocomplete', () => {
       start: 8,
       end: 12,
     })
+  })
+
+  test('hides compact from providers outside the supported harness set', () => {
+    const commands = [
+      command('compact', 'Builtin', 'Compact context', null),
+      command('review', 'Builtin', 'Review', null),
+    ]
+    expect(
+      filterComposerCommandsForProvider('claude', commands).map((item) => item.name),
+    ).toEqual(['compact', 'review'])
+    expect(
+      filterComposerCommandsForProvider('openCode', commands).map((item) => item.name),
+    ).toEqual(['review'])
   })
 
   test('detects the current whitespace-delimited file mention', () => {

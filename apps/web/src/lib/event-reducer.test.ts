@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import type { AgentSession, SequencedEvent } from '@padu/client'
-import { reduceRuntimeEvent } from './event-reducer'
+import {
+  parseCompactionSubmission,
+  reduceRuntimeEvent,
+  supportsCompaction,
+} from './event-reducer'
 
 const clock = {
   nowSeconds: () => 200,
@@ -255,6 +259,95 @@ describe('thread goals', () => {
     const next = apply(active, 'turnStarted', null)
     expect(next.turns).toHaveLength(1)
     expect(next.turns[0]?.id).toBe('turn')
+  })
+
+  test('manages compaction state and records compaction markers', () => {
+    let session = runningSession()
+    expect(session.compacting).toBeFalsy()
+
+    session = apply(session, 'compactionStarted', null)
+    expect(session.compacting).toBe(true)
+
+    const compactedResult = reduceRuntimeEvent(
+      session,
+      event('sessionCompacted', { tokensBefore: 80_000, tokensAfter: 8_000 }),
+      clock,
+    )
+    expect(compactedResult.session.compacting).toBe(false)
+    expect(compactedResult.session.compactions).toHaveLength(1)
+    expect(compactedResult.session.compactions?.[0]?.tokensBefore).toBe(80_000)
+    expect(compactedResult.session.compactions?.[0]?.tokensAfter).toBe(8_000)
+    expect(compactedResult.session.context_usage?.tokens).toBe(8_000)
+    expect(compactedResult.queueDrain).toBe(true)
+
+    // Compaction failed settles compacting flag
+    session = apply(session, 'compactionStarted', null)
+    expect(session.compacting).toBe(true)
+    const failedResult = reduceRuntimeEvent(
+      session,
+      event('compactionFailed', { reason: 'Refused' }),
+      clock,
+    )
+    expect(failedResult.session.compacting).toBe(false)
+    expect(failedResult.queueDrain).toBe(true)
+    session = failedResult.session
+
+    // Turn finished settles compacting flag
+    session = apply(session, 'compactionStarted', null)
+    expect(session.compacting).toBe(true)
+    session = apply(session, 'turnFinished', { success: true, summary: null })
+    expect(session.compacting).toBe(false)
+  })
+
+  test('releases a queued prompt when compaction settles without an active turn', () => {
+    const session: AgentSession = {
+      ...runningSession(),
+      status: 'idle',
+      messages: [],
+      turns: [],
+      compacting: true,
+      queued_messages: [{
+        id: 'queued',
+        content: 'next task',
+        created_at: 101,
+      }],
+    }
+    const result = reduceRuntimeEvent(
+      session,
+      event('sessionCompacted', { tokensBefore: 80_000, tokensAfter: 8_000 }),
+      clock,
+    )
+    expect(result.settled).toBe(false)
+    expect(result.queueDrain).toBe(true)
+    expect(result.session.compacting).toBe(false)
+    expect(result.session.queued_messages?.[0]?.id).toBe('queued')
+  })
+
+  test('supportsCompaction is true only for claude, agy, and codex', () => {
+    expect(supportsCompaction('claude')).toBe(true)
+    expect(supportsCompaction('agy')).toBe(true)
+    expect(supportsCompaction('codex')).toBe(true)
+    expect(supportsCompaction('opencode')).toBe(false)
+    expect(supportsCompaction('deepSeek')).toBe(false)
+    expect(supportsCompaction('cursor')).toBe(false)
+    expect(supportsCompaction('amp')).toBe(false)
+    expect(supportsCompaction(undefined)).toBe(false)
+  })
+
+  test('parses /compact focus only for supported providers', () => {
+    expect(parseCompactionSubmission('claude', '/compact')).toEqual({ focus: null })
+    expect(parseCompactionSubmission('agy', '  /compact   keep API decisions  ')).toEqual({
+      focus: 'keep API decisions',
+    })
+    expect(parseCompactionSubmission('agy', '/compact\tkeep tests')).toEqual({
+      focus: 'keep tests',
+    })
+    expect(parseCompactionSubmission('codex', '/compact\n')).toEqual({ focus: null })
+    expect(parseCompactionSubmission('codex', '/compact retain architecture')).toEqual({
+      focus: null,
+    })
+    expect(parseCompactionSubmission('codex', '/compacted')).toBeNull()
+    expect(parseCompactionSubmission('opencode', '/compact')).toBeNull()
   })
 })
 

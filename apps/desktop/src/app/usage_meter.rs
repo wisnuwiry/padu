@@ -9,6 +9,7 @@
 use gpui::{PathBuilder, relative};
 
 use super::*;
+use crate::ui::{Button, ButtonStyle};
 use crate::usage::{PlanUsage, format_tokens, reset_label};
 
 const USAGE_METER_MENU_ID: &str = "usage-meter";
@@ -179,6 +180,10 @@ impl Padu {
         }
         let session = self.selected_session()?;
         let provider = session.provider;
+        let session_id = session.id;
+        let compacting = session.compacting;
+        let compacting_admission_open =
+            !session.is_busy() && !self.submission_preparations.contains(&session_id);
         let context = session.context_usage;
         let theme = Theme::current(cx);
         let plan = self.plan_usage.get(&provider).cloned();
@@ -234,23 +239,32 @@ impl Padu {
         });
 
         let percent = context.and_then(context_percent);
+        let can_compact = provider.supports_compaction();
+        let supports_compaction_focus =
+            matches!(provider, ProviderKind::Claude | ProviderKind::Agy);
+        let compact_recommended = can_compact && percent.is_some_and(|percent| percent >= 70.0);
         let fill = match percent {
             Some(percent) if percent >= 95.0 => theme.danger,
             Some(percent) if percent >= 80.0 => theme.warning,
             _ => theme.gauge,
         };
-        let tooltip = match (&error, percent) {
-            (Some(error), _) => SharedString::from(tr!("usage.refresh_failed", error = error)),
-            (None, Some(percent)) => SharedString::from(tr!(
+        let tooltip = match (&error, compact_recommended, percent) {
+            (Some(error), _, _) => SharedString::from(tr!("usage.refresh_failed", error = error)),
+            (None, _, _) if compacting => SharedString::from(tr!("usage.compacting")),
+            (None, true, _) => SharedString::from(tr!("usage.compact_tooltip")),
+            (None, false, Some(percent)) => SharedString::from(tr!(
                 "usage.context_used",
                 percent = format!("{percent:.0}"),
                 shortcut = crate::platform::primary_shortcut("⌘U", "Ctrl+U")
             )),
-            (None, None) => SharedString::from(tr!(
+            (None, false, None) => SharedString::from(tr!(
                 "usage.shortcut",
                 shortcut = crate::platform::primary_shortcut("⌘U", "Ctrl+U")
             )),
         };
+
+        let compact_focus_input = self.compact_focus_input.clone();
+        let compact_padu = cx.entity().downgrade();
 
         let trigger = div()
             .id("usage-meter")
@@ -264,13 +278,79 @@ impl Padu {
             .hover(|element| element.bg(theme.overlay))
             .when(handle.is_open(), |element| element.bg(theme.overlay_strong))
             .tooltip(Tooltip::text(tooltip))
-            .child(context_gauge(percent, theme.border_strong, fill));
+            .child(context_gauge(percent, theme.border_strong, fill))
+            .when(compact_recommended || compacting, |element| {
+                element.child(div().ml(px(3.0)).flex().items_center().child(icon(
+                    "icons/sparkle.svg",
+                    12.0,
+                    if compacting {
+                        theme.accent
+                    } else {
+                        theme.text_secondary
+                    },
+                )))
+            });
 
         Some(popover(
             trigger,
             &handle,
             MenuAlign::AboveRight,
             move |handle, _, cx| {
+                let compact_control = can_compact.then(|| {
+                    let focus_input = compact_focus_input.clone();
+                    let menu = handle.clone();
+                    let label = if compacting {
+                        tr!("usage.compacting")
+                    } else {
+                        tr!("usage.compact_action")
+                    };
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(8.0))
+                        .when(supports_compaction_focus, |element| {
+                            element
+                                .child(
+                                    div()
+                                        .text_size(sp(12.0))
+                                        .text_color(Theme::current(cx).text_secondary)
+                                        .child(tr!("usage.compact_focus_label")),
+                                )
+                                .child(
+                                    TextField::new("compact-focus-field", focus_input.clone())
+                                        .aria_label(tr!("usage.compact_focus_label"))
+                                        .w_full(),
+                                )
+                        })
+                        .child(
+                            Button::new("compact-context-button", label)
+                                .button_style(ButtonStyle::Prominent)
+                                .enabled(!compacting && compacting_admission_open)
+                                .on_press({
+                                    let compact_padu = compact_padu.clone();
+                                    move |_, window, cx| {
+                                        let accepted = compact_padu
+                                            .update(cx, |this, cx| {
+                                                let focus = focus_input
+                                                    .read(cx)
+                                                    .content()
+                                                    .trim()
+                                                    .to_owned();
+                                                this.request_context_compaction(
+                                                    session_id,
+                                                    (!focus.is_empty()).then_some(focus),
+                                                    cx,
+                                                )
+                                            })
+                                            .unwrap_or(false);
+                                        if accepted {
+                                            menu.close(window, cx);
+                                        }
+                                    }
+                                }),
+                        )
+                        .into_any_element()
+                });
                 usage_panel(
                     handle,
                     provider,
@@ -278,6 +358,7 @@ impl Padu {
                     plan.clone(),
                     error.as_deref(),
                     plan_loading,
+                    compact_control,
                     cx,
                 )
             },
@@ -373,6 +454,7 @@ fn usage_panel(
     plan: Option<PlanUsage>,
     error: Option<&str>,
     plan_loading: bool,
+    compact_control: Option<AnyElement>,
     cx: &App,
 ) -> AnyElement {
     let theme = Theme::current(cx);
@@ -430,6 +512,10 @@ fn usage_panel(
             )
             .child(meter_bar(&theme, percent.unwrap_or(0.0))),
     );
+    if let Some(compact_control) = compact_control {
+        panel = panel.child(div().h(px(1.0)).flex_none().bg(theme.border));
+        panel = panel.child(compact_control);
+    }
     if plan.is_some() || error.is_some() || plan_loading {
         panel = panel.child(div().h(px(1.0)).flex_none().bg(theme.border));
     }

@@ -1,6 +1,6 @@
 use gpui::{
     AnyElement, App, Div, ElementId, InteractiveElement, Interactivity, ParentElement, RenderOnce,
-    Stateful, StyleRefinement, Styled, Window, div, prelude::*, px,
+    SharedString, Stateful, StyleRefinement, Styled, Window, div, prelude::*, px,
 };
 
 use crate::input::TextInput;
@@ -23,6 +23,7 @@ pub struct TextField {
     input: gpui::Entity<TextInput>,
     icon: Option<(&'static str, f32)>,
     suffix: Option<AnyElement>,
+    aria_label: Option<SharedString>,
 }
 
 impl TextField {
@@ -32,6 +33,7 @@ impl TextField {
             input,
             icon: None,
             suffix: None,
+            aria_label: None,
         }
     }
 
@@ -44,6 +46,13 @@ impl TextField {
     /// Trailing content, typically a keyboard hint that hides while typing.
     pub fn suffix(mut self, suffix: impl IntoElement) -> Self {
         self.suffix = Some(suffix.into_any_element());
+        self
+    }
+
+    /// Accessible name for the embedded text control. The placeholder stays a
+    /// visual hint and is not a reliable replacement for this label.
+    pub fn aria_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.aria_label = Some(label.into());
         self
     }
 }
@@ -86,6 +95,7 @@ impl RenderOnce for TextField {
             .gap(px(6.0))
             .text_size(sp(12.5))
             .line_height(sp(16.0))
+            .when_some(self.aria_label, |element, label| element.aria_label(label))
             .when_some(self.icon, |element, (path, size)| {
                 element.child(icon(path, size, theme.text_tertiary))
             })

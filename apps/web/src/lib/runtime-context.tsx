@@ -134,6 +134,7 @@ interface RuntimeContextValue {
     embeddedNotes?: EmbeddedNote[],
   ) => Promise<void>
   sendGoalOperation: (session: AgentSession, operation: GoalOperation) => Promise<void>
+  compactContext: (session: AgentSession, focus: string | null) => Promise<void>
   cancel: (sessionId: string) => Promise<void>
   closeSession: (sessionId: string) => Promise<void>
   removeQueuedMessage: (sessionId: string, messageId: string) => Promise<void>
@@ -400,6 +401,41 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     [client, config, queryClient, cacheSession, persistOrdered],
   )
 
+  const drainNextQueued = useCallback(
+    async (settled: AgentSession) => {
+      if (!config || settled.status !== 'idle') return
+      const latest = queryClient.getQueryData<AgentSession>(
+        daemonKeys.session(config.address, settled.id),
+      ) ?? settled
+      const nextQueued = latest.queued_messages?.[0]
+      if (!nextQueued) return
+      await drainQueuedSubmission(
+        latest,
+        nextQueued,
+        {
+          readCurrent: () => queryClient.getQueryData<AgentSession>(
+            daemonKeys.session(config.address, settled.id),
+          ),
+          send: async (_queuedSession, metadata) => {
+            if (!sendPromptRef.current) {
+              throw new Error(translate(localeRef.current, 'errors.no_live_runtime'))
+            }
+            await sendPromptRef.current(
+              latest,
+              metadata.visiblePrompt,
+              metadata.attachments,
+              metadata.providerPrompt,
+              metadata.embeddedNotes,
+            )
+          },
+          cache: cacheSession,
+          persist: persistOrdered,
+        },
+      )
+    },
+    [config, queryClient, cacheSession, persistOrdered],
+  )
+
   const finishSettledTurn = useCallback(
     (settled: AgentSession) => {
       if (checkpointCaptures.current.has(settled.id)) return
@@ -411,35 +447,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           // Release the checkpoint gate before starting the queued turn. The
           // next send must become a real turn instead of queueing itself again.
           checkpointCaptures.current.delete(saved.id)
-          if (!config || saved.status !== 'idle') return
-          const latest = queryClient.getQueryData<AgentSession>(
-            daemonKeys.session(config.address, saved.id),
-          ) ?? saved
-          const nextQueued = latest.queued_messages?.[0]
-          if (!nextQueued) return
-          await drainQueuedSubmission(
-            latest,
-            nextQueued,
-            {
-              readCurrent: () => queryClient.getQueryData<AgentSession>(
-                daemonKeys.session(config.address, saved.id),
-              ),
-              send: async (_queuedSession, metadata) => {
-                if (!sendPromptRef.current) {
-                  throw new Error(translate(localeRef.current, 'errors.no_live_runtime'))
-                }
-                await sendPromptRef.current(
-                  latest,
-                  metadata.visiblePrompt,
-                  metadata.attachments,
-                  metadata.providerPrompt,
-                  metadata.embeddedNotes,
-                )
-              },
-              cache: cacheSession,
-              persist: persistOrdered,
-            },
-          )
+          await drainNextQueued(saved)
         })
         .catch((error) => toast.error(errorMessage(error)))
         .finally(() => {
@@ -448,7 +456,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           }
         })
     },
-    [config, queryClient, cacheSession, persistOrdered, finalizeSettledTurn],
+    [drainNextQueued, finalizeSettledTurn],
   )
 
   const subscribe = useCallback(
@@ -548,6 +556,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           }))
         }
         if (result.error) toast.error(result.error)
+        if (result.queueDrain) {
+          void drainNextQueued(result.session)
+            .catch((error) => toast.error(errorMessage(error)))
+        }
         if (result.settled) {
           const projectionTimer = projectionPersistTimers.current.get(session.id)
           if (projectionTimer !== undefined) {
@@ -591,6 +603,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       persistOrdered,
       scheduleProjectionPersist,
       finishSettledTurn,
+      drainNextQueued,
     ],
   )
 
@@ -658,6 +671,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         currentSession.status === 'connecting' ||
         currentSession.status === 'working' ||
         currentSession.status === 'waiting' ||
+        currentSession.compacting ||
         checkpointCaptures.current.has(currentSession.id)
       ) {
         const queued = queueSubmission(
@@ -1030,6 +1044,28 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     ],
   )
 
+  const compactContext = useCallback(
+    async (inputSession: AgentSession, focus: string | null) => {
+      if (!client || !config || phase !== 'connected') {
+        throw new Error(translate(localeRef.current, 'errors.daemon_disconnected'))
+      }
+      const key = daemonKeys.session(config.address, inputSession.id)
+      const current = queryClient.getQueryData<AgentSession>(key) ?? inputSession
+      queryClient.setQueryData<AgentSession>(key, { ...current, compacting: true })
+      try {
+        await client.compactSession(
+          inputSession.id,
+          focus,
+          runtimes[inputSession.id]?.runtimeId,
+        )
+      } catch (error) {
+        queryClient.setQueryData<AgentSession>(key, { ...current, compacting: false })
+        throw error
+      }
+    },
+    [client, config, phase, queryClient, runtimes],
+  )
+
   sendPromptRef.current = sendPrompt
 
   const steerPrompt = useCallback<RuntimeContextValue['steerPrompt']>(
@@ -1365,6 +1401,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     attachSession,
     sendPrompt,
     sendGoalOperation,
+    compactContext,
     steerPrompt,
     cancel,
     closeSession,

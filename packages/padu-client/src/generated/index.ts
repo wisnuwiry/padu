@@ -21,6 +21,7 @@ export type { CloudflareHostConfig } from "./CloudflareHostConfig";
 export type { Command } from "./Command";
 export type { CommandScope } from "./CommandScope";
 export type { CommitSnapshot } from "./CommitSnapshot";
+export type { CompactionMarker } from "./CompactionMarker";
 export type { ComposerDraft } from "./ComposerDraft";
 export type { ComposerDraftAttachment } from "./ComposerDraftAttachment";
 export type { ComposerDraftChange } from "./ComposerDraftChange";

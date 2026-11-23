@@ -114,6 +114,26 @@ impl EventSink {
             .broadcast_checkpoint_failed(task_id, session_id, streak);
     }
 
+    pub fn send_compaction_started(&self, session_id: Uuid, started_at: u64) {
+        self.hub
+            .broadcast_compaction_started(session_id, started_at);
+    }
+
+    pub fn send_session_compacted(
+        &self,
+        session_id: Uuid,
+        tokens_before: Option<u64>,
+        tokens_after: Option<u64>,
+        completed_at: u64,
+    ) {
+        self.hub
+            .broadcast_session_compacted(session_id, tokens_before, tokens_after, completed_at);
+    }
+
+    pub fn send_compaction_failed(&self, session_id: Uuid, reason: String) {
+        self.hub.broadcast_compaction_failed(session_id, reason);
+    }
+
     pub fn send_task_state_changed(&self) {
         let mut state = self.hub.state.lock();
         Hub::broadcast_task_state_changed(&mut state, 0);
@@ -238,6 +258,10 @@ impl Hub {
             runtime_id,
             hub: self.clone(),
         }
+    }
+
+    fn active_runtime_id(&self, session_id: Uuid) -> Option<Uuid> {
+        self.state.lock().active_runtimes.get(&session_id).copied()
     }
 
     fn begin_runtime(&self, session_id: Uuid, runtime_id: Uuid) {
@@ -460,6 +484,44 @@ impl Hub {
             .retain(|_, subscriber| subscriber.send(message.clone()).is_ok());
     }
 
+    fn broadcast_compaction_started(&self, session_id: Uuid, started_at: u64) {
+        let message = ServerMessage::CompactionStarted {
+            session_id,
+            started_at,
+        };
+        self.state
+            .lock()
+            .subscribers
+            .retain(|_, subscriber| subscriber.send(message.clone()).is_ok());
+    }
+
+    fn broadcast_session_compacted(
+        &self,
+        session_id: Uuid,
+        tokens_before: Option<u64>,
+        tokens_after: Option<u64>,
+        completed_at: u64,
+    ) {
+        let message = ServerMessage::SessionCompacted {
+            session_id,
+            tokens_before,
+            tokens_after,
+            completed_at,
+        };
+        self.state
+            .lock()
+            .subscribers
+            .retain(|_, subscriber| subscriber.send(message.clone()).is_ok());
+    }
+
+    fn broadcast_compaction_failed(&self, session_id: Uuid, reason: String) {
+        let message = ServerMessage::CompactionFailed { session_id, reason };
+        self.state
+            .lock()
+            .subscribers
+            .retain(|_, subscriber| subscriber.send(message.clone()).is_ok());
+    }
+
     fn broadcast_task_state_changed(state: &mut HubState, source_subscriber_id: u64) {
         state.task_state_revision = state.task_state_revision.saturating_add(1);
         let message = ServerMessage::TaskStateChanged {
@@ -538,11 +600,18 @@ impl RequestDispatcher {
 
     fn dispatch_runtime(
         &self,
-        request: Request,
+        mut request: Request,
         outgoing: Sender<ServerMessage>,
         source_subscriber_id: u64,
     ) {
-        let session_id = request.session_id;
+        let session_id = command_session_id(&request.command).unwrap_or(request.session_id);
+        request.session_id = session_id;
+        if matches!(&request.command, Command::CompactSession { .. })
+            && request.runtime_id.is_nil()
+            && let Some(runtime_id) = self.hub.active_runtime_id(session_id)
+        {
+            request.runtime_id = runtime_id;
+        }
         let failed_request_id = request.request_id;
         let failed_outgoing = outgoing.clone();
         let mut dispatched = DispatchedRequest {
@@ -840,6 +909,7 @@ fn command_targets_runtime(command: &Command) -> bool {
         command,
         Command::AttachSession
             | Command::Start { .. }
+            | Command::CompactSession { .. }
             | Command::Prompt { .. }
             | Command::Steer { .. }
             | Command::Cancel
@@ -862,6 +932,13 @@ fn command_targets_runtime(command: &Command) -> bool {
             | Command::CloseSession
             | Command::RemoveSession
     )
+}
+
+fn command_session_id(command: &Command) -> Option<Uuid> {
+    match command {
+        Command::CompactSession { session_id, .. } => Some(*session_id),
+        _ => None,
+    }
 }
 
 fn run_runtime_mailbox(
@@ -2455,5 +2532,16 @@ mod tests {
             computer_use_enabled: false,
             provider_cursor: None,
         }
+    }
+
+    #[test]
+    fn compaction_routes_through_the_target_session_runtime_mailbox() {
+        let session_id = Uuid::new_v4();
+        let command = Command::CompactSession {
+            session_id,
+            focus: None,
+        };
+        assert!(command_targets_runtime(&command));
+        assert_eq!(command_session_id(&command), Some(session_id));
     }
 }

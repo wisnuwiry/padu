@@ -3542,9 +3542,10 @@ impl Padu {
         if self.response_fork_preparations.contains_key(&session.id) {
             return;
         }
-        if session.is_busy() {
-            // While the agent is working, Enter queues a follow-up instead of
-            // refusing the message. The queue drains once the turn settles.
+        if session.is_busy() || session.compacting {
+            // While the agent is working or compacting, Enter queues a
+            // follow-up instead of refusing the message. The queue drains once
+            // the foreground phase settles.
             self.enqueue_follow_up_submission(session.id, submission, cx);
             return;
         }
@@ -4065,6 +4066,7 @@ impl Padu {
             return;
         };
         if session.is_busy()
+            || session.compacting
             || session.queued_messages.is_empty()
             || self.ending_checkpoint_pending(session_id)
             // Messages parked behind a goal-initiated provider start stay
@@ -4219,7 +4221,7 @@ impl Padu {
             self.defer_queue_drain(session_id);
             return;
         }
-        if session.status.is_busy() {
+        if session.status.is_busy() || session.compacting {
             if let Some(queued_drain) = queued_drain.take() {
                 self.restore_queued_drain(Some(queued_drain), QueuedDrainFailure::Deferred);
             } else {

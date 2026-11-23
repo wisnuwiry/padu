@@ -109,6 +109,17 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
             "turnFinished",
             json!({ "success": success, "summary": summary }),
         ),
+        DriverEvent::CompactionStarted => ("compactionStarted", Value::Null),
+        DriverEvent::SessionCompacted {
+            tokens_before,
+            tokens_after,
+        } => (
+            "sessionCompacted",
+            json!({ "tokensBefore": tokens_before, "tokensAfter": tokens_after }),
+        ),
+        DriverEvent::CompactionFailed { reason } => {
+            ("compactionFailed", json!({ "reason": reason }))
+        }
         DriverEvent::Error(error) => ("error", Value::String(error)),
         DriverEvent::ProcessExited => ("processExited", Value::Null),
     };
@@ -191,6 +202,31 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
             DriverEvent::TurnFinished {
                 success: finished.success,
                 summary: finished.summary,
+            }
+        }
+        "compactionStarted" => DriverEvent::CompactionStarted,
+        "sessionCompacted" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct WireCompacted {
+                tokens_before: Option<u64>,
+                tokens_after: Option<u64>,
+            }
+            let payload: WireCompacted = serde_json::from_value(payload)?;
+            DriverEvent::SessionCompacted {
+                tokens_before: payload.tokens_before,
+                tokens_after: payload.tokens_after,
+            }
+        }
+        "compactionFailed" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct WireFailed {
+                reason: String,
+            }
+            let payload: WireFailed = serde_json::from_value(payload)?;
+            DriverEvent::CompactionFailed {
+                reason: payload.reason,
             }
         }
         "error" => DriverEvent::Error(serde_json::from_value(payload)?),
@@ -319,5 +355,41 @@ mod tests {
         assert_eq!(request_id, "request-1");
         assert_eq!(questions[0].id, "deployment");
         assert_eq!(questions[0].options[0].label, "Preview");
+    }
+
+    #[test]
+    fn compaction_events_round_trip_through_the_daemon_wire() {
+        let started_wire = event_to_wire(DriverEvent::CompactionStarted).unwrap();
+        assert_eq!(started_wire.kind, "compactionStarted");
+        assert!(matches!(
+            event_from_wire(started_wire).unwrap(),
+            DriverEvent::CompactionStarted
+        ));
+
+        let compacted_wire = event_to_wire(DriverEvent::SessionCompacted {
+            tokens_before: Some(150_000),
+            tokens_after: Some(12_000),
+        })
+        .unwrap();
+        assert_eq!(compacted_wire.kind, "sessionCompacted");
+        let DriverEvent::SessionCompacted {
+            tokens_before,
+            tokens_after,
+        } = event_from_wire(compacted_wire).unwrap()
+        else {
+            panic!("the event changed variants during its wire round trip");
+        };
+        assert_eq!(tokens_before, Some(150_000));
+        assert_eq!(tokens_after, Some(12_000));
+
+        let failed_wire = event_to_wire(DriverEvent::CompactionFailed {
+            reason: "Harness rejected command".into(),
+        })
+        .unwrap();
+        assert_eq!(failed_wire.kind, "compactionFailed");
+        let DriverEvent::CompactionFailed { reason } = event_from_wire(failed_wire).unwrap() else {
+            panic!("the event changed variants during its wire round trip");
+        };
+        assert_eq!(reason, "Harness rejected command");
     }
 }

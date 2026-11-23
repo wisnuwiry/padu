@@ -2026,6 +2026,10 @@ commands.goal_description:
   en: Set a goal this task keeps pursuing
 commands.resume_description:
   en: Resume a terminal agent session
+commands.compact_description:
+  en: Summarize conversation context with the active harness
+commands.compact_unsupported:
+  en: Context compaction is not available for %{provider}
 
 goal.title:
   en: Goal
@@ -3178,6 +3182,16 @@ usage.shortcut:
   en: Usage (%{shortcut})
 usage.context_window:
   en: Context window
+usage.compact_tooltip:
+  en: Context is filling up. Click to compact.
+usage.compact_action:
+  en: Compact context
+usage.compact_focus_label:
+  en: Focus (optional)
+usage.compact_focus_placeholder:
+  en: Optional focus, such as architecture decisions
+usage.compacting:
+  en: Compacting context…
 usage.plan_limits:
   en: Plan usage limits
 usage.plan_limits_named:
@@ -3188,6 +3202,27 @@ usage.unavailable:
   en: Unavailable — %{error}
 usage.usage_limit:
   en: Usage limit
+
+transcript.compacting_title:
+  en: Compacting conversation context…
+transcript.compacting_subtitle:
+  en: "%{provider} is summarizing session history"
+transcript.compacted_badge:
+  en: Context compacted
+transcript.compacted_tokens:
+  en: "%{before} → %{after} tokens"
+transcript.compacted_reduction:
+  en: "%{before} → %{after} tokens (−%{percent}%)"
+transcript.show_compacted_history:
+  en: "Show compacted history (%{count} turns)"
+transcript.hide_compacted_history:
+  en: Hide compacted history
+transcript.compacted_history_retained:
+  en: Earlier turns remain available in this transcript.
+transcript.compaction_checkpoint_preserved:
+  en: Git checkpoints stay preserved and rewindable.
+transcript.compaction_failed:
+  en: "Context compaction failed: %{reason}"
 usage.hour_limit:
   en: "%{count}-hour limit"
 usage.day_limit:

@@ -150,6 +150,14 @@ impl DriverHandle {
     pub fn fork(&self, turns_to_remove: usize) -> anyhow::Result<ProviderResumeCursor> {
         self.inner.fork(turns_to_remove)
     }
+
+    pub fn supports_compaction(&self) -> bool {
+        self.inner.supports_compaction()
+    }
+
+    pub fn compact(&self, focus: Option<&str>) -> anyhow::Result<()> {
+        self.inner.compact(focus)
+    }
 }
 
 pub trait DriverControl: Send + Sync {
@@ -161,6 +169,13 @@ pub trait DriverControl: Send + Sync {
     /// the outcome asynchronously through `DriverEvent::SteerAccepted` or
     /// `DriverEvent::SteerRejected`.
     fn steer(&self, _prompt: String) {}
+    fn supports_compaction(&self) -> bool {
+        false
+    }
+    /// Request context compaction from the harness.
+    fn compact(&self, _focus: Option<&str>) -> anyhow::Result<()> {
+        anyhow::bail!("context compaction is not supported by this provider transport")
+    }
     fn cancel(&self);
     fn cancel_computer_use(&self) {}
     fn refresh_background_work(&self) {}

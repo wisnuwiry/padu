@@ -161,6 +161,9 @@ impl Padu {
             Query::Ready(catalog) => {
                 let mut commands =
                     composer_complete::merge_reported_commands(&catalog.commands, &reported);
+                if !provider.supports_compaction() {
+                    commands.retain(|command| command.name != "compact");
+                }
                 if !commands.iter().any(|command| command.name == "note") {
                     commands.push(SlashCommand {
                         name: "note".into(),

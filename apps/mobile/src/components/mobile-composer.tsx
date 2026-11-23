@@ -7,6 +7,10 @@ import type {
   UserInputAnswer,
 } from '@padu/client';
 import {
+  parseCompactionSubmission,
+  supportsCompaction,
+} from '@padu/client';
+import {
   detectSkillTrigger,
   filterSkillCommands,
   replaceSkillTrigger,
@@ -413,21 +417,30 @@ export function ComposerSkillAutocomplete({
  * content and hugging the right edge. Renders nothing until the daemon
  * reports usage or a selected window.
  */
-function ComposerContextRow({ session }: { session: AgentSession }) {
+function ComposerContextRow({
+  session,
+  onPress,
+}: {
+  session: AgentSession;
+  onPress?: () => void;
+}) {
   const theme = useTheme();
   const usage = session.context_usage;
   const percent = usage?.window ? Math.round(usage.tokens * 100 / usage.window) : null;
   if (!usage && !session.context_window) return null;
+  const canCompact = supportsCompaction(session.provider);
 
   const summary = percent != null
     ? `context ${percent}%`
     : usage
       ? `${formatTokens(usage.tokens)} tokens`
       : session.context_window;
-  return (
+  const content = (
     <View
+      accessible={!canCompact}
+      accessibilityHint={!canCompact ? undefined : 'Opens context compaction options'}
       accessibilityLabel={summary || 'Session context'}
-      accessibilityRole="text"
+      accessibilityRole={!canCompact ? 'text' : undefined}
       style={styles.contextRow}>
       {percent != null && usage?.window ? (
         <>
@@ -444,7 +457,27 @@ function ComposerContextRow({ session }: { session: AgentSession }) {
           </Text>
         </>
       )}
+      {canCompact && (
+        <PaduIcon
+          name={session.compacting ? 'loaderCircle' : 'sparkle'}
+          size={12}
+          tintColor={session.compacting ? theme.accent : theme.textTertiary}
+        />
+      )}
     </View>
+  );
+  if (!canCompact || !onPress) return content;
+  return (
+    <Pressable
+      accessibilityHint="Opens context compaction options"
+      accessibilityLabel={summary || 'Session context'}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: session.compacting }}
+      hitSlop={12}
+      onPress={onPress}
+      style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}>
+      {content}
+    </Pressable>
   );
 }
 
@@ -469,6 +502,9 @@ export function MobileComposer({
   const [preservedEmbeddedNotes, setPreservedEmbeddedNotes] = useState<EmbeddedNote[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [compactPanelOpen, setCompactPanelOpen] = useState(false);
+  const [compactFocus, setCompactFocus] = useState('');
+  const supportsCompactionFocus = session.provider === 'claude' || session.provider === 'agy';
   const [skillWarnings, setSkillWarnings] = useState<readonly string[]>(
     initialSkillWarnings,
   );
@@ -713,9 +749,52 @@ export function MobileComposer({
     });
   }
 
+  async function runContextCompaction(focus: string | null, clearComposer = false) {
+    if (submitting || session.compacting || sessionBusy(session)) return;
+    setSubmitting(true);
+    setLocalError(null);
+    try {
+      await runtime.compactContext(session, supportsCompactionFocus ? focus : null);
+      if (clearComposer) {
+        setDraft('');
+        setPreservedAttachments([]);
+        setPreservedEmbeddedNotes([]);
+        setCursor(0);
+        await draftFlush.flush();
+        if (daemon.client) {
+          await applyComposerDraftChanges(daemon.client, [{
+            target: { type: 'session', sessionId: session.id },
+            draft: null,
+          }]).catch(() => {});
+        }
+      }
+      setCompactFocus('');
+      setCompactPanelOpen(false);
+      await Haptics.selectionAsync();
+    } catch (cause) {
+      setLocalError(cause instanceof Error ? cause.message : String(cause));
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function submit() {
     const prompt = draft.trim();
     if (!prompt || submitting) return;
+    if (/^\/compact(?:\s|$)/u.test(prompt) && !supportsCompaction(session.provider)) {
+      setLocalError(
+        `Context compaction is not available for ${session.provider}.`,
+      );
+      return;
+    }
+    const compaction = preservedAttachments.length === 0 && preservedEmbeddedNotes.length === 0
+      ? parseCompactionSubmission(session.provider, prompt)
+      : null;
+    if (compaction) {
+      await runContextCompaction(compaction.focus, true);
+      return;
+    }
     const submittedSession = session;
     setSubmitting(true);
     setLocalError(null);
@@ -1006,7 +1085,70 @@ export function MobileComposer({
           setCursor(event.nativeEvent.selection.end);
         }}
       />
-      <ComposerContextRow session={session} />
+      <ComposerContextRow
+        session={session}
+        onPress={supportsCompaction(session.provider)
+          ? () => setCompactPanelOpen((open) => !open)
+          : undefined}
+      />
+      {compactPanelOpen && supportsCompaction(session.provider) && (
+        <View
+          style={[
+            styles.compactPanel,
+            {
+              backgroundColor: theme.surface,
+              borderColor: theme.border,
+            },
+          ]}>
+          <Text style={[styles.compactPanelTitle, { color: theme.text }]}>
+            {session.compacting ? 'Compacting context…' : 'Compact context'}
+          </Text>
+          <Text style={[styles.compactPanelBody, { color: theme.textSecondary }]}>
+            Ask the harness to summarize this conversation. Earlier turns and Git checkpoints stay available.
+          </Text>
+          {supportsCompactionFocus && (
+            <TextInput
+              accessibilityLabel="Optional compaction focus"
+              editable={!session.compacting && !sessionBusy(session)}
+              placeholder="Optional focus, such as architecture decisions"
+              placeholderTextColor={theme.textGhost}
+              style={[
+                styles.compactFocusInput,
+                {
+                  backgroundColor: theme.overlay,
+                  borderColor: theme.border,
+                  color: theme.text,
+                },
+              ]}
+              value={compactFocus}
+              onChangeText={setCompactFocus}
+              onSubmitEditing={() => void runContextCompaction(compactFocus.trim() || null)}
+            />
+          )}
+          <Pressable
+            accessibilityLabel={session.compacting ? 'Compacting context' : 'Compact context'}
+            accessibilityRole="button"
+            disabled={session.compacting || submitting || sessionBusy(session)}
+            onPress={() => void runContextCompaction(
+              supportsCompactionFocus ? compactFocus.trim() || null : null,
+            )}
+            style={({ pressed }) => [
+              styles.compactAction,
+              {
+                backgroundColor: theme.accent,
+                opacity: session.compacting || submitting || sessionBusy(session)
+                  ? 0.45
+                  : pressed
+                    ? 0.7
+                    : 1,
+              },
+            ]}>
+            <Text style={[styles.compactActionText, { color: theme.background }]}>
+              {session.compacting ? 'Compacting…' : 'Compact context'}
+            </Text>
+          </Pressable>
+        </View>
+      )}
 
       <ModelSheet
         model={session.model ?? null}
@@ -1313,6 +1455,31 @@ const styles = StyleSheet.create({
     minHeight: 20,
     paddingHorizontal: 4,
   },
+  compactPanel: {
+    borderRadius: Radius.medium,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: Spacing.two,
+    marginTop: Spacing.two,
+    padding: Spacing.three,
+  },
+  compactPanelTitle: { fontSize: 14, fontWeight: '600' },
+  compactPanelBody: { fontSize: 12, lineHeight: 16 },
+  compactFocusInput: {
+    borderRadius: Radius.small,
+    borderWidth: StyleSheet.hairlineWidth,
+    fontSize: 13,
+    minHeight: 44,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.two,
+  },
+  compactAction: {
+    alignItems: 'center',
+    borderRadius: Radius.small,
+    justifyContent: 'center',
+    minHeight: 44,
+    paddingHorizontal: Spacing.three,
+  },
+  compactActionText: { fontSize: 13, fontWeight: '700' },
   statusItem: { alignItems: 'center', flexDirection: 'row', flexShrink: 1, gap: 4 },
   statusText: { flexShrink: 1, fontSize: 11, fontVariant: ['tabular-nums'], fontWeight: '500' },
   iconButton: {

@@ -42,6 +42,7 @@ const DISABLE_CODEX_NODE_REPL: &str = "mcp_servers.node_repl.enabled=false";
 enum CommandMessage {
     Prompt(String),
     Steer(String),
+    Compact,
     Cancel,
     Respond {
         request_id: String,
@@ -455,6 +456,20 @@ impl CodexDriver {
                                 "method": "turn/start",
                                 "id": next_request_id,
                                 "params": params
+                            })
+                        }
+                        CommandMessage::Compact => {
+                            let Some(thread_id) = wait_for_thread_id(&writer_thread_id) else {
+                                let _ = writer_events.send(DriverEvent::Error(tr!(
+                                    "errors.codex_thread_open_incomplete"
+                                )));
+                                continue;
+                            };
+                            next_request_id += 1;
+                            json!({
+                                "method": "thread/compact/start",
+                                "id": next_request_id,
+                                "params": {"threadId": thread_id}
                             })
                         }
                         CommandMessage::Steer(text) => {
@@ -1030,6 +1045,21 @@ impl DriverControl for CodexDriver {
         let _ = self.commands.send(CommandMessage::Steer(prompt));
     }
 
+    fn supports_compaction(&self) -> bool {
+        true
+    }
+
+    fn compact(&self, focus: Option<&str>) -> anyhow::Result<()> {
+        if focus.is_some_and(|focus| !focus.trim().is_empty()) {
+            anyhow::bail!(
+                "Codex native compaction does not accept a custom focus; compact without focus"
+            );
+        }
+        self.commands
+            .send(CommandMessage::Compact)
+            .map_err(|e| anyhow!("{e}"))
+    }
+
     fn cancel(&self) {
         let _ = self.commands.send(CommandMessage::Cancel);
     }
@@ -1356,6 +1386,10 @@ struct CodexStreamState {
     next_citation_number: usize,
     /// Item id and part index of the reasoning chunk currently streaming.
     reasoning_part: Option<(String, u64)>,
+    /// Native compaction emits both a completed item and the deprecated
+    /// `thread/compacted` notification for the same turn. Remember that turn
+    /// so only one settled event reaches Padu.
+    completed_compaction_turn: Option<String>,
 }
 
 impl CodexStreamState {
@@ -1868,6 +1902,49 @@ fn handle_codex_message(
                         delta: delta.to_owned(),
                     },
                 ));
+            }
+        }
+        "item/started"
+            if params
+                .pointer("/item/type")
+                .and_then(Value::as_str)
+                .is_some_and(|kind| kind == "contextCompaction") =>
+        {
+            let _ = events.send(DriverEvent::CompactionStarted);
+        }
+        "item/completed"
+            if params
+                .pointer("/item/type")
+                .and_then(Value::as_str)
+                .is_some_and(|kind| kind == "contextCompaction") =>
+        {
+            let turn_id = params
+                .get("turnId")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            if !turn_id.as_deref().is_some_and(|turn_id| {
+                stream_state.completed_compaction_turn.as_deref() == Some(turn_id)
+            }) {
+                stream_state.completed_compaction_turn = turn_id;
+                let _ = events.send(DriverEvent::SessionCompacted {
+                    tokens_before: None,
+                    tokens_after: None,
+                });
+            }
+        }
+        "thread/compacted" => {
+            let turn_id = params
+                .get("turnId")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            if !turn_id.as_deref().is_some_and(|turn_id| {
+                stream_state.completed_compaction_turn.as_deref() == Some(turn_id)
+            }) {
+                stream_state.completed_compaction_turn = turn_id;
+                let _ = events.send(DriverEvent::SessionCompacted {
+                    tokens_before: None,
+                    tokens_after: None,
+                });
             }
         }
         "item/started" | "item/completed" => {
@@ -3239,6 +3316,72 @@ mod tests {
             reasoning,
             "**Evaluating cleanup**\n\n**Analyzing methods** and detection"
         );
+    }
+
+    #[test]
+    fn native_compaction_emits_one_started_and_settled_pair() {
+        let thread_id = Mutex::new(Some("thread-1".to_owned()));
+        let turn_id = Mutex::new(Some("turn-compact".to_owned()));
+        let turn_ids = Mutex::new(vec!["turn-compact".to_owned()]);
+        let pending_rollbacks = Mutex::new(HashMap::new());
+        let pending_forks = Mutex::new(HashMap::new());
+        let pending_steers = Mutex::new(HashMap::new());
+        let background_rpcs = Mutex::new(BackgroundRpcState::default());
+        let goal_rpcs = Mutex::new(GoalRpcState::default());
+        let (goal_commands, _goal_command_rx) = unbounded();
+        let (event_tx, event_rx) = unbounded();
+        let mut stream_state = CodexStreamState::default();
+
+        for message in [
+            json!({
+                "method": "item/started",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-compact",
+                    "item": {"type": "contextCompaction", "id": "compact-1"}
+                }
+            }),
+            json!({
+                "method": "item/completed",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-compact",
+                    "item": {"type": "contextCompaction", "id": "compact-1"}
+                }
+            }),
+            json!({
+                "method": "thread/compacted",
+                "params": {"threadId": "thread-1", "turnId": "turn-compact"}
+            }),
+        ] {
+            handle_codex_message(
+                message,
+                &thread_id,
+                &turn_id,
+                &turn_ids,
+                &pending_rollbacks,
+                &pending_forks,
+                &pending_steers,
+                &background_rpcs,
+                &goal_rpcs,
+                &goal_commands,
+                &event_tx,
+                &mut stream_state,
+            );
+        }
+
+        assert!(matches!(
+            event_rx.recv().unwrap(),
+            DriverEvent::CompactionStarted
+        ));
+        assert!(matches!(
+            event_rx.recv().unwrap(),
+            DriverEvent::SessionCompacted {
+                tokens_before: None,
+                tokens_after: None,
+            }
+        ));
+        assert!(event_rx.try_recv().is_err());
     }
 
     #[test]

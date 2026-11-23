@@ -7,7 +7,7 @@ use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Matcher, Utf32Str};
 pub use padu_protocol::composer::{
     CommandScope, FileEntry, SKILL_CAPABILITY_PROBE_VERSION, SkillCapabilityMetadata,
-    SkillNativeSyntax, SkillProviderCapability, SlashCommand,
+    SkillNativeSyntax, SkillProviderCapability, SlashCommand, parse_compaction_submission,
 };
 use padu_protocol::model::{ProviderKind, ProviderModelOption, ReportedCommand};
 

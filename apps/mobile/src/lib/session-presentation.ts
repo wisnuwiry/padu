@@ -34,7 +34,14 @@ export type TranscriptRow =
   | { kind: 'message'; key: string; message: Message; footerTimestamp: number | null }
   | { kind: 'activities'; key: string; block: TranscriptBlock; live: boolean }
   | { kind: 'fold'; key: string; turn: AgentTurn; label: string; expanded: boolean }
-  | { kind: 'changed'; key: string; checkpoint: Checkpoint };
+  | { kind: 'changed'; key: string; turnId: string; checkpoint: Checkpoint }
+  | {
+      kind: 'compaction';
+      key: string;
+      marker: NonNullable<AgentSession['compactions']>[number] | null;
+      provider: ProviderKind;
+      expanded: boolean;
+    };
 
 const DATE_SECTION_TITLES: Record<SessionGroupId, string> = {
   pinned: 'Pinned',
@@ -256,6 +263,7 @@ interface TaggedRow {
 export function buildTranscriptRows(
   session: AgentSession,
   expandedFolds: ReadonlySet<string> = new Set(),
+  expandedCompactions: ReadonlySet<string> = new Set(),
 ): TranscriptRow[] {
   const runningTurnId = session.turns.find((turn) => turn.status === 'running')?.id ?? null;
   const latestBlock = session.transcript_blocks.at(-1);
@@ -336,7 +344,12 @@ export function buildTranscriptRows(
     if (item.turnId && lastRowByTurn.get(item.turnId) === item) {
       const turn = turnsById.get(item.turnId);
       if (turn && turn.status !== 'running' && turn.checkpoint?.files.length) {
-        rows.push({ kind: 'changed', key: `changed:${turn.id}`, checkpoint: turn.checkpoint });
+        rows.push({
+          kind: 'changed',
+          key: `changed:${turn.id}`,
+          turnId: turn.id,
+          checkpoint: turn.checkpoint,
+        });
       }
     }
   }
@@ -344,5 +357,79 @@ export function buildTranscriptRows(
     const turn = turnsById.get(turnId);
     if (turn?.completed_at && !row.message.streaming) row.footerTimestamp = turn.completed_at;
   }
-  return rows;
+  const withCompactions = insertCompactionRows(rows, session, expandedCompactions);
+  if (session.compacting) {
+    withCompactions.push({
+      kind: 'compaction',
+      key: 'compaction:active',
+      marker: null,
+      provider: session.provider,
+      expanded: false,
+    });
+  }
+  return withCompactions;
+}
+
+function insertCompactionRows(
+  rows: TranscriptRow[],
+  session: AgentSession,
+  expandedCompactions: ReadonlySet<string>,
+): TranscriptRow[] {
+  const result = [...rows];
+  const sameTurnOffset = new Map<number, number>();
+  const markers = session.compactions ?? [];
+  for (const marker of markers) {
+    const boundary = Math.max(0, Math.min(marker.turnCount, session.turns.length));
+    let rowBoundary = 0;
+    if (boundary > 0) {
+      const turnId = session.turns[boundary - 1]!.id;
+      for (let index = result.length - 1; index >= 0; index -= 1) {
+        if (transcriptRowTurnId(result[index]!) === turnId) {
+          rowBoundary = index + 1;
+          break;
+        }
+      }
+    }
+    const priorAtBoundary = sameTurnOffset.get(boundary) ?? 0;
+    result.splice(Math.min(rowBoundary + priorAtBoundary, result.length), 0, {
+      kind: 'compaction',
+      key: `compaction:${marker.id}`,
+      marker,
+      provider: session.provider,
+      expanded: expandedCompactions.has(marker.id),
+    });
+    sameTurnOffset.set(boundary, priorAtBoundary + 1);
+  }
+
+  const hiddenTurnIds = new Set<string>();
+  let segmentStart = 0;
+  for (const marker of markers) {
+    const segmentEnd = Math.max(0, Math.min(marker.turnCount, session.turns.length));
+    segmentStart = Math.min(segmentStart, segmentEnd);
+    if (!expandedCompactions.has(marker.id)) {
+      for (const turn of session.turns.slice(segmentStart, segmentEnd)) {
+        hiddenTurnIds.add(turn.id);
+      }
+    }
+    segmentStart = segmentEnd;
+  }
+  return result.filter((row) => {
+    const turnId = transcriptRowTurnId(row);
+    return !turnId || !hiddenTurnIds.has(turnId);
+  });
+}
+
+function transcriptRowTurnId(row: TranscriptRow): string | null {
+  switch (row.kind) {
+    case 'message':
+      return row.message.turn_id;
+    case 'activities':
+      return row.block.turn_id;
+    case 'fold':
+      return row.turn.id;
+    case 'changed':
+      return row.turnId;
+    case 'compaction':
+      return null;
+  }
 }

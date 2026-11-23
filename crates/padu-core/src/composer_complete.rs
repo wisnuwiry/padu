@@ -13,7 +13,9 @@ use std::path::{Path, PathBuf};
 use crate::model::{ProviderKind, ReportedCommand};
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Matcher, Utf32Str};
-pub use padu_protocol::composer::{CommandScope, FileEntry, SkillCapabilityMetadata, SlashCommand};
+pub use padu_protocol::composer::{
+    CommandScope, FileEntry, SkillCapabilityMetadata, SlashCommand, parse_compaction_submission,
+};
 
 /// How many rows a filter pass returns. The popup shows a screenful and the
 /// keyboard walks the rest; past this the tail is noise, not choice.
@@ -394,6 +396,17 @@ fn assemble_slash_commands(
         template: None,
         skill_file: None,
     });
+    if provider.supports_compaction() {
+        commands.retain(|command| command.name != "compact");
+        commands.push(SlashCommand {
+            name: "compact".to_owned(),
+            description: crate::i18n::translate("commands.compact_description"),
+            scope: CommandScope::Builtin,
+            argument_hint: Some("[focus]".to_owned()),
+            template: None,
+            skill_file: None,
+        });
+    }
     sort_commands_for_display(&mut commands);
     commands
 }
@@ -1493,6 +1506,52 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn compaction_is_a_builtin_only_for_supported_harnesses() {
+        let root =
+            std::env::temp_dir().join(format!("padu-compact-command-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        for provider in ProviderKind::ALL {
+            let commands = assemble_slash_commands(provider, &root, Vec::new());
+            assert_eq!(
+                commands.iter().any(|command| command.name == "compact"),
+                provider.supports_compaction(),
+                "{} exposed the wrong compaction availability",
+                provider.display_name()
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn compaction_submission_parses_focus_and_rejects_other_providers() {
+        assert_eq!(
+            parse_compaction_submission(ProviderKind::Claude, "/compact"),
+            Some(None)
+        );
+        assert_eq!(
+            parse_compaction_submission(ProviderKind::Agy, " /compact   keep API decisions "),
+            Some(Some("keep API decisions".into()))
+        );
+        assert_eq!(
+            parse_compaction_submission(ProviderKind::Codex, "/compacted"),
+            None
+        );
+        assert_eq!(
+            parse_compaction_submission(ProviderKind::Codex, "/compact"),
+            Some(None)
+        );
+        assert_eq!(
+            parse_compaction_submission(ProviderKind::Codex, "/compact retain architecture"),
+            Some(None)
+        );
+        assert_eq!(
+            parse_compaction_submission(ProviderKind::OpenCode, "/compact"),
+            None
+        );
     }
 
     // Windows gates symlink creation behind Developer Mode.

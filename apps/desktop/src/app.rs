@@ -33,11 +33,11 @@ use crate::md;
 use crate::model::{
     ActivityItem, ActivityKind, AgentSession, BackgroundWorkEvent, BackgroundWorkItem,
     BackgroundWorkKey, BackgroundWorkKind, BackgroundWorkStatus, Checkpoint, CheckpointStatus,
-    ContextUsage, DriverEvent, FavoriteModel, InteractionMode, Message, MessageAttachment,
-    MessageRole, PendingPermission, Project, ProviderKind, ProviderModel, ProviderProbe,
-    ProviderResumeCursor, ProviderSessionHistory, ProviderSessionSummary, QueuedMessage,
-    ReasoningBlock, RuntimeMode, SessionStatus, SessionWorkspace, TranscriptBlock, TurnStatus,
-    UserInputAnswer, UserInputQuestion, compact_path, unix_time, unix_time_millis,
+    CompactionMarker, ContextUsage, DriverEvent, FavoriteModel, InteractionMode, Message,
+    MessageAttachment, MessageRole, PendingPermission, Project, ProviderKind, ProviderModel,
+    ProviderProbe, ProviderResumeCursor, ProviderSessionHistory, ProviderSessionSummary,
+    QueuedMessage, ReasoningBlock, RuntimeMode, SessionStatus, SessionWorkspace, TranscriptBlock,
+    TurnStatus, UserInputAnswer, UserInputQuestion, compact_path, unix_time, unix_time_millis,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -1967,6 +1967,7 @@ pub struct Padu {
     copied_activity_feedback: HashMap<(Uuid, ActivityDisclosureSectionKind), u64>,
     copied_activity_generation: u64,
     message_edit: Option<MessageEdit>,
+    expanded_compactions: HashSet<Uuid>,
     transcript_rows: ListState,
     /// Active turns use top alignment so row remeasurement cannot invoke the
     /// bottom-aligned list's implicit pin and displace the sent-message anchor.
@@ -2092,6 +2093,8 @@ pub struct Padu {
     /// Find-in-page state for the selected transcript, created lazily on the
     /// first primary-modifier F press.
     transcript_search: Option<transcript_search::TranscriptSearch>,
+    /// Optional focus guidance for compaction launched from the context meter.
+    compact_focus_input: Entity<TextInput>,
     /// Independent selection for the transient toast message. Keeping it out
     /// of the transcript registry prevents an overlay from joining a drag to
     /// whatever happens to be painted beneath it.
@@ -2979,6 +2982,9 @@ impl Padu {
         });
         let usage_project_filter =
             cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("input.filter_projects")));
+        let compact_focus_input = cx.new(|cx| {
+            TextInput::new(window, cx).placeholder(tr!("usage.compact_focus_placeholder"))
+        });
         let right_panel_diff_filter =
             cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("diff.filter_files")));
         let navigation_rail = cx.new(|_| ConversationNavigationRail::new());
@@ -4230,6 +4236,7 @@ impl Padu {
                 copied_activity_feedback: HashMap::new(),
                 copied_activity_generation: 0,
                 message_edit: None,
+                expanded_compactions: HashSet::new(),
                 transcript_rows,
                 anchored_transcript_rows,
                 sidebar_list_state,
@@ -4272,6 +4279,7 @@ impl Padu {
                 transcript_selection: TranscriptSelection::default(),
                 transcript_focus: cx.focus_handle(),
                 transcript_search: None,
+                compact_focus_input,
                 toast_selection: TranscriptSelection::default(),
                 transcript_scrollbar: ScrollbarState::new(),
                 menus: RefCell::new(HashMap::new()),

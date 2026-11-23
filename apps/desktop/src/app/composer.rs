@@ -23,6 +23,13 @@ pub(super) fn composer_submit_action(
     }
 }
 
+fn context_compaction_admission_allowed(session: &AgentSession, preparing: bool) -> bool {
+    session.provider.supports_compaction()
+        && !session.compacting
+        && !session.is_busy()
+        && !preparing
+}
+
 impl Padu {
     // ── Permission ─────────────────────────────────────────────────────────
 
@@ -2331,6 +2338,7 @@ impl Padu {
             || self.execute_note_composer_command(prompt, cx)
             || self.execute_fast_mode_toggle(prompt, cx)
             || self.execute_goal_composer_command(prompt, cx)
+            || self.execute_compact_composer_command(prompt, cx)
     }
 
     fn execute_note_composer_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
@@ -2462,6 +2470,93 @@ impl Padu {
         } else {
             "commands.fast_disabled"
         }));
+        true
+    }
+
+    fn execute_compact_composer_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
+        let invocation = prompt.trim();
+        let is_compaction = invocation == "/compact"
+            || invocation
+                .strip_prefix("/compact")
+                .is_some_and(|rest| rest.chars().next().is_some_and(char::is_whitespace));
+        if !is_compaction {
+            return false;
+        }
+        let Some(session) = self.selected_session() else {
+            return false;
+        };
+        if !session.provider.supports_compaction() {
+            let provider = session.provider.display_name();
+            self.composer.update(cx, |input, cx| input.clear(cx));
+            self.show_toast(tr!("commands.compact_unsupported", provider = provider));
+            return true;
+        }
+        let Some(focus) =
+            crate::composer_complete::parse_compaction_submission(session.provider, prompt)
+        else {
+            return false;
+        };
+        let session_id = session.id;
+        if self.request_context_compaction(session_id, focus, cx) {
+            self.composer.update(cx, |input, cx| input.clear(cx));
+        }
+        true
+    }
+
+    /// Dispatch compaction without blocking the frame on a daemon round trip.
+    /// The optimistic flag makes the transcript respond immediately; the
+    /// daemon's runtime event and persisted session remain authoritative.
+    pub(super) fn request_context_compaction(
+        &mut self,
+        session_id: Uuid,
+        focus: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return false;
+        };
+        if !context_compaction_admission_allowed(
+            session,
+            self.submission_preparations.contains(&session_id),
+        ) {
+            return false;
+        }
+        if let Some(session) = self.state.session_mut(session_id) {
+            session.compacting = true;
+        }
+        self.state.mark_session_dirty(session_id);
+        cx.notify();
+
+        let client = self.daemon.client();
+        cx.spawn(async move |padu, cx| {
+            let request_client = client.clone();
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    request_client.request(
+                        session_id,
+                        Uuid::nil(),
+                        padu_client::Command::CompactSession { session_id, focus },
+                    )
+                })
+                .await;
+            let _ = padu.update(cx, |padu, cx| {
+                if let Err(error) = result {
+                    if let Some(session) = padu.state.session_mut(session_id) {
+                        session.compacting = false;
+                    }
+                    padu.state.mark_session_dirty(session_id);
+                    padu.show_toast(error.to_string());
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
         true
     }
 
@@ -4410,6 +4505,23 @@ pub(super) fn visible_picker_models(
 #[cfg(test)]
 mod attachment_routing_tests {
     use super::*;
+
+    #[test]
+    fn compaction_admission_waits_for_foreground_work_and_preparation() {
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Claude);
+        assert!(context_compaction_admission_allowed(&session, false));
+        assert!(!context_compaction_admission_allowed(&session, true));
+
+        session.status = SessionStatus::Connecting;
+        assert!(!context_compaction_admission_allowed(&session, false));
+        session.status = SessionStatus::Idle;
+        session.compacting = true;
+        assert!(!context_compaction_admission_allowed(&session, false));
+
+        session.compacting = false;
+        session.provider = ProviderKind::OpenCode;
+        assert!(!context_compaction_admission_allowed(&session, false));
+    }
 
     #[test]
     fn attachment_request_rejects_a_stale_host_generation() {

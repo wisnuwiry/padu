@@ -47,6 +47,30 @@ pub struct SlashCommand {
     pub skill_file: Option<String>,
 }
 
+/// Parse Padu's `/compact [focus]` command for the three supported harnesses.
+///
+/// `None` means the text is not a Padu compaction command. `Some(None)` is a
+/// valid command without optional focus guidance. Codex has no focus field in
+/// its native compaction API, so any typed focus is intentionally discarded.
+pub fn parse_compaction_submission(
+    provider: crate::model::ProviderKind,
+    prompt: &str,
+) -> Option<Option<String>> {
+    if !provider.supports_compaction() {
+        return None;
+    }
+    let invocation = prompt.trim();
+    let remainder = invocation.strip_prefix("/compact")?;
+    if !remainder.is_empty() && !remainder.chars().next().is_some_and(char::is_whitespace) {
+        return None;
+    }
+    let focus = remainder.trim();
+    Some(
+        (provider != crate::model::ProviderKind::Codex && !focus.is_empty())
+            .then(|| focus.to_owned()),
+    )
+}
+
 /// The native spellings supported by a provider's CLI.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]

@@ -113,6 +113,51 @@ describe('mobile session presentation', () => {
     expect(contextPercent(session({ context_usage: { tokens: 500, window: null } }))).toBeNull();
   });
 
+  test('anchors compaction at its turn boundary and reveals hidden turns on demand', () => {
+    const current = session({
+      turns: [
+        turn({ id: 'first', turn_count: 1, status: 'completed' }),
+        turn({ id: 'second', turn_count: 2, status: 'completed' }),
+      ],
+      messages: [
+        { id: 'user-1', turn_id: 'first', role: 'user', content: 'first', created_at: 1, streaming: false },
+        { id: 'agent-1', turn_id: 'first', role: 'assistant', content: 'first answer', created_at: 2, streaming: false },
+        { id: 'user-2', turn_id: 'second', role: 'user', content: 'second', created_at: 3, streaming: false },
+        { id: 'agent-2', turn_id: 'second', role: 'assistant', content: 'second answer', created_at: 4, streaming: false },
+      ],
+      compactions: [{
+        id: 'compaction',
+        turnCount: 1,
+        tokensBefore: 80_000,
+        tokensAfter: 8_000,
+        compactedAt: 2,
+      }],
+    });
+    expect(buildTranscriptRows(current).map((row) => (
+      row.kind === 'message' ? `message:${row.message.id}` : row.kind
+    ))).toEqual(['compaction', 'message:user-2', 'message:agent-2']);
+
+    expect(buildTranscriptRows(current, new Set(), new Set(['compaction'])).map((row) => (
+      row.kind === 'message' ? `message:${row.message.id}` : row.kind
+    ))).toEqual([
+      'message:user-1',
+      'message:agent-1',
+      'compaction',
+      'message:user-2',
+      'message:agent-2',
+    ]);
+  });
+
+  test('appends the active compaction card after the revealed transcript', () => {
+    const current = session({ compacting: true });
+    const compactions = buildTranscriptRows(current).filter(
+      (row) => row.kind === 'compaction',
+    );
+    expect(compactions.map((row) => (
+      row.kind === 'compaction' ? row.marker?.id ?? null : undefined
+    ))).toEqual([null]);
+  });
+
   test('keeps provider ordering inline when the turn is unknown', () => {
     const current = session({
       messages: [
