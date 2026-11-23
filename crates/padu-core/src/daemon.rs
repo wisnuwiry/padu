@@ -28,12 +28,251 @@ use padu_protocol::kanban::{Task, TaskStatus, TaskSummary, TaskWorkspaceKind};
 use padu_protocol::model::ProviderSessionHistory;
 use padu_protocol::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
 
+/// One in-flight harness compaction, tracked from the command that requested
+/// it until the harness settles the turn.
+///
+/// `tokens_before` is the context occupancy the meter showed when the user
+/// asked to compact; `tokens_after` is the newest occupancy the harness
+/// reported while compacting. Both are optional because a provider may not
+/// report usage at all.
+#[derive(Clone, Debug, Default)]
+struct CompactionRun {
+    tokens_before: Option<u64>,
+    tokens_after: Option<u64>,
+    provider_turn_started: bool,
+}
+
+#[derive(Clone)]
+struct CompactionTracker {
+    runs: Arc<Mutex<HashMap<Uuid, CompactionRun>>>,
+    task_state: Arc<Mutex<PersistedState>>,
+    task_store: Arc<StateStore>,
+}
+
+impl CompactionTracker {
+    fn begin(&self, session_id: Uuid, tokens_before: Option<u64>) -> anyhow::Result<()> {
+        let mut runs = self.runs.lock();
+        if runs.contains_key(&session_id) {
+            bail!("context compaction is already running for this session");
+        }
+        runs.insert(
+            session_id,
+            CompactionRun {
+                tokens_before,
+                tokens_after: None,
+                provider_turn_started: false,
+            },
+        );
+        Ok(())
+    }
+
+    fn cancel(&self, session_id: Uuid) {
+        self.runs.lock().remove(&session_id);
+    }
+
+    fn observe_usage(&self, session_id: Uuid, context_tokens: Option<u64>) {
+        let Some(tokens) = context_tokens else {
+            return;
+        };
+        if let Some(run) = self.runs.lock().get_mut(&session_id) {
+            run.tokens_after = Some(tokens);
+        }
+    }
+
+    fn mark_turn_started(&self, session_id: Uuid) {
+        if let Some(run) = self.runs.lock().get_mut(&session_id) {
+            run.provider_turn_started = true;
+        }
+    }
+
+    fn settle_after_turn(
+        &self,
+        session_id: Uuid,
+        success: bool,
+        summary: Option<String>,
+        events: &EventSink,
+    ) -> Option<WireDriverEvent> {
+        let run = {
+            let mut runs = self.runs.lock();
+            if !runs
+                .get(&session_id)
+                .is_some_and(|run| run.provider_turn_started)
+            {
+                return None;
+            }
+            runs.remove(&session_id)?
+        };
+        if success {
+            Some(self.complete(session_id, run, None, None, events))
+        } else {
+            Some(self.fail(
+                session_id,
+                summary.unwrap_or_else(|| "the provider could not compact this context".into()),
+                events,
+            ))
+        }
+    }
+
+    fn settle_from_driver(
+        &self,
+        session_id: Uuid,
+        tokens_before: Option<u64>,
+        tokens_after: Option<u64>,
+        events: &EventSink,
+    ) -> bool {
+        let Some(run) = self.runs.lock().remove(&session_id) else {
+            return false;
+        };
+        let _ = self.complete(session_id, run, tokens_before, tokens_after, events);
+        true
+    }
+
+    fn fail_from_driver(&self, session_id: Uuid, reason: String, events: &EventSink) -> bool {
+        if self.runs.lock().remove(&session_id).is_some() {
+            let _ = self.fail(session_id, reason, events);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn fail_before_event(
+        &self,
+        session_id: Uuid,
+        reason: String,
+        events: &EventSink,
+    ) -> Option<WireDriverEvent> {
+        self.runs.lock().remove(&session_id)?;
+        Some(self.fail(session_id, reason, events))
+    }
+
+    fn complete(
+        &self,
+        session_id: Uuid,
+        run: CompactionRun,
+        reported_before: Option<u64>,
+        reported_after: Option<u64>,
+        events: &EventSink,
+    ) -> WireDriverEvent {
+        let completed_at = crate::model::unix_time();
+        let tokens_before = reported_before.or(run.tokens_before);
+        let tokens_after = reported_after.or(run.tokens_after);
+        let persist_error = {
+            let mut state = self.task_state.lock();
+            let Some(previous_session) = state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .cloned()
+            else {
+                let _ = events.send_compaction_failed(
+                    session_id,
+                    "the compacted session no longer exists".into(),
+                );
+                return WireDriverEvent::new(
+                    "compactionFailed",
+                    json!({ "reason": "the compacted session no longer exists" }),
+                );
+            };
+            let session = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == session_id)
+                .expect("the session was found immediately above");
+            session.compacting = false;
+            session.updated_at = completed_at;
+            if let Some(tokens) = tokens_after {
+                let usage = session
+                    .context_usage
+                    .get_or_insert(crate::model::ContextUsage::default());
+                usage.tokens = tokens;
+            }
+            session
+                .compactions
+                .push(padu_protocol::model::CompactionMarker {
+                    id: Uuid::new_v4(),
+                    turn_count: session.turns.len(),
+                    tokens_before,
+                    tokens_after,
+                    compacted_at: completed_at,
+                });
+            let error = self.task_store.save(&mut state).err();
+            if error.is_some()
+                && let Some(session) = state
+                    .sessions
+                    .iter_mut()
+                    .find(|session| session.id == session_id)
+            {
+                *session = previous_session;
+                session.compacting = false;
+            }
+            error
+        };
+
+        if let Some(error) = persist_error {
+            let reason = format!("compaction completed but could not be saved: {error}");
+            events.send_compaction_failed(session_id, reason.clone());
+            return WireDriverEvent::new("compactionFailed", json!({ "reason": reason }));
+        }
+
+        events.send_session_compacted(session_id, tokens_before, tokens_after, completed_at);
+        events.send_task_state_changed();
+        WireDriverEvent::new(
+            "sessionCompacted",
+            json!({
+                "tokensBefore": tokens_before,
+                "tokensAfter": tokens_after,
+            }),
+        )
+    }
+
+    fn fail(&self, session_id: Uuid, reason: String, events: &EventSink) -> WireDriverEvent {
+        let persist_error = {
+            let mut state = self.task_state.lock();
+            let Some(previous_session) = state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .cloned()
+            else {
+                events.send_compaction_failed(session_id, reason.clone());
+                return WireDriverEvent::new("compactionFailed", json!({ "reason": reason }));
+            };
+            let session = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == session_id)
+                .expect("the session was found immediately above");
+            session.compacting = false;
+            session.updated_at = crate::model::unix_time();
+            let error = self.task_store.save(&mut state).err();
+            if error.is_some()
+                && let Some(session) = state
+                    .sessions
+                    .iter_mut()
+                    .find(|session| session.id == session_id)
+            {
+                *session = previous_session;
+                session.compacting = false;
+            }
+            error
+        };
+        let reason = persist_error.map_or(reason, |error| {
+            format!("compaction failed and its state could not be saved: {error}")
+        });
+        events.send_compaction_failed(session_id, reason.clone());
+        events.send_task_state_changed();
+        WireDriverEvent::new("compactionFailed", json!({ "reason": reason }))
+    }
+}
+
 pub struct PaduBackend {
     sessions: Mutex<HashMap<Uuid, (Uuid, DriverHandle)>>,
     terminals: Mutex<HashMap<Uuid, (Uuid, crate::terminal::DaemonTerminal)>>,
     settings: DaemonSettingsStore,
-    task_store: StateStore,
-    task_state: Mutex<PersistedState>,
+    task_store: Arc<StateStore>,
+    task_state: Arc<Mutex<PersistedState>>,
+    compaction_runs: Arc<Mutex<HashMap<Uuid, CompactionRun>>>,
     removed_session_ids: Mutex<HashSet<Uuid>>,
     composer_drafts: ComposerDraftStore,
     attachments: AttachmentStore,
@@ -51,6 +290,11 @@ impl PaduBackend {
             .load()
             .context("could not load Padu task database")?;
         migrate_projectless_state(&task_store, &mut task_state)?;
+        // Compaction is an in-flight runtime state. A daemon restart cannot
+        // resume the harness turn, so never revive a stale animation.
+        for session in &mut task_state.sessions {
+            session.compacting = false;
+        }
         let composer_drafts = ComposerDraftStore::for_state_path(task_store.path());
         let attachments = AttachmentStore::new(
             task_store
@@ -68,8 +312,9 @@ impl PaduBackend {
             sessions: Mutex::new(HashMap::new()),
             terminals: Mutex::new(HashMap::new()),
             settings,
-            task_store,
-            task_state: Mutex::new(task_state),
+            task_store: Arc::new(task_store),
+            task_state: Arc::new(Mutex::new(task_state)),
+            compaction_runs: Arc::new(Mutex::new(HashMap::new())),
             removed_session_ids: Mutex::new(HashSet::new()),
             composer_drafts,
             attachments,
@@ -80,6 +325,14 @@ impl PaduBackend {
             usage_rates_dir,
             default_cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
         })
+    }
+
+    fn compaction_tracker(&self) -> CompactionTracker {
+        CompactionTracker {
+            runs: self.compaction_runs.clone(),
+            task_state: self.task_state.clone(),
+            task_store: self.task_store.clone(),
+        }
     }
 
     /// Keeps legacy `DaemonSettings.disabled_providers` derived from the
@@ -1434,20 +1687,85 @@ impl Backend for PaduBackend {
                 let handle = driver::start_local(provider, options, event_sender)?;
                 let supports_steer = handle.supports_steer();
                 let thread_events = events.clone();
+                let compaction = self.compaction_tracker();
                 std::thread::Builder::new()
                     .name(format!("padu-daemon-events-{session_id}"))
                     .spawn(move || {
                         while let Ok(event) = event_receiver.recv() {
-                            let wire = event_to_wire(event).unwrap_or_else(|error| {
-                                WireDriverEvent::new(
-                                    "error",
-                                    Value::String(format!(
-                                        "could not encode daemon event: {error}"
-                                    )),
+                            let mut suppress_wire_event = false;
+                            let turn_finished = match &event {
+                                DriverEvent::TurnFinished { success, summary } => {
+                                    Some((*success, summary.clone()))
+                                }
+                                _ => None,
+                            };
+                            match &event {
+                                DriverEvent::TurnStarted => {
+                                    compaction.mark_turn_started(session_id)
+                                }
+                                DriverEvent::UsageUpdated { context_tokens, .. } => {
+                                    compaction.observe_usage(session_id, *context_tokens)
+                                }
+                                DriverEvent::Error(error) => {
+                                    if let Some(failure) = compaction.fail_before_event(
+                                        session_id,
+                                        error.clone(),
+                                        &thread_events,
+                                    ) {
+                                        let _ = thread_events.send(failure);
+                                    }
+                                }
+                                DriverEvent::ProcessExited => {
+                                    if let Some(failure) = compaction.fail_before_event(
+                                        session_id,
+                                        "the provider process exited during compaction".into(),
+                                        &thread_events,
+                                    ) {
+                                        let _ = thread_events.send(failure);
+                                    }
+                                }
+                                DriverEvent::CompactionFailed { reason } => {
+                                    suppress_wire_event = !compaction.fail_from_driver(
+                                        session_id,
+                                        reason.clone(),
+                                        &thread_events,
+                                    );
+                                }
+                                DriverEvent::SessionCompacted {
+                                    tokens_before,
+                                    tokens_after,
+                                } => {
+                                    suppress_wire_event = !compaction.settle_from_driver(
+                                        session_id,
+                                        *tokens_before,
+                                        *tokens_after,
+                                        &thread_events,
+                                    );
+                                }
+                                _ => {}
+                            }
+                            if !suppress_wire_event {
+                                let wire = event_to_wire(event).unwrap_or_else(|error| {
+                                    WireDriverEvent::new(
+                                        "error",
+                                        Value::String(format!(
+                                            "could not encode daemon event: {error}"
+                                        )),
+                                    )
+                                });
+                                if thread_events.send(wire).is_err() {
+                                    break;
+                                }
+                            }
+                            if let Some((success, summary)) = turn_finished
+                                && let Some(settled) = compaction.settle_after_turn(
+                                    session_id,
+                                    success,
+                                    summary,
+                                    &thread_events,
                                 )
-                            });
-                            if thread_events.send(wire).is_err() {
-                                break;
+                            {
+                                let _ = thread_events.send(settled);
                             }
                         }
                     })
@@ -1473,6 +1791,103 @@ impl Backend for PaduBackend {
                 drop(removed);
                 Ok(ResponsePayload::Ack)
             }
+            Command::CompactSession {
+                session_id: target_session_id,
+                focus,
+            } => {
+                let driver = {
+                    let sessions = self.sessions.lock();
+                    let (active_runtime_id, driver) =
+                        sessions.get(&target_session_id).ok_or_else(|| {
+                            anyhow!("daemon session {target_session_id} is not running")
+                        })?;
+                    if *active_runtime_id != runtime_id && runtime_id != uuid::Uuid::nil() {
+                        bail!(
+                            "daemon session {target_session_id} belongs to runtime {active_runtime_id}, not {runtime_id}"
+                        );
+                    }
+                    driver.clone()
+                };
+
+                let provider = self
+                    .task_state
+                    .lock()
+                    .sessions
+                    .iter()
+                    .find(|s| s.id == target_session_id)
+                    .map(|s| s.provider);
+                if let Some(p) = provider {
+                    if !p.supports_compaction() {
+                        bail!(
+                            "provider {} does not support context compaction",
+                            p.display_name()
+                        );
+                    }
+                }
+                if !driver.supports_compaction() {
+                    bail!("active driver transport does not support context compaction");
+                }
+
+                let tokens_before = {
+                    let state = self.task_state.lock();
+                    let session = state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == target_session_id)
+                        .ok_or_else(|| {
+                            anyhow!("session {target_session_id} is not in task state")
+                        })?;
+                    if session.compacting {
+                        bail!("context compaction is already running for this session");
+                    }
+                    if session.status.is_busy() {
+                        bail!("cannot compact while the session is running a turn");
+                    }
+                    session.context_usage.map(|usage| usage.tokens)
+                };
+                let compaction = self.compaction_tracker();
+                compaction.begin(target_session_id, tokens_before)?;
+                {
+                    let mut state = self.task_state.lock();
+                    let session = state
+                        .sessions
+                        .iter_mut()
+                        .find(|session| session.id == target_session_id)
+                        .ok_or_else(|| {
+                            anyhow!("session {target_session_id} is not in task state")
+                        })?;
+                    session.compacting = true;
+                }
+
+                if let Err(error) = driver.compact(focus.as_deref()) {
+                    compaction.cancel(target_session_id);
+                    {
+                        let mut state = self.task_state.lock();
+                        if let Some(session) = state
+                            .sessions
+                            .iter_mut()
+                            .find(|session| session.id == target_session_id)
+                        {
+                            session.compacting = false;
+                        }
+                    }
+                    let reason = error.to_string();
+                    let _ = events.send(WireDriverEvent::new(
+                        "compactionFailed",
+                        json!({ "reason": reason }),
+                    ));
+                    events.send_compaction_failed(target_session_id, reason);
+                    return Err(error);
+                }
+
+                let now = crate::model::unix_time();
+                let _ = events.send(WireDriverEvent::new("compactionStarted", Value::Null));
+                events.send_compaction_started(target_session_id, now);
+
+                Ok(ResponsePayload::CompactionAck {
+                    session_id: target_session_id,
+                })
+            }
             command => {
                 let driver = {
                     let sessions = self.sessions.lock();
@@ -1486,6 +1901,17 @@ impl Backend for PaduBackend {
                     }
                     driver.clone()
                 };
+                if matches!(&command, Command::Prompt { .. } | Command::Steer { .. }) {
+                    let state = self.task_state.lock();
+                    if state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == session_id)
+                        .is_some_and(|session| session.compacting)
+                    {
+                        bail!("cannot send a prompt while context compaction is running");
+                    }
+                }
                 handle_driver_command(&driver, command)
             }
         }
@@ -2429,7 +2855,8 @@ fn handle_driver_command(
             let cursor = Some(serde_json::to_value(driver.fork(turns_to_remove)?)?);
             return Ok(ResponsePayload::Cursor { cursor });
         }
-        Command::AttachSession
+        Command::CompactSession { .. }
+        | Command::AttachSession
         | Command::Start { .. }
         | Command::GetSettings
         | Command::UpdateSettings { .. }
@@ -2603,6 +3030,17 @@ fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
             "turnFinished",
             json!({ "success": success, "summary": summary }),
         ),
+        DriverEvent::CompactionStarted => ("compactionStarted", Value::Null),
+        DriverEvent::SessionCompacted {
+            tokens_before,
+            tokens_after,
+        } => (
+            "sessionCompacted",
+            json!({ "tokensBefore": tokens_before, "tokensAfter": tokens_after }),
+        ),
+        DriverEvent::CompactionFailed { reason } => {
+            ("compactionFailed", json!({ "reason": reason }))
+        }
         DriverEvent::Error(error) => ("error", Value::String(error)),
         DriverEvent::ProcessExited => ("processExited", Value::Null),
     };
@@ -2687,6 +3125,31 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
                 summary: finished.summary,
             }
         }
+        "compactionStarted" => DriverEvent::CompactionStarted,
+        "sessionCompacted" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct WireCompacted {
+                tokens_before: Option<u64>,
+                tokens_after: Option<u64>,
+            }
+            let payload: WireCompacted = serde_json::from_value(payload)?;
+            DriverEvent::SessionCompacted {
+                tokens_before: payload.tokens_before,
+                tokens_after: payload.tokens_after,
+            }
+        }
+        "compactionFailed" => {
+            #[derive(serde::Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct WireFailed {
+                reason: String,
+            }
+            let payload: WireFailed = serde_json::from_value(payload)?;
+            DriverEvent::CompactionFailed {
+                reason: payload.reason,
+            }
+        }
         "error" => DriverEvent::Error(serde_json::from_value(payload)?),
         "processExited" => DriverEvent::ProcessExited,
         kind => bail!("daemon sent an unsupported driver event {kind:?}"),
@@ -2755,6 +3218,7 @@ struct TurnFinishedWire {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::driver::DriverControl;
     use crate::server::Hub;
     use padu_protocol::ServerMessage;
 
@@ -2861,6 +3325,15 @@ mod tests {
             thread_id: "thread".into(),
         });
         session.finish_active_turn(crate::model::TurnStatus::Completed);
+        session
+            .compactions
+            .push(padu_protocol::model::CompactionMarker {
+                id: Uuid::new_v4(),
+                turn_count: 1,
+                tokens_before: Some(80_000),
+                tokens_after: Some(8_000),
+                compacted_at: 1,
+            });
 
         assert!(validate_message_rewind(&session, 1).is_ok());
 
@@ -3434,6 +3907,433 @@ mod tests {
             .unwrap();
         assert_eq!(done.status, TaskStatus::Done);
 
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    struct MockCompactionDriver {
+        compact_called: Arc<Mutex<Option<Option<String>>>>,
+        supported: bool,
+    }
+
+    impl DriverControl for MockCompactionDriver {
+        fn prompt(&self, _prompt: String) {}
+        fn cancel(&self) {}
+        fn respond(&self, _request_id: String, _option_id: String) {}
+        fn rollback(&self, _turns: usize) -> anyhow::Result<Option<ProviderResumeCursor>> {
+            Ok(None)
+        }
+        fn supports_compaction(&self) -> bool {
+            self.supported
+        }
+        fn compact(&self, focus: Option<&str>) -> anyhow::Result<()> {
+            *self.compact_called.lock() = Some(focus.map(str::to_owned));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn compaction_daemon_candidacy_and_dispatch() {
+        let (dir, backend, hub, rx, project) = test_daemon();
+        let session_id = Uuid::new_v4();
+        let runtime_id = Uuid::new_v4();
+        let sink = hub.event_sink(session_id, runtime_id);
+
+        // 1. Session not running returns error
+        let err = backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id,
+                    runtime_id,
+                    command: Command::CompactSession {
+                        session_id,
+                        focus: Some("arch".into()),
+                    },
+                },
+                sink.clone(),
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("is not running"));
+
+        // 2. Add an unsupported session (e.g. OpenCode)
+        let mut opencode_session = AgentSession::new(project.id, ProviderKind::OpenCode);
+        opencode_session.id = session_id;
+        {
+            let mut state = backend.task_state.lock();
+            state.sessions.push(opencode_session);
+        }
+
+        let compact_called = Arc::new(Mutex::new(None));
+        let mock_driver = Arc::new(MockCompactionDriver {
+            compact_called: compact_called.clone(),
+            supported: true,
+        });
+        backend.sessions.lock().insert(
+            session_id,
+            (runtime_id, DriverHandle::from_control(mock_driver)),
+        );
+
+        let err = backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id,
+                    runtime_id,
+                    command: Command::CompactSession {
+                        session_id,
+                        focus: Some("arch".into()),
+                    },
+                },
+                sink.clone(),
+            )
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("does not support context compaction")
+        );
+        assert!(compact_called.lock().is_none());
+
+        // 3. Update session to supported provider (Claude)
+        {
+            let mut state = backend.task_state.lock();
+            if let Some(s) = state.sessions.iter_mut().find(|s| s.id == session_id) {
+                s.provider = ProviderKind::Claude;
+            }
+        }
+
+        {
+            let mut state = backend.task_state.lock();
+            let session = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == session_id)
+                .unwrap();
+            session.status = SessionStatus::Working;
+        }
+        let err = backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id,
+                    runtime_id,
+                    command: Command::CompactSession {
+                        session_id,
+                        focus: None,
+                    },
+                },
+                sink.clone(),
+            )
+            .unwrap_err();
+        assert!(err.to_string().contains("running a turn"));
+        backend
+            .task_state
+            .lock()
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+            .unwrap()
+            .status = SessionStatus::Idle;
+
+        let res = backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id,
+                    runtime_id,
+                    command: Command::CompactSession {
+                        session_id,
+                        focus: Some("arch".into()),
+                    },
+                },
+                sink.clone(),
+            )
+            .unwrap();
+        assert!(matches!(
+            res,
+            ResponsePayload::CompactionAck { session_id: ack_id } if ack_id == session_id
+        ));
+        assert_eq!(*compact_called.lock(), Some(Some("arch".to_string())));
+
+        // Verify session was marked compacting
+        {
+            let state = backend.task_state.lock();
+            let session = state.sessions.iter().find(|s| s.id == session_id).unwrap();
+            assert!(session.compacting);
+        }
+
+        for command in [
+            Command::Prompt {
+                prompt: "do not overlap".into(),
+            },
+            Command::Steer {
+                prompt: "do not overlap".into(),
+            },
+        ] {
+            let err = backend
+                .handle(
+                    Request {
+                        request_id: Uuid::new_v4(),
+                        session_id,
+                        runtime_id,
+                        command,
+                    },
+                    sink.clone(),
+                )
+                .unwrap_err();
+            assert!(err.to_string().contains("context compaction"));
+        }
+
+        // Verify CompactionStarted was broadcast
+        let mut found_started = false;
+        while let Ok(msg) = rx.try_recv() {
+            if let ServerMessage::CompactionStarted {
+                session_id: sid, ..
+            } = msg
+            {
+                if sid == session_id {
+                    found_started = true;
+                    break;
+                }
+            }
+        }
+        assert!(found_started, "expected CompactionStarted broadcast");
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn compaction_tracker_records_success_and_failure_without_touching_history() {
+        let (dir, backend, hub, rx, project) = test_daemon();
+        let session_id = Uuid::new_v4();
+        let runtime_id = Uuid::new_v4();
+        let mut session = AgentSession::new(project.id, ProviderKind::Claude);
+        session.id = session_id;
+        session.context_usage = Some(crate::model::ContextUsage {
+            tokens: 80_000,
+            window: Some(200_000),
+        });
+        let original_turn_id = Uuid::new_v4();
+        session.turns.push(crate::model::AgentTurn {
+            id: original_turn_id,
+            turn_count: 1,
+            status: crate::model::TurnStatus::Completed,
+            provider_turn_started: true,
+            provider_resume_at: None,
+            started_at: 1,
+            completed_at: Some(2),
+            checkpoint: Some(crate::model::Checkpoint {
+                turn_count: 1,
+                git_ref: "refs/padu/session-checkpoint".into(),
+                status: crate::model::CheckpointStatus::Ready,
+                files: Vec::new(),
+                additions: 0,
+                deletions: 0,
+                created_at: 2,
+            }),
+        });
+        backend.task_state.lock().sessions.push(session);
+
+        let events = hub.event_sink(session_id, runtime_id);
+        let tracker = backend.compaction_tracker();
+        tracker.begin(session_id, Some(80_000)).unwrap();
+        tracker.mark_turn_started(session_id);
+        tracker.observe_usage(session_id, Some(8_000));
+        let settled = tracker.settle_after_turn(session_id, true, None, &events);
+        assert!(matches!(
+            settled.map(event_from_wire),
+            Some(Ok(DriverEvent::SessionCompacted {
+                tokens_before: Some(80_000),
+                tokens_after: Some(8_000),
+            }))
+        ));
+
+        let state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .unwrap();
+        assert!(!session.compacting);
+        assert_eq!(session.turns.len(), 1);
+        assert_eq!(session.turns[0].id, original_turn_id);
+        assert_eq!(
+            session.turns[0]
+                .checkpoint
+                .as_ref()
+                .map(|checkpoint| checkpoint.git_ref.as_str()),
+            Some("refs/padu/session-checkpoint")
+        );
+        assert_eq!(session.context_usage.unwrap().tokens, 8_000);
+        assert_eq!(session.compactions.len(), 1);
+        assert_eq!(session.compactions[0].tokens_before, Some(80_000));
+        assert_eq!(session.compactions[0].tokens_after, Some(8_000));
+        drop(state);
+        assert!(!tracker.settle_from_driver(session_id, None, None, &events));
+        assert_eq!(
+            backend
+                .task_state
+                .lock()
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .unwrap()
+                .compactions
+                .len(),
+            1
+        );
+
+        let mut found_compacted = false;
+        while let Ok(message) = rx.try_recv() {
+            if matches!(
+                message,
+                ServerMessage::SessionCompacted {
+                    session_id: found,
+                    tokens_before: Some(80_000),
+                    tokens_after: Some(8_000),
+                    ..
+                } if found == session_id
+            ) {
+                found_compacted = true;
+            }
+        }
+        assert!(found_compacted, "expected SessionCompacted broadcast");
+
+        tracker.begin(session_id, Some(8_000)).unwrap();
+        tracker.mark_turn_started(session_id);
+        let failed =
+            tracker.settle_after_turn(session_id, false, Some("provider refused".into()), &events);
+        assert!(matches!(
+            failed.map(event_from_wire),
+            Some(Ok(DriverEvent::CompactionFailed { reason }))
+                if reason.contains("provider refused")
+        ));
+        assert!(
+            !backend
+                .task_state
+                .lock()
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .unwrap()
+                .compacting
+        );
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn compaction_tracker_settles_only_after_the_compaction_turn_starts() {
+        let (dir, backend, hub, _rx, project) = test_daemon();
+        let session_id = Uuid::new_v4();
+        let runtime_id = Uuid::new_v4();
+        let mut session = AgentSession::new(project.id, ProviderKind::Claude);
+        session.id = session_id;
+        session.compacting = true;
+        session.context_usage = Some(crate::model::ContextUsage {
+            tokens: 80_000,
+            window: Some(200_000),
+        });
+        backend.task_state.lock().sessions.push(session);
+
+        let events = hub.event_sink(session_id, runtime_id);
+        let tracker = backend.compaction_tracker();
+        tracker.begin(session_id, Some(80_000)).unwrap();
+        tracker.observe_usage(session_id, Some(8_000));
+
+        // A late TurnFinished from the prompt that preceded compaction must
+        // not settle this run or publish a marker.
+        assert!(
+            tracker
+                .settle_after_turn(session_id, true, None, &events)
+                .is_none()
+        );
+        {
+            let state = backend.task_state.lock();
+            let session = state
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .unwrap();
+            assert!(session.compacting);
+            assert!(session.compactions.is_empty());
+        }
+
+        tracker.mark_turn_started(session_id);
+        assert!(matches!(
+            tracker
+                .settle_after_turn(session_id, true, None, &events)
+                .map(event_from_wire),
+            Some(Ok(DriverEvent::SessionCompacted {
+                tokens_before: Some(80_000),
+                tokens_after: Some(8_000),
+            }))
+        ));
+        assert!(
+            tracker
+                .settle_after_turn(session_id, true, None, &events)
+                .is_none()
+        );
+        let state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .unwrap();
+        assert!(!session.compacting);
+        assert_eq!(session.compactions.len(), 1);
+
+        drop(state);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn compaction_save_failure_rolls_back_the_in_memory_success() {
+        let (dir, backend, hub, _rx, project) = test_daemon();
+        let session_id = Uuid::new_v4();
+        let runtime_id = Uuid::new_v4();
+        let mut session = AgentSession::new(project.id, ProviderKind::Claude);
+        session.id = session_id;
+        session.compacting = true;
+        session.context_usage = Some(crate::model::ContextUsage {
+            tokens: 80_000,
+            window: Some(200_000),
+        });
+        backend.task_state.lock().sessions.push(session);
+
+        let tracker = CompactionTracker {
+            runs: backend.compaction_runs.clone(),
+            task_state: backend.task_state.clone(),
+            task_store: Arc::new(StateStore::new(std::path::PathBuf::from(
+                "/dev/null/padu-test.db",
+            ))),
+        };
+        tracker.begin(session_id, Some(80_000)).unwrap();
+        tracker.mark_turn_started(session_id);
+        tracker.observe_usage(session_id, Some(8_000));
+        let event = tracker.settle_after_turn(
+            session_id,
+            true,
+            None,
+            &hub.event_sink(session_id, runtime_id),
+        );
+        assert!(matches!(
+            event.map(event_from_wire),
+            Some(Ok(DriverEvent::CompactionFailed { reason }))
+                if reason.contains("could not be saved")
+        ));
+
+        let state = backend.task_state.lock();
+        let session = state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .unwrap();
+        assert!(!session.compacting);
+        assert!(session.compactions.is_empty());
+        assert_eq!(session.context_usage.unwrap().tokens, 80_000);
+
+        drop(state);
         std::fs::remove_dir_all(dir).ok();
     }
 }

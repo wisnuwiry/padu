@@ -408,7 +408,10 @@ fn run_client(
                     | ServerMessage::PrOpened { .. }
                     | ServerMessage::PrMerged { .. }
                     | ServerMessage::MrMerged { .. }
-                    | ServerMessage::IssueClosed { .. } => {}
+                    | ServerMessage::IssueClosed { .. }
+                    | ServerMessage::CompactionStarted { .. }
+                    | ServerMessage::SessionCompacted { .. }
+                    | ServerMessage::CompactionFailed { .. } => {}
                 }
             }
             Ok(Message::Close(_)) => break,

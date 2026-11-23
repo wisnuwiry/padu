@@ -117,10 +117,9 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
             "sessionCompacted",
             json!({ "tokensBefore": tokens_before, "tokensAfter": tokens_after }),
         ),
-        DriverEvent::CompactionFailed { reason } => (
-            "compactionFailed",
-            json!({ "reason": reason }),
-        ),
+        DriverEvent::CompactionFailed { reason } => {
+            ("compactionFailed", json!({ "reason": reason }))
+        }
         DriverEvent::Error(error) => ("error", Value::String(error)),
         DriverEvent::ProcessExited => ("processExited", Value::Null),
     };

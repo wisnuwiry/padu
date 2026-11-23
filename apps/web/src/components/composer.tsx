@@ -13,6 +13,7 @@ import type {
   ProviderProbe,
   ThreadGoalStatus,
 } from '@padu/client'
+import { parseCompactionSubmission, supportsCompaction } from '@padu/client'
 import {
   useEffect,
   useRef,
@@ -56,6 +57,7 @@ import { useI18n } from '@/lib/i18n'
 import {
   composerAutocompleteRows,
   detectComposerTrigger,
+  filterComposerCommandsForProvider,
   isFastModeToggleSubmission,
   isResumeSubmission,
   mergeComposerCommands,
@@ -192,6 +194,7 @@ export function Composer({
   const {
     sendPrompt,
     sendGoalOperation,
+    compactContext,
     steerPrompt,
     cancel,
     respond,
@@ -256,9 +259,12 @@ export function Composer({
     : workspace.kind === 'worktree'
       ? workspace.branch
       : t('workspace.local')
-  const availableCommands = mergeComposerCommands(
-    composerCommands.data?.commands ?? [],
-    session.available_commands ?? [],
+  const availableCommands = filterComposerCommandsForProvider(
+    session.provider,
+    mergeComposerCommands(
+      composerCommands.data?.commands ?? [],
+      session.available_commands ?? [],
+    ),
   )
   const resolveProviderPrompt = useWebProviderPromptResolver(
     composerCommands,
@@ -451,6 +457,7 @@ export function Composer({
       || executeResumeCommand(submittedPrompt)
       || executeFastModeToggle(submittedPrompt)
       || executeGoalCommand(submittedPrompt)
+      || executeCompactionCommand(submittedPrompt)
   }
 
   function executeNoteCommand(submittedPrompt: string): boolean {
@@ -486,6 +493,24 @@ export function Composer({
     clearComposerDraft()
     savePatch({ service_tier: nextTier })
     toast.success(t(enabled ? 'commands.fast_enabled' : 'commands.fast_disabled'))
+    return true
+  }
+
+  function executeCompactionCommand(submittedPrompt: string): boolean {
+    const isCompaction = /^\/compact(?:\s|$)/u.test(submittedPrompt.trim())
+    if (!isCompaction) return false
+    if (!supportsCompaction(session.provider)) {
+      clearComposerDraft()
+      toast.error(t('commands.compact_unsupported', { provider: session.provider }))
+      return true
+    }
+    const command = parseCompactionSubmission(session.provider, submittedPrompt)
+    if (!command) return true
+    if (busy || session.compacting || submitting) return true
+    void compactContext(session, command.focus).then(
+      () => clearComposerDraft(),
+      (error) => toast.error(errorMessage(error)),
+    )
     return true
   }
 
@@ -2142,14 +2167,22 @@ function UsageMeter({
 }) {
   const { locale, t } = useI18n()
   const { client, config } = useDaemon()
+  const { compactContext } = useRuntime()
   const settings = useDaemonSettings()
   const [open, setOpen] = useState(false)
+  const [compactFocus, setCompactFocus] = useState('')
   const usageShortcut = usePrimaryShortcut('⌘U', 'Ctrl+U')
   const context = session.context_usage
   const contextPercent = context?.window
     ? context.tokens * 100 / context.window
     : null
   const supportsPlanUsage = PLAN_USAGE_PROVIDERS.includes(session.provider)
+  const canCompact = supportsCompaction(session.provider)
+  const supportsCompactionFocus =
+    session.provider === 'claude' || session.provider === 'agy'
+  const canStartCompaction =
+    canCompact && !session.compacting && !['connecting', 'working', 'waiting'].includes(session.status)
+  const compactRecommended = canCompact && (contextPercent ?? 0) >= 70
   const plan = useQuery({
     queryKey: daemonKeys.planUsage(config?.address ?? 'disconnected', session.provider),
     queryFn: () => fetchPlanUsage(client!, session.provider, settings.data!, providerVersion),
@@ -2166,9 +2199,24 @@ function UsageMeter({
   const error = plan.error ? errorMessage(plan.error) : null
   const tooltip = error
     ? t('usage.refresh_failed', { error })
+    : session.compacting
+      ? t('usage.compacting')
+      : compactRecommended
+        ? t('usage.compact_tooltip')
     : contextPercent == null
       ? t('usage.shortcut', { shortcut: usageShortcut })
       : t('usage.context_used', { percent: contextPercent.toFixed(0), shortcut: usageShortcut })
+
+  function compact() {
+    if (!canStartCompaction) return
+    const focus = supportsCompactionFocus ? compactFocus.trim() || null : null
+    void compactContext(session, focus)
+      .then(() => {
+        setCompactFocus('')
+        setOpen(false)
+      })
+      .catch((cause) => toast.error(errorMessage(cause)))
+  }
 
   return (
     <Popover.Root modal={false} open={open} onOpenChange={setOpen}>
@@ -2180,7 +2228,18 @@ function UsageMeter({
         )}
         title={tooltip}
       >
-        <ContextGauge percent={contextPercent} />
+        <span className="flex items-center gap-1">
+          <ContextGauge percent={contextPercent} />
+          {(compactRecommended || session.compacting) && (
+            <PaduIcon
+              className={cn(
+                'size-2.5',
+                session.compacting ? 'text-ring' : 'text-[var(--text-secondary)]',
+              )}
+              name="sparkle"
+            />
+          )}
+        </span>
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Positioner
@@ -2204,6 +2263,36 @@ function UsageMeter({
                 ? `${formatTokens(context.tokens)} / ${formatTokens(context.window)} (${contextPercent.toFixed(0)}%)`
                 : formatTokens(context?.tokens ?? 0)}
             />
+            {canCompact && (
+              <div className="flex flex-col gap-2 border-t pt-3">
+                {supportsCompactionFocus && (
+                  <input
+                    aria-label={t('usage.compact_focus_placeholder')}
+                    className="h-8 rounded-md border bg-background px-2.5 text-xs text-foreground outline-none placeholder:text-[var(--text-tertiary)] focus-visible:ring-1 focus-visible:ring-ring"
+                    disabled={!canStartCompaction}
+                    placeholder={t('usage.compact_focus_placeholder')}
+                    value={compactFocus}
+                    onChange={(event) => setCompactFocus(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        compact()
+                      }
+                    }}
+                  />
+                )}
+                <Button
+                  disabled={!canStartCompaction}
+                  size="sm"
+                  type="button"
+                  onClick={compact}
+                >
+                  {session.compacting
+                    ? t('usage.compacting')
+                    : t('usage.compact_action')}
+                </Button>
+              </div>
+            )}
             {(plan.data || plan.isFetching || error) && <div className="h-px bg-border" />}
             {plan.data && <PlanUsageLanes locale={locale} plan={plan.data} provider={session.provider} t={t} />}
             {plan.isFetching && supportsPlanUsage && <UsageSkeleton t={t} />}

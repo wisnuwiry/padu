@@ -41,6 +41,8 @@ fn test_session() -> AgentSession {
         transcript_blocks: Vec::new(),
         turns: Vec::new(),
         queued_messages: Vec::new(),
+        compacting: false,
+        compactions: Vec::new(),
         detail_loaded: true,
     }
 }

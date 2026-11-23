@@ -12,8 +12,8 @@ use super::{
     append_text_delta_to_session, assistant_response_footer, assistant_response_footer_index,
     assistant_response_footer_time, clamp_window_bounds_to_display, compact_driver_error,
     compute_default_window_bounds, disclosure_leading_space, fenced_code, fitted_file_tree_width,
-    fitted_panel_widths, folded_transcript_row_kinds, format_worked_duration,
-    format_working_elapsed, maintain_transcript_anchor, message_opens_turn,
+    fitted_panel_widths, folded_transcript_row_kinds, folded_transcript_row_kinds_with_compactions,
+    format_worked_duration, format_working_elapsed, maintain_transcript_anchor, message_opens_turn,
     message_starts_followup_turn, navigation_preview_snippet, navigation_rail_fade_visibility,
     navigation_rail_height, navigation_rail_scale, paused_toast_duration, pop_stream_batch,
     push_transcript_activity, response_footer_message_index, response_row_turn_id,
@@ -1045,6 +1045,48 @@ fn multiple_blocks_at_one_boundary_preserve_event_order() {
         rows,
         vec![Message(0), TurnBlock(0), TurnBlock(1), Message(1)]
     );
+}
+
+#[test]
+fn transcript_places_compaction_at_its_turn_boundary_and_discloses_history() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Claude);
+    for prompt in ["first", "second", "third"] {
+        session.begin_turn(prompt);
+        session.push_message(MessageRole::Assistant, format!("{prompt} answer"));
+        session.finish_active_turn(TurnStatus::Completed);
+    }
+    let marker_id = Uuid::new_v4();
+    session.compactions.push(crate::model::CompactionMarker {
+        id: marker_id,
+        turn_count: 2,
+        tokens_before: Some(80_000),
+        tokens_after: Some(8_000),
+        compacted_at: 2,
+    });
+    session.compacting = true;
+    let collapsed =
+        folded_transcript_row_kinds_with_compactions(&session, &HashSet::new(), &HashSet::new());
+    assert_eq!(collapsed[0], CompactionMarker(0));
+    assert!(collapsed.contains(&Message(4)));
+    assert!(collapsed.contains(&Message(5)));
+    assert!(!collapsed.contains(&Message(0)));
+    assert!(!collapsed.contains(&Message(3)));
+    assert_eq!(collapsed.last(), Some(&CompactionActive));
+
+    let expanded = folded_transcript_row_kinds_with_compactions(
+        &session,
+        &HashSet::new(),
+        &HashSet::from([marker_id]),
+    );
+    assert!((0..=5).all(|index| expanded.contains(&Message(index))));
+    let marker_position = expanded
+        .iter()
+        .position(|row| *row == CompactionMarker(0))
+        .unwrap();
+    let previous_message = expanded.iter().position(|row| *row == Message(3)).unwrap();
+    let next_message = expanded.iter().position(|row| *row == Message(4)).unwrap();
+    assert!(previous_message < marker_position && marker_position < next_message);
+    assert_eq!(expanded.last(), Some(&CompactionActive));
 }
 
 /// Row *kinds* and row *count* are derived from the same list, and

@@ -6,6 +6,7 @@ import type {
   SkillProviderCapability,
   SlashCommand,
 } from '@padu/client'
+import { supportsCompaction } from '@padu/client'
 import {
   detectSkillTrigger,
   filterSkillCommands,
@@ -84,6 +85,16 @@ export function mergeComposerCommands(
     const byScope = commandScopeRank(left.scope) - commandScopeRank(right.scope)
     return byScope || left.name.localeCompare(right.name)
   })
+}
+
+/** Keep provider-gated built-ins out even if a live process reports them. */
+export function filterComposerCommandsForProvider(
+  provider: ProviderKind,
+  commands: SlashCommand[],
+): SlashCommand[] {
+  return supportsCompaction(provider)
+    ? commands
+    : commands.filter((command) => command.name !== 'compact')
 }
 
 export function isFastModeToggleSubmission(

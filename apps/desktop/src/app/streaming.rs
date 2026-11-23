@@ -288,7 +288,11 @@ impl Padu {
             DriverEvent::TurnStarted => {
                 runtime.last_driver_error = None;
                 if let Some(session) = self.state.session_mut(session_id) {
-                    if session.active_turn_id().is_some() {
+                    if session.compacting {
+                        // Native compaction runs as a provider turn on some
+                        // harnesses, but it is not a user-visible transcript
+                        // turn. The dedicated compaction card owns this phase.
+                    } else if session.active_turn_id().is_some() {
                         // Covers submissions and the optimistic pursuit turn
                         // a `/goal` began: the provider's start confirms it.
                         session.mark_active_turn_provider_started();
@@ -499,6 +503,74 @@ impl Padu {
                         usage.window = Some(window);
                     }
                     self.state.mark_session_dirty(session_id);
+                }
+            }
+            DriverEvent::CompactionStarted => {
+                if let Some(session) = self.state.session_mut(session_id)
+                    && !session.compacting
+                {
+                    session.compacting = true;
+                    self.state.mark_session_dirty(session_id);
+                }
+            }
+            DriverEvent::SessionCompacted {
+                tokens_before,
+                tokens_after,
+            } => {
+                let completed_at = unix_time();
+                if let Some(session) = self.state.session_mut(session_id) {
+                    session.compacting = false;
+                    if let Some(tokens) = tokens_after {
+                        session
+                            .context_usage
+                            .get_or_insert(ContextUsage::default())
+                            .tokens = tokens;
+                    }
+                    session.compactions.push(CompactionMarker {
+                        id: Uuid::new_v4(),
+                        turn_count: session.turns.len(),
+                        tokens_before,
+                        tokens_after,
+                        compacted_at: completed_at,
+                    });
+                    session.updated_at = completed_at;
+                    self.state.mark_session_dirty(session_id);
+                }
+                if allow_queue_drain
+                    && self
+                        .state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == session_id)
+                        .is_some_and(|session| !session.queued_messages.is_empty())
+                    && !self.pending_queue_drains.contains(&session_id)
+                {
+                    self.pending_queue_drains.push(session_id);
+                }
+            }
+            DriverEvent::CompactionFailed { reason } => {
+                if let Some(session) = self.state.session_mut(session_id)
+                    && session.compacting
+                {
+                    session.compacting = false;
+                    self.state.mark_session_dirty(session_id);
+                }
+                if allow_queue_drain
+                    && self
+                        .state
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == session_id)
+                        .is_some_and(|session| !session.queued_messages.is_empty())
+                    && !self.pending_queue_drains.contains(&session_id)
+                {
+                    self.pending_queue_drains.push(session_id);
+                }
+                if self.state.selected_session == Some(session_id) {
+                    self.show_toast(tr!(
+                        "transcript.compaction_failed",
+                        reason = compact_driver_error(&reason)
+                    ));
                 }
             }
             DriverEvent::TurnFinished { success, summary } => {

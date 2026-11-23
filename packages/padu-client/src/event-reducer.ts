@@ -34,6 +34,7 @@ export interface RuntimeEventResult {
   permission?: PendingPermission | null
   userInput?: PendingUserInput | null
   settled: boolean
+  queueDrain: boolean
   removeRuntime: boolean
   error?: string
 }
@@ -61,6 +62,7 @@ export function reduceRuntimeEvent(
   const result: RuntimeEventResult = {
     session,
     settled: false,
+    queueDrain: false,
     removeRuntime: false,
   }
 
@@ -92,6 +94,10 @@ export function reduceRuntimeEvent(
       if (Array.isArray(payload)) session.available_commands = payload as ReportedCommand[]
       break
     case 'turnStarted': {
+      // Native compaction is represented by the dedicated compaction card.
+      // Do not manufacture an empty conversation turn for a provider compaction
+      // turn (Codex emits the normal turn lifecycle around it).
+      if (session.compacting) break
       const turn = activeTurn(session)
       if (turn) {
         turn.provider_turn_started = true
@@ -229,6 +235,7 @@ export function reduceRuntimeEvent(
     }
     case 'sessionCompacted': {
       session.compacting = false
+      result.queueDrain = true
       const payloadObj = asRecord(payload)
       const tokensBefore = typeof payloadObj?.tokensBefore === 'number' ? payloadObj.tokensBefore : null
       const tokensAfter = typeof payloadObj?.tokensAfter === 'number' ? payloadObj.tokensAfter : null
@@ -245,15 +252,16 @@ export function reduceRuntimeEvent(
       session.compactions.push(marker)
       if (tokensAfter != null) {
         if (!session.context_usage) {
-          session.context_usage = { contextTokens: tokensAfter, contextWindow: null }
+          session.context_usage = { tokens: tokensAfter, window: null }
         } else {
-          session.context_usage.contextTokens = tokensAfter
+          session.context_usage.tokens = tokensAfter
         }
       }
       break
     }
     case 'compactionFailed': {
       session.compacting = false
+      result.queueDrain = true
       break
     }
     case 'error': {
@@ -832,4 +840,25 @@ function clone<T>(value: T): T {
 
 export function supportsCompaction(provider: string | null | undefined): boolean {
   return provider === 'claude' || provider === 'agy' || provider === 'codex'
+}
+
+/**
+ * Parse Padu's `/compact [focus]` command for a supported provider.
+ *
+ * `null` means this is not a Padu compaction command, so normal prompt
+ * resolution should continue. A returned object with a `null` focus is the
+ * valid command without optional guidance. Codex has no focus field in its
+ * native compaction API, so typed focus is intentionally discarded.
+ */
+export function parseCompactionSubmission(
+  provider: string | null | undefined,
+  prompt: string,
+): { focus: string | null } | null {
+  if (!supportsCompaction(provider)) return null
+  const invocation = prompt.trim()
+  if (!invocation.startsWith('/compact')) return null
+  const remainder = invocation.slice('/compact'.length)
+  if (remainder.length > 0 && !/^\s/u.test(remainder)) return null
+  const focus = remainder.trim()
+  return { focus: provider === 'codex' ? null : focus || null }
 }

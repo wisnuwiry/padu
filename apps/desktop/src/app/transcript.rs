@@ -28,11 +28,21 @@ impl Padu {
     /// already cached. The fingerprint is one allocation-free linear pass, so a
     /// settled transcript now costs a scan instead of a fold.
     pub(super) fn refresh_transcript_row_kinds(&self) -> usize {
-        let fingerprint = self
+        let mut fingerprint = self
             .selected_session()
             .map_or(EMPTY_TRANSCRIPT_FINGERPRINT, |session| {
                 transcript_rows_fingerprint(session, &self.expanded_turns)
             });
+        let expanded_compactions =
+            self.expanded_compactions
+                .iter()
+                .fold(0u64, |combined, marker_id| {
+                    combined.wrapping_add(mix_uuid(EMPTY_TRANSCRIPT_FINGERPRINT, *marker_id))
+                });
+        fingerprint = mix(
+            mix(fingerprint, self.expanded_compactions.len() as u64),
+            expanded_compactions,
+        );
         if self.transcript_row_kinds_fingerprint.get() != Some(fingerprint) {
             let next_kinds = self.selected_transcript_row_kinds();
             *self.transcript_row_kinds.borrow_mut() = next_kinds;
@@ -43,7 +53,11 @@ impl Padu {
 
     pub(super) fn selected_transcript_row_kinds(&self) -> Vec<TranscriptRowKind> {
         self.selected_session().map_or_else(Vec::new, |session| {
-            folded_transcript_row_kinds(session, &self.expanded_turns)
+            folded_transcript_row_kinds_with_compactions(
+                session,
+                &self.expanded_turns,
+                &self.expanded_compactions,
+            )
         })
     }
 
@@ -407,7 +421,7 @@ impl Padu {
         self.remeasure_transcript_row(target);
     }
 
-    fn remeasure_transcript_row(&self, target: TranscriptRowKind) {
+    pub(super) fn remeasure_transcript_row(&self, target: TranscriptRowKind) {
         self.sync_transcript_rows();
         let row = self
             .transcript_row_kinds
@@ -440,6 +454,11 @@ pub(super) enum TranscriptRowKind {
     /// that has not produced a chunk yet still shows visible progress, and a
     /// streaming one shows it below whatever content has arrived.
     WorkingIndicator,
+    /// The harness-owned compaction currently running, shown after the last
+    /// provider event so the transcript can explain the quiet generation.
+    CompactionActive,
+    /// One settled compaction marker, newest last.
+    CompactionMarker(usize),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -647,7 +666,9 @@ pub(super) fn assistant_response_footer(
                 | TranscriptRowKind::TurnFold(_)
                 | TranscriptRowKind::ResponseFooter(_, _)
                 | TranscriptRowKind::ChangedFiles(_)
-                | TranscriptRowKind::WorkingIndicator => None,
+                | TranscriptRowKind::WorkingIndicator
+                | TranscriptRowKind::CompactionActive
+                | TranscriptRowKind::CompactionMarker(_) => None,
             })
             .filter(|part| !part.content.trim().is_empty())
             .map(|part| part.content.as_str())
@@ -847,6 +868,7 @@ pub(super) fn transcript_rows_fingerprint(
     // driver error can drop the busy status without touching any turn — the
     // turn statuses below would hold still while the rows moved.
     hash = mix(hash, session.status.is_busy() as u64);
+    hash = mix(hash, session.compacting as u64);
 
     hash = mix(hash, session.messages.len() as u64);
     for message in &session.messages {
@@ -876,6 +898,11 @@ pub(super) fn transcript_rows_fingerprint(
                 checkpoint.status == CheckpointStatus::Ready && !checkpoint.files.is_empty()
             }) as u64,
         );
+    }
+    hash = mix(hash, session.compactions.len() as u64);
+    for marker in &session.compactions {
+        hash = mix_uuid(hash, marker.id);
+        hash = mix(hash, marker.turn_count as u64);
     }
 
     // A set has no stable iteration order, so combine its members with an
@@ -920,9 +947,18 @@ fn mix_turn_id(hash: u64, turn_id: Option<Uuid>) -> u64 {
 ///
 /// Every field this reads is fingerprinted by [`transcript_rows_fingerprint`]
 /// so frames can skip the fold; consult a new one and that must learn it too.
+#[cfg(test)]
 pub(super) fn folded_transcript_row_kinds(
     session: &AgentSession,
     expanded_turns: &HashSet<Uuid>,
+) -> Vec<TranscriptRowKind> {
+    folded_transcript_row_kinds_with_compactions(session, expanded_turns, &HashSet::new())
+}
+
+pub(super) fn folded_transcript_row_kinds_with_compactions(
+    session: &AgentSession,
+    expanded_turns: &HashSet<Uuid>,
+    expanded_compactions: &HashSet<Uuid>,
 ) -> Vec<TranscriptRowKind> {
     let anchors = session
         .transcript_blocks
@@ -1012,35 +1048,80 @@ pub(super) fn folded_transcript_row_kinds(
     // visible row, which may be answer text, tool activity, or a collapsed work
     // disclosure. The message index supplies stable copy/fork identity without
     // deciding the footer's position.
-    if response_footers.is_empty() {
-        return rows;
+    if !response_footers.is_empty() {
+        let mut last_row_by_turn = HashMap::new();
+        for (index, row) in rows.iter().copied().enumerate() {
+            if let Some(turn_id) = row_turn_id(session, row)
+                && response_footers.contains_key(&turn_id)
+            {
+                last_row_by_turn.insert(turn_id, index);
+            }
+        }
+        let footer_after_row = last_row_by_turn
+            .into_iter()
+            .filter_map(|(turn_id, index)| {
+                response_footers
+                    .get(&turn_id)
+                    .copied()
+                    .map(|message_index| (index, (turn_id, message_index)))
+            })
+            .collect::<HashMap<_, _>>();
+        let mut with_footers = Vec::with_capacity(rows.len() + footer_after_row.len());
+        for (index, row) in rows.into_iter().enumerate() {
+            with_footers.push(row);
+            if let Some((turn_id, message_index)) = footer_after_row.get(&index).copied() {
+                with_footers.push(TranscriptRowKind::ResponseFooter(turn_id, message_index));
+            }
+        }
+        rows = with_footers;
     }
 
-    let mut last_row_by_turn = HashMap::new();
-    for (index, row) in rows.iter().copied().enumerate() {
-        if let Some(turn_id) = row_turn_id(session, row)
-            && response_footers.contains_key(&turn_id)
-        {
-            last_row_by_turn.insert(turn_id, index);
-        }
+    insert_compaction_rows(session, &mut rows, expanded_compactions);
+    if session.compacting {
+        rows.push(TranscriptRowKind::CompactionActive);
     }
-    let footer_after_row = last_row_by_turn
-        .into_iter()
-        .filter_map(|(turn_id, index)| {
-            response_footers
-                .get(&turn_id)
-                .copied()
-                .map(|message_index| (index, (turn_id, message_index)))
-        })
-        .collect::<HashMap<_, _>>();
-    let mut with_footers = Vec::with_capacity(rows.len() + footer_after_row.len());
-    for (index, row) in rows.into_iter().enumerate() {
-        with_footers.push(row);
-        if let Some((turn_id, message_index)) = footer_after_row.get(&index).copied() {
-            with_footers.push(TranscriptRowKind::ResponseFooter(turn_id, message_index));
-        }
+    rows
+}
+
+fn insert_compaction_rows(
+    session: &AgentSession,
+    rows: &mut Vec<TranscriptRowKind>,
+    expanded_compactions: &HashSet<Uuid>,
+) {
+    let mut same_turn_offset = HashMap::<usize, usize>::new();
+    for (marker_index, marker) in session.compactions.iter().enumerate() {
+        let boundary = marker.turn_count.min(session.turns.len());
+        let row_boundary = if boundary == 0 {
+            0
+        } else {
+            let turn_id = session.turns[boundary - 1].id;
+            rows.iter()
+                .rposition(|row| row_turn_id(session, *row) == Some(turn_id))
+                .map_or(0, |index| index + 1)
+        };
+        let prior_at_boundary = same_turn_offset.entry(boundary).or_default();
+        let insertion = (row_boundary + *prior_at_boundary).min(rows.len());
+        rows.insert(insertion, TranscriptRowKind::CompactionMarker(marker_index));
+        *prior_at_boundary += 1;
     }
-    with_footers
+
+    let mut hidden_turns = HashSet::new();
+    let mut segment_start = 0;
+    for marker in &session.compactions {
+        let segment_end = marker.turn_count.min(session.turns.len());
+        segment_start = segment_start.min(segment_end);
+        if !expanded_compactions.contains(&marker.id) {
+            hidden_turns.extend(
+                session.turns[segment_start..segment_end]
+                    .iter()
+                    .map(|turn| turn.id),
+            );
+        }
+        segment_start = segment_end;
+    }
+    rows.retain(|row| {
+        row_turn_id(session, *row).is_none_or(|turn_id| !hidden_turns.contains(&turn_id))
+    });
 }
 
 /// The rows the turn *produced*, in transcript order: its assistant text parts
@@ -1089,7 +1170,9 @@ fn response_footer_message_index_from_rows(
         | TranscriptRowKind::TurnFold(_)
         | TranscriptRowKind::ResponseFooter(_, _)
         | TranscriptRowKind::ChangedFiles(_)
-        | TranscriptRowKind::WorkingIndicator => None,
+        | TranscriptRowKind::WorkingIndicator
+        | TranscriptRowKind::CompactionActive
+        | TranscriptRowKind::CompactionMarker(_) => None,
     })?;
     let message = session.messages.get(message_index)?;
     if message.streaming {
@@ -1103,7 +1186,9 @@ fn response_footer_message_index_from_rows(
             | TranscriptRowKind::TurnFold(_)
             | TranscriptRowKind::ResponseFooter(_, _)
             | TranscriptRowKind::ChangedFiles(_)
-            | TranscriptRowKind::WorkingIndicator => None,
+            | TranscriptRowKind::WorkingIndicator
+            | TranscriptRowKind::CompactionActive
+            | TranscriptRowKind::CompactionMarker(_) => None,
         })
         .any(|message| !message.content.trim().is_empty())
         .then_some(message_index)
@@ -1126,7 +1211,9 @@ fn turn_answer_start(session: &AgentSession, turn_rows: &[TranscriptRowKind]) ->
         | TranscriptRowKind::TurnFold(_)
         | TranscriptRowKind::ResponseFooter(_, _)
         | TranscriptRowKind::ChangedFiles(_)
-        | TranscriptRowKind::WorkingIndicator => false,
+        | TranscriptRowKind::WorkingIndicator
+        | TranscriptRowKind::CompactionActive
+        | TranscriptRowKind::CompactionMarker(_) => false,
     };
     let Some(last_text) = turn_rows.iter().rposition(is_answer_text) else {
         return turn_rows.len();
@@ -1144,7 +1231,9 @@ fn row_turn_id(session: &AgentSession, row: TranscriptRowKind) -> Option<Uuid> {
         TranscriptRowKind::TurnFold(turn_id) => Some(turn_id),
         TranscriptRowKind::ResponseFooter(turn_id, _) => Some(turn_id),
         TranscriptRowKind::ChangedFiles(turn_id) => Some(turn_id),
-        TranscriptRowKind::WorkingIndicator => None,
+        TranscriptRowKind::WorkingIndicator
+        | TranscriptRowKind::CompactionActive
+        | TranscriptRowKind::CompactionMarker(_) => None,
     }
 }
 
@@ -1161,6 +1250,7 @@ pub(super) fn response_row_turn_id(session: &AgentSession, row: TranscriptRowKin
                 .turn_id
         }
         TranscriptRowKind::WorkingIndicator => None,
+        TranscriptRowKind::CompactionActive | TranscriptRowKind::CompactionMarker(_) => None,
         TranscriptRowKind::TurnBlock(_)
         | TranscriptRowKind::TurnFold(_)
         | TranscriptRowKind::ResponseFooter(_, _)

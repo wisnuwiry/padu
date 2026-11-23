@@ -1656,6 +1656,7 @@ impl StateStore {
         let stored = serde_json::from_str::<AgentSession>(&data).map_err(to_io_error)?;
         session.transcript_blocks = stored.transcript_blocks;
         session.turns = stored.turns;
+        session.compactions = stored.compactions;
         session.queued_messages = stored.queued_messages;
         session.workspace = stored.workspace;
         session.provider_cursor = stored.provider_cursor;
@@ -2422,6 +2423,8 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         transcript_blocks: Vec::new(),
         turns: Vec::new(),
         queued_messages: Vec::new(),
+        compacting: false,
+        compactions: Vec::new(),
         detail_loaded: false,
     })
 }
@@ -3095,6 +3098,16 @@ mod tests {
         state.sessions[0].begin_turn("Ask");
         state.sessions[0].push_message(MessageRole::Assistant, "an answer");
         state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        state.sessions[0]
+            .compactions
+            .push(crate::model::CompactionMarker {
+                id: Uuid::new_v4(),
+                turn_count: 1,
+                tokens_before: Some(80_000),
+                tokens_after: Some(8_000),
+                compacted_at: 200,
+            });
+        state.sessions[0].compacting = true;
         store.save(&mut state).unwrap();
 
         let reopened = store_in(&directory);
@@ -3119,6 +3132,11 @@ mod tests {
         let session = &restored.sessions[0];
         assert!(session.detail_loaded);
         assert_eq!(session.turns.len(), 1);
+        assert_eq!(session.compactions.len(), 1);
+        assert_eq!(session.compactions[0].turn_count, 1);
+        assert_eq!(session.compactions[0].tokens_before, Some(80_000));
+        assert_eq!(session.compactions[0].tokens_after, Some(8_000));
+        assert!(!session.compacting);
         assert_eq!(
             session.workspace,
             SessionWorkspace::Worktree {

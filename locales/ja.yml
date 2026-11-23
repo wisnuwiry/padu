@@ -957,6 +957,8 @@ commands.fast_enabled: 高速モードを有効にしました
 commands.fast_disabled: 高速モードを無効にしました
 commands.goal_description: このタスクが継続して追求するゴールを設定
 commands.resume_description: ターミナルのエージェントセッションを再開
+commands.compact_description: 現在のハーネスで会話コンテキストを要約
+commands.compact_unsupported: "%{provider} ではコンテキストを圧縮できません"
 goal.title: ゴール
 goal.objective_placeholder: このタスクは何を目指し続けるべきですか？
 goal.set: ゴールを設定
@@ -1542,11 +1544,26 @@ usage.refresh_failed: "使用状況の更新に失敗しました：%{error}"
 usage.context_used: コンテキストウインドウを %{percent}% 使用（%{shortcut}）
 usage.shortcut: 使用状況（%{shortcut}）
 usage.context_window: コンテキストウインドウ
+usage.compact_tooltip: コンテキストが埋まりつつあります。クリックして圧縮します。
+usage.compact_action: コンテキストを圧縮
+usage.compact_focus_label: フォーカス（任意）
+usage.compact_focus_placeholder: 任意のフォーカス（例：アーキテクチャの決定）
+usage.compacting: コンテキストを圧縮中…
 usage.plan_limits: プランの使用量上限
 usage.plan_limits_named: プランの使用量上限 · %{plan}
 usage.open_account_settings: アカウントの使用状況設定を開く
 usage.unavailable: 利用不可 — %{error}
 usage.usage_limit: 使用量の上限
+transcript.compacting_title: 会話コンテキストを圧縮中…
+transcript.compacting_subtitle: "%{provider} がセッション履歴を要約しています"
+transcript.compacted_badge: コンテキストを圧縮しました
+transcript.compacted_tokens: "%{before} → %{after} トークン"
+transcript.compacted_reduction: "%{before} → %{after} トークン（−%{percent}%）"
+transcript.show_compacted_history: "圧縮された履歴を表示（%{count} ターン）"
+transcript.hide_compacted_history: 圧縮された履歴を隠す
+transcript.compacted_history_retained: 以前のターンはこのトランスクリプトに残っています。
+transcript.compaction_checkpoint_preserved: Git チェックポイントは保持され、巻き戻せます。
+transcript.compaction_failed: "コンテキストの圧縮に失敗しました: %{reason}"
 usage.hour_limit: "%{count} 時間の上限"
 usage.day_limit: "%{count} 日間の上限"
 usage.weekly_limit: 週間の上限

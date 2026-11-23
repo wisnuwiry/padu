@@ -927,6 +927,8 @@ commands.fast_enabled: Mode cepat diaktifkan
 commands.fast_disabled: Mode cepat dinonaktifkan
 commands.goal_description: Tetapkan target yang terus diupayakan tugas ini
 commands.resume_description: Lanjutkan sesi agen terminal
+commands.compact_description: Ringkas konteks percakapan dengan harness aktif
+commands.compact_unsupported: Peringkasan konteks tidak tersedia untuk %{provider}
 goal.title: Target
 goal.objective_placeholder: Apa yang harus terus diupayakan oleh tugas ini?
 goal.set: Tetapkan target
@@ -1487,11 +1489,26 @@ usage.refresh_failed: "Penyegaran penggunaan gagal: %{error}"
 usage.context_used: Jendela konteks %{percent}% digunakan (%{shortcut})
 usage.shortcut: Penggunaan (%{shortcut})
 usage.context_window: Jendela konteks
+usage.compact_tooltip: Konteks hampir penuh. Klik untuk meringkas.
+usage.compact_action: Ringkas konteks
+usage.compact_focus_label: Fokus (opsional)
+usage.compact_focus_placeholder: Fokus opsional, misalnya keputusan arsitektur
+usage.compacting: Meringkas konteks…
 usage.plan_limits: Batas penggunaan paket
 usage.plan_limits_named: Batas penggunaan paket · %{plan}
 usage.open_account_settings: Buka pengaturan penggunaan akun
 usage.unavailable: Tidak tersedia — %{error}
 usage.usage_limit: Batas penggunaan
+transcript.compacting_title: Meringkas konteks percakapan…
+transcript.compacting_subtitle: "%{provider} sedang meringkas riwayat sesi"
+transcript.compacted_badge: Konteks diringkas
+transcript.compacted_tokens: "%{before} → %{after} token"
+transcript.compacted_reduction: "%{before} → %{after} token (−%{percent}%)"
+transcript.show_compacted_history: "Tampilkan riwayat diringkas (%{count} giliran)"
+transcript.hide_compacted_history: Sembunyikan riwayat diringkas
+transcript.compacted_history_retained: Giliran sebelumnya tetap tersedia di transkrip ini.
+transcript.compaction_checkpoint_preserved: Checkpoint Git tetap tersimpan dan dapat diputar ulang.
+transcript.compaction_failed: "Peringkasan konteks gagal: %{reason}"
 usage.hour_limit: Batas %{count} jam
 usage.day_limit: Batas %{count} hari
 usage.weekly_limit: Batas mingguan

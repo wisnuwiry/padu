@@ -40,6 +40,7 @@ use crate::model::{
 
 enum CommandMessage {
     Prompt(String),
+    Compact(String),
     Steer(String),
     Cancel,
     Respond {
@@ -52,6 +53,13 @@ enum CommandMessage {
     },
     Options(SessionOptions),
     Shutdown,
+}
+
+fn compact_command(focus: Option<&str>) -> String {
+    match focus {
+        Some(focus) if !focus.trim().is_empty() => format!("/compact {}", focus.trim()),
+        _ => "/compact".to_owned(),
+    }
 }
 
 pub struct AcpDriver {
@@ -645,6 +653,28 @@ async fn run_sdk_connection(
                         {
                             text = format!("/plan {text}");
                         }
+                        let _ = events.send(DriverEvent::TurnStarted);
+                        if let Err(error) = send_prompt(
+                            &connection,
+                            &session_id,
+                            text,
+                            &prompt_requests,
+                            &events,
+                            provider,
+                            &native_session_id,
+                            grok_title_home.clone(),
+                            title_refresh.clone(),
+                            stream_state.clone(),
+                            watchdog_live.clone(),
+                        ) {
+                            let _ = events.send(DriverEvent::Error(error.to_string()));
+                            let _ = events.send(DriverEvent::TurnFinished {
+                                success: false,
+                                summary: None,
+                            });
+                        }
+                    }
+                    CommandMessage::Compact(text) => {
                         let _ = events.send(DriverEvent::TurnStarted);
                         if let Err(error) = send_prompt(
                             &connection,
@@ -2248,6 +2278,17 @@ impl DriverControl for AcpDriver {
         let _ = self.commands.try_send(CommandMessage::Steer(prompt));
     }
 
+    fn supports_compaction(&self) -> bool {
+        true
+    }
+
+    fn compact(&self, focus: Option<&str>) -> anyhow::Result<()> {
+        let text = compact_command(focus);
+        self.commands
+            .try_send(CommandMessage::Compact(text))
+            .map_err(|e| anyhow!("{e}"))
+    }
+
     fn cancel(&self) {
         let _ = self.commands.try_send(CommandMessage::Cancel);
     }
@@ -3516,5 +3557,15 @@ mod tests {
                 InteractionMode::Build
             ));
         }
+    }
+
+    #[test]
+    fn compaction_uses_the_acp_slash_command_and_trims_focus() {
+        assert_eq!(compact_command(None), "/compact");
+        assert_eq!(compact_command(Some("  ")), "/compact");
+        assert_eq!(
+            compact_command(Some("  preserve tool results  ")),
+            "/compact preserve tool results"
+        );
     }
 }

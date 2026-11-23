@@ -1109,6 +1109,43 @@ impl Padu {
         cx.notify();
     }
 
+    pub(super) fn toggle_compaction_history(&mut self, marker_id: Uuid, cx: &mut Context<Self>) {
+        self.pin_transcript_for_disclosure();
+        let scroll_top = self.active_transcript_rows().logical_scroll_top();
+        let previous_kinds = self.transcript_row_kinds.borrow().clone();
+        let anchor_kind = previous_kinds.get(scroll_top.item_ix).copied();
+        if !self.expanded_compactions.remove(&marker_id) {
+            self.expanded_compactions.insert(marker_id);
+        }
+        self.transcript_anchor_following.set(false);
+        self.splice_transcript_rows_after_visibility_change(&previous_kinds);
+
+        let next_kinds = self.transcript_row_kinds.borrow();
+        let target = anchor_kind
+            .and_then(|kind| next_kinds.iter().position(|candidate| *candidate == kind))
+            .or_else(|| {
+                next_kinds.iter().position(|kind| {
+                    matches!(
+                        kind,
+                        TranscriptRowKind::CompactionMarker(index)
+                            if self
+                                .selected_session()
+                                .and_then(|session| session.compactions.get(*index))
+                                .is_some_and(|marker| marker.id == marker_id)
+                    )
+                })
+            });
+        drop(next_kinds);
+        if let Some(item_ix) = target {
+            self.active_transcript_rows().scroll_to(ListOffset {
+                item_ix,
+                offset_in_item: Pixels::ZERO,
+            });
+            self.transcript_is_scrolled.set(true);
+        }
+        cx.notify();
+    }
+
     /// A single transcript row, self-centered to the content column so the
     /// list can measure it at its true wrap width. Current-turn reasoning and
     /// activity blocks are anchored at the exact boundary between assistant
@@ -1564,7 +1601,9 @@ impl Padu {
             | TranscriptRowKind::TurnFold(_)
             | TranscriptRowKind::ResponseFooter(_, _)
             | TranscriptRowKind::ChangedFiles(_)
-            | TranscriptRowKind::WorkingIndicator => false,
+            | TranscriptRowKind::WorkingIndicator
+            | TranscriptRowKind::CompactionActive
+            | TranscriptRowKind::CompactionMarker(_) => false,
         };
         let inner = match kind {
             TranscriptRowKind::Message(message_index) => self
@@ -1693,6 +1732,15 @@ impl Padu {
                 .render_changed_files_row(turn_id, &theme, cx)
                 .unwrap_or_else(|| div().into_any_element()),
             TranscriptRowKind::WorkingIndicator => self.render_working_indicator_row(&theme),
+            TranscriptRowKind::CompactionActive => {
+                self.render_compaction_row(None, None, &theme, cx)
+            }
+            TranscriptRowKind::CompactionMarker(index) => self
+                .selected_session()
+                .and_then(|session| session.compactions.get(index))
+                .cloned()
+                .map(|marker| self.render_compaction_row(Some(marker), Some(index), &theme, cx))
+                .unwrap_or_else(|| div().into_any_element()),
         };
         let mut row = div()
             .id(("transcript-row", index))
@@ -2142,6 +2190,195 @@ impl Padu {
                         duration = format_working_elapsed(elapsed)
                     ))),
             )
+            .into_any_element()
+    }
+
+    /// A harness-owned compaction, first as a live fold and then as its
+    /// settled audit marker. The transcript itself remains intact: the marker
+    /// tells the reader what changed without deleting earlier turns or Git
+    /// checkpoints.
+    fn render_compaction_row(
+        &mut self,
+        marker: Option<CompactionMarker>,
+        _marker_index: Option<usize>,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if marker.is_none() {
+            let provider = self
+                .selected_session()
+                .map(|session| session.provider.display_name())
+                .unwrap_or("Agent");
+            let spinner = if cx.reduce_motion() {
+                icon("icons/sparkle.svg", 15.0, theme.accent).into_any_element()
+            } else {
+                motion::spin(icon("icons/loader-circle.svg", 15.0, theme.accent))
+            };
+            return div()
+                .w_full()
+                .rounded(px(Theme::surface_radius()))
+                .border_1()
+                .border_color(theme.border_strong)
+                .bg(theme.overlay_strong)
+                .px(px(14.0))
+                .py(px(12.0))
+                .flex()
+                .items_center()
+                .gap(px(10.0))
+                .child(spinner)
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(2.0))
+                        .child(
+                            div()
+                                .text_size(sp(13.5))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.text)
+                                .child(tr!("transcript.compacting_title")),
+                        )
+                        .child(
+                            div()
+                                .text_size(sp(12.0))
+                                .text_color(theme.text_tertiary)
+                                .child(tr!("transcript.compacting_subtitle", provider = provider)),
+                        ),
+                )
+                .into_any_element();
+        }
+
+        let marker = marker.expect("settled compaction marker");
+        let expanded = self.expanded_compactions.contains(&marker.id);
+        let before = marker
+            .tokens_before
+            .map(crate::usage::format_tokens)
+            .unwrap_or_else(|| "?".to_owned());
+        let after = marker
+            .tokens_after
+            .map(crate::usage::format_tokens)
+            .unwrap_or_else(|| "?".to_owned());
+        let reduction = match (marker.tokens_before, marker.tokens_after) {
+            (Some(before), Some(after)) if before > 0 && after < before => {
+                Some(100.0 * (before - after) as f64 / before as f64)
+            }
+            _ => None,
+        };
+        let metric = reduction.map_or_else(
+            || {
+                tr!(
+                    "transcript.compacted_tokens",
+                    before = before,
+                    after = after
+                )
+            },
+            |reduction| {
+                tr!(
+                    "transcript.compacted_reduction",
+                    before = before,
+                    after = after,
+                    percent = format!("{reduction:.0}")
+                )
+            },
+        );
+        let marker_id = marker.id;
+        let toggle_label = if expanded {
+            tr!("transcript.hide_compacted_history")
+        } else {
+            tr!(
+                "transcript.show_compacted_history",
+                count = marker.turn_count
+            )
+        };
+        let focus = self.transcript_control_focus(format!("compaction-history-{}", marker.id), cx);
+        div()
+            .w_full()
+            .rounded(px(Theme::surface_radius()))
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.surface)
+            .px(px(14.0))
+            .py(px(11.0))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(icon("icons/sparkle.svg", 14.0, theme.accent))
+                    .child(
+                        div()
+                            .text_size(sp(13.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!("transcript.compacted_badge")),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        div()
+                            .text_size(sp(12.0))
+                            .text_color(theme.text_tertiary)
+                            .child(SharedString::from(metric)),
+                    ),
+            )
+            .child(
+                div()
+                    .id(SharedString::from(format!(
+                        "compaction-history-{}",
+                        marker_id
+                    )))
+                    .track_focus(&focus)
+                    .tab_index(0)
+                    .w_full()
+                    .rounded(px(Theme::control_radius()))
+                    .px(px(7.0))
+                    .py(px(5.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(5.0))
+                    .cursor_pointer()
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_secondary)
+                    .focus_visible(|element| element.bg(theme.overlay_strong))
+                    .hover(|element| element.bg(theme.overlay))
+                    .child(SharedString::from(toggle_label))
+                    .child(icon(
+                        if expanded {
+                            "icons/chevron-down.svg"
+                        } else {
+                            "icons/chevron-right.svg"
+                        },
+                        10.0,
+                        theme.text_tertiary,
+                    ))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.toggle_compaction_history(marker_id, cx);
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                        if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                            this.toggle_compaction_history(marker_id, cx);
+                            cx.stop_propagation();
+                        }
+                    })),
+            )
+            .when(expanded, |card| {
+                card.child(
+                    div()
+                        .rounded(px(Theme::control_radius()))
+                        .bg(theme.overlay)
+                        .px(px(10.0))
+                        .py(px(8.0))
+                        .flex()
+                        .flex_col()
+                        .gap(px(4.0))
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_secondary)
+                        .child(tr!("transcript.compacted_history_retained"))
+                        .child(tr!("transcript.compaction_checkpoint_preserved")),
+                )
+            })
             .into_any_element()
     }
 

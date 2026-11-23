@@ -1678,6 +1678,9 @@ impl AgentSession {
         for block in &mut self.transcript_blocks {
             block.after_message = block.after_message.min(message_count);
         }
+        self.compactions
+            .retain(|marker| marker.turn_count <= turn_count);
+        self.compacting = false;
         self.updated_at = unix_time();
     }
 
@@ -1714,6 +1717,9 @@ impl AgentSession {
             if let Some(turn_id) = block.turn_id {
                 block.turn_id = turn_ids.get(&turn_id).copied();
             }
+        }
+        for marker in &mut fork.compactions {
+            marker.id = Uuid::new_v4();
         }
 
         let now = unix_time();
@@ -4868,6 +4874,21 @@ mod tests {
     }
 
     #[test]
+    fn only_priority_harnesses_support_compaction() {
+        for provider in ProviderKind::ALL {
+            assert_eq!(
+                provider.supports_compaction(),
+                matches!(
+                    provider,
+                    ProviderKind::Agy | ProviderKind::Claude | ProviderKind::Codex
+                ),
+                "{} has the wrong compaction capability",
+                provider.display_name()
+            );
+        }
+    }
+
+    #[test]
     fn prompt_title_truncation_is_unicode_safe() {
         let project = Project::from_path(PathBuf::from("/tmp/padu"));
         let mut session = AgentSession::new(project.id, ProviderKind::Claude);
@@ -4939,6 +4960,23 @@ mod tests {
             activities: Vec::new(),
         });
         session.finish_active_turn(TurnStatus::Completed);
+        session.compacting = true;
+        session.compactions = vec![
+            CompactionMarker {
+                id: Uuid::new_v4(),
+                turn_count: 1,
+                tokens_before: Some(80_000),
+                tokens_after: Some(8_000),
+                compacted_at: 3,
+            },
+            CompactionMarker {
+                id: Uuid::new_v4(),
+                turn_count: 2,
+                tokens_before: Some(8_000),
+                tokens_after: Some(4_000),
+                compacted_at: 4,
+            },
+        ];
 
         session.truncate_after_turn(1);
 
@@ -4954,6 +4992,9 @@ mod tests {
         assert_eq!(session.transcript_blocks.len(), 1);
         assert_eq!(session.transcript_blocks[0].turn_id, Some(first_turn));
         assert_eq!(session.transcript_blocks[0].after_message, 2);
+        assert_eq!(session.compactions.len(), 1);
+        assert_eq!(session.compactions[0].turn_count, 1);
+        assert!(!session.compacting);
     }
 
     #[test]
@@ -4967,6 +5008,14 @@ mod tests {
         session.begin_turn("second");
         session.push_message(MessageRole::Assistant, "second answer");
         session.finish_active_turn(TurnStatus::Completed);
+        let marker_id = Uuid::new_v4();
+        session.compactions.push(CompactionMarker {
+            id: marker_id,
+            turn_count: 1,
+            tokens_before: Some(80_000),
+            tokens_after: Some(8_000),
+            compacted_at: 3,
+        });
 
         let fork = session
             .fork_through_turn(
@@ -4986,6 +5035,8 @@ mod tests {
         assert_eq!(fork.messages.len(), 2);
         assert_ne!(fork.turns[0].id, first_turn);
         assert_ne!(fork.messages[1].id, first_message);
+        assert_eq!(fork.compactions.len(), 1);
+        assert_ne!(fork.compactions[0].id, marker_id);
         assert!(
             fork.messages
                 .iter()

@@ -84,6 +84,13 @@ fn stop_task_request(request_id: u64, task_id: &str) -> Value {
     })
 }
 
+fn compact_command(focus: Option<&str>) -> String {
+    match focus {
+        Some(focus) if !focus.trim().is_empty() => format!("/compact {}", focus.trim()),
+        _ => "/compact".to_owned(),
+    }
+}
+
 pub struct ClaudeDriver {
     commands: Sender<CommandMessage>,
     pending_user_inputs: Arc<Mutex<HashMap<String, Value>>>,
@@ -550,6 +557,17 @@ impl DriverControl for ClaudeDriver {
 
     fn steer(&self, prompt: String) {
         let _ = self.commands.send(CommandMessage::Steer(prompt));
+    }
+
+    fn supports_compaction(&self) -> bool {
+        true
+    }
+
+    fn compact(&self, focus: Option<&str>) -> anyhow::Result<()> {
+        let text = compact_command(focus);
+        self.commands
+            .send(CommandMessage::Prompt(text))
+            .map_err(|e| anyhow!("{e}"))
     }
 
     fn cancel(&self) {
@@ -2591,5 +2609,15 @@ mod tests {
         // 2+100+10+8 from the last iteration, then the main model's window —
         // not the subagent's tokens, not the smaller subagent window.
         assert_eq!(usage, [(Some(120), None), (None, Some(1_000_000))]);
+    }
+
+    #[test]
+    fn compaction_uses_the_harness_slash_command_and_trims_focus() {
+        assert_eq!(compact_command(None), "/compact");
+        assert_eq!(compact_command(Some("   ")), "/compact");
+        assert_eq!(
+            compact_command(Some("  keep API decisions  ")),
+            "/compact keep API decisions"
+        );
     }
 }

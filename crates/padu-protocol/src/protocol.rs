@@ -141,8 +141,7 @@ pub enum Command {
     /// Request context compaction for a session.
     /// Strictly validated by daemon for Claude, Antigravity, and Codex.
     CompactSession {
-        #[serde(default)]
-        session_id: Option<Uuid>,
+        session_id: Uuid,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         focus: Option<String>,
     },

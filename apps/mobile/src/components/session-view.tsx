@@ -20,6 +20,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
+import { useReducedMotion } from 'react-native-reanimated';
 import { Defs, LinearGradient, Rect, Stop, Svg } from 'react-native-svg';
 
 import { ActivityGroup } from '@/components/activity-group';
@@ -69,6 +70,7 @@ export function SessionView({
   const query = useSession(sessionId);
   const session = query.data;
   const [expandedFolds, setExpandedFolds] = useState<ReadonlySet<string>>(new Set());
+  const [expandedCompactions, setExpandedCompactions] = useState<ReadonlySet<string>>(new Set());
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [pinnedToBottom, setPinnedToBottom] = useState(true);
@@ -79,8 +81,8 @@ export function SessionView({
   // screen bottom, so only the fade lead overlaps the tail.
   const listBottomInset = composerHeight / 2;
   const transcriptRows = useMemo(
-    () => session ? buildTranscriptRows(session, expandedFolds) : [],
-    [expandedFolds, session],
+    () => session ? buildTranscriptRows(session, expandedFolds, expandedCompactions) : [],
+    [expandedCompactions, expandedFolds, session],
   );
   const running = Boolean(session && sessionBusy(session));
   const listRef = useRef<FlatList<TranscriptRow>>(null);
@@ -140,6 +142,15 @@ export function SessionView({
       const next = new Set(current);
       if (next.has(turnId)) next.delete(turnId);
       else next.add(turnId);
+      return next;
+    });
+  }
+
+  function toggleCompaction(markerId: string) {
+    setExpandedCompactions((current) => {
+      const next = new Set(current);
+      if (next.has(markerId)) next.delete(markerId);
+      else next.add(markerId);
       return next;
     });
   }
@@ -234,7 +245,13 @@ export function SessionView({
             <SessionEmpty loading={query.isPending} error={query.error} missing={query.data === null} />
           )}
           ListFooterComponent={running && session ? <WorkingFooter session={session} /> : undefined}
-          renderItem={({ item }) => <TranscriptRowView row={item} onToggleFold={toggleFold} />}
+          renderItem={({ item }) => (
+            <TranscriptRowView
+              row={item}
+              onToggleCompaction={toggleCompaction}
+              onToggleFold={toggleFold}
+            />
+          )}
           onContentSizeChange={maybeAutoscroll}
           onLayout={maybeAutoscroll}
           onScroll={trackScroll}
@@ -338,9 +355,11 @@ function OfflineBanner() {
 
 function TranscriptRowView({
   row,
+  onToggleCompaction,
   onToggleFold,
 }: {
   row: TranscriptRow;
+  onToggleCompaction: (markerId: string) => void;
   onToggleFold: (turnId: string) => void;
 }) {
   switch (row.kind) {
@@ -358,6 +377,15 @@ function TranscriptRowView({
       );
     case 'changed':
       return <ChangedFilesCard checkpoint={row.checkpoint} />;
+    case 'compaction':
+      return (
+        <CompactionCard
+          expanded={row.expanded}
+          marker={row.marker}
+          onToggle={() => row.marker && onToggleCompaction(row.marker.id)}
+          provider={row.provider}
+        />
+      );
   }
 }
 
@@ -511,6 +539,120 @@ function ChangedFilesCard({ checkpoint }: { checkpoint: Checkpoint }) {
   );
 }
 
+function CompactionCard({
+  expanded,
+  marker,
+  onToggle,
+  provider,
+}: {
+  expanded: boolean;
+  marker: NonNullable<AgentSession['compactions']>[number] | null;
+  onToggle: () => void;
+  provider: AgentSession['provider'];
+}) {
+  const theme = useTheme();
+  const reduceMotion = useReducedMotion();
+
+  if (!marker) {
+    return (
+      <View
+        accessibilityLiveRegion="polite"
+        style={[
+          styles.compactionCard,
+          {
+            backgroundColor: theme.overlayStrong,
+            borderColor: theme.borderStrong,
+          },
+        ]}>
+        {reduceMotion ? (
+          <PaduIcon name="sparkle" size={16} tintColor={theme.accent} />
+        ) : (
+          <ActivityIndicator color={theme.accent} size="small" />
+        )}
+        <View style={styles.compactionCopy}>
+          <Text style={[styles.compactionTitle, { color: theme.text }]}>
+            Compacting conversation context…
+          </Text>
+          <Text style={[styles.compactionBody, { color: theme.textTertiary }]}>
+            {provider === 'claude'
+              ? 'Claude Code'
+              : provider === 'agy'
+                ? 'Antigravity'
+                : 'Codex'}
+            {' '}
+            is summarizing session history
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  const before = marker.tokensBefore == null ? '?' : formatTokenCount(marker.tokensBefore);
+  const after = marker.tokensAfter == null ? '?' : formatTokenCount(marker.tokensAfter);
+  const reduction = marker.tokensBefore && marker.tokensAfter != null
+    ? Math.max(0, Math.round((1 - marker.tokensAfter / marker.tokensBefore) * 100))
+    : null;
+  return (
+    <View
+      style={[
+        styles.compactionCard,
+        styles.compactionSettledCard,
+        {
+          backgroundColor: theme.surface,
+          borderColor: theme.border,
+        },
+      ]}>
+      <View style={styles.compactionHeader}>
+        <PaduIcon name="sparkle" size={14} tintColor={theme.accent} />
+        <Text style={[styles.compactionTitle, { color: theme.text }]}>
+          Context compacted
+        </Text>
+        <View style={styles.compactionSpacer} />
+        <Text style={[styles.compactionMetric, { color: theme.textTertiary }]}>
+          {reduction == null
+            ? `${before} → ${after} tokens`
+            : `${before} → ${after} (−${reduction}%)`}
+        </Text>
+      </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded }}
+        onPress={onToggle}
+        style={({ pressed }) => [
+          styles.compactionToggle,
+          { opacity: pressed ? 0.6 : 1 },
+        ]}>
+        <Text style={[styles.compactionToggleText, { color: theme.textSecondary }]}>
+          {expanded
+            ? 'Hide compacted history'
+            : `Show compacted history (${marker.turnCount} turns)`}
+        </Text>
+        <PaduIcon
+          name={expanded ? 'chevronDown' : 'chevronRight'}
+          size={10}
+          tintColor={theme.textGhost}
+        />
+      </Pressable>
+      {expanded && (
+        <View style={[styles.compactionDetail, { backgroundColor: theme.overlay }]}>
+          <Text style={[styles.compactionBody, { color: theme.textSecondary }]}>
+            Earlier turns remain available in this transcript.
+          </Text>
+          <Text style={[styles.compactionBody, { color: theme.textSecondary }]}>
+            Git checkpoints stay preserved and rewindable.
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+function formatTokenCount(tokens: number) {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
+  return String(tokens);
+}
+
 function WorkingFooter({ session }: { session: AgentSession }) {
   const theme = useTheme();
   const startedAt = session.turns.at(-1)?.started_at ?? null;
@@ -644,6 +786,44 @@ const styles = StyleSheet.create({
   },
   changedFileRow: { alignItems: 'center', flexDirection: 'row', gap: 8 },
   changedFilePath: { flex: 1, fontFamily: MonoFont, fontSize: 11 },
+  compactionCard: {
+    alignItems: 'center',
+    borderRadius: Radius.medium,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: Spacing.two,
+    marginBottom: Spacing.three,
+    marginTop: Spacing.half,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.two,
+  },
+  compactionCopy: { flex: 1, gap: Spacing.half },
+  compactionSettledCard: { alignItems: 'stretch', flexDirection: 'column' },
+  compactionHeader: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    gap: Spacing.two,
+    minWidth: 0,
+  },
+  compactionTitle: { fontSize: 13, fontWeight: '600' },
+  compactionBody: { fontSize: 12, lineHeight: 16 },
+  compactionSpacer: { flex: 1 },
+  compactionMetric: { fontSize: 11.5, fontVariant: ['tabular-nums'] },
+  compactionToggle: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: Spacing.one,
+    minHeight: 44,
+    paddingHorizontal: Spacing.one,
+  },
+  compactionToggleText: { flexShrink: 1, fontSize: 12 },
+  compactionDetail: {
+    borderRadius: Radius.small,
+    gap: Spacing.one,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.two,
+  },
   jumpButton: {
     borderRadius: Radius.pill,
     bottom: 80,

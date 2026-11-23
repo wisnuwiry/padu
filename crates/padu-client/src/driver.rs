@@ -103,6 +103,14 @@ impl DriverHandle {
         self.inner.fork(turns_to_remove)
     }
 
+    pub fn supports_compaction(&self) -> bool {
+        self.inner.supports_compaction()
+    }
+
+    pub fn compact(&self, focus: Option<&str>) -> anyhow::Result<()> {
+        self.inner.compact(focus)
+    }
+
     pub fn close(&self) {
         self.inner.close();
     }
@@ -114,6 +122,12 @@ pub trait DriverControl: Send + Sync {
         false
     }
     fn steer(&self, _prompt: String) {}
+    fn supports_compaction(&self) -> bool {
+        false
+    }
+    fn compact(&self, _focus: Option<&str>) -> anyhow::Result<()> {
+        anyhow::bail!("context compaction is not supported by this provider transport")
+    }
     fn cancel(&self);
     fn cancel_computer_use(&self) {}
     fn refresh_background_work(&self) {}

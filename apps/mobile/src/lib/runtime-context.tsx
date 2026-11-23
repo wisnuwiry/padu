@@ -87,6 +87,7 @@ interface RuntimeContextValue {
     attachments?: MessageAttachment[],
     embeddedNotes?: EmbeddedNote[],
   ) => Promise<void>;
+  compactContext: (session: AgentSession, focus: string | null) => Promise<void>;
   createTask: (
     projectId: string,
     provider: ProviderKind,
@@ -318,6 +319,16 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         setUserInputs((values) => ({ ...values, [session.id]: result.userInput ?? undefined }));
       }
       if (result.error) setErrors((values) => ({ ...values, [session.id]: result.error }));
+      if (result.queueDrain) {
+        const timer = persistTimers.current.get(session.id);
+        if (timer) clearTimeout(timer);
+        persistTimers.current.delete(session.id);
+        void persistOrdered(result.session)
+          .then(() => drainQueue(session.id))
+          .catch((cause) => {
+            setErrors((values) => ({ ...values, [session.id]: errorMessage(cause) }));
+          });
+      }
       if (result.settled) {
         const timer = persistTimers.current.get(session.id);
         if (timer) clearTimeout(timer);
@@ -377,7 +388,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     let current = queryClient.getQueryData<AgentSession>(
       daemonKeys.session(profileId, inputSession.id),
     ) ?? inputSession;
-    if (sessionBusy(current)) {
+    if (sessionBusy(current) || current.compacting) {
       const queued = queueSubmission(
         current,
         prompt,
@@ -562,6 +573,31 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     if (!runtime) throw new Error('This task has no live agent runtime');
     await client.request({ type: 'cancel' }, sessionId, runtime.runtimeId);
   }, [daemon.client]);
+
+  const compactContext = useCallback(async (
+    session: AgentSession,
+    focus: string | null,
+  ) => {
+    const client = daemon.client;
+    const profileId = daemon.activeProfile?.id;
+    if (!client || !profileId) throw new Error('Padu daemon is disconnected');
+    const runtime = entries.current.get(session.id);
+    const key = daemonKeys.session(profileId, session.id);
+    const current = queryClient.getQueryData<AgentSession>(key) ?? session;
+    const optimistic = { ...current, compacting: true };
+    cacheSession(optimistic);
+    try {
+      await client.compactSession(session.id, focus, runtime?.runtimeId);
+    } catch (error) {
+      cacheSession(current);
+      throw error;
+    }
+  }, [
+    cacheSession,
+    daemon.activeProfile?.id,
+    daemon.client,
+    queryClient,
+  ]);
 
   const markWorking = useCallback((sessionId: string) => {
     const profileId = daemon.activeProfile?.id;
@@ -828,6 +864,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       attachSession,
       sendPrompt,
       steerPrompt,
+      compactContext,
       createTask,
       cancel,
       respond,

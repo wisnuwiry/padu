@@ -165,12 +165,18 @@ export function Transcript({
   const wasNearBottom = useRef(true)
   const expandedSession = useRef(session.id)
   const [expandedTurns, setExpandedTurns] = useState<Set<string>>(new Set())
+  const [expandedCompactions, setExpandedCompactions] = useState<Set<string>>(new Set())
   const [atTop, setAtTop] = useState(true)
   const [atBottom, setAtBottom] = useState(true)
   const [railFits, setRailFits] = useState(false)
   const [activeTurnIndex, setActiveTurnIndex] = useState(() => Math.max(0, session.turns.length - 1))
   const [messageEdit, setMessageEdit] = useState<MessageEdit | null>(null)
-  const items = buildTranscriptItems(session, expandedTurns, new Set(rewindTurnCounts))
+  const items = buildTranscriptItems(
+    session,
+    expandedTurns,
+    expandedCompactions,
+    new Set(rewindTurnCounts),
+  )
   const itemIndexesByMessage = new Map<string, number>()
   items.forEach((item, index) => {
     if (item.kind === 'message' && item.message.role === 'user') {
@@ -225,6 +231,7 @@ export function Transcript({
     if (expandedSession.current === session.id) return
     expandedSession.current = session.id
     setExpandedTurns(new Set())
+    setExpandedCompactions(new Set())
     setMessageEdit(null)
     wasNearBottom.current = true
     setAtBottom(true)
@@ -288,6 +295,7 @@ export function Transcript({
               backgroundWork={backgroundWork}
               item={item}
               locale={locale}
+              provider={session.provider}
               sessionId={session.id}
               t={t}
               onCopyToComposer={onCopyToComposer}
@@ -328,6 +336,12 @@ export function Transcript({
                 const next = new Set(current)
                 if (next.has(turnId)) next.delete(turnId)
                 else next.add(turnId)
+                return next
+              })}
+              onToggleCompaction={(markerId) => setExpandedCompactions((current) => {
+                const next = new Set(current)
+                if (next.has(markerId)) next.delete(markerId)
+                else next.add(markerId)
                 return next
               })}
             />
@@ -613,6 +627,12 @@ type TranscriptRenderItem =
       startedAt: number
     }
   | {
+      kind: 'compaction'
+      key: string
+      marker: NonNullable<AgentSession['compactions']>[number] | null
+      expanded: boolean
+    }
+  | {
       kind: 'tail'
       key: 'tail'
     }
@@ -620,6 +640,7 @@ type TranscriptRenderItem =
 function buildTranscriptItems(
   session: AgentSession,
   expandedTurns: Set<string>,
+  expandedCompactions: Set<string>,
   availableRewindTurnCounts: ReadonlySet<number>,
 ): TranscriptRenderItem[] {
   const turns = new Map(session.turns.map((turn) => [turn.id, turn]))
@@ -747,8 +768,81 @@ function buildTranscriptItems(
     })
     }
   }
-  items.push({ kind: 'tail', key: 'tail' })
-  return items
+  const withCompactions = insertCompactionItems(items, session, expandedCompactions)
+  if (session.compacting) {
+    withCompactions.push({
+      kind: 'compaction',
+      key: 'compaction-active',
+      marker: null,
+      expanded: false,
+    })
+  }
+  withCompactions.push({ kind: 'tail', key: 'tail' })
+  return withCompactions
+}
+
+function insertCompactionItems(
+  items: TranscriptRenderItem[],
+  session: AgentSession,
+  expandedCompactions: ReadonlySet<string>,
+): TranscriptRenderItem[] {
+  const rows = [...items]
+  const sameTurnOffset = new Map<number, number>()
+  const markers = session.compactions ?? []
+  for (const marker of markers) {
+    const boundary = Math.max(0, Math.min(marker.turnCount, session.turns.length))
+    let rowBoundary = 0
+    if (boundary > 0) {
+      const turnId = session.turns[boundary - 1]!.id
+      for (let index = rows.length - 1; index >= 0; index -= 1) {
+        if (transcriptItemTurnId(rows[index]!) === turnId) {
+          rowBoundary = index + 1
+          break
+        }
+      }
+    }
+    const priorAtBoundary = sameTurnOffset.get(boundary) ?? 0
+    rows.splice(Math.min(rowBoundary + priorAtBoundary, rows.length), 0, {
+      kind: 'compaction',
+      key: `compaction-${marker.id}`,
+      marker,
+      expanded: expandedCompactions.has(marker.id),
+    })
+    sameTurnOffset.set(boundary, priorAtBoundary + 1)
+  }
+
+  const hiddenTurnIds = new Set<string>()
+  let segmentStart = 0
+  for (const marker of markers) {
+    const segmentEnd = Math.max(0, Math.min(marker.turnCount, session.turns.length))
+    segmentStart = Math.min(segmentStart, segmentEnd)
+    if (!expandedCompactions.has(marker.id)) {
+      for (const turn of session.turns.slice(segmentStart, segmentEnd)) {
+        hiddenTurnIds.add(turn.id)
+      }
+    }
+    segmentStart = segmentEnd
+  }
+  return rows.filter((row) => {
+    const turnId = transcriptItemTurnId(row)
+    return !turnId || !hiddenTurnIds.has(turnId)
+  })
+}
+
+function transcriptItemTurnId(item: TranscriptRenderItem): string | null {
+  switch (item.kind) {
+    case 'fold':
+    case 'changed':
+      return item.turnId
+    case 'block':
+      return item.block.turn_id ?? null
+    case 'message':
+      return item.message.turn_id ?? null
+    case 'working':
+    case 'compaction':
+    case 'tail':
+      return null
+  }
 }
 
 function responseForkTurnCount(
@@ -772,9 +866,11 @@ function TranscriptItemView({
   item,
   backgroundWork,
   locale,
+  provider,
   sessionId,
   t,
   onToggleTurn,
+  onToggleCompaction,
   onReviewChanges,
   onCopyToComposer,
   onAddToNote,
@@ -790,9 +886,11 @@ function TranscriptItemView({
   item: TranscriptRenderItem
   backgroundWork: BackgroundWorkItem[]
   locale: AppLocale
+  provider: AgentSession['provider']
   sessionId: string
   t: Translator
   onToggleTurn: (turnId: string) => void
+  onToggleCompaction: (markerId: string) => void
   onReviewChanges?: (source: ReviewDiffSource) => void
   onCopyToComposer?: (content: string) => void
   onAddToNote?: (content: string) => void
@@ -848,6 +946,17 @@ function TranscriptItemView({
     )
   } else if (item.kind === 'working') {
     content = <WorkingIndicator startedAt={item.startedAt} t={t} />
+  } else if (item.kind === 'compaction') {
+    content = (
+      <CompactionCard
+        active={item.marker === null}
+        expanded={item.expanded}
+        marker={item.marker}
+        provider={provider}
+        t={t}
+        onToggle={() => item.marker && onToggleCompaction(item.marker.id)}
+      />
+    )
   } else {
     content = (
       <MessageRow
@@ -1530,6 +1639,98 @@ function MessageContextMenu({
       </ContextMenu.Portal>
     </ContextMenu.Root>
   )
+}
+
+function CompactionCard({
+  active,
+  expanded,
+  marker,
+  provider,
+  t,
+  onToggle,
+}: {
+  active: boolean
+  expanded: boolean
+  marker: NonNullable<AgentSession['compactions']>[number] | null
+  provider: AgentSession['provider']
+  t: Translator
+  onToggle: () => void
+}) {
+  if (active) {
+    return (
+      <div
+        aria-live="polite"
+        className="flex items-center gap-3 rounded-[10px] border bg-[var(--overlay-strong)] px-3.5 py-3"
+      >
+        <PaduIcon
+          className="size-4 shrink-0 text-ring motion-safe:animate-spin"
+          name="loaderCircle"
+        />
+        <div className="min-w-0">
+          <div className="text-[13px] font-medium">{t('transcript.compacting_title')}</div>
+          <div className="mt-0.5 text-xs text-[var(--text-tertiary)]">
+            {t('transcript.compacting_subtitle', {
+              provider: provider === 'claude'
+                ? 'Claude Code'
+                : provider === 'agy'
+                  ? 'Antigravity'
+                  : 'Codex',
+            })}
+          </div>
+        </div>
+      </div>
+    )
+  }
+  if (!marker) return null
+  const before = marker.tokensBefore == null ? '?' : formatCompactionTokens(marker.tokensBefore)
+  const after = marker.tokensAfter == null ? '?' : formatCompactionTokens(marker.tokensAfter)
+  const reduction = marker.tokensBefore && marker.tokensAfter != null
+    ? Math.max(0, Math.round((1 - marker.tokensAfter / marker.tokensBefore) * 100))
+    : null
+  return (
+    <div className="rounded-[10px] border bg-card px-3.5 py-3">
+      <div className="flex items-center gap-2">
+        <PaduIcon className="size-3.5 text-ring" name="sparkle" />
+        <div className="text-[13px] font-medium">{t('transcript.compacted_badge')}</div>
+        <div className="flex-1" />
+        <div className="text-xs text-[var(--text-tertiary)]">
+          {reduction == null
+            ? t('transcript.compacted_tokens', { before, after })
+            : t('transcript.compacted_reduction', {
+                before,
+                after,
+                percent: String(reduction),
+              })}
+        </div>
+      </div>
+      <button
+        aria-expanded={expanded}
+        className="mt-2 flex w-full items-center gap-1 rounded-md px-1.5 py-1 text-left text-xs text-[var(--text-secondary)] outline-none hover:bg-[var(--overlay)] focus-visible:ring-1 focus-visible:ring-ring"
+        type="button"
+        onClick={onToggle}
+      >
+        {expanded
+          ? t('transcript.hide_compacted_history')
+          : t('transcript.show_compacted_history', { count: marker.turnCount })}
+        <PaduIcon
+          className="size-2.5 text-[var(--text-tertiary)]"
+          name={expanded ? 'chevronDown' : 'chevronRight'}
+        />
+      </button>
+      {expanded && (
+        <div className="mt-2 rounded-md bg-[var(--overlay)] px-2.5 py-2 text-xs leading-5 text-[var(--text-secondary)]">
+          <div>{t('transcript.compacted_history_retained')}</div>
+          <div>{t('transcript.compaction_checkpoint_preserved')}</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function formatCompactionTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`
+  return String(tokens)
 }
 
 function ActivityGroup({
