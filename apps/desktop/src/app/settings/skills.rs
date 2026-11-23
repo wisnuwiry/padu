@@ -547,6 +547,7 @@ impl Padu {
             SkillSource::Provider(ProviderKind::Cursor),
             SkillSource::Provider(ProviderKind::Fx),
             SkillSource::Provider(ProviderKind::OpenCode),
+            SkillSource::Provider(ProviderKind::OpenCodeV2),
             SkillSource::Provider(ProviderKind::Pi),
             SkillSource::Provider(ProviderKind::OhMyPi),
             SkillSource::Provider(ProviderKind::Amp),

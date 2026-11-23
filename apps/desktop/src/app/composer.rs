@@ -4409,7 +4409,7 @@ pub(super) fn picker_rail_shows_provider(
 ) -> bool {
     let installed = probes
         .iter()
-        .any(|probe| probe.provider == kind && probe.installed);
+        .any(|probe| probe.provider == kind && probe.available());
     let switched_off = disabled_providers.contains(&kind) && locked_provider != Some(kind);
     installed && !switched_off
 }
@@ -4457,7 +4457,7 @@ pub(super) fn visible_picker_models(
     let searching = !normalized_query.is_empty();
     let mut models = probes
         .iter()
-        .filter(|probe| probe.installed)
+        .filter(|probe| probe.available())
         .flat_map(|probe| {
             probe
                 .models

@@ -382,7 +382,9 @@ impl Padu {
                 ("deepseek-chat".into(), "DeepSeek Chat".into()),
                 ("deepseek-reasoner".into(), "DeepSeek Reasoner".into()),
             ],
-            ProviderKind::OpenCode => vec![("default".into(), "Default".into())],
+            ProviderKind::OpenCode | ProviderKind::OpenCodeV2 => {
+                vec![("default".into(), "Default".into())]
+            }
             _ => vec![],
         }
     }

@@ -36,6 +36,8 @@ impl Padu {
         for (index, kind) in order.into_iter().enumerate() {
             let probe = self.provider_probe(kind);
             let installed = probe.is_some_and(|probe| probe.installed);
+            let available = probe.is_some_and(|probe| probe.available());
+            let unavailable_reason = probe.and_then(|probe| probe.unavailable_reason.clone());
             let binary_path = probe
                 .filter(|probe| probe.installed)
                 .and_then(|probe| probe.path.as_deref())
@@ -54,6 +56,8 @@ impl Padu {
 
             let dot_color = if !installed {
                 theme.text_ghost
+            } else if !available {
+                theme.warning
             } else if disabled {
                 theme.warning
             } else {
@@ -68,7 +72,9 @@ impl Padu {
                 if let Some(path) = binary_path {
                     parts.push(path);
                 }
-                if disabled {
+                if let Some(reason) = unavailable_reason {
+                    parts.push(reason);
+                } else if disabled {
                     parts.push(tr!("providers.disabled_for_new_tasks"));
                 } else if model_count > 0 {
                     parts.push(if model_count == 1 {
@@ -331,6 +337,8 @@ impl Padu {
                             provider: ProviderKind::Agy,
                             installed: true,
                             path: Some(path),
+                            unavailable_reason: None,
+                            storage_paths: Vec::new(),
                             models: crate::model_catalog::fallback_models(ProviderKind::Agy),
                             agent_presets: crate::model_catalog::fallback_agent_presets(
                                 ProviderKind::Agy,
@@ -576,14 +584,16 @@ impl Padu {
         cx: &mut Context<Self>,
     ) -> Div {
         let override_value = self.state.provider_binary_overrides.get(&kind).cloned();
-        let installed = self
-            .provider_probe(kind)
-            .is_some_and(|probe| probe.installed);
-        let full_path = self
-            .provider_probe(kind)
+        let probe = self.provider_probe(kind);
+        let installed = probe.as_ref().is_some_and(|probe| probe.installed);
+        let full_path = probe
+            .as_ref()
             .filter(|probe| probe.installed)
             .and_then(|probe| probe.path.as_ref())
             .map(|path| path.display().to_string());
+        let unavailable_reason = probe
+            .as_ref()
+            .and_then(|probe| probe.unavailable_reason.as_deref());
 
         let caption = match (&override_value, full_path) {
             (Some(_), Some(path)) => tr!("providers.using_override", path = path),
@@ -661,6 +671,102 @@ impl Padu {
                     .text_size(sp(12.5))
                     .text_color(theme.text_ghost)
                     .child(SharedString::from(caption)),
+            )
+            .when_some(unavailable_reason, |element, reason| {
+                element.child(
+                    div()
+                        .text_size(sp(12.5))
+                        .text_color(theme.warning)
+                        .child(SharedString::from(reason.to_owned())),
+                )
+            })
+            .when_some(
+                probe
+                    .as_ref()
+                    .filter(|probe| !probe.storage_paths.is_empty())
+                    .map(|probe| probe.storage_paths.clone()),
+                |element, paths| {
+                    let mut rows = div().mt(px(6.0)).flex().flex_col().gap(px(3.0)).child(
+                        div()
+                            .text_size(sp(12.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text_secondary)
+                            .child(tr!("providers.storage_paths")),
+                    );
+                    for entry in paths {
+                        rows = rows.child(self.provider_storage_path_row(
+                            kind,
+                            entry.kind,
+                            &entry.path.display().to_string(),
+                            &theme,
+                            cx,
+                        ));
+                    }
+                    element.child(rows)
+                },
+            )
+    }
+
+    fn provider_storage_path_row(
+        &self,
+        provider: ProviderKind,
+        kind: crate::model::ProviderStoragePathKind,
+        path: &str,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let id = format!("provider-storage-{}-{kind:?}", provider.id());
+        let copied = self.control_was_copied(&id);
+        let value = path.to_owned();
+        let copied_id = id.clone();
+        let label = match kind {
+            crate::model::ProviderStoragePathKind::Config => tr!("providers.storage_path_config"),
+            crate::model::ProviderStoragePathKind::Data => tr!("providers.storage_path_data"),
+            crate::model::ProviderStoragePathKind::State => tr!("providers.storage_path_state"),
+            crate::model::ProviderStoragePathKind::Cache => tr!("providers.storage_path_cache"),
+        };
+        div()
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .child(
+                div()
+                    .w(px(48.0))
+                    .flex_none()
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_tertiary)
+                    .child(SharedString::from(label)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .font_family(crate::md::render::MONO_FAMILY)
+                    .text_size(sp(12.0))
+                    .text_color(theme.text_secondary)
+                    .child(SharedString::from(path.to_owned())),
+            )
+            .child(
+                icon_button(
+                    SharedString::from(id.clone()),
+                    if copied {
+                        "icons/check.svg"
+                    } else {
+                        "icons/copy.svg"
+                    },
+                    *theme,
+                )
+                .tab_index(0)
+                .tooltip(Tooltip::text(if copied {
+                    tr!("common.copied")
+                } else {
+                    tr!("common.copy")
+                }))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(value.clone()));
+                    this.show_control_copied(copied_id.clone(), cx);
+                })),
             )
     }
 

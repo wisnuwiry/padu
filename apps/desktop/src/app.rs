@@ -162,6 +162,8 @@ struct SlashCommandCatalog {
 struct ProviderBinaryObservation {
     version: Option<String>,
     identity: Option<SkillBinaryIdentity>,
+    unavailable_reason: Option<String>,
+    checked: bool,
 }
 
 fn signal_event_pump(wake: &smol::channel::Sender<()>) {
@@ -3155,6 +3157,8 @@ impl Padu {
                 provider,
                 installed: false,
                 path: None,
+                unavailable_reason: None,
+                storage_paths: Vec::new(),
                 models: crate::model_catalog::fallback_models(provider),
                 agent_presets: crate::model_catalog::fallback_agent_presets(provider),
             })

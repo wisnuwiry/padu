@@ -514,6 +514,11 @@ providers.detected_as: "%{command} として検出されました"
 providers.searches_path: Padu は PATH で %{command} を検出できませんでした
 providers.binary_path: 実行ファイルのパス
 providers.binary_path_description: Padu が %{provider} の起動に使用する実行ファイルです。Return キーで適用します。空欄にすると PATH から自動検出します
+providers.storage_paths: 保存パス
+providers.storage_path_config: 設定
+providers.storage_path_data: データ
+providers.storage_path_state: 状態
+providers.storage_path_cache: キャッシュ
 providers.checked_just_now: たった今確認済み
 providers.checked_minutes_ago: "%{count} 分前に確認済み"
 providers.checked_hours_ago: "%{count} 時間前に確認済み"
@@ -1543,7 +1548,13 @@ usage.chart_description: "Claude Code と Codex の日別 %{metric}。"
 usage.refresh_failed: "使用状況の更新に失敗しました：%{error}"
 usage.context_used: コンテキストウインドウを %{percent}% 使用（%{shortcut}）
 usage.shortcut: 使用状況（%{shortcut}）
-usage.context_window: コンテキストウインドウ
+usage.context_window: 有効コンテキスト
+usage.context_source_harness_environment: "CLAUDE_CODE_AUTO_COMPACT_WINDOW の値を分母に使用"
+usage.context_source_claude_one_million: "モデル名の [1m] を分母に使用"
+usage.context_source_claude_default: "[1m] のないモデルの既定値を分母に使用"
+usage.context_source_provider: "プロバイダーが報告した値を分母に使用"
+usage.context_source_unknown: "コンテキスト上限を判定できません"
+usage.context_over_budget: "有効コンテキストを %{tokens} 超過"
 usage.compact_tooltip: コンテキストが埋まりつつあります。クリックして圧縮します。
 usage.compact_action: コンテキストを圧縮
 usage.compact_focus_label: フォーカス（任意）

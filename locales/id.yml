@@ -505,6 +505,11 @@ providers.detected_as: Terdeteksi sebagai %{command}
 providers.searches_path: Padu tidak mendeteksi %{command} di PATH
 providers.binary_path: Jalur biner
 providers.binary_path_description: Eksekusi yang dijalankan Padu untuk %{provider}. Tekan Return untuk menerapkan; kosongkan untuk mendeteksi dari PATH
+providers.storage_paths: Jalur penyimpanan
+providers.storage_path_config: Konfigurasi
+providers.storage_path_data: Data
+providers.storage_path_state: State
+providers.storage_path_cache: Cache
 providers.checked_just_now: Baru saja diperiksa
 providers.checked_minutes_ago: Diperiksa %{count}m yang lalu
 providers.checked_hours_ago: Diperiksa %{count}j yang lalu
@@ -1488,7 +1493,13 @@ usage.chart_description: "%{metric} harian terbagi antara Claude Code dan Codex.
 usage.refresh_failed: "Penyegaran penggunaan gagal: %{error}"
 usage.context_used: Jendela konteks %{percent}% digunakan (%{shortcut})
 usage.shortcut: Penggunaan (%{shortcut})
-usage.context_window: Jendela konteks
+usage.context_window: Konteks efektif
+usage.context_source_harness_environment: "Pembagi dari CLAUDE_CODE_AUTO_COMPACT_WINDOW"
+usage.context_source_claude_one_million: "Pembagi dari nama model ([1m])"
+usage.context_source_claude_default: "Pembagi bawaan untuk model non-[1m]"
+usage.context_source_provider: "Pembagi yang dilaporkan provider"
+usage.context_source_unknown: "Batas konteks tidak dapat ditentukan"
+usage.context_over_budget: "%{tokens} melebihi konteks efektif"
 usage.compact_tooltip: Konteks hampir penuh. Klik untuk meringkas.
 usage.compact_action: Ringkas konteks
 usage.compact_focus_label: Fokus (opsional)

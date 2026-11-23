@@ -102,6 +102,7 @@ fn live_badges_read_context_usage_and_turns() {
     session.context_usage = Some(ContextUsage {
         tokens: 12_500,
         window: Some(200_000),
+        source: None,
     });
     session.turns = vec![test_turn(1_000, Some(1_060)), test_turn(2_000, None)];
     // The open turn ticks against `now`.
@@ -121,6 +122,7 @@ fn live_badges_prefer_larger_goal_ledger() {
     session.context_usage = Some(ContextUsage {
         tokens: 100,
         window: None,
+        source: None,
     });
     session.thread_goal = Some(ThreadGoal {
         objective: String::from("goal"),
@@ -160,6 +162,7 @@ fn live_badges_stay_interactive_with_500_cards() {
         session.context_usage = Some(ContextUsage {
             tokens: 1_000 + index,
             window: None,
+            source: None,
         });
         session.turns = vec![test_turn(now - 300, Some(now - 240))];
         sessions.push(session);
