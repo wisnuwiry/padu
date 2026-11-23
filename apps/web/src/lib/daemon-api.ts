@@ -505,6 +505,21 @@ export async function setSessionPinned(
   return response.session
 }
 
+export async function renameSession(
+  client: PaduClient,
+  sessionId: string,
+  title: string,
+): Promise<{ session: AgentSession; nativeWarning: string | null }> {
+  const response = expectResponse(
+    await client.request({ type: 'renameSession', title }, sessionId),
+    'sessionRenamed',
+  )
+  return {
+    session: response.session,
+    nativeWarning: response.nativeWarning ?? null,
+  }
+}
+
 export async function setSessionArchived(
   client: PaduClient,
   sessionId: string,

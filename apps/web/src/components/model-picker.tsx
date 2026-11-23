@@ -67,23 +67,27 @@ export function ModelPicker({
     return PROVIDERS.filter(({ id }) => {
       const isCurrent = id === session.provider
       const isInstalled = probeMap[id]?.installed ?? false
+      const isAvailable = isInstalled && !probeMap[id]?.unavailable_reason
       const hasModels = (probeMap[id]?.models?.length ?? 0) > 0
       if (!isInstalled && !isCurrent && (!hasModels || detectionSettled)) return false
       const disabled = disabledProviders.includes(id)
       if (disabled && lockedProvider !== id) return false
-      return true
+      return isAvailable || isCurrent || hasModels
     })
   }, [disabledProviders, lockedProvider, probeMap, session.provider, detectionSettled])
 
   const usableProviders = useMemo(() => {
     return shownProviders.filter(({ id }) => {
       if (lockedProvider && id !== lockedProvider) return false
-      return true
+      return (probeMap[id]?.installed ?? false) && !probeMap[id]?.unavailable_reason
     })
-  }, [lockedProvider, shownProviders])
+  }, [lockedProvider, probeMap, shownProviders])
 
   const hasAnyModels = useMemo(() => {
-    return Object.values(probeMap).some((probe) => (probe?.models?.length ?? 0) > 0)
+    return Object.values(probeMap).some((probe) => (
+      Boolean(probe?.installed && !probe.unavailable_reason) &&
+      (probe?.models?.length ?? 0) > 0
+    ))
   }, [probeMap])
   const noProviders = detectionSettled && shownProviders.length === 0 && !hasAnyModels
 

@@ -730,7 +730,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             },
             staleTime: PROVIDER_PROBE_CACHE_STALE_TIME,
           })
-          if (!providerProbe.installed || !providerProbe.path) {
+          if (
+            !providerProbe.installed ||
+            !providerProbe.path ||
+            providerProbe.unavailable_reason
+          ) {
             throw new Error(translate(localeRef.current, 'errors.provider_not_installed', {
               provider: providerName(currentSession.provider),
             }))
@@ -970,7 +974,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         },
         staleTime: PROVIDER_PROBE_CACHE_STALE_TIME,
       })
-      if (!providerProbe.installed || !providerProbe.path) {
+      if (
+        !providerProbe.installed ||
+        !providerProbe.path ||
+        providerProbe.unavailable_reason
+      ) {
         throw new Error(translate(localeRef.current, 'errors.provider_not_installed', {
           provider: providerName(currentSession.provider),
         }))
@@ -1505,7 +1513,8 @@ function providerName(provider: AgentSession['provider']) {
       cursor: 'Cursor Agent',
       deepSeek: 'DeepSeek Harness',
       fx: 'Fx',
-      openCode: 'OpenCode',
+      openCode: 'OpenCode v1',
+      openCodeV2: 'OpenCode v2',
       grok: 'Grok',
       kimi: 'Kimi',
       commandCode: 'Command Code',
