@@ -96,11 +96,13 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
         DriverEvent::UsageUpdated {
             context_tokens,
             context_window,
+            context_window_source,
         } => (
             "usageUpdated",
             json!({
                 "contextTokens": context_tokens,
                 "contextWindow": context_window,
+                "contextWindowSource": context_window_source,
             }),
         ),
         DriverEvent::PlanUsageUpdated(usage) => ("planUsageUpdated", serde_json::to_value(usage)?),
@@ -193,6 +195,7 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
             DriverEvent::UsageUpdated {
                 context_tokens: usage.context_tokens,
                 context_window: usage.context_window,
+                context_window_source: usage.context_window_source,
             }
         }
         "planUsageUpdated" => DriverEvent::PlanUsageUpdated(serde_json::from_value(payload)?),
@@ -286,6 +289,7 @@ struct RejectedSteerWire {
 struct UsageWire {
     context_tokens: Option<u64>,
     context_window: Option<u64>,
+    context_window_source: Option<crate::model::ContextWindowSource>,
 }
 
 #[derive(Deserialize)]

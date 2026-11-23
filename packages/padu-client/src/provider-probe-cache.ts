@@ -1,8 +1,8 @@
 import { isValidSkillBinaryIdentity } from './composer-skills'
 import type { ProviderKind, ProviderProbe, SkillBinaryIdentity } from './generated'
 
-const CACHE_KEY = 'padu.provider-probes.v2'
-const CACHE_VERSION = 2
+const CACHE_KEY = 'padu.provider-probes.v3'
+const CACHE_VERSION = 3
 const CACHE_MAX_AGE = 30 * 24 * 60 * 60 * 1_000
 const CACHE_MAX_ENTRIES = 32
 
@@ -100,6 +100,10 @@ function isCachedProviderProbe(value: unknown): value is CachedProviderProbe {
     && typeof data.provider === 'string'
     && typeof data.installed === 'boolean'
     && (data.path === null || typeof data.path === 'string')
+    && (data.unavailable_reason === undefined
+      || data.unavailable_reason === null
+      || typeof data.unavailable_reason === 'string')
+    && Array.isArray(data.storage_paths)
     && Array.isArray(data.models)
     && Array.isArray(data.agent_presets)
     && (data.version === null || typeof data.version === 'string')

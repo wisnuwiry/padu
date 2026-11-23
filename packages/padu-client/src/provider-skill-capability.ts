@@ -21,6 +21,7 @@ const PROVIDER_KINDS: ReadonlySet<string> = new Set([
   "deepSeek",
   "fx",
   "openCode",
+  "openCodeV2",
   "grok",
   "kimi",
   "commandCode",

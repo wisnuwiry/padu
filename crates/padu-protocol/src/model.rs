@@ -22,6 +22,7 @@ pub enum ProviderKind {
     DeepSeek,
     Fx,
     OpenCode,
+    OpenCodeV2,
     Grok,
     Kimi,
     CommandCode,
@@ -31,7 +32,7 @@ pub enum ProviderKind {
 }
 
 impl ProviderKind {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::Agy,
         Self::Amp,
         Self::Claude,
@@ -40,6 +41,7 @@ impl ProviderKind {
         Self::DeepSeek,
         Self::Fx,
         Self::OpenCode,
+        Self::OpenCodeV2,
         Self::Grok,
         Self::Kimi,
         Self::CommandCode,
@@ -58,6 +60,7 @@ impl ProviderKind {
             Self::DeepSeek => "deepseek",
             Self::Fx => "fx",
             Self::OpenCode => "opencode",
+            Self::OpenCodeV2 => "opencodev2",
             Self::Grok => "grok",
             Self::Kimi => "kimi",
             Self::CommandCode => "commandcode",
@@ -76,7 +79,8 @@ impl ProviderKind {
             Self::Cursor => "Cursor CLI",
             Self::DeepSeek => "DeepSeek Harness",
             Self::Fx => "Fx",
-            Self::OpenCode => "OpenCode",
+            Self::OpenCode => "OpenCode v1",
+            Self::OpenCodeV2 => "OpenCode v2",
             Self::Grok => "Grok Build",
             Self::Kimi => "Kimi Code",
             Self::CommandCode => "Command Code",
@@ -95,7 +99,8 @@ impl ProviderKind {
             Self::Cursor => "Cursor",
             Self::DeepSeek => "DeepSeek",
             Self::Fx => "Fx",
-            Self::OpenCode => "OpenCode",
+            Self::OpenCode => "OpenCode v1",
+            Self::OpenCodeV2 => "OpenCode v2",
             Self::Grok => "Grok",
             Self::Kimi => "Kimi",
             Self::CommandCode => "Command",
@@ -117,6 +122,7 @@ impl ProviderKind {
             Self::DeepSeek => "dsh",
             Self::Fx => "fx",
             Self::OpenCode => "opencode",
+            Self::OpenCodeV2 => "opencode",
             Self::Grok => "grok",
             Self::Kimi => "kimi",
             Self::CommandCode => "command-code",
@@ -142,6 +148,7 @@ impl ProviderKind {
                 | Self::Cursor
                 | Self::DeepSeek
                 | Self::OpenCode
+                | Self::OpenCodeV2
                 | Self::Grok
                 | Self::OhMyPi
                 | Self::Pi
@@ -159,6 +166,7 @@ impl ProviderKind {
                 | Self::Cursor
                 | Self::DeepSeek
                 | Self::OpenCode
+                | Self::OpenCodeV2
                 | Self::Grok
                 | Self::OhMyPi
                 | Self::Pi
@@ -175,6 +183,7 @@ impl ProviderKind {
                 | Self::DeepSeek
                 | Self::Fx
                 | Self::OpenCode
+                | Self::OpenCodeV2
                 | Self::Grok
                 | Self::Kimi
                 | Self::CommandCode
@@ -222,6 +231,9 @@ pub enum ProviderResumeCursor {
         fork_context: Option<String>,
     },
     OpenCode {
+        session_id: String,
+    },
+    OpenCodeV2 {
         session_id: String,
     },
     DeepSeek {
@@ -277,6 +289,7 @@ impl ProviderResumeCursor {
             ProviderKind::DeepSeek => Self::DeepSeek { session_id: id },
             ProviderKind::Fx => Self::Fx { session_id: id },
             ProviderKind::OpenCode => Self::OpenCode { session_id: id },
+            ProviderKind::OpenCodeV2 => Self::OpenCodeV2 { session_id: id },
             ProviderKind::Grok => Self::Grok { session_id: id },
             ProviderKind::Kimi => Self::Kimi { session_id: id },
             ProviderKind::CommandCode => Self::CommandCode { session_id: id },
@@ -302,6 +315,7 @@ impl ProviderResumeCursor {
             Self::DeepSeek { .. } => ProviderKind::DeepSeek,
             Self::Fx { .. } => ProviderKind::Fx,
             Self::OpenCode { .. } => ProviderKind::OpenCode,
+            Self::OpenCodeV2 { .. } => ProviderKind::OpenCodeV2,
             Self::Grok { .. } => ProviderKind::Grok,
             Self::Kimi { .. } => ProviderKind::Kimi,
             Self::CommandCode { .. } => ProviderKind::CommandCode,
@@ -320,6 +334,7 @@ impl ProviderResumeCursor {
             | Self::DeepSeek { session_id }
             | Self::Fx { session_id }
             | Self::OpenCode { session_id }
+            | Self::OpenCodeV2 { session_id }
             | Self::Grok { session_id }
             | Self::Kimi { session_id }
             | Self::CommandCode { session_id }
@@ -583,11 +598,31 @@ impl ProviderModel {
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ProviderStoragePathKind {
+    Config,
+    Data,
+    State,
+    Cache,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderStoragePath {
+    pub kind: ProviderStoragePathKind,
+    pub path: PathBuf,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 pub struct ProviderProbe {
     pub provider: ProviderKind,
     pub installed: bool,
     pub path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unavailable_reason: Option<String>,
+    #[serde(default)]
+    pub storage_paths: Vec<ProviderStoragePath>,
     #[serde(default)]
     pub models: Vec<ProviderModel>,
     #[serde(default)]
@@ -595,6 +630,10 @@ pub struct ProviderProbe {
 }
 
 impl ProviderProbe {
+    pub fn available(&self) -> bool {
+        self.installed && self.unavailable_reason.is_none()
+    }
+
     pub fn preferred_model(&self) -> Option<&ProviderModel> {
         self.models
             .iter()
@@ -937,16 +976,34 @@ pub struct AgentTurn {
     pub checkpoint: Option<Checkpoint>,
 }
 
-/// How full the provider's context window is, from the latest main-thread
-/// model call. `tokens` is prompt + cache + output of that call; `window` is
-/// the model's context size, which the provider only reports once a turn
-/// settles — `None` means "not known yet", and the meter degrades to a bare
-/// token count.
+/// Why Padu chose the effective context denominator.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ContextWindowSource {
+    /// Claude Code's `CLAUDE_CODE_AUTO_COMPACT_WINDOW`.
+    HarnessEnvironment,
+    /// Claude's `[1m]` model-id suffix.
+    ClaudeModelOneMillion,
+    /// Claude Code's default budget for a model without the `[1m]` suffix.
+    ClaudeModelDefault,
+    /// A live provider stream or model catalog.
+    Provider,
+    /// Padu has tokens but no trustworthy denominator.
+    Unknown,
+}
+
+/// How full the provider's effective context window is, from the latest
+/// main-thread model call. `tokens` is prompt + cache + output of that call;
+/// `window` is the denominator Padu trusts, and `source` explains where that
+/// denominator came from. `None` means "not known yet"; the meter then
+/// degrades to a bare token count without inventing a budget.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, TS)]
 pub struct ContextUsage {
     pub tokens: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<ContextWindowSource>,
 }
 
 /// Where Codex stands on a thread goal. Mirrors the app-server's
@@ -2390,6 +2447,7 @@ pub enum DriverEvent {
     UsageUpdated {
         context_tokens: Option<u64>,
         context_window: Option<u64>,
+        context_window_source: Option<ContextWindowSource>,
     },
     /// Account-level rate-limit meters carried by the provider's own stream
     /// (Codex's `account/rateLimits/updated`). Same shape the OAuth fetcher
@@ -4828,6 +4886,10 @@ mod tests {
         assert_eq!(ProviderKind::DeepSeek.command(), "dsh");
         assert_eq!(ProviderKind::Fx.command(), "fx");
         assert_eq!(ProviderKind::OpenCode.command(), "opencode");
+        assert_eq!(ProviderKind::OpenCodeV2.id(), "opencodev2");
+        assert_eq!(ProviderKind::OpenCodeV2.command(), "opencode");
+        assert_eq!(ProviderKind::OpenCode.display_name(), "OpenCode v1");
+        assert_eq!(ProviderKind::OpenCodeV2.display_name(), "OpenCode v2");
         assert_eq!(ProviderKind::Grok.command(), "grok");
         assert_eq!(ProviderKind::Pi.command(), "pi");
         assert_eq!(ProviderKind::Qoder.id(), "qoder");
@@ -4847,6 +4909,7 @@ mod tests {
             ProviderKind::Cursor,
             ProviderKind::DeepSeek,
             ProviderKind::OpenCode,
+            ProviderKind::OpenCodeV2,
             ProviderKind::Grok,
             ProviderKind::Pi,
         ] {
@@ -4869,6 +4932,7 @@ mod tests {
         assert!(ProviderKind::DeepSeek.supports_model_discovery());
         assert!(ProviderKind::Fx.supports_model_discovery());
         assert!(ProviderKind::OpenCode.supports_model_discovery());
+        assert!(ProviderKind::OpenCodeV2.supports_model_discovery());
         assert!(ProviderKind::Grok.supports_model_discovery());
         assert!(ProviderKind::Pi.supports_model_discovery());
     }
