@@ -97,6 +97,25 @@ fn opencode_permission_rules(mode: RuntimeMode, interaction_mode: InteractionMod
     }
 }
 
+fn opencode_v1_resume_unavailable() -> anyhow::Error {
+    let paths = crate::model::provider_storage_paths(crate::model::ProviderKind::OpenCode)
+        .into_iter()
+        .map(|entry| {
+            let kind = match entry.kind {
+                crate::model::ProviderStoragePathKind::Config => "config",
+                crate::model::ProviderStoragePathKind::Data => "data",
+                crate::model::ProviderStoragePathKind::State => "state",
+                crate::model::ProviderStoragePathKind::Cache => "cache",
+            };
+            format!("{kind}={}", entry.path.display())
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    anyhow!(
+        "OpenCode v1's native session is not resumable because the isolated v1 store is missing or incomplete. Expected: {paths}"
+    )
+}
+
 pub struct OpenCodeDriver {
     // `Drop` releases this lease before waking the worker, guaranteeing that
     // final process teardown runs on the worker rather than the UI thread.
@@ -148,10 +167,14 @@ impl OpenCodeDriver {
             .transpose()?;
         // The one-shot path handed Computer Use to OpenCode through the
         // environment; the resident server takes it exactly the same way.
-        let environment = computer_use
-            .as_ref()
-            .map(|runtime| super::support::opencode_computer_use_environment(&runtime.config))
-            .unwrap_or_default();
+        let mut environment =
+            crate::model::provider_xdg_environment(crate::model::ProviderKind::OpenCode);
+        environment.extend(
+            computer_use
+                .as_ref()
+                .map(|runtime| super::support::opencode_computer_use_environment(&runtime.config))
+                .unwrap_or_default(),
+        );
         // Computer Use bakes per-session configuration into the server's
         // environment, so it keeps a dedicated server. Every other session
         // shares the workspace's one resident server — OpenCode hosts many
@@ -160,7 +183,7 @@ impl OpenCodeDriver {
         let server = if computer_use.is_some() {
             PooledServer::dedicated(OpenCodeServer::start_with_env(&binary, &cwd, &environment)?)
         } else {
-            crate::opencode_pool::acquire(&binary, &cwd)?
+            crate::opencode_pool::acquire_v1_isolated(&binary, &cwd, &environment)?
         };
 
         let agent = if interaction_mode == InteractionMode::Plan || mode == RuntimeMode::Plan {
@@ -172,7 +195,13 @@ impl OpenCodeDriver {
         // Reuse the native session when resuming so the conversation, and the
         // cursor already persisted for it, stay the same.
         let session_id = match resume_session_id {
-            Some(session_id) => session_id,
+            Some(session_id) => {
+                let path = format!("/session/{}", encode_path_segment(&session_id));
+                if server.request("GET", &path, None).is_err() {
+                    return Err(opencode_v1_resume_unavailable());
+                }
+                session_id
+            }
             None => {
                 let created = server
                     .request("POST", "/session", Some(&json!({"agent": agent})))
@@ -222,6 +251,7 @@ impl OpenCodeDriver {
                 let _ = events.send(DriverEvent::UsageUpdated {
                     context_tokens: Some(tokens),
                     context_window: None,
+                    context_window_source: None,
                 });
             }
         } else if let Some(model) = model.as_ref() {
@@ -276,6 +306,7 @@ impl OpenCodeDriver {
                     let _ = metadata_events.send(DriverEvent::UsageUpdated {
                         context_tokens: None,
                         context_window: Some(window),
+                        context_window_source: Some(crate::model::ContextWindowSource::Provider),
                     });
                 }
             })?;
@@ -945,6 +976,8 @@ fn handle_event(
                     let _ = events.send(DriverEvent::UsageUpdated {
                         context_tokens,
                         context_window,
+                        context_window_source: context_window
+                            .map(|_| crate::model::ContextWindowSource::Provider),
                     });
                 }
             }
@@ -1556,6 +1589,7 @@ mod tests {
                 DriverEvent::UsageUpdated {
                     context_tokens: tokens,
                     context_window: window,
+                    ..
                 } => {
                     context_tokens = tokens.or(context_tokens);
                     context_window = window.or(context_window);
@@ -1787,7 +1821,8 @@ mod tests {
             event_rx.try_recv().unwrap(),
             DriverEvent::UsageUpdated {
                 context_tokens: Some(15_201),
-                context_window: Some(200_000)
+                context_window: Some(200_000),
+                context_window_source: Some(crate::model::ContextWindowSource::Provider),
             }
         ));
         assert!(event_rx.try_recv().is_err());

@@ -437,6 +437,7 @@ fn handle_message(
                 let _ = events.send(DriverEvent::UsageUpdated {
                     context_tokens: Some(tokens),
                     context_window: None,
+                    context_window_source: None,
                 });
             }
             if let Some(content) = value.pointer("/message/content").and_then(Value::as_array) {

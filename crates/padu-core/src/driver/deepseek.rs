@@ -769,6 +769,8 @@ fn handle_session_event(
                 let _ = events.send(DriverEvent::UsageUpdated {
                     context_tokens: None,
                     context_window: window,
+                    context_window_source: window
+                        .map(|_| crate::model::ContextWindowSource::Provider),
                 });
             }
         }
@@ -1148,6 +1150,8 @@ fn emit_projection(key: &str, value: &Value, events: &impl DriverEventSink) {
                 let _ = events.send(DriverEvent::UsageUpdated {
                     context_tokens: tokens,
                     context_window: window,
+                    context_window_source: window
+                        .map(|_| crate::model::ContextWindowSource::Provider),
                 });
             }
         }
@@ -1172,6 +1176,7 @@ fn emit_usage(usage: Option<&Value>, events: &impl DriverEventSink) {
         let _ = events.send(DriverEvent::UsageUpdated {
             context_tokens: Some(total),
             context_window: None,
+            context_window_source: None,
         });
     }
 }
@@ -1628,7 +1633,8 @@ mod tests {
             event_rx.recv().unwrap(),
             DriverEvent::UsageUpdated {
                 context_tokens: Some(120),
-                context_window: Some(8192)
+                context_window: Some(8192),
+                context_window_source: Some(crate::model::ContextWindowSource::Provider),
             }
         ));
     }

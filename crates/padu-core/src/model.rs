@@ -1,7 +1,7 @@
 //! Daemon-only provider discovery layered over shared protocol models.
 
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use padu_protocol::composer::SkillBinaryIdentity;
 pub use padu_protocol::model::*;
@@ -16,9 +16,168 @@ pub fn provider_probe(provider: ProviderKind, binary_override: Option<&str>) -> 
         provider,
         installed: path.is_some(),
         path,
+        unavailable_reason: None,
+        storage_paths: provider_storage_paths(provider),
         models: crate::model_catalog::fallback_models(provider),
         agent_presets: crate::model_catalog::fallback_agent_presets(provider),
     }
+}
+
+/// Resolve the exact storage roots Padu expects the harness to own. These are
+/// read-only diagnostics for Settings; Padu never writes provider config.
+pub fn provider_storage_paths(provider: ProviderKind) -> Vec<ProviderStoragePath> {
+    let Some(root) = provider_xdg_roots(provider) else {
+        return Vec::new();
+    };
+    [
+        (ProviderStoragePathKind::Config, root.config),
+        (ProviderStoragePathKind::Data, root.data),
+        (ProviderStoragePathKind::State, root.state),
+        (ProviderStoragePathKind::Cache, root.cache),
+    ]
+    .into_iter()
+    .map(|(kind, path)| ProviderStoragePath { kind, path })
+    .collect()
+}
+
+/// Environment variables passed to an OpenCode child. v2 deliberately keeps
+/// the standard OpenCode roots; v1 receives Padu-owned roots so it cannot
+/// share credentials, sessions, plugins, skills, or cache with v2.
+pub fn provider_xdg_environment(provider: ProviderKind) -> Vec<(String, String)> {
+    let Some(root) = provider_xdg_roots(provider).filter(|_| provider == ProviderKind::OpenCode)
+    else {
+        return Vec::new();
+    };
+    let environment_root =
+        |path: &std::path::Path| path.parent().unwrap_or(path).to_string_lossy().into_owned();
+    let mut environment = vec![
+        ("XDG_CONFIG_HOME".into(), environment_root(&root.config)),
+        ("XDG_DATA_HOME".into(), environment_root(&root.data)),
+        ("XDG_STATE_HOME".into(), environment_root(&root.state)),
+        ("XDG_CACHE_HOME".into(), environment_root(&root.cache)),
+        (
+            "OPENCODE_CONFIG_DIR".into(),
+            root.config.to_string_lossy().into_owned(),
+        ),
+        (
+            "OPENCODE_CONFIG".into(),
+            root.config
+                .join("opencode.json")
+                .to_string_lossy()
+                .into_owned(),
+        ),
+    ];
+    // OpenCode's process-level overrides supersede its XDG files. When one is
+    // present in the parent process, replace it with v1-isolated content so the
+    // standard v2 configuration cannot leak into the legacy provider.
+    if crate::command_env::environment_value("OPENCODE_CONFIG_CONTENT").is_some() {
+        environment.push(("OPENCODE_CONFIG_CONTENT".into(), "{}".into()));
+    }
+    if crate::command_env::environment_value("OPENCODE_AUTH_CONTENT").is_some() {
+        environment.push((
+            "OPENCODE_AUTH_CONTENT".into(),
+            std::fs::read_to_string(root.data.join("auth.json"))
+                .ok()
+                .filter(|content| !content.trim().is_empty())
+                .unwrap_or_else(|| "{}".into()),
+        ));
+    }
+    if crate::command_env::environment_value("OPENCODE_API_KEY").is_some() {
+        environment.push(("OPENCODE_API_KEY".into(), String::new()));
+    }
+    environment
+}
+
+pub fn apply_provider_version_compatibility(probe: &mut ProviderProbe, version: Option<&str>) {
+    if !matches!(
+        probe.provider,
+        ProviderKind::OpenCode | ProviderKind::OpenCodeV2
+    ) {
+        return;
+    }
+    let Some(major) = version
+        .and_then(|version| version.split('.').next())
+        .and_then(|major| major.parse::<u64>().ok())
+    else {
+        if probe.installed {
+            probe.unavailable_reason =
+                Some("Could not determine the installed OpenCode major version.".into());
+        }
+        return;
+    };
+    let supported = match probe.provider {
+        ProviderKind::OpenCode => major == 1,
+        ProviderKind::OpenCodeV2 => major >= 2,
+        _ => true,
+    };
+    probe.unavailable_reason = (!supported).then(|| {
+        format!(
+            "{} requires an OpenCode {} binary; detected {}.",
+            probe.provider.display_name(),
+            if probe.provider == ProviderKind::OpenCode {
+                "1.x"
+            } else {
+                "2.x"
+            },
+            version.unwrap_or("an unknown version")
+        )
+    });
+}
+
+struct ProviderXdgRoots {
+    config: PathBuf,
+    data: PathBuf,
+    state: PathBuf,
+    cache: PathBuf,
+}
+
+fn provider_xdg_roots(provider: ProviderKind) -> Option<ProviderXdgRoots> {
+    match provider {
+        ProviderKind::OpenCode => {
+            let base = dirs::data_dir()?
+                .join(crate::identity::DATA_DIRECTORY_NAME)
+                .join("opencode-v1");
+            Some(ProviderXdgRoots {
+                config: base.join("config").join("opencode"),
+                data: base.join("data").join("opencode"),
+                state: base.join("state").join("opencode"),
+                cache: base.join("cache").join("opencode"),
+            })
+        }
+        ProviderKind::OpenCodeV2 => Some(ProviderXdgRoots {
+            config: xdg_root("XDG_CONFIG_HOME", ".config")?.join("opencode"),
+            data: xdg_root("XDG_DATA_HOME", ".local/share")?.join("opencode"),
+            state: xdg_root("XDG_STATE_HOME", ".local/state")?.join("opencode"),
+            cache: xdg_root("XDG_CACHE_HOME", ".cache")?.join("opencode"),
+        }),
+        _ => None,
+    }
+}
+
+fn xdg_root(variable: &str, home_fallback: &str) -> Option<PathBuf> {
+    #[cfg(windows)]
+    let _ = home_fallback;
+    crate::command_env::environment_value(variable)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            #[cfg(windows)]
+            {
+                match variable {
+                    "XDG_CONFIG_HOME" => dirs::config_dir(),
+                    "XDG_CACHE_HOME" => dirs::cache_dir(),
+                    _ => dirs::data_dir(),
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                crate::command_env::environment_value("HOME")
+                    .filter(|value| !value.is_empty())
+                    .map(PathBuf::from)
+                    .or_else(dirs::home_dir)
+                    .map(|home| home.join(home_fallback))
+            }
+        })
 }
 
 /// Detect a provider and hydrate its catalog from the daemon-owned cache.
@@ -48,10 +207,13 @@ fn apply_cached_models(
 }
 
 pub fn discover_provider_models(mut probe: ProviderProbe) -> ProviderProbe {
-    if probe.provider.supports_model_discovery()
+    if probe.available()
+        && probe.provider.supports_model_discovery()
         && let Some(path) = probe.path.as_deref()
     {
-        let (models, agent_presets) = crate::model_catalog::discover_catalog(probe.provider, path);
+        let environment = provider_xdg_environment(probe.provider);
+        let (models, agent_presets) =
+            crate::model_catalog::discover_catalog_with_env(probe.provider, path, &environment);
         probe.models = models;
         probe.agent_presets = agent_presets;
     }
@@ -121,6 +283,8 @@ mod tests {
             provider: ProviderKind::Codex,
             installed: true,
             path: Some("/usr/bin/codex".into()),
+            unavailable_reason: None,
+            storage_paths: Vec::new(),
             models: crate::model_catalog::fallback_models(ProviderKind::Codex),
             agent_presets: Vec::new(),
         };

@@ -77,13 +77,17 @@ impl HeadlessComputerUseRuntime {
     pub(super) fn start(provider: ProviderKind, events: DriverEventSender) -> anyhow::Result<Self> {
         let runtime = computer_use_runtime::ComputerUseRuntime::start(events)?;
         let config = match provider {
-            ProviderKind::OpenCode => {
-                let existing = match std::env::var("OPENCODE_CONFIG_CONTENT") {
-                    Ok(content) => Some(content),
-                    Err(std::env::VarError::NotPresent) => None,
-                    Err(std::env::VarError::NotUnicode(_)) => {
-                        return Err(anyhow!("OPENCODE_CONFIG_CONTENT is not valid UTF-8"));
+            ProviderKind::OpenCode | ProviderKind::OpenCodeV2 => {
+                let existing = if provider == ProviderKind::OpenCodeV2 {
+                    match std::env::var("OPENCODE_CONFIG_CONTENT") {
+                        Ok(content) => Some(content),
+                        Err(std::env::VarError::NotPresent) => None,
+                        Err(std::env::VarError::NotUnicode(_)) => {
+                            return Err(anyhow!("OPENCODE_CONFIG_CONTENT is not valid UTF-8"));
+                        }
                     }
+                } else {
+                    None
                 };
                 let base = runtime.config.clone();
                 let config_content = build_opencode_computer_use_config(

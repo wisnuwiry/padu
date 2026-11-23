@@ -12,7 +12,7 @@
 //!
 //! `enabled` otherwise defaults to `true` for every provider. Per §6.2,
 //! "when CLI probed present" governs runtime candidacy (P1-02), not the
-//! stored default: probing 14 CLIs at startup would stall every launch,
+//! stored default: probing 15 CLIs at startup would stall every launch,
 //! and an absent CLI today must not destroy the user's stored toggle.
 
 use std::io;
@@ -42,7 +42,7 @@ pub fn seed_defaults(provider: ProviderKind) -> SeedDefaults {
         },
         // Full agentic CLIs and routers, mid cost. OpenCode routes across
         // models, so it gets the broadest tag set.
-        ProviderKind::OpenCode => SeedDefaults {
+        ProviderKind::OpenCode | ProviderKind::OpenCodeV2 => SeedDefaults {
             role_tags: &["fix", "refactor", "docs", "test", "review", "plan"],
             cost_tier: CostTier::Medium,
         },
@@ -210,9 +210,12 @@ mod tests {
     }
 
     #[test]
-    fn fresh_database_seeds_all_fourteen_profiles() {
+    fn fresh_database_seeds_every_provider_profile() {
         let connection = migrated_memory();
-        assert_eq!(seed_agent_profiles(&connection, &[]).unwrap(), 14);
+        assert_eq!(
+            seed_agent_profiles(&connection, &[]).unwrap(),
+            ProviderKind::ALL.len()
+        );
 
         let profiles = list_agent_profiles(&connection).unwrap();
         assert_eq!(profiles.len(), ProviderKind::ALL.len());
@@ -287,7 +290,10 @@ mod tests {
     fn legacy_disabled_providers_import_as_disabled_exactly_once() {
         let connection = migrated_memory();
         let disabled = [ProviderKind::Claude, ProviderKind::Kimi];
-        assert_eq!(seed_agent_profiles(&connection, &disabled).unwrap(), 2 + 12);
+        assert_eq!(
+            seed_agent_profiles(&connection, &disabled).unwrap(),
+            ProviderKind::ALL.len()
+        );
 
         let profiles = list_agent_profiles(&connection).unwrap();
         for profile in &profiles {

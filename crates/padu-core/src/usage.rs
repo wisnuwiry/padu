@@ -256,8 +256,10 @@ fn usage_body_account_label(body: &Value) -> Option<String> {
 /// Fetch OpenCode Go's rolling, weekly, and monthly subscription limits.
 /// `None` means OpenCode has no Go credential, which is normal for people
 /// using Zen or any of OpenCode's many other providers. Blocking.
-pub fn fetch_opencode_go_plan_usage() -> anyhow::Result<Option<PlanUsage>> {
-    let Some(api_key) = opencode_go_api_key() else {
+pub fn fetch_opencode_go_plan_usage(
+    provider: crate::model::ProviderKind,
+) -> anyhow::Result<Option<PlanUsage>> {
+    let Some(api_key) = opencode_go_api_key(provider) else {
         return Ok(None);
     };
     let (status, body) = http_get(
@@ -288,21 +290,27 @@ pub fn fetch_opencode_go_plan_usage() -> anyhow::Result<Option<PlanUsage>> {
 /// Match OpenCode's credential precedence closely enough for its Go provider:
 /// `OPENCODE_AUTH_CONTENT` replaces auth.json, a provider entry overrides the
 /// catalog environment key, and `OPENCODE_API_KEY` remains the fallback.
-fn opencode_go_api_key() -> Option<String> {
-    let auth = std::env::var("OPENCODE_AUTH_CONTENT")
-        .ok()
+fn opencode_go_api_key(provider: crate::model::ProviderKind) -> Option<String> {
+    let data_home = crate::model::provider_storage_paths(provider)
+        .into_iter()
+        .find(|entry| entry.kind == crate::model::ProviderStoragePathKind::Data)
+        .map(|entry| entry.path)?;
+    if provider == crate::model::ProviderKind::OpenCode {
+        let payload = std::fs::read_to_string(data_home.join("auth.json")).ok()?;
+        let auth = serde_json::from_str::<Value>(&payload).ok();
+        return opencode_go_api_key_from_auth(auth.as_ref());
+    }
+
+    let auth = crate::command_env::environment_value("OPENCODE_AUTH_CONTENT")
+        .and_then(|value| value.to_str().map(str::to_owned))
         .and_then(|payload| serde_json::from_str::<Value>(&payload).ok())
         .or_else(|| {
-            let data_home = std::env::var_os("XDG_DATA_HOME")
-                .filter(|path| !path.is_empty())
-                .map(std::path::PathBuf::from)
-                .or_else(|| dirs::home_dir().map(|home| home.join(".local/share")))?;
-            let payload = std::fs::read_to_string(data_home.join("opencode/auth.json")).ok()?;
+            let payload = std::fs::read_to_string(data_home.join("auth.json")).ok()?;
             serde_json::from_str(&payload).ok()
         });
     opencode_go_api_key_from_auth(auth.as_ref()).or_else(|| {
-        std::env::var("OPENCODE_API_KEY")
-            .ok()
+        crate::command_env::environment_value("OPENCODE_API_KEY")
+            .and_then(|value| value.to_str().map(str::to_owned))
             .map(|key| key.trim().to_owned())
             .filter(|key| !key.is_empty())
     })
