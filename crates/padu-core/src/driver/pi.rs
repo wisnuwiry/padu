@@ -464,6 +464,9 @@ impl PiDriver {
                     let _ = writer_events.send(DriverEvent::UsageUpdated {
                         context_tokens,
                         context_window,
+                        context_window_source: context_window.map(|_| {
+                            crate::model::ContextWindowSource::Provider
+                        }),
                     });
                 }
                 if let Some(title) = state
@@ -561,6 +564,9 @@ impl PiDriver {
                                                         DriverEvent::UsageUpdated {
                                                             context_tokens: None,
                                                             context_window: Some(window),
+                                                            context_window_source: Some(
+                                                                crate::model::ContextWindowSource::Provider,
+                                                            ),
                                                         },
                                                     );
                                                 }
@@ -1308,6 +1314,7 @@ fn handle_pi_message(
                     let _ = events.send(DriverEvent::UsageUpdated {
                         context_tokens: Some(tokens),
                         context_window: None,
+                        context_window_source: None,
                     });
                 }
                 emit_completed_message_fallback(value.get("message"), events, state);
@@ -1532,6 +1539,7 @@ mod tests {
                 DriverEvent::UsageUpdated {
                     context_tokens: tokens,
                     context_window: window,
+                    ..
                 } => {
                     context_tokens = tokens.or(context_tokens);
                     context_window = window.or(context_window);
@@ -1786,6 +1794,7 @@ mod tests {
                 DriverEvent::UsageUpdated {
                     context_tokens: tokens,
                     context_window: window,
+                    ..
                 } => {
                     context_tokens = tokens.or(context_tokens);
                     context_window = window.or(context_window);
@@ -2054,7 +2063,8 @@ mod tests {
             event_rx.try_recv().unwrap(),
             DriverEvent::UsageUpdated {
                 context_tokens: Some(5952),
-                context_window: None
+                context_window: None,
+                context_window_source: None,
             }
         ));
         assert!(event_rx.try_recv().is_err());

@@ -60,6 +60,7 @@ export const DEFAULT_PROVIDER_SKILL_CAPABILITIES = {
   deepSeek: capability(null),
   fx: capability("dollar"),
   openCode: capability(null),
+  openCodeV2: capability(null),
   grok: capability(null),
   kimi: capability(null),
   commandCode: capability(null),

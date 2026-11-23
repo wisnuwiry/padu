@@ -22,6 +22,7 @@ const PROVIDER_FILES: Array<readonly [file: string, kind: string]> = [
   ["provider-deepseek.svg", "deepSeek"],
   ["provider-fx.svg", "fx"],
   ["provider-opencode.svg", "openCode"],
+  ["provider-opencode.svg", "openCodeV2"],
   ["provider-grok.svg", "grok"],
   ["provider-kimi.svg", "kimi"],
   ["provider-ohmypi.svg", "ohMyPi"],

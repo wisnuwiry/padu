@@ -47,6 +47,7 @@ pub(crate) fn discover(
         | ProviderKind::Grok
         | ProviderKind::Kimi
         | ProviderKind::CommandCode
+        | ProviderKind::OpenCodeV2
         | ProviderKind::Qoder => None,
     }
 }
@@ -143,7 +144,8 @@ fn discover_opencode(binary: &Path, project_root: &Path) -> Option<Vec<SlashComm
     // `debug config` is the effective, plugin-mutated configuration. Unlike a
     // directory walk, it sees plural command roots, inline config, and commands
     // registered by plugins exactly as the installed CLI resolves them.
-    let value = capture_json(binary, &["debug", "config"], project_root)?;
+    let environment = crate::model::provider_xdg_environment(crate::model::ProviderKind::OpenCode);
+    let value = capture_json_with_env(binary, &["debug", "config"], project_root, &environment)?;
     Some(parse_opencode_commands(&value))
 }
 
@@ -409,9 +411,19 @@ fn command(
 }
 
 fn capture_json(binary: &Path, args: &[&str], cwd: &Path) -> Option<Value> {
+    capture_json_with_env(binary, args, cwd, &[])
+}
+
+fn capture_json_with_env(
+    binary: &Path,
+    args: &[&str],
+    cwd: &Path,
+    environment: &[(String, String)],
+) -> Option<Value> {
     let mut command = crate::command_env::command(binary);
     command
         .args(args)
+        .envs(environment.iter().map(|(key, value)| (key, value)))
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

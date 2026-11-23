@@ -82,7 +82,7 @@ impl PooledServer {
     }
 }
 
-type PoolKey = (PathBuf, PathBuf); // (binary, workspace directory)
+type PoolKey = (PathBuf, PathBuf, &'static str); // (binary, workspace directory, flavor)
 
 enum PoolState {
     Vacant,
@@ -115,15 +115,42 @@ fn pool() -> &'static Mutex<HashMap<PoolKey, Arc<PoolSlot>>> {
 /// Blocking (process start plus health probe), so callers must already be off
 /// the UI thread — driver start on the background executor is.
 pub(crate) fn acquire(binary: &Path, cwd: &Path) -> anyhow::Result<PooledServer> {
-    acquire_with_start(binary, cwd, || OpenCodeServer::start(binary, cwd))
+    let environment = crate::model::provider_xdg_environment(crate::model::ProviderKind::OpenCode);
+    acquire_v1_isolated(binary, cwd, &environment)
 }
 
+pub(crate) fn acquire_v1_isolated(
+    binary: &Path,
+    cwd: &Path,
+    environment: &[(String, String)],
+) -> anyhow::Result<PooledServer> {
+    acquire_flavored(binary, cwd, "v1-isolated", || {
+        OpenCodeServer::start_with_env(binary, cwd, environment)
+    })
+}
+
+pub(crate) fn acquire_v2(binary: &Path, cwd: &Path) -> anyhow::Result<PooledServer> {
+    acquire_flavored(binary, cwd, "v2", || {
+        OpenCodeServer::start_v2_with_env(binary, cwd, &[])
+    })
+}
+
+#[cfg(test)]
 fn acquire_with_start(
     binary: &Path,
     cwd: &Path,
     start: impl FnOnce() -> anyhow::Result<OpenCodeServer>,
 ) -> anyhow::Result<PooledServer> {
-    let key = (binary.to_path_buf(), cwd.to_path_buf());
+    acquire_flavored(binary, cwd, "v1", start)
+}
+
+fn acquire_flavored(
+    binary: &Path,
+    cwd: &Path,
+    flavor: &'static str,
+    start: impl FnOnce() -> anyhow::Result<OpenCodeServer>,
+) -> anyhow::Result<PooledServer> {
+    let key = (binary.to_path_buf(), cwd.to_path_buf(), flavor);
     let slot = {
         let mut pool = pool().lock().unwrap();
         Arc::clone(pool.entry(key).or_default())

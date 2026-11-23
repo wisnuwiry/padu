@@ -26,10 +26,9 @@ import {
   createNote,
   deleteNote,
   getNote,
-  hydrateSession,
   listNotes,
-  persistSession,
   removeSession,
+  renameSession,
   setSessionArchived,
   setSessionPinned,
   updateNote,
@@ -212,9 +211,8 @@ function NotesShell() {
           }}
           onRenameSession={async (sessionId, title) => {
             if (!client) throw new Error(t('errors.daemon_disconnected'))
-            const hydrated = await hydrateSession(client, sessionId)
-            if (!hydrated) throw new Error(t('errors.task_not_found'))
-            await persistSession(client, { ...hydrated, title, updated_at: Math.floor(Date.now() / 1_000) })
+            const result = await renameSession(client, sessionId, title)
+            if (result.nativeWarning) toast.warning(result.nativeWarning)
             await taskState.refetch()
           }}
           onSearch={() => goSession(undefined)}

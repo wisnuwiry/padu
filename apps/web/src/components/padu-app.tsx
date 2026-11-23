@@ -72,6 +72,7 @@ import {
   loadProviderSessionHistory,
   persistProject,
   removeSession,
+  renameSession as renameDaemonSession,
   selectableProjects,
   sameProviderSession,
   sessionCwd,
@@ -1073,9 +1074,27 @@ export function PaduApp() {
       ? { ...session, title, updated_at: updatedAt }
       : session)
     try {
-      const hydrated = await hydrateSession(client, sessionId)
-      if (!hydrated) throw new Error(t('errors.task_not_found'))
-      await saveSession({ ...hydrated, title, updated_at: updatedAt })
+      const result = await renameDaemonSession(client, sessionId, title)
+      queryClient.setQueryData<TaskState>(stateKey, (currentState) => currentState && ({
+        ...currentState,
+        sessions: currentState.sessions.map((session) => session.id === sessionId
+          ? {
+              ...session,
+              title: result.session.title,
+              auto_title: result.session.auto_title,
+              updated_at: result.session.updated_at,
+            }
+          : session),
+      }))
+      queryClient.setQueryData<AgentSession>(sessionKey, (session) => session
+        ? {
+            ...session,
+            title: result.session.title,
+            auto_title: result.session.auto_title,
+            updated_at: result.session.updated_at,
+          }
+        : session)
+      if (result.nativeWarning) toast.warning(result.nativeWarning)
     } catch (error) {
       if (previousSummary) {
         queryClient.setQueryData<TaskState>(stateKey, (currentState) => currentState && ({

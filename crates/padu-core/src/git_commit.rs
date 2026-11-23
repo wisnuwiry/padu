@@ -109,6 +109,7 @@ pub fn generate_message(
     command
         .args(args)
         .current_dir(cwd)
+        .envs(crate::model::provider_xdg_environment(invocation.provider))
         .env("NO_COLOR", "1")
         .env("CI", "1");
     let result = run_capture(&mut command, AGENT_TIMEOUT).with_context(|| {
@@ -304,6 +305,19 @@ fn agent_arguments(
             if let Some(effort) = reasoning_effort {
                 push(&mut args, "--variant");
                 push(&mut args, effort);
+            }
+        }
+        ProviderKind::OpenCodeV2 => {
+            push(&mut args, "run");
+            push(&mut args, "--agent");
+            push(&mut args, "plan");
+            if let Some(model) = model {
+                let model = match reasoning_effort.filter(|effort| !effort.is_empty()) {
+                    Some(effort) => format!("{model}#{effort}"),
+                    None => model.to_owned(),
+                };
+                push(&mut args, "--model");
+                push(&mut args, &model);
             }
         }
         ProviderKind::Grok => {
@@ -785,6 +799,13 @@ mod tests {
                     assert!(has(&args, "--pure"));
                     assert!(has_pair(&args, "--agent", "plan"));
                     assert!(has_pair(&args, "--variant", "low"));
+                }
+                ProviderKind::OpenCodeV2 => {
+                    assert_eq!(args.first().and_then(|arg| arg.to_str()), Some("run"));
+                    assert!(!has(&args, "--pure"));
+                    assert!(!has(&args, "--variant"));
+                    assert!(has_pair(&args, "--agent", "plan"));
+                    assert!(has_pair(&args, "--model", "model#low"));
                 }
                 ProviderKind::Claude => {
                     assert!(has(&args, "--print"));

@@ -403,6 +403,7 @@ fn emit_usage(usage: Option<&Value>, events: &DriverEventSender) {
             // the app merges tokens the way it does Claude's mid-turn
             // updates until a provider reports a window.
             context_window: None,
+            context_window_source: None,
         });
     }
 }
@@ -749,6 +750,7 @@ mod tests {
                 DriverEvent::UsageUpdated {
                     context_tokens,
                     context_window,
+                    ..
                 } => Some((context_tokens, context_window)),
                 _ => None,
             })

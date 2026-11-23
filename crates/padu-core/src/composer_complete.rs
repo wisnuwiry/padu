@@ -228,7 +228,11 @@ fn assemble_slash_commands(
                 scan_skill_files(provider, &home.join(".codex/skills"), &mut commands);
             }
         }
-        ProviderKind::OpenCode => {
+        ProviderKind::OpenCode | ProviderKind::OpenCodeV2 => {
+            let config_root = crate::model::provider_storage_paths(provider)
+                .into_iter()
+                .find(|entry| entry.kind == crate::model::ProviderStoragePathKind::Config)
+                .map(|entry| entry.path);
             scan_command_files(
                 &project_root.join(".opencode/command"),
                 CommandScope::Project,
@@ -246,18 +250,16 @@ fn assemble_slash_commands(
                 &project_root.join(".claude/skills"),
                 &mut commands,
             );
-            if let Some(home) = home.as_deref() {
+            if let Some(config_root) = config_root.as_deref() {
                 scan_command_files(
-                    &home.join(".config/opencode/command"),
+                    &config_root.join("command"),
                     CommandScope::User,
                     true,
                     &mut commands,
                 );
-                scan_skill_files(
-                    provider,
-                    &home.join(".config/opencode/skills"),
-                    &mut commands,
-                );
+                scan_skill_files(provider, &config_root.join("skills"), &mut commands);
+            }
+            if let Some(home) = home.as_deref() {
                 scan_skill_files(provider, &home.join(".claude/skills"), &mut commands);
             }
         }

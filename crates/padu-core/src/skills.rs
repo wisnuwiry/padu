@@ -73,7 +73,11 @@ pub fn user_skill_locations() -> Vec<SkillLocation> {
     );
     push(
         SkillSource::Provider(ProviderKind::OpenCode),
-        home_join(".config/opencode/skills"),
+        provider_config_root(ProviderKind::OpenCode).map(|root| root.join("skills")),
+    );
+    push(
+        SkillSource::Provider(ProviderKind::OpenCodeV2),
+        provider_config_root(ProviderKind::OpenCodeV2).map(|root| root.join("skills")),
     );
     push(
         SkillSource::Provider(ProviderKind::Cursor),
@@ -96,6 +100,13 @@ pub fn user_skill_locations() -> Vec<SkillLocation> {
         home_join(".config/agents/skills"),
     );
     locations
+}
+
+fn provider_config_root(provider: ProviderKind) -> Option<PathBuf> {
+    crate::model::provider_storage_paths(provider)
+        .into_iter()
+        .find(|entry| entry.kind == crate::model::ProviderStoragePathKind::Config)
+        .map(|entry| entry.path)
 }
 
 /// Every project-scope skill root under `project_root`. Path joins only.
@@ -516,7 +527,7 @@ mod tests {
             skill.primary().source,
             SkillSource::Provider(ProviderKind::Codex)
         );
-        assert_eq!(skill.sources_label(), "Codex · Cursor · OpenCode");
+        assert_eq!(skill.sources_label(), "Codex · Cursor · OpenCode v1");
         assert_eq!(skill.duplicates, 0, "grouped copies are not duplicates");
 
         // A disabled copy next to live ones keeps the skill enabled.

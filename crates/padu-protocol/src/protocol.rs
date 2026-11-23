@@ -210,6 +210,11 @@ pub enum Command {
     /// merge-only so a stale client snapshot cannot delete tasks another
     /// client just created.
     RemoveSession,
+    /// Persist a user-owned title and make at most one native rename attempt
+    /// against the live provider runtime. A native failure is non-fatal.
+    RenameSession {
+        title: String,
+    },
     SetSessionPinned {
         pinned: bool,
     },
@@ -656,6 +661,11 @@ pub enum ResponsePayload {
     },
     SessionMetadataUpdated {
         session: AgentSession,
+    },
+    SessionRenamed {
+        session: AgentSession,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        native_warning: Option<String>,
     },
     Session {
         session: Option<AgentSession>,

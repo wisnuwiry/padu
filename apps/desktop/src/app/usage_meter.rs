@@ -9,6 +9,7 @@
 use gpui::{PathBuilder, relative};
 
 use super::*;
+use crate::model::ContextWindowSource;
 use crate::ui::{Button, ButtonStyle};
 use crate::usage::{PlanUsage, format_tokens, reset_label};
 
@@ -16,10 +17,11 @@ const USAGE_METER_MENU_ID: &str = "usage-meter";
 
 /// Providers with an account-level plan fetcher. Codex additionally refreshes
 /// live from its own stream notifications.
-pub(super) const PLAN_USAGE_PROVIDERS: [ProviderKind; 4] = [
+pub(super) const PLAN_USAGE_PROVIDERS: [ProviderKind; 5] = [
     ProviderKind::Claude,
     ProviderKind::Codex,
     ProviderKind::OpenCode,
+    ProviderKind::OpenCodeV2,
     ProviderKind::Grok,
 ];
 
@@ -262,6 +264,14 @@ impl Padu {
                 shortcut = crate::platform::primary_shortcut("⌘U", "Ctrl+U")
             )),
         };
+        let tooltip = context
+            .map(|usage| {
+                SharedString::from(format!(
+                    "{tooltip} · {}",
+                    context_source_label(usage.source)
+                ))
+            })
+            .unwrap_or(tooltip);
 
         let compact_focus_input = self.compact_focus_input.clone();
         let compact_padu = cx.entity().downgrade();
@@ -371,6 +381,24 @@ fn context_percent(usage: ContextUsage) -> Option<f64> {
         .window
         .filter(|window| *window > 0)
         .map(|window| usage.tokens as f64 * 100.0 / window as f64)
+}
+
+fn context_source_label(source: Option<ContextWindowSource>) -> String {
+    match source {
+        Some(ContextWindowSource::HarnessEnvironment) => {
+            tr!("usage.context_source_harness_environment")
+        }
+        Some(ContextWindowSource::ClaudeModelOneMillion) => {
+            tr!("usage.context_source_claude_one_million")
+        }
+        Some(ContextWindowSource::ClaudeModelDefault) => {
+            tr!("usage.context_source_claude_default")
+        }
+        Some(ContextWindowSource::Provider) => tr!("usage.context_source_provider"),
+        Some(ContextWindowSource::Unknown) | None => {
+            tr!("usage.context_source_unknown")
+        }
+    }
 }
 
 /// The trigger glyph: a ring whose arc fills clockwise from 12 o'clock as the
@@ -487,6 +515,15 @@ fn usage_panel(
         // The transport reports occupancy but not the window size.
         _ => format_tokens(usage.tokens),
     };
+    let over_budget = usage
+        .window
+        .filter(|window| usage.tokens > *window)
+        .map(|window| {
+            tr!(
+                "usage.context_over_budget",
+                tokens = format_tokens(usage.tokens - window)
+            )
+        });
     panel = panel.child(
         div()
             .flex()
@@ -509,6 +546,20 @@ fn usage_panel(
                             .text_color(theme.text_tertiary)
                             .child(SharedString::from(value)),
                     ),
+            )
+            .when_some(over_budget, |panel, over_budget| {
+                panel.child(
+                    div()
+                        .text_size(sp(11.0))
+                        .text_color(theme.warning)
+                        .child(SharedString::from(over_budget)),
+                )
+            })
+            .child(
+                div()
+                    .text_size(sp(11.0))
+                    .text_color(theme.text_ghost)
+                    .child(SharedString::from(context_source_label(usage.source))),
             )
             .child(meter_bar(&theme, percent.unwrap_or(0.0))),
     );

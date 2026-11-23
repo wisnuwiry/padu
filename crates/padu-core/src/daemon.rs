@@ -905,6 +905,12 @@ impl Backend for PaduBackend {
                             .and_then(crate::model::probe_provider_version)
                     })
                     .flatten();
+                if probe_version {
+                    crate::model::apply_provider_version_compatibility(
+                        &mut probe,
+                        version.as_deref(),
+                    );
+                }
                 let binary_identity = probe_version
                     .then(|| {
                         padu_protocol::composer::native_skill_syntax(provider).and_then(|_| {
@@ -936,8 +942,9 @@ impl Backend for PaduBackend {
                     crate::model::ProviderKind::Codex => {
                         Some(crate::usage::fetch_codex_plan_usage()?)
                     }
-                    crate::model::ProviderKind::OpenCode => {
-                        crate::usage::fetch_opencode_go_plan_usage()?
+                    crate::model::ProviderKind::OpenCode
+                    | crate::model::ProviderKind::OpenCodeV2 => {
+                        crate::usage::fetch_opencode_go_plan_usage(provider)?
                     }
                     crate::model::ProviderKind::Grok => {
                         ensure_shell_environment();
@@ -1084,6 +1091,43 @@ impl Backend for PaduBackend {
                     })
                     .collect();
                 Ok(ResponsePayload::TaskStateSaved { sessions })
+            }
+            Command::RenameSession { title } => {
+                let title = title.trim();
+                if title.is_empty() {
+                    bail!("session title cannot be empty");
+                }
+                let projection = {
+                    let mut state = self.task_state.lock();
+                    let (changed, projection) = {
+                        let session = state
+                            .sessions
+                            .iter_mut()
+                            .find(|session| session.id == session_id)
+                            .ok_or_else(|| anyhow!("session not found: {session_id}"))?;
+                        (session.set_title(title), session.list_projection())
+                    };
+                    if changed {
+                        state.mark_session_dirty(session_id);
+                        self.task_store.save(&mut state)?;
+                    }
+                    projection
+                };
+                let driver = self
+                    .sessions
+                    .lock()
+                    .get(&session_id)
+                    .map(|(_, driver)| driver.clone());
+                let native_warning = match driver.map(|driver| driver.rename_native(title)) {
+                    Some(Ok(_)) | None => None,
+                    Some(Err(error)) => Some(format!(
+                        "Padu saved the title, but the provider rename failed: {error}"
+                    )),
+                };
+                Ok(ResponsePayload::SessionRenamed {
+                    session: projection,
+                    native_warning,
+                })
             }
             Command::SetSessionPinned { pinned } => {
                 let mut state = self.task_state.lock();
@@ -1237,7 +1281,6 @@ impl Backend for PaduBackend {
                     });
                 }
                 ensure_shell_environment();
-                let settings = self.settings.get();
                 // The profile registry is the source of truth for candidacy
                 // (PRD §6.3); legacy `disabled_providers` is derived from it
                 // on every profile update, so it is not consulted here.
@@ -1246,12 +1289,7 @@ impl Backend for PaduBackend {
                         sessions: Vec::new(),
                     });
                 }
-                let binary_override = settings
-                    .provider_binary_overrides
-                    .get(&provider)
-                    .map(String::as_str);
-                let Some(binary) = crate::model::provider_probe(provider, binary_override).path
-                else {
+                let Ok(binary) = self.provider_binary(provider) else {
                     return Ok(ResponsePayload::ProviderSessions {
                         sessions: Vec::new(),
                     });
@@ -1276,6 +1314,9 @@ impl Backend for PaduBackend {
                     }
                     ProviderKind::DeepSeek => {
                         crate::deepseek_session::list_provider_sessions(&binary, limit)?
+                    }
+                    ProviderKind::OpenCodeV2 => {
+                        crate::opencode_session::list_provider_sessions_v2(&binary, limit)?
                     }
                     ProviderKind::Grok => crate::grok_session::list_provider_sessions(limit)?,
                     ProviderKind::Kimi => crate::kimi_session::list_provider_sessions(limit)?,
@@ -1337,6 +1378,14 @@ impl Backend for PaduBackend {
                     }
                     ProviderResumeCursor::CommandCode { session_id } => {
                         crate::command_code_session::provider_session_history(
+                            session_id,
+                            VISIBLE_TURN_LIMIT,
+                        )?
+                    }
+                    ProviderResumeCursor::OpenCodeV2 { session_id } => {
+                        let binary = self.provider_binary(ProviderKind::OpenCodeV2)?;
+                        crate::opencode_session::provider_session_history_v2(
+                            &binary,
                             session_id,
                             VISIBLE_TURN_LIMIT,
                         )?
@@ -1665,6 +1714,17 @@ impl Backend for PaduBackend {
                 let previous = self.sessions.lock().remove(&session_id);
                 drop(previous);
                 let provider = decode_enum(&options.provider)?;
+                if matches!(provider, ProviderKind::OpenCode | ProviderKind::OpenCodeV2) {
+                    let version = crate::model::probe_provider_version(&options.binary);
+                    let mut probe = crate::model::provider_probe(provider, options.binary.to_str());
+                    crate::model::apply_provider_version_compatibility(
+                        &mut probe,
+                        version.as_deref(),
+                    );
+                    if let Some(reason) = probe.unavailable_reason {
+                        bail!("{reason}");
+                    }
+                }
                 let options = DriverStartOptions {
                     binary: options.binary,
                     cwd: options.cwd,
@@ -1673,7 +1733,9 @@ impl Backend for PaduBackend {
                     model: options.model,
                     reasoning_effort: options.reasoning_effort,
                     service_tier: options.service_tier,
-                    context_window: options.context_window,
+                    context_window: (provider != ProviderKind::Claude)
+                        .then_some(options.context_window)
+                        .flatten(),
                     agent_preset: options.agent_preset,
                     computer_use_enabled: options.computer_use_enabled,
                     provider_cursor: options
@@ -2317,6 +2379,20 @@ impl PaduBackend {
                 })?;
                 Ok((fork.cursor, HashMap::new()))
             }
+            ProviderKind::OpenCodeV2 => {
+                let Some(ProviderResumeCursor::OpenCodeV2 { session_id }) =
+                    source.provider_cursor.as_ref()
+                else {
+                    bail!("OpenCode v2's native session is unavailable");
+                };
+                let fork = fork_provider_session(ProviderSessionForkRequest::OpenCodeV2 {
+                    binary: self.provider_binary(ProviderKind::OpenCodeV2)?,
+                    cwd: cwd.to_owned(),
+                    session_id: session_id.clone(),
+                    turn_count: provider_turn_count,
+                })?;
+                Ok((fork.cursor, HashMap::new()))
+            }
             ProviderKind::Grok => {
                 let Some(ProviderResumeCursor::Grok { session_id }) =
                     source.provider_cursor.as_ref()
@@ -2493,6 +2569,32 @@ impl PaduBackend {
                 };
                 Ok((Some(cursor), HashMap::new(), false))
             }
+            ProviderKind::OpenCodeV2 => {
+                let cursor = if let Some(driver) = self
+                    .sessions
+                    .lock()
+                    .get(&source.id)
+                    .map(|(_, driver)| driver.clone())
+                {
+                    driver
+                        .rollback(rollback_turns)?
+                        .ok_or_else(|| anyhow!("OpenCode v2 returned no rewound-session cursor"))?
+                } else {
+                    let Some(ProviderResumeCursor::OpenCodeV2 { session_id }) =
+                        source.provider_cursor.as_ref()
+                    else {
+                        bail!("OpenCode v2's native session is unavailable");
+                    };
+                    fork_provider_session(ProviderSessionForkRequest::OpenCodeV2 {
+                        binary: binary.to_owned(),
+                        cwd: cwd.to_owned(),
+                        session_id: session_id.clone(),
+                        turn_count: provider_turn_count,
+                    })?
+                    .cursor
+                };
+                Ok((Some(cursor), HashMap::new(), false))
+            }
             ProviderKind::Amp => {
                 let Some(ProviderResumeCursor::Amp {
                     thread_id,
@@ -2607,9 +2709,20 @@ impl PaduBackend {
             .provider_binary_overrides
             .get(&provider)
             .map(String::as_str);
-        crate::model::provider_probe(provider, binary_override)
+        let probe = crate::model::provider_probe(provider, binary_override);
+        let binary = probe
             .path
-            .ok_or_else(|| anyhow!("{} is not installed on the daemon", provider.display_name()))
+            .clone()
+            .ok_or_else(|| anyhow!("{} is not installed on the daemon", provider.display_name()))?;
+        if matches!(provider, ProviderKind::OpenCode | ProviderKind::OpenCodeV2) {
+            let version = crate::model::probe_provider_version(&binary);
+            let mut checked = probe;
+            crate::model::apply_provider_version_compatibility(&mut checked, version.as_deref());
+            if let Some(reason) = checked.unavailable_reason {
+                bail!("{reason}");
+            }
+        }
+        Ok(binary)
     }
 }
 
@@ -2772,6 +2885,16 @@ fn fork_provider_session(
             HashMap::new(),
             None,
         ),
+        ProviderSessionForkRequest::OpenCodeV2 {
+            binary,
+            cwd,
+            session_id,
+            turn_count,
+        } => (
+            crate::driver::fork_session_at_turn_v2(&binary, &cwd, &session_id, turn_count)?,
+            HashMap::new(),
+            None,
+        ),
         ProviderSessionForkRequest::Grok {
             binary,
             cwd,
@@ -2877,6 +3000,7 @@ fn handle_driver_command(
         | Command::LoadTaskState
         | Command::SaveTaskState { .. }
         | Command::RemoveSession
+        | Command::RenameSession { .. }
         | Command::SetSessionPinned { .. }
         | Command::SetSessionArchived { .. }
         | Command::HydrateSession { .. }
@@ -3017,11 +3141,13 @@ fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
         DriverEvent::UsageUpdated {
             context_tokens,
             context_window,
+            context_window_source,
         } => (
             "usageUpdated",
             json!({
                 "contextTokens": context_tokens,
                 "contextWindow": context_window,
+                "contextWindowSource": context_window_source,
             }),
         ),
         DriverEvent::PlanUsageUpdated(usage) => ("planUsageUpdated", serde_json::to_value(usage)?),
@@ -3114,6 +3240,7 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
             DriverEvent::UsageUpdated {
                 context_tokens: usage.context_tokens,
                 context_window: usage.context_window,
+                context_window_source: usage.context_window_source,
             }
         }
         "planUsageUpdated" => DriverEvent::PlanUsageUpdated(serde_json::from_value(payload)?),
@@ -3207,6 +3334,7 @@ struct RejectedSteerWire {
 struct UsageWire {
     context_tokens: Option<u64>,
     context_window: Option<u64>,
+    context_window_source: Option<crate::model::ContextWindowSource>,
 }
 
 #[derive(Deserialize)]
@@ -4111,6 +4239,7 @@ mod tests {
         session.context_usage = Some(crate::model::ContextUsage {
             tokens: 80_000,
             window: Some(200_000),
+            source: None,
         });
         let original_turn_id = Uuid::new_v4();
         session.turns.push(crate::model::AgentTurn {
@@ -4232,6 +4361,7 @@ mod tests {
         session.context_usage = Some(crate::model::ContextUsage {
             tokens: 80_000,
             window: Some(200_000),
+            source: None,
         });
         backend.task_state.lock().sessions.push(session);
 
@@ -4298,6 +4428,7 @@ mod tests {
         session.context_usage = Some(crate::model::ContextUsage {
             tokens: 80_000,
             window: Some(200_000),
+            source: None,
         });
         backend.task_state.lock().sessions.push(session);
 

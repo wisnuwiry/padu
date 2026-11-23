@@ -83,7 +83,7 @@ export function CommitDialog({
           if (!session) throw new Error(t('commit.no_task'))
           const settings = await loadDaemonSettings(client)
           const probe = await probeProvider(client, session.provider, settings)
-          if (!probe.installed || !probe.path) {
+          if (!probe.installed || !probe.path || probe.unavailable_reason) {
             throw new Error(t('commit.agent_unavailable'))
           }
           commitMessage = await generateWorkspaceCommitMessage(

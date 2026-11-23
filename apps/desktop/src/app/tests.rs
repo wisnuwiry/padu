@@ -2079,6 +2079,8 @@ fn switched_off_providers_leave_the_picker_except_for_their_locked_session() {
         provider,
         installed: true,
         path: Some(std::path::PathBuf::from(format!("/bin/{}", provider.id()))),
+        unavailable_reason: None,
+        storage_paths: Vec::new(),
         models: vec![ProviderModel::new(model, model)],
         agent_presets: Vec::new(),
     };
@@ -2168,6 +2170,8 @@ fn tab_cycle_walks_favorites_then_usable_providers_in_rail_order() {
         provider,
         installed,
         path: installed.then(|| std::path::PathBuf::from(format!("/bin/{}", provider.id()))),
+        unavailable_reason: None,
+        storage_paths: Vec::new(),
         models: vec![ProviderModel::new("model", "model")],
         agent_presets: Vec::new(),
     };
@@ -2216,6 +2220,8 @@ fn the_picker_is_empty_only_once_detection_has_answered() {
         provider,
         installed,
         path: installed.then(|| std::path::PathBuf::from(format!("/bin/{}", provider.id()))),
+        unavailable_reason: None,
+        storage_paths: Vec::new(),
         models: vec![ProviderModel::new("model", "model")],
         agent_presets: Vec::new(),
     };
@@ -2263,6 +2269,8 @@ fn the_rail_draws_only_installed_providers_the_settings_left_on() {
         provider,
         installed,
         path: installed.then(|| std::path::PathBuf::from(format!("/bin/{}", provider.id()))),
+        unavailable_reason: None,
+        storage_paths: Vec::new(),
         models: vec![ProviderModel::new("model", "model")],
         agent_presets: Vec::new(),
     };

@@ -60,6 +60,10 @@ enum CommandMessage {
         turns_to_remove: usize,
         response: Sender<Result<String, String>>,
     },
+    Rename {
+        title: String,
+        response: Sender<Result<(), String>>,
+    },
     Options(SessionOptions),
     Goal(GoalOperation),
     RefreshBackgroundWork,
@@ -623,6 +627,31 @@ impl CodexDriver {
                             }
                             continue;
                         }
+                        CommandMessage::Rename { title, response } => {
+                            let Some(thread_id) = wait_for_thread_id(&writer_thread_id) else {
+                                let _ = response
+                                    .send(Err("Codex did not finish opening its thread.".into()));
+                                continue;
+                            };
+                            next_request_id += 1;
+                            let request_id = next_request_id;
+                            writer_pending_rollbacks
+                                .lock()
+                                .insert(request_id, (0, response));
+                            let message = json!({
+                                "method": "thread/name/set",
+                                "id": request_id,
+                                "params": {"threadId": thread_id, "name": title}
+                            });
+                            if let Err(error) = write_json_line(&mut stdin, &message)
+                                && let Some((_, response)) =
+                                    writer_pending_rollbacks.lock().remove(&request_id)
+                            {
+                                let _ = response
+                                    .send(Err(format!("Codex transport write failed: {error}")));
+                            }
+                            continue;
+                        }
                         CommandMessage::Options(options) => {
                             model = options.model;
                             reasoning_effort = options.reasoning_effort;
@@ -1058,6 +1087,21 @@ impl DriverControl for CodexDriver {
         self.commands
             .send(CommandMessage::Compact)
             .map_err(|e| anyhow!("{e}"))
+    }
+
+    fn rename_native(&self, title: &str) -> anyhow::Result<bool> {
+        let (response, receiver) = crossbeam_channel::bounded(1);
+        self.commands
+            .send(CommandMessage::Rename {
+                title: title.to_owned(),
+                response,
+            })
+            .map_err(|error| anyhow!("{error}"))?;
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .map_err(|error| anyhow!("Codex rename response timed out: {error}"))?
+            .map_err(anyhow::Error::msg)?;
+        Ok(true)
     }
 
     fn cancel(&self) {
@@ -2025,6 +2069,8 @@ fn handle_codex_message(
                 let _ = events.send(DriverEvent::UsageUpdated {
                     context_tokens: tokens,
                     context_window: window,
+                    context_window_source: window
+                        .map(|_| crate::model::ContextWindowSource::Provider),
                 });
             }
         }

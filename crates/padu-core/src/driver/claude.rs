@@ -39,8 +39,9 @@ use crate::driver::{
 };
 use crate::model::{
     ActivityKind, BackgroundWorkEvent, BackgroundWorkItem, BackgroundWorkKey, BackgroundWorkKind,
-    BackgroundWorkStatus, DriverEvent, InteractionMode, PermissionOption, ProviderResumeCursor,
-    RuntimeMode, UserInputAnswer, UserInputOption, UserInputQuestion, unix_time_millis,
+    BackgroundWorkStatus, ContextWindowSource, DriverEvent, InteractionMode, PermissionOption,
+    ProviderResumeCursor, RuntimeMode, UserInputAnswer, UserInputOption, UserInputQuestion,
+    unix_time_millis,
 };
 
 enum CommandMessage {
@@ -55,6 +56,10 @@ enum CommandMessage {
         request_id: String,
         input: Value,
         answers: Vec<UserInputAnswer>,
+    },
+    Rename {
+        title: String,
+        response: crossbeam_channel::Sender<Result<(), String>>,
     },
     Options(SessionOptions),
     StopBackgroundWork {
@@ -112,17 +117,35 @@ fn permission_mode(mode: RuntimeMode, interaction_mode: InteractionMode) -> &'st
     }
 }
 
-/// The model id to hand the CLI for a session's context-window choice.
-///
-/// Claude Code serves 200K by default and reaches its 1M window through a
-/// `[1m]` suffix on the model id rather than a flag, so the window travels with
-/// `--model` and with mid-session `set_model` requests.
-fn wire_model(model: Option<&str>, context_window: Option<&str>) -> Option<String> {
-    let model = model?;
-    if context_window == Some("1m") && !model.ends_with("[1m]") {
-        Some(format!("{model}[1m]"))
-    } else {
-        Some(model.to_owned())
+fn parse_context_window_value(value: &str) -> Option<u64> {
+    let value = value.trim();
+    let (number, multiplier) = match value.as_bytes().last().copied() {
+        Some(b'k' | b'K') => (&value[..value.len() - 1], 1_000_u64),
+        Some(b'm' | b'M') => (&value[..value.len() - 1], 1_000_000_u64),
+        _ => (value, 1_u64),
+    };
+    number
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .filter(|number| *number > 0)
+        .and_then(|number| number.checked_mul(multiplier))
+        .filter(|window| *window > 0)
+}
+
+fn resolve_context_window(
+    environment_window: Option<u64>,
+    model: Option<&str>,
+) -> (Option<u64>, ContextWindowSource) {
+    if let Some(window) = environment_window {
+        return (Some(window), ContextWindowSource::HarnessEnvironment);
+    }
+    match model {
+        Some(model) if model.to_ascii_lowercase().contains("[1m]") => {
+            (Some(1_000_000), ContextWindowSource::ClaudeModelOneMillion)
+        }
+        Some(_) => (Some(250_000), ContextWindowSource::ClaudeModelDefault),
+        None => (None, ContextWindowSource::Unknown),
     }
 }
 
@@ -192,7 +215,7 @@ impl ClaudeDriver {
             model,
             reasoning_effort,
             service_tier: _,
-            context_window,
+            context_window: _,
             agent_preset: _,
             computer_use_enabled: _,
             provider_cursor,
@@ -219,8 +242,7 @@ impl ClaudeDriver {
         let mut command = crate::command_env::command(&binary);
         command.current_dir(&cwd);
         configure_stream_command(&mut command, mode, interaction_mode);
-        let launch_model = wire_model(model.as_deref(), context_window.as_deref());
-        if let Some(model) = launch_model.as_deref() {
+        if let Some(model) = model.as_deref() {
             command.args(["--model", model]);
         }
         if let Some(effort) = reasoning_effort.as_deref() {
@@ -259,12 +281,29 @@ impl ClaudeDriver {
                 resume_at,
             }),
         });
+        let environment_window =
+            crate::command_env::environment_value("CLAUDE_CODE_AUTO_COMPACT_WINDOW")
+                .and_then(|value| parse_context_window_value(&value.to_string_lossy()));
+        let initial_model = model.clone();
+        let (initial_window, initial_source) =
+            resolve_context_window(environment_window, initial_model.as_deref());
+        if initial_window.is_some() {
+            let _ = events.send(DriverEvent::UsageUpdated {
+                context_tokens: None,
+                context_window: initial_window,
+                context_window_source: Some(initial_source),
+            });
+        }
 
         let (commands, command_rx) = unbounded();
         let auto_approve = mode != RuntimeMode::Ask;
         let turn_active = Arc::new(Mutex::new(false));
         let pending_task_stops = Arc::new(Mutex::new(HashMap::<String, BackgroundWorkKey>::new()));
         let pending_user_inputs = Arc::new(Mutex::new(HashMap::<String, Value>::new()));
+        let pending_renames = Arc::new(Mutex::new(HashMap::<
+            String,
+            crossbeam_channel::Sender<Result<(), String>>,
+        >::new()));
 
         let reader_events = events.clone();
         let reader_commands = commands.clone();
@@ -272,12 +311,16 @@ impl ClaudeDriver {
         let reader_session = session_id.clone();
         let reader_pending_task_stops = pending_task_stops.clone();
         let reader_pending_user_inputs = pending_user_inputs.clone();
+        let reader_pending_renames = pending_renames.clone();
         let reader_thread = thread::Builder::new()
             .name("padu-claude-reader".into())
             .spawn(move || {
                 let mut state = ClaudeStreamState {
                     pending_task_stops: reader_pending_task_stops,
                     pending_user_inputs: reader_pending_user_inputs,
+                    pending_renames: reader_pending_renames,
+                    environment_window,
+                    context_model: initial_model,
                     ..ClaudeStreamState::default()
                 };
                 for line in BufReader::new(stdout).lines().map_while(Result::ok) {
@@ -302,6 +345,7 @@ impl ClaudeDriver {
         let writer_events = events.clone();
         let writer_turn = turn_active;
         let writer_pending_task_stops = pending_task_stops;
+        let writer_pending_renames = pending_renames;
         let writer_title_refresh = super::title_refresh::NativeTitleRefresh::default();
         let title_session_id = session_id;
         thread::Builder::new()
@@ -309,7 +353,7 @@ impl ClaudeDriver {
             .spawn(move || {
                 let mut stdin = stdin;
                 let mut next_request_id = 0_u64;
-                let mut current_model = launch_model;
+                let mut current_model = model;
                 while let Ok(message) = command_rx.recv() {
                     let written = match message {
                         CommandMessage::Prompt(text) => {
@@ -444,14 +488,35 @@ impl ClaudeDriver {
                                 }),
                             )
                         }
-                        CommandMessage::Options(options) => {
-                            // The window rides on the model id, so switching it
-                            // is the same `set_model` round trip as switching
-                            // models — verified accepted by the CLI (2.1.228).
-                            let next_model = wire_model(
-                                options.model.as_deref(),
-                                options.context_window.as_deref(),
+                        CommandMessage::Rename { title, response } => {
+                            next_request_id += 1;
+                            let request_id = format!("padu-rename-{next_request_id}");
+                            writer_pending_renames
+                                .lock()
+                                .insert(request_id.clone(), response);
+                            let written = write_line(
+                                &mut stdin,
+                                &json!({
+                                    "type": "control_request",
+                                    "request_id": request_id,
+                                    "request": {
+                                        "subtype": "rename_session",
+                                        "title": title,
+                                        "source": "host",
+                                        "session_id": title_session_id,
+                                    }
+                                }),
                             );
+                            if let Err(error) = &written
+                                && let Some(response) =
+                                    writer_pending_renames.lock().remove(&request_id)
+                            {
+                                let _ = response.send(Err(error.to_string()));
+                            }
+                            written
+                        }
+                        CommandMessage::Options(options) => {
+                            let next_model = options.model;
                             if next_model == current_model {
                                 continue;
                             }
@@ -570,6 +635,21 @@ impl DriverControl for ClaudeDriver {
             .map_err(|e| anyhow!("{e}"))
     }
 
+    fn rename_native(&self, title: &str) -> anyhow::Result<bool> {
+        let (response, receiver) = crossbeam_channel::bounded(1);
+        self.commands
+            .send(CommandMessage::Rename {
+                title: title.to_owned(),
+                response,
+            })
+            .map_err(|error| anyhow!("{error}"))?;
+        receiver
+            .recv_timeout(Duration::from_secs(10))
+            .map_err(|error| anyhow!("Claude rename response timed out: {error}"))?
+            .map_err(anyhow::Error::msg)?;
+        Ok(true)
+    }
+
     fn cancel(&self) {
         let _ = self.commands.send(CommandMessage::Cancel);
     }
@@ -650,10 +730,9 @@ struct ClaudeStreamState {
     task_output_tails: ClaudeTaskOutputTails,
     pending_task_stops: Arc<Mutex<HashMap<String, BackgroundWorkKey>>>,
     pending_user_inputs: Arc<Mutex<HashMap<String, Value>>>,
-    /// Model of the latest main-thread assistant message, so the settled
-    /// turn's `modelUsage` map can be read for that model's context window
-    /// rather than a subagent's.
-    last_assistant_model: Option<String>,
+    pending_renames: Arc<Mutex<HashMap<String, crossbeam_channel::Sender<Result<(), String>>>>>,
+    environment_window: Option<u64>,
+    context_model: Option<String>,
     /// Last title copied from Claude's native transcript metadata.
     last_auto_title: Option<String>,
 }
@@ -843,24 +922,6 @@ fn start_claude_task_output_tail(
     _events: &DriverEventSender,
     _state: &mut ClaudeStreamState,
 ) {
-}
-
-/// The context window of the model that served this turn, from the result
-/// message's per-model usage map. Falls back to the largest reported window
-/// when the model key does not line up.
-fn context_window_from_result(value: &Value, last_model: Option<&str>) -> Option<u64> {
-    let models = value.get("modelUsage")?.as_object()?;
-    if let Some(model) = last_model {
-        for (key, entry) in models {
-            if key == model || entry.get("canonicalModel").and_then(Value::as_str) == Some(model) {
-                return entry.get("contextWindow").and_then(Value::as_u64);
-            }
-        }
-    }
-    models
-        .values()
-        .filter_map(|entry| entry.get("contextWindow").and_then(Value::as_u64))
-        .max()
 }
 
 fn claude_task_id(value: &Value) -> Option<&str> {
@@ -1284,6 +1345,21 @@ fn handle_message(
             else {
                 return;
             };
+            if let Some(response) = state.pending_renames.lock().remove(request_id) {
+                let subtype = value.pointer("/response/subtype").and_then(Value::as_str);
+                let result = if subtype == Some("error") {
+                    Err(value
+                        .pointer("/response/error")
+                        .or_else(|| value.pointer("/response/response/message"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("Claude rejected the session rename")
+                        .to_owned())
+                } else {
+                    Ok(())
+                };
+                let _ = response.send(result);
+                return;
+            }
             let Some(key) = state.pending_task_stops.lock().remove(request_id) else {
                 return;
             };
@@ -1369,12 +1445,17 @@ fn handle_message(
             }
             if let Some(usage) = value.pointer("/message/usage") {
                 if let Some(model) = value.pointer("/message/model").and_then(Value::as_str) {
-                    state.last_assistant_model = Some(model.to_owned());
+                    state.context_model = Some(model.to_owned());
                 }
                 if let Some(tokens) = super::support::claude_context_tokens(usage) {
+                    let (window, source) = resolve_context_window(
+                        state.environment_window,
+                        state.context_model.as_deref(),
+                    );
                     let _ = events.send(DriverEvent::UsageUpdated {
                         context_tokens: Some(tokens),
-                        context_window: None,
+                        context_window: window,
+                        context_window_source: Some(source),
                     });
                 }
             }
@@ -1517,12 +1598,13 @@ fn handle_message(
                 let _ = events.send(DriverEvent::Error(result.to_owned()));
             }
             // Ahead of TurnFinished, whose forced save should include it.
-            if let Some(window) =
-                context_window_from_result(value, state.last_assistant_model.as_deref())
-            {
+            let (window, source) =
+                resolve_context_window(state.environment_window, state.context_model.as_deref());
+            if window.is_some() {
                 let _ = events.send(DriverEvent::UsageUpdated {
                     context_tokens: None,
-                    context_window: Some(window),
+                    context_window: window,
+                    context_window_source: Some(source),
                 });
             }
             if !std::mem::take(&mut *turn_active.lock()) {
@@ -2602,13 +2684,28 @@ mod tests {
                 DriverEvent::UsageUpdated {
                     context_tokens,
                     context_window,
-                } => Some((context_tokens, context_window)),
+                    context_window_source,
+                } => Some((context_tokens, context_window, context_window_source)),
                 _ => None,
             })
             .collect();
-        // 2+100+10+8 from the last iteration, then the main model's window —
-        // not the subagent's tokens, not the smaller subagent window.
-        assert_eq!(usage, [(Some(120), None), (None, Some(1_000_000))]);
+        // 2+100+10+8 from the last iteration, then the non-[1m] model default.
+        // The result's provider-reported windows must not override either value.
+        assert_eq!(
+            usage,
+            [
+                (
+                    Some(120),
+                    Some(250_000),
+                    Some(ContextWindowSource::ClaudeModelDefault),
+                ),
+                (
+                    None,
+                    Some(250_000),
+                    Some(ContextWindowSource::ClaudeModelDefault),
+                ),
+            ]
+        );
     }
 
     #[test]

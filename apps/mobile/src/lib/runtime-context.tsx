@@ -32,6 +32,7 @@ import {
   persistSession,
   probeProvider,
   removeDaemonSession,
+  renameSession as renameDaemonSession,
   setSessionArchived,
   setSessionPinned,
   type TaskState,
@@ -104,7 +105,7 @@ interface RuntimeContextValue {
     answers: UserInputAnswer[],
   ) => Promise<void>;
   updateSessionOptions: (sessionId: string, changes: SessionOptionChanges) => Promise<void>;
-  renameSession: (sessionId: string, title: string) => Promise<void>;
+  renameSession: (sessionId: string, title: string) => Promise<string | null>;
   setSessionPinned: (sessionId: string, pinned: boolean) => Promise<void>;
   setSessionArchived: (sessionId: string, archived: boolean) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
@@ -415,8 +416,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       }
       const settings = await loadDaemonSettings(client);
       const probe = await probeProvider(client, current.provider, settings);
-      if (!probe.installed || !probe.path) {
-        throw new Error(`${current.provider} is not installed on the daemon host`);
+      if (!probe.installed || !probe.path || probe.unavailable_reason) {
+        throw new Error(
+          probe.unavailable_reason
+            ? `${current.provider} is unavailable: ${probe.unavailable_reason}`
+            : `${current.provider} is not installed on the daemon host`,
+        );
       }
       if (daemon.activeProfile) {
         writeProviderProbeCache(
@@ -680,16 +685,25 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   }, [cacheSession, daemon.activeProfile?.id, daemon.client, daemon.phase, loadFullSession, persistOrdered, removeRuntime]);
 
   const renameSession = useCallback(async (sessionId: string, title: string) => {
-    const current = await loadFullSession(sessionId);
-    const trimmed = title.trim();
-    const next = {
-      ...current,
-      title: trimmed || 'New task',
-      updated_at: clock.nowSeconds(),
-    };
-    cacheSession(next);
-    await persistOrdered(next);
-  }, [cacheSession, loadFullSession, persistOrdered]);
+    const client = daemon.client;
+    if (!client || daemon.phase !== 'connected') {
+      throw new Error('Padu daemon is disconnected');
+    }
+    const result = await renameDaemonSession(client, sessionId, title.trim());
+    const profileId = daemon.activeProfile?.id;
+    const current = profileId
+      ? queryClient.getQueryData<AgentSession>(daemonKeys.session(profileId, sessionId))
+      : undefined;
+    cacheSession(current
+      ? {
+          ...current,
+          title: result.session.title,
+          auto_title: result.session.auto_title,
+          updated_at: result.session.updated_at,
+        }
+      : result.session);
+    return result.nativeWarning;
+  }, [cacheSession, daemon.activeProfile?.id, daemon.client, daemon.phase, queryClient]);
 
   /** Pin / archive flags are daemon-owned metadata. Optimistically flip the
    * flag in both the task list and the hydrated session, then reconcile with

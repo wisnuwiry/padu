@@ -1,5 +1,13 @@
 import { useNavigate, useSearch } from '@tanstack/react-router'
-import type { AgentSession, CreateTask, ProviderKind, Task, TaskStatus, TaskSummary } from '@padu/client'
+import { useQueryClient } from '@tanstack/react-query'
+import type {
+  AgentSession,
+  CreateTask,
+  ProviderKind,
+  Task,
+  TaskStatus,
+  TaskSummary,
+} from '@padu/client'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { PaduIcon, PROVIDERS, ProviderIcon } from '@/components/padu-icon'
@@ -19,13 +27,16 @@ import { useDaemon } from '@/lib/daemon-context'
 import { useI18n } from '@/lib/i18n'
 import {
   createTask,
+  daemonKeys,
   deleteTask,
   moveTask,
   updateTask,
   persistSession,
   removeSession,
+  renameSession as renameDaemonSession,
   setSessionArchived,
   setSessionPinned,
+  type TaskState,
 } from '@/lib/daemon-api'
 import { projectDisplayName } from '@/lib/project-presentation'
 import { formatDurationShort, formatTokens, taskLiveBadges } from '@/lib/task-live-badges'
@@ -38,6 +49,7 @@ const DEFAULT_PROVIDER_MODELS: Record<string, string[]> = {
   agy: ['gemini-2.0-flash', 'gemini-2.0-pro', 'gemini-1.5-pro'],
   deepSeek: ['deepseek-chat', 'deepseek-reasoner'],
   openCode: ['default'],
+  openCodeV2: ['default'],
   grok: ['grok-2', 'grok-beta'],
   kimi: ['moonshot-v1-auto', 'moonshot-v1-128k'],
   pi: ['default'],
@@ -55,7 +67,8 @@ export function BoardPage() {
   const { t } = useI18n()
   const navigate = useNavigate()
   const search = useSearch({ from: '/board' })
-  const { client, phase } = useDaemon()
+  const queryClient = useQueryClient()
+  const { client, config, phase } = useDaemon()
   const taskState = useTaskState()
 
   const [mobileSidebar, setMobileSidebar] = useState(false)
@@ -183,6 +196,40 @@ export function BoardPage() {
     }
   }
 
+  const handleRenameSession = async (sessionId: string, title: string) => {
+    if (!client || !config) throw new Error(t('errors.daemon_disconnected'))
+    try {
+      const result = await renameDaemonSession(client, sessionId, title)
+      const stateKey = daemonKeys.taskState(config.address)
+      const sessionKey = daemonKeys.session(config.address, sessionId)
+      queryClient.setQueryData<TaskState>(stateKey, (currentState) => currentState && ({
+        ...currentState,
+        sessions: currentState.sessions.map((session) => session.id === sessionId
+          ? {
+              ...session,
+              title: result.session.title,
+              auto_title: result.session.auto_title,
+              updated_at: result.session.updated_at,
+            }
+          : session),
+      }))
+      queryClient.setQueryData<AgentSession>(sessionKey, (session) => session
+        ? {
+            ...session,
+            title: result.session.title,
+            auto_title: result.session.auto_title,
+            updated_at: result.session.updated_at,
+          }
+        : session)
+      if (result.nativeWarning) toast.warning(result.nativeWarning)
+    } catch (error) {
+      toast.error(t('errors.rename_task', {
+        error: error instanceof Error ? error.message : String(error),
+      }))
+      throw error
+    }
+  }
+
   const projects = taskState.data?.projects ?? []
 
   if (phase === 'booting' || phase === 'connecting') {
@@ -210,7 +257,7 @@ export function BoardPage() {
           onRemoveSession={async (id) => {
             if (client) await removeSession(client, id)
           }}
-          onRenameSession={async () => {}}
+          onRenameSession={handleRenameSession}
           onSetSessionArchived={async (id, archived) => {
             if (client) await setSessionArchived(client, id, archived)
           }}

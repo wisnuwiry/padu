@@ -37,6 +37,12 @@ pub enum ProviderSessionForkRequest {
         session_id: String,
         turn_count: usize,
     },
+    OpenCodeV2 {
+        binary: PathBuf,
+        cwd: PathBuf,
+        session_id: String,
+        turn_count: usize,
+    },
     Grok {
         binary: PathBuf,
         cwd: PathBuf,

@@ -4,6 +4,7 @@ import type {
   AgentSession,
   BranchSnapshot,
   ComposerDraft,
+  ContextWindowSource,
   EmbeddedNote,
   GoalOperation,
   MessageAttachment,
@@ -2149,6 +2150,7 @@ const PLAN_USAGE_PROVIDERS: AgentSession['provider'][] = [
   'claude',
   'codex',
   'openCode',
+  'openCodeV2',
   'grok',
 ]
 
@@ -2176,6 +2178,11 @@ function UsageMeter({
   const contextPercent = context?.window
     ? context.tokens * 100 / context.window
     : null
+  const contextOver = context?.window && context.tokens > context.window
+    ? t('usage.context_over_budget', {
+        tokens: formatTokens(context.tokens - context.window),
+      })
+    : null
   const supportsPlanUsage = PLAN_USAGE_PROVIDERS.includes(session.provider)
   const canCompact = supportsCompaction(session.provider)
   const supportsCompactionFocus =
@@ -2197,7 +2204,8 @@ function UsageMeter({
   }, [openSignal, onOpenSignalHandled])
 
   const error = plan.error ? errorMessage(plan.error) : null
-  const tooltip = error
+  const contextTooltip = contextSourceLabel(context?.source, t)
+  const baseTooltip = error
     ? t('usage.refresh_failed', { error })
     : session.compacting
       ? t('usage.compacting')
@@ -2206,6 +2214,7 @@ function UsageMeter({
     : contextPercent == null
       ? t('usage.shortcut', { shortcut: usageShortcut })
       : t('usage.context_used', { percent: contextPercent.toFixed(0), shortcut: usageShortcut })
+  const tooltip = `${baseTooltip} · ${contextTooltip}`
 
   function compact() {
     if (!canStartCompaction) return
@@ -2263,6 +2272,10 @@ function UsageMeter({
                 ? `${formatTokens(context.tokens)} / ${formatTokens(context.window)} (${contextPercent.toFixed(0)}%)`
                 : formatTokens(context?.tokens ?? 0)}
             />
+            {contextOver && (
+              <p className="text-[10px] text-[var(--warning)]">{contextOver}</p>
+            )}
+            <p className="text-[10px] text-[var(--text-ghost)]">{contextTooltip}</p>
             {canCompact && (
               <div className="flex flex-col gap-2 border-t pt-3">
                 {supportsCompactionFocus && (
@@ -2307,6 +2320,25 @@ function UsageMeter({
       </Popover.Portal>
     </Popover.Root>
   )
+}
+
+function contextSourceLabel(
+  source: ContextWindowSource | null | undefined,
+  t: Translator,
+) {
+  switch (source) {
+    case 'harnessEnvironment':
+      return t('usage.context_source_harness_environment')
+    case 'claudeModelOneMillion':
+      return t('usage.context_source_claude_one_million')
+    case 'claudeModelDefault':
+      return t('usage.context_source_claude_default')
+    case 'provider':
+      return t('usage.context_source_provider')
+    case 'unknown':
+    default:
+      return t('usage.context_source_unknown')
+  }
 }
 
 function ContextGauge({ percent }: { percent: number | null }) {

@@ -251,6 +251,7 @@ export function ProvidersSettings() {
           const probe = probes.data[provider.id]
           const probeState = probes.states[provider.id]
           const installed = probe?.installed ?? false
+          const available = installed && !probe?.unavailable_reason
           const profile = profileById.get(provider.id)
           // The registry is the source of truth once loaded; the legacy
           // settings list covers the pre-load window.
@@ -271,6 +272,8 @@ export function ProvidersSettings() {
             ? 'bg-[var(--warning)]'
             : !installed
               ? 'bg-[var(--text-ghost)]'
+              : !available
+                ? 'bg-[var(--warning)]'
               : disabled
                 ? 'bg-[var(--warning)]'
                 : 'bg-[var(--success)]'
@@ -553,6 +556,25 @@ export function ProvidersSettings() {
                   <p className="truncate text-[10px] text-[var(--text-ghost)]" title={providerProbeCaption(provider.command, probe, Boolean(settings.data.provider_binary_overrides?.[provider.id]), t)}>
                     {providerProbeCaption(provider.command, probe, Boolean(settings.data.provider_binary_overrides?.[provider.id]), t)}
                   </p>
+                  {probe?.storage_paths?.length ? (
+                    <div className="mt-2 space-y-1">
+                      <p className="text-[10px] font-medium text-[var(--text-secondary)]">
+                        {t('providers.storage_paths')}
+                      </p>
+                      {probe.storage_paths.map((entry) => (
+                        <button
+                          className="flex w-full min-w-0 items-center gap-2 rounded-[6px] text-left text-[10px] text-[var(--text-tertiary)] outline-none hover:bg-accent focus-visible:ring-1 focus-visible:ring-ring"
+                          key={`${provider.id}-${entry.kind}`}
+                          title={entry.path}
+                          type="button"
+                          onClick={() => void navigator.clipboard.writeText(entry.path)}
+                        >
+                          <span className="w-16 shrink-0">{storagePathKindLabel(entry.kind, t)}</span>
+                          <span className="truncate font-mono">{entry.path}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                   <ProviderAccountLine
                     provider={provider.id}
                     settings={settings.data}
@@ -578,6 +600,7 @@ function providerProbeDetail(
   if (state.isPending) return t('common.checking')
   if (state.error) return t('providers.check_failed', { command, error: errorMessage(state.error) })
   if (!probe?.installed) return t('providers.not_detected_as', { command })
+  if (probe.unavailable_reason) return probe.unavailable_reason
   const parts = []
   if (probe.path) parts.push(abbreviateHomePath(probe.path))
   if (disabled) parts.push(t('providers.disabled_for_new_tasks'))
@@ -586,6 +609,13 @@ function providerProbeDetail(
     { count: probe.models.length },
   ))
   return parts.join('  ·  ') || t('providers.detected_as', { command })
+}
+
+function storagePathKindLabel(
+  kind: 'config' | 'data' | 'state' | 'cache',
+  t: Translator,
+) {
+  return t(`providers.storage_path_${kind}`)
 }
 
 function providerProbeCaption(
@@ -613,7 +643,7 @@ function providerCheckedLabel(updatedAt: number, t: Translator) {
 /// Everything else renders no account line — unknown means hidden, never a
 /// placeholder. Mirrors the desktop's `PLAN_USAGE_PROVIDERS` refresh on row
 /// expand.
-const PLAN_USAGE_PROVIDERS: ProviderKind[] = ['claude', 'codex', 'openCode', 'grok']
+const PLAN_USAGE_PROVIDERS: ProviderKind[] = ['claude', 'codex', 'openCode', 'openCodeV2', 'grok']
 
 /// Providers without conversation rollback or fork. Mirrors
 /// `ProviderKind::supports_conversation_rollback` /

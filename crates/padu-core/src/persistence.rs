@@ -3500,7 +3500,10 @@ mod tests {
 
         let directory = temporary_directory();
         let store = store_in(&directory);
-        assert_eq!(store.seed_agent_profiles(&[]).unwrap(), 14);
+        assert_eq!(
+            store.seed_agent_profiles(&[]).unwrap(),
+            ProviderKind::ALL.len()
+        );
 
         let updated = store
             .update_agent_profile(UpdateAgentProfile {

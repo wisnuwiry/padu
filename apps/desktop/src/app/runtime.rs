@@ -172,12 +172,15 @@ fn fetch_fresh_skill_snapshot(
         },
     ) {
         Ok(padu_client::ResponsePayload::ProviderProbe {
+            probe,
             version,
             binary_identity,
             ..
         }) => ProviderBinaryObservation {
             version,
             identity: binary_identity,
+            unavailable_reason: probe.unavailable_reason,
+            checked: true,
         },
         _ => ProviderBinaryObservation::default(),
     };
@@ -785,6 +788,38 @@ fn perform_provider_rewind(
             };
             Ok((Some(cursor), None, None))
         }
+        ProviderKind::OpenCodeV2 => {
+            let cursor = if let Some(driver) = request.driver.as_ref() {
+                driver.rollback(request.rollback_turns)?.ok_or_else(|| {
+                    anyhow::anyhow!("OpenCode v2 returned no cursor for the rewound session")
+                })?
+            } else {
+                let Some(ProviderResumeCursor::OpenCodeV2 {
+                    session_id: native_session_id,
+                }) = request.provider_cursor.as_ref()
+                else {
+                    anyhow::bail!(tr!(
+                        "errors.provider_native_cursor_unavailable",
+                        provider = "OpenCode v2"
+                    ));
+                };
+                let binary = request.binary.as_deref().ok_or_else(|| {
+                    anyhow::anyhow!(tr!("errors.provider_not_found", provider = "OpenCode v2"))
+                })?;
+                request
+                    .workspace_client
+                    .fork_provider_session(
+                        padu_client::provider_session::ProviderSessionForkRequest::OpenCodeV2 {
+                            binary: binary.to_owned(),
+                            cwd: request.project_path.clone(),
+                            session_id: native_session_id.clone(),
+                            turn_count: request.provider_turn_count,
+                        },
+                    )?
+                    .cursor
+            };
+            Ok((Some(cursor), None, None))
+        }
         ProviderKind::Amp => {
             let Some(ProviderResumeCursor::Amp {
                 thread_id: native_thread_id,
@@ -1150,6 +1185,38 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
                         .workspace_client
                         .fork_provider_session(
                             padu_client::provider_session::ProviderSessionForkRequest::OpenCode {
+                                binary: binary.to_owned(),
+                                cwd: request.source_workspace_path.clone(),
+                                session_id: native_session_id.clone(),
+                                turn_count: request.provider_turn_count,
+                            },
+                        )?
+                        .cursor,
+                    None,
+                    None,
+                ))
+            }
+            ProviderKind::OpenCodeV2 => {
+                let Some(ProviderResumeCursor::OpenCodeV2 {
+                    session_id: native_session_id,
+                }) = request.source.provider_cursor.as_ref()
+                else {
+                    anyhow::bail!(tr!(
+                        "errors.provider_native_session_unavailable",
+                        provider = "OpenCode v2"
+                    ));
+                };
+                let binary = request.binary.as_deref().ok_or_else(|| {
+                    anyhow::anyhow!(tr!(
+                        "errors.provider_not_installed",
+                        provider = "OpenCode v2"
+                    ))
+                })?;
+                Ok((
+                    request
+                        .workspace_client
+                        .fork_provider_session(
+                            padu_client::provider_session::ProviderSessionForkRequest::OpenCodeV2 {
                                 binary: binary.to_owned(),
                                 cwd: request.source_workspace_path.clone(),
                                 session_id: native_session_id.clone(),
@@ -1723,7 +1790,7 @@ impl Padu {
         }
         let Some(probe) = self
             .provider_probe(provider)
-            .filter(|probe| probe.installed)
+            .filter(|probe| probe.available())
             .cloned()
         else {
             return;
@@ -1744,7 +1811,10 @@ impl Padu {
                         provider,
                         binary_override,
                         discover_models: true,
-                        probe_version: false,
+                        probe_version: matches!(
+                            provider,
+                            ProviderKind::OpenCode | ProviderKind::OpenCodeV2
+                        ),
                     },
                 ) {
                     Ok(padu_client::ResponsePayload::ProviderProbe { probe, .. }) => probe,
@@ -1807,12 +1877,15 @@ impl Padu {
                         },
                     ) {
                         Ok(padu_client::ResponsePayload::ProviderProbe {
+                            probe,
                             version,
                             binary_identity,
                             ..
                         }) => ProviderBinaryObservation {
                             version,
                             identity: binary_identity,
+                            unavailable_reason: probe.unavailable_reason,
+                            checked: true,
                         },
                         _ => ProviderBinaryObservation::default(),
                     };
@@ -1831,6 +1904,16 @@ impl Padu {
         let mut changed = false;
         while let Ok((provider, binary)) = self.provider_version_events.try_recv() {
             self.provider_version_probes_pending.remove(&provider);
+            if binary.checked {
+                if let Some(probe) = self
+                    .probes
+                    .iter_mut()
+                    .find(|probe| probe.provider == provider)
+                    && probe.unavailable_reason != binary.unavailable_reason
+                {
+                    probe.unavailable_reason = binary.unavailable_reason.clone();
+                }
+            }
             apply_provider_version_observation(
                 &mut self.provider_versions,
                 provider,
@@ -1891,6 +1974,8 @@ impl Padu {
                             provider,
                             installed: false,
                             path: None,
+                            unavailable_reason: None,
+                            storage_paths: Vec::new(),
                             models: crate::model_catalog::fallback_models(provider),
                             agent_presets: crate::model_catalog::fallback_agent_presets(provider),
                         },
@@ -1991,7 +2076,7 @@ impl Padu {
         switched_on
             && self
                 .provider_probe(provider)
-                .is_some_and(|probe| probe.installed)
+                .is_some_and(|probe| probe.available())
     }
 
     /// Whether the model picker has no provider left to offer — nothing
@@ -2320,7 +2405,8 @@ impl Padu {
             .map(|runtime| runtime.driver.clone());
         let binary_provider = match provider {
             ProviderKind::Amp => Some("Amp"),
-            ProviderKind::OpenCode => Some("OpenCode"),
+            ProviderKind::OpenCode => Some("OpenCode v1"),
+            ProviderKind::OpenCodeV2 => Some("OpenCode v2"),
             ProviderKind::Grok => Some("Grok Build"),
             _ => None,
         };
@@ -2830,7 +2916,10 @@ impl Padu {
             .map(|runtime| runtime.driver.clone());
         let needs_binary = rollback_turns > 0
             && (matches!(source.provider, ProviderKind::Amp)
-                || (source.provider == ProviderKind::OpenCode && driver.is_none())
+                || (matches!(
+                    source.provider,
+                    ProviderKind::OpenCode | ProviderKind::OpenCodeV2
+                ) && driver.is_none())
                 || (source.provider == ProviderKind::Grok && retained_turn_count > 0));
         let binary = needs_binary
             .then(|| {
@@ -3083,6 +3172,7 @@ impl Padu {
                     | ProviderKind::Cursor
                     | ProviderKind::DeepSeek
                     | ProviderKind::OpenCode
+                    | ProviderKind::OpenCodeV2
                     | ProviderKind::Grok
             ) && provider_rewind_cursor.is_some())
         {
@@ -4858,6 +4948,8 @@ mod skill_submission_tests {
         ProviderBinaryObservation {
             version: Some(version.into()),
             identity: Some(binary_identity(digest)),
+            unavailable_reason: None,
+            checked: true,
         }
     }
 

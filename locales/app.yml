@@ -1148,6 +1148,16 @@ providers.binary_path:
   en: Binary path
 providers.binary_path_description:
   en: The executable Padu launches for %{provider}. Press Return to apply; leave empty to detect from PATH
+providers.storage_paths:
+  en: Storage paths
+providers.storage_path_config:
+  en: Config
+providers.storage_path_data:
+  en: Data
+providers.storage_path_state:
+  en: State
+providers.storage_path_cache:
+  en: Cache
 providers.checked_just_now:
   en: Checked just now
 providers.checked_minutes_ago:
@@ -3181,7 +3191,19 @@ usage.context_used:
 usage.shortcut:
   en: Usage (%{shortcut})
 usage.context_window:
-  en: Context window
+  en: Effective context
+usage.context_source_harness_environment:
+  en: "Denominator from CLAUDE_CODE_AUTO_COMPACT_WINDOW"
+usage.context_source_claude_one_million:
+  en: "Denominator from the model name ([1m])"
+usage.context_source_claude_default:
+  en: "Default denominator for a non-[1m] model"
+usage.context_source_provider:
+  en: "Denominator reported by the provider"
+usage.context_source_unknown:
+  en: "Context budget could not be determined"
+usage.context_over_budget:
+  en: "%{tokens} over effective budget"
 usage.compact_tooltip:
   en: Context is filling up. Click to compact.
 usage.compact_action:

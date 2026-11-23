@@ -2,7 +2,7 @@
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -11,7 +11,10 @@ use anyhow::{Context as _, anyhow, bail};
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 
-use crate::model::ProviderResumeCursor;
+use crate::model::{
+    AgentTurn, Message, MessageRole, ProviderResumeCursor, ProviderSessionHistory,
+    ProviderSessionSummary, TurnStatus,
+};
 
 const SERVER_START_TIMEOUT: Duration = Duration::from_secs(10);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -35,6 +38,138 @@ pub fn fork_session_at_turn(
     // one is started and killed with the handle otherwise.
     let server = crate::opencode_pool::acquire(binary, cwd)?;
     fork_session_at_turn_on_server(&server, session_id, retained_turns)
+}
+
+pub fn list_provider_sessions_v2(
+    binary: &Path,
+    limit: usize,
+) -> anyhow::Result<Vec<ProviderSessionSummary>> {
+    let cwd = std::env::current_dir()?;
+    let server = OpenCodeServer::start_v2_with_env(binary, &cwd, &[])?;
+    let path = format!(
+        "/api/session?limit={}&order=desc&parentID=null&archived=false",
+        limit.max(1)
+    );
+    let response = server.request("GET", &path, None)?;
+    Ok(response
+        .get("data")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|session| {
+            let session_id = session.get("id").and_then(Value::as_str)?;
+            let cwd = session
+                .pointer("/location/directory")
+                .and_then(Value::as_str)
+                .map(PathBuf::from)
+                .unwrap_or_else(|| cwd.clone());
+            let created = session.pointer("/time/created").and_then(Value::as_u64)? / 1_000;
+            let updated = session
+                .pointer("/time/updated")
+                .and_then(Value::as_u64)
+                .unwrap_or(created.saturating_mul(1_000))
+                / 1_000;
+            Some(ProviderSessionSummary {
+                cursor: ProviderResumeCursor::OpenCodeV2 {
+                    session_id: session_id.to_owned(),
+                },
+                title: session
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|title| !title.is_empty())
+                    .unwrap_or("OpenCode v2 session")
+                    .to_owned(),
+                cwd,
+                created_at: created,
+                updated_at: updated,
+            })
+        })
+        .collect())
+}
+
+pub fn provider_session_history_v2(
+    binary: &Path,
+    session_id: &str,
+    visible_turn_limit: usize,
+) -> anyhow::Result<ProviderSessionHistory> {
+    let cwd = std::env::current_dir()?;
+    let server = OpenCodeServer::start_v2_with_env(binary, &cwd, &[])?;
+    let path = format!("/api/session/{}/message", encode_path_segment(session_id));
+    let response = server.request("GET", &path, None)?;
+    let raw_messages = response
+        .get("data")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let user_indices = raw_messages
+        .iter()
+        .enumerate()
+        .filter_map(|(index, message)| {
+            (message.get("type").and_then(Value::as_str) == Some("user")).then_some(index)
+        })
+        .collect::<Vec<_>>();
+    let first_visible = user_indices.len().saturating_sub(visible_turn_limit);
+    let mut history = ProviderSessionHistory::default();
+    for (turn_index, user_index) in user_indices.iter().enumerate().skip(first_visible) {
+        let next_user = user_indices
+            .get(turn_index + 1)
+            .copied()
+            .unwrap_or(raw_messages.len());
+        let user = &raw_messages[*user_index];
+        let Some(text) = user.get("text").and_then(Value::as_str) else {
+            continue;
+        };
+        let created_at = user
+            .pointer("/time/created")
+            .and_then(Value::as_u64)
+            .unwrap_or_default()
+            / 1_000;
+        let turn_id = uuid::Uuid::new_v4();
+        history.turns.push(AgentTurn {
+            id: turn_id,
+            turn_count: history.turns.len() + 1,
+            status: TurnStatus::Completed,
+            provider_turn_started: true,
+            provider_resume_at: None,
+            started_at: created_at,
+            completed_at: Some(created_at),
+            checkpoint: None,
+        });
+        history.messages.push(Message {
+            turn_id: Some(turn_id),
+            created_at,
+            ..Message::new(MessageRole::User, text)
+        });
+        for assistant in &raw_messages[user_index + 1..next_user] {
+            if assistant.get("type").and_then(Value::as_str) != Some("assistant") {
+                continue;
+            }
+            let text = assistant
+                .get("content")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|part| part.get("type").and_then(Value::as_str) == Some("text"))
+                .filter_map(|part| part.get("text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if text.is_empty() {
+                continue;
+            }
+            let created_at = assistant
+                .pointer("/time/created")
+                .and_then(Value::as_u64)
+                .unwrap_or_default()
+                / 1_000;
+            history.messages.push(Message {
+                turn_id: Some(turn_id),
+                created_at,
+                ..Message::new(MessageRole::Assistant, text)
+            });
+        }
+    }
+    Ok(history)
 }
 
 /// Forks through the task's resident OpenCode server.
@@ -126,6 +261,7 @@ pub(crate) struct OpenCodeServer {
 }
 
 impl OpenCodeServer {
+    #[cfg(test)]
     pub(crate) fn start(binary: &Path, cwd: &Path) -> anyhow::Result<Self> {
         Self::start_with_env(binary, cwd, &[])
     }
@@ -136,6 +272,23 @@ impl OpenCodeServer {
         binary: &Path,
         cwd: &Path,
         environment: &[(String, String)],
+    ) -> anyhow::Result<Self> {
+        Self::start_with_env_and_health(binary, cwd, environment, "/global/health")
+    }
+
+    pub(crate) fn start_v2_with_env(
+        binary: &Path,
+        cwd: &Path,
+        environment: &[(String, String)],
+    ) -> anyhow::Result<Self> {
+        Self::start_with_env_and_health(binary, cwd, environment, "/api/info")
+    }
+
+    fn start_with_env_and_health(
+        binary: &Path,
+        cwd: &Path,
+        environment: &[(String, String)],
+        health_path: &str,
     ) -> anyhow::Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .context("could not reserve a local port for OpenCode")?;
@@ -176,7 +329,7 @@ impl OpenCodeServer {
         let started_at = Instant::now();
         loop {
             if server
-                .request_with_timeout("GET", "/global/health", None, HEALTH_PROBE_TIMEOUT)
+                .request_with_timeout("GET", health_path, None, HEALTH_PROBE_TIMEOUT)
                 .is_ok()
             {
                 return Ok(server);

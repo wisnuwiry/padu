@@ -491,6 +491,7 @@ impl Padu {
             DriverEvent::UsageUpdated {
                 context_tokens,
                 context_window,
+                context_window_source,
             } => {
                 // Meta about the conversation, not turn output: it applies
                 // even while a rewound or cancelled turn's tail drains.
@@ -501,6 +502,9 @@ impl Padu {
                     }
                     if let Some(window) = context_window {
                         usage.window = Some(window);
+                    }
+                    if context_window_source.is_some() {
+                        usage.source = context_window_source;
                     }
                     self.state.mark_session_dirty(session_id);
                 }

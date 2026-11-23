@@ -73,6 +73,7 @@ export function SessionView({
   const [expandedCompactions, setExpandedCompactions] = useState<ReadonlySet<string>>(new Set());
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [renameWarning, setRenameWarning] = useState<string | null>(null);
   const [pinnedToBottom, setPinnedToBottom] = useState(true);
   // Measured overlay height so the transcript ends halfway up the
   // composer instead of running full height behind it.
@@ -239,6 +240,12 @@ export function SessionView({
           ListHeaderComponent={(
             <>
               {daemon.phase === 'error' ? <OfflineBanner /> : undefined}
+              {renameWarning ? (
+                <RenameWarningBanner
+                  message={renameWarning}
+                  onDismiss={() => setRenameWarning(null)}
+                />
+              ) : undefined}
             </>
           )}
           ListEmptyComponent={(
@@ -329,11 +336,41 @@ export function SessionView({
         <RenameDialog
           initialValue={displaySessionTitle(session)}
           onDismiss={() => setRenaming(false)}
-          onSubmit={(title) => runtime.renameSession(session.id, title)}
+          onSubmit={async (title) => {
+            const warning = await runtime.renameSession(session.id, title);
+            setRenaming(false);
+            setRenameWarning(warning);
+          }}
           visible={renaming}
         />
       )}
     </KeyboardAvoidingView>
+  );
+}
+
+function RenameWarningBanner({
+  message,
+  onDismiss,
+}: {
+  message: string;
+  onDismiss: () => void;
+}) {
+  const theme = useTheme();
+  return (
+    <View
+      accessibilityLiveRegion="polite"
+      accessibilityRole="alert"
+      style={[styles.offlineBanner, { backgroundColor: theme.warningSoft }]}>
+      <PaduIcon name="alert" size={14} tintColor={theme.warning} />
+      <Text style={[styles.offlineText, { color: theme.warning }]}>{message}</Text>
+      <Pressable
+        accessibilityLabel="Dismiss rename warning"
+        accessibilityRole="button"
+        hitSlop={12}
+        onPress={onDismiss}>
+        <PaduIcon name="x" size={14} tintColor={theme.warning} />
+      </Pressable>
+    </View>
   );
 }
 

@@ -650,7 +650,10 @@ export default function TasksScreen() {
         <RenameDialog
           initialValue={displaySessionTitle(renameTarget)}
           onDismiss={() => setRenameTarget(null)}
-          onSubmit={(title) => runtime.renameSession(renameTarget.id, title)}
+          onSubmit={async (title) => {
+            const warning = await runtime.renameSession(renameTarget.id, title);
+            if (warning) Alert.alert('Native rename failed', warning);
+          }}
           visible
         />
       )}

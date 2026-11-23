@@ -329,7 +329,10 @@ pub(crate) fn catalog_agent(
     binary: &Path,
     cwd: &Path,
 ) -> anyhow::Result<AcpAgent> {
-    let launch = launch_for(provider, None, None)?;
+    let mut launch = launch_for(provider, None, None)?;
+    launch
+        .env
+        .extend(crate::model::provider_xdg_environment(provider));
     sdk_agent(binary, cwd, launch, None, Arc::new(Mutex::new(Vec::new())))
 }
 
@@ -2121,6 +2124,8 @@ pub(crate) fn handle_session_update(
                 let _ = events.send(DriverEvent::UsageUpdated {
                     context_tokens: used,
                     context_window: window,
+                    context_window_source: window
+                        .map(|_| crate::model::ContextWindowSource::Provider),
                 });
             }
         }
@@ -3253,6 +3258,7 @@ mod tests {
             DriverEvent::UsageUpdated {
                 context_tokens: Some(9677),
                 context_window: Some(500000),
+                context_window_source: Some(crate::model::ContextWindowSource::Provider),
             }
         ));
     }

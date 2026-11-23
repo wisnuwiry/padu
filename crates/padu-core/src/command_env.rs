@@ -576,6 +576,16 @@ pub(crate) fn shell_environment() -> ShellEnvironment {
         .unwrap_or_default()
 }
 
+/// Read an environment value using the same precedence as [`command`]:
+/// captured login-shell values override Padu's inherited process environment.
+pub(crate) fn environment_value(name: &str) -> Option<OsString> {
+    shell_environment()
+        .into_iter()
+        .rev()
+        .find_map(|(key, value)| (key == OsStr::new(name)).then_some(value))
+        .or_else(|| std::env::var_os(name))
+}
+
 fn cached_login_shell_variable(name: &OsStr) -> Option<OsString> {
     login_shell_environment()
         .read()

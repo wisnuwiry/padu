@@ -192,7 +192,7 @@ export function reduceRuntimeEvent(
     case 'usageUpdated': {
       const value = asRecord(payload)
       if (!value) break
-      const previous = session.context_usage ?? { tokens: 0, window: null }
+      const previous = session.context_usage ?? { tokens: 0, window: null, source: null }
       session.context_usage = {
         tokens:
           typeof value.contextTokens === 'number' ? value.contextTokens : previous.tokens,
@@ -200,6 +200,10 @@ export function reduceRuntimeEvent(
           typeof value.contextWindow === 'number'
             ? value.contextWindow
             : previous.window,
+        source:
+          typeof value.contextWindowSource === 'string'
+            ? value.contextWindowSource as typeof previous.source
+            : previous.source,
       }
       break
     }

@@ -2,5 +2,6 @@
 import type { ProviderAgentPreset } from "./ProviderAgentPreset";
 import type { ProviderKind } from "./ProviderKind";
 import type { ProviderModel } from "./ProviderModel";
+import type { ProviderStoragePath } from "./ProviderStoragePath";
 
-export type ProviderProbe = { provider: ProviderKind, installed: boolean, path: string | null, models: Array<ProviderModel>, agent_presets: Array<ProviderAgentPreset>, };
+export type ProviderProbe = { provider: ProviderKind, installed: boolean, path: string | null, unavailable_reason?: string | null, storage_paths: Array<ProviderStoragePath>, models: Array<ProviderModel>, agent_presets: Array<ProviderAgentPreset>, };

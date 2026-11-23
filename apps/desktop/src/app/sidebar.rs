@@ -2443,13 +2443,68 @@ impl Padu {
                 .iter()
                 .find(|session| session.id == session_id)
                 .is_some_and(|session| session.title != title);
-        if should_update
-            && self
-                .state
-                .session_mut(session_id)
-                .is_some_and(|session| session.set_title(&title))
-        {
-            self.save();
+        if should_update {
+            let previous = self.state.session_mut(session_id).map(|session| {
+                let previous = (session.title.clone(), session.updated_at);
+                session.set_title(&title);
+                previous
+            });
+            if let Some((previous_title, previous_updated_at)) = previous {
+                let response = self.daemon.client().request(
+                    session_id,
+                    Uuid::nil(),
+                    padu_client::Command::RenameSession {
+                        title: title.clone(),
+                    },
+                );
+                match response {
+                    Ok(padu_client::ResponsePayload::SessionRenamed {
+                        session,
+                        native_warning,
+                    }) => {
+                        if let Some(local) = self
+                            .state
+                            .sessions
+                            .iter_mut()
+                            .find(|session| session.id == session_id)
+                        {
+                            local.title = session.title;
+                            local.auto_title = session.auto_title;
+                            local.updated_at = session.updated_at;
+                        }
+                        if let Some(warning) = native_warning {
+                            self.show_toast(warning);
+                        }
+                    }
+                    Ok(_) => {
+                        if let Some(local) = self
+                            .state
+                            .sessions
+                            .iter_mut()
+                            .find(|session| session.id == session_id)
+                        {
+                            local.title = previous_title;
+                            local.updated_at = previous_updated_at;
+                        }
+                        self.show_toast(tr!(
+                            "errors.save_local_state",
+                            error = "invalid daemon response"
+                        ));
+                    }
+                    Err(error) => {
+                        if let Some(local) = self
+                            .state
+                            .sessions
+                            .iter_mut()
+                            .find(|session| session.id == session_id)
+                        {
+                            local.title = previous_title;
+                            local.updated_at = previous_updated_at;
+                        }
+                        self.show_toast(tr!("errors.save_local_state", error = error.to_string()));
+                    }
+                }
+            }
         }
         cx.notify();
     }

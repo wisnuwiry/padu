@@ -10,6 +10,7 @@ mod command_code;
 mod computer_use;
 mod deepseek;
 mod opencode;
+mod opencode_v2;
 mod pi;
 mod support;
 mod title_refresh;
@@ -17,6 +18,7 @@ mod title_refresh;
 pub(crate) use acp::catalog_agent;
 pub(crate) use acp_agy::discover_agy_models;
 pub use acp_agy::{agy_account_label, agy_auth_status, authenticate_agy, logout_agy};
+pub(crate) use opencode_v2::fork_session_at_turn_v2;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -158,6 +160,12 @@ impl DriverHandle {
     pub fn compact(&self, focus: Option<&str>) -> anyhow::Result<()> {
         self.inner.compact(focus)
     }
+
+    /// Attempt one provider-native rename. `false` means the provider has no
+    /// native rename operation, which is not a warning condition.
+    pub fn rename_native(&self, title: &str) -> anyhow::Result<bool> {
+        self.inner.rename_native(title)
+    }
 }
 
 pub trait DriverControl: Send + Sync {
@@ -175,6 +183,9 @@ pub trait DriverControl: Send + Sync {
     /// Request context compaction from the harness.
     fn compact(&self, _focus: Option<&str>) -> anyhow::Result<()> {
         anyhow::bail!("context compaction is not supported by this provider transport")
+    }
+    fn rename_native(&self, _title: &str) -> anyhow::Result<bool> {
+        Ok(false)
     }
     fn cancel(&self);
     fn cancel_computer_use(&self) {}
@@ -253,6 +264,9 @@ pub fn start_local(
         // OpenCode's own server is its real API, and it is what exposes
         // interactive permission requests.
         ProviderKind::OpenCode => Arc::new(opencode::OpenCodeDriver::start(options, events)?),
+        ProviderKind::OpenCodeV2 => {
+            Arc::new(opencode_v2::OpenCodeV2Driver::start(options, events)?)
+        }
         // Claude serves a realtime stream of user messages on stdin — the same
         // transport the Agent SDK drives — which is what lets its Supervised
         // mode ask rather than decide alone.

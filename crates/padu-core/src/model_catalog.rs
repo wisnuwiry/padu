@@ -64,18 +64,14 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         })
         .collect(),
         ProviderKind::Claude => vec![
-            claude_long_context(claude_ultracode_model("claude-fable-5", "Claude Fable 5")),
-            claude_long_context(claude_ultracode_model("claude-opus-5", "Claude Opus 5")),
-            claude_long_context(claude_ultracode_model("claude-opus-4-8", "Claude Opus 4.8")),
-            claude_long_context(claude_ultracode_model("claude-opus-4-7", "Claude Opus 4.7")),
-            claude_long_context(claude_reasoning_model("claude-opus-4-6", "Claude Opus 4.6")),
+            claude_ultracode_model("claude-fable-5", "Claude Fable 5"),
+            claude_ultracode_model("claude-opus-5", "Claude Opus 5"),
+            claude_ultracode_model("claude-opus-4-8", "Claude Opus 4.8"),
+            claude_ultracode_model("claude-opus-4-7", "Claude Opus 4.7"),
+            claude_reasoning_model("claude-opus-4-6", "Claude Opus 4.6"),
             claude_reasoning_model("claude-opus-4-5", "Claude Opus 4.5"),
-            claude_long_context(claude_ultracode_model("claude-sonnet-5", "Claude Sonnet 5"))
-                .default(),
-            claude_long_context(claude_reasoning_model(
-                "claude-sonnet-4-6",
-                "Claude Sonnet 4.6",
-            )),
+            claude_ultracode_model("claude-sonnet-5", "Claude Sonnet 5").default(),
+            claude_reasoning_model("claude-sonnet-4-6", "Claude Sonnet 4.6"),
             ProviderModel::new("claude-haiku-4-5", "Claude Haiku 4.5"),
         ],
         // Cursor's full catalog is account-specific and exposed by the
@@ -91,7 +87,7 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         // subscription login. An invented fallback could expose an unusable
         // route, so discovery is authoritative.
         ProviderKind::Fx => Vec::new(),
-        ProviderKind::OpenCode => Vec::new(),
+        ProviderKind::OpenCode | ProviderKind::OpenCodeV2 => Vec::new(),
         // Grok's catalog comes from `grok models`, which includes any custom
         // model the user configured. An invented fallback would offer a model
         // the CLI rejects, so discovery is authoritative.
@@ -131,6 +127,17 @@ pub fn discover_catalog(
     provider: ProviderKind,
     binary: &Path,
 ) -> (Vec<ProviderModel>, Vec<ProviderAgentPreset>) {
+    discover_catalog_with_env(provider, binary, &[])
+}
+
+/// Discover a provider catalog with the same process isolation the live
+/// harness uses. OpenCode v1 must not inspect the standard v2 configuration
+/// while listing its models.
+pub fn discover_catalog_with_env(
+    provider: ProviderKind,
+    binary: &Path,
+    environment: &[(String, String)],
+) -> (Vec<ProviderModel>, Vec<ProviderAgentPreset>) {
     let (discovered, discovered_presets) = match provider {
         ProviderKind::Agy => (crate::driver::discover_agy_models(binary), None),
         // Amp exposes stable agent modes rather than a model inventory. Keep
@@ -141,7 +148,8 @@ pub fn discover_catalog(
         ProviderKind::Cursor => (discover_cursor_models(binary), None),
         ProviderKind::DeepSeek => discover_deepseek_catalog(binary),
         ProviderKind::Fx => (discover_fx_models(binary), None),
-        ProviderKind::OpenCode => (discover_opencode_models(binary), None),
+        ProviderKind::OpenCode => (discover_opencode_models(binary, environment), None),
+        ProviderKind::OpenCodeV2 => (discover_opencode_v2_models(binary), None),
         ProviderKind::Grok => (discover_grok_models(binary), None),
         ProviderKind::Kimi => (discover_kimi_models(binary), None),
         ProviderKind::CommandCode => (discover_command_code_models(binary), None),
@@ -425,13 +433,74 @@ fn parse_qoder_models(output: &str) -> Vec<ProviderModel> {
     deduplicate(parse_cursor_models(output))
 }
 
-fn discover_opencode_models(binary: &Path) -> Vec<ProviderModel> {
+fn discover_opencode_models(binary: &Path, environment: &[(String, String)]) -> Vec<ProviderModel> {
     let mut command = crate::command_env::command(binary);
+    command.envs(environment.iter().map(|(key, value)| (key, value)));
     let command = command.arg("models");
     let Ok(output) = crate::command_env::output(command) else {
         return Vec::new();
     };
     parse_opencode_models(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn discover_opencode_v2_models(binary: &Path) -> Vec<ProviderModel> {
+    let mut command = crate::command_env::command(binary);
+    let command = command.args(["api", "GET", "/api/model"]);
+    let Ok(output) = crate::command_env::output(command) else {
+        return Vec::new();
+    };
+    let Ok(catalog) = serde_json::from_slice::<Value>(&output.stdout) else {
+        return Vec::new();
+    };
+    parse_opencode_v2_models(&catalog)
+}
+
+fn parse_opencode_v2_models(catalog: &Value) -> Vec<ProviderModel> {
+    catalog
+        .get("data")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            if entry.get("enabled").and_then(Value::as_bool) == Some(false)
+                || entry.get("status").and_then(Value::as_str) == Some("inactive")
+            {
+                return None;
+            }
+            let provider = entry.get("providerID").and_then(Value::as_str)?;
+            let id = entry
+                .get("modelID")
+                .or_else(|| entry.get("id"))
+                .and_then(Value::as_str)?;
+            let name = entry
+                .get("name")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned)
+                .unwrap_or_else(|| display_name_from_slug(id));
+            let mut model = ProviderModel::new(format!("{provider}/{id}"), name)
+                .sub_provider(display_name_from_slug(provider));
+            let efforts = entry
+                .get("variants")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|variant| variant.get("id").and_then(Value::as_str))
+                .map(|effort| ProviderModelOption::new(effort, reasoning_effort_label(effort)))
+                .collect::<Vec<_>>();
+            if !efforts.is_empty() {
+                let default = efforts
+                    .iter()
+                    .find(|effort| matches!(effort.id.as_str(), "medium" | "high" | "low"))
+                    .or_else(|| efforts.first())
+                    .map(|effort| effort.id.clone())
+                    .unwrap_or_default();
+                model = model.reasoning(efforts, default);
+            }
+            Some(model)
+        })
+        .collect()
 }
 
 fn discover_deepseek_catalog(
@@ -1199,20 +1268,6 @@ fn claude_ultracode_model(id: &str, name: &str) -> ProviderModel {
     ProviderModel::new(id, name).reasoning(
         reasoning_options(["low", "medium", "high", "xhigh", "max", "ultracode"]),
         "high",
-    )
-}
-
-/// Claude Code serves a 200K window by default and reaches the 1M one through
-/// a `[1m]` model-id suffix, so the window is a per-session trait rather than a
-/// separate model. The CLI refuses the suffix on Claude 3, Opus 4.0/4.1/4.5,
-/// and Haiku 4.5, so only the models that honor it carry the choice.
-fn claude_long_context(model: ProviderModel) -> ProviderModel {
-    model.context_windows(
-        [
-            ProviderModelOption::new("200k", tr!("model_option.context_200k")),
-            ProviderModelOption::new("1m", tr!("model_option.context_1m")),
-        ],
-        "200k",
     )
 }
 

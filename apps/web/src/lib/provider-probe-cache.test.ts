@@ -33,6 +33,8 @@ const probe: ProviderProbeResult = {
   provider: 'codex',
   installed: true,
   path: '/usr/local/bin/codex',
+  unavailable_reason: null,
+  storage_paths: [],
   models: [{
     id: 'gpt-5',
     name: 'GPT-5',
@@ -72,7 +74,7 @@ describe('provider probe cache', () => {
     writeProviderProbeCache(storage, 'ws://daemon-a', 'codex', null, probe, 10_000)
     expect(readProviderProbeCache(storage, 'ws://daemon-a', 'codex', null, 31 * 24 * 60 * 60 * 1_000)).toBeUndefined()
 
-    storage.setItem('padu.provider-probes.v1', '{bad json')
+    storage.setItem('padu.provider-probes.v3', '{bad json')
     expect(readProviderProbeCache(storage, 'ws://daemon-a', 'codex')).toBeUndefined()
   })
 

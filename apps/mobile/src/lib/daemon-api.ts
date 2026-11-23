@@ -363,6 +363,21 @@ export async function setSessionPinned(
   return response.session;
 }
 
+export async function renameSession(
+  client: PaduClient,
+  sessionId: string,
+  title: string,
+): Promise<{ session: AgentSession; nativeWarning: string | null }> {
+  const response = expectResponse(
+    await client.request({ type: 'renameSession', title }, sessionId),
+    'sessionRenamed',
+  );
+  return {
+    session: response.session,
+    nativeWarning: response.nativeWarning ?? null,
+  };
+}
+
 /**
  * Reads daemon blob bytes on the global path (these commands bail on the
  * session-scoped path). Returns base64, mirroring web's attachments reader.

@@ -506,6 +506,11 @@ providers.detected_as: 已检测到 %{command}
 providers.searches_path: Padu 未在 PATH 中找到 %{command}
 providers.binary_path: 可执行文件路径
 providers.binary_path_description: Padu 用于启动 %{provider} 的可执行文件。按 Return 应用；留空则从 PATH 自动检测
+providers.storage_paths: 存储路径
+providers.storage_path_config: 配置
+providers.storage_path_data: 数据
+providers.storage_path_state: 状态
+providers.storage_path_cache: 缓存
 providers.checked_just_now: 刚刚检查过
 providers.checked_minutes_ago: "%{count} 分钟前检查过"
 providers.checked_hours_ago: "%{count} 小时前检查过"
@@ -1489,7 +1494,13 @@ usage.chart_description: Claude Code 与 Codex 的每日%{metric}分布。
 usage.refresh_failed: "用量刷新失败：%{error}"
 usage.context_used: 上下文窗口已使用 %{percent}%（%{shortcut}）
 usage.shortcut: 用量（%{shortcut}）
-usage.context_window: 上下文窗口
+usage.context_window: 有效上下文
+usage.context_source_harness_environment: "使用 CLAUDE_CODE_AUTO_COMPACT_WINDOW 作为分母"
+usage.context_source_claude_one_million: "使用模型名称中的 [1m] 作为分母"
+usage.context_source_claude_default: "使用非 [1m] 模型的默认值作为分母"
+usage.context_source_provider: "使用提供商报告的上下文上限"
+usage.context_source_unknown: "无法确定上下文上限"
+usage.context_over_budget: "超出有效上下文 %{tokens}"
 usage.compact_tooltip: 上下文即将占满。点击压缩。
 usage.compact_action: 压缩上下文
 usage.compact_focus_label: 重点（可选）
