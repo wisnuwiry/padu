@@ -138,7 +138,7 @@ export default function NewTaskScreen() {
   activeProfileIdRef.current = daemon.activeProfile?.id ?? null;
   activeClientRef.current = daemon.client;
   const installedProviders = useMemo(
-    () => catalog.providers.filter((item) => item.installed).map((item) => item.id),
+    () => catalog.providers.filter((item) => item.available).map((item) => item.id),
     [catalog.providers],
   );
   const modelCatalog = useAllProviderModels(installedProviders);

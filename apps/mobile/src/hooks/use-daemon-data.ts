@@ -34,6 +34,7 @@ const PROVIDERS: ProviderKind[] = [
   'cursor',
   'amp',
   'openCode',
+  'openCodeV2',
   'grok',
   'kimi',
   'deepSeek',
@@ -296,7 +297,7 @@ export function useProviderCatalog() {
         queryKey: daemonKeys.provider(activeProfile?.id ?? 'disconnected', provider),
         queryFn: () => probeProvider(requireClient(client), provider, settings.data!, {
           discoverModels: false,
-          probeVersion: false,
+          probeVersion: provider === 'openCode' || provider === 'openCodeV2',
         }),
         enabled:
           phase === 'connected' &&
@@ -315,6 +316,9 @@ export function useProviderCatalog() {
         id,
         label: providerLabel(id),
         installed: query.data?.installed === true,
+        available:
+          query.data?.installed === true && !query.data.unavailable_reason,
+        unavailableReason: query.data?.unavailable_reason ?? null,
         path: query.data?.path ?? null,
         isPending: query.isPending,
         error: query.error,

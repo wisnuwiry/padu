@@ -151,6 +151,7 @@ export const PROVIDER_ICON_NAME: Record<ProviderKind, PaduIconName> = {
   deepSeek: "providerDeepseek",
   fx: "providerFx",
   openCode: "providerOpencode",
+  openCodeV2: "providerOpencode",
   grok: "providerGrok",
   kimi: "providerKimi",
   ohMyPi: "providerOhmypi",

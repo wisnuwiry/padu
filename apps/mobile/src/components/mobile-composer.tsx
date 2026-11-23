@@ -1,5 +1,6 @@
 import type {
   AgentSession,
+  ContextWindowSource,
   EmbeddedNote,
   MessageAttachment,
   PendingPermission,
@@ -426,15 +427,20 @@ function ComposerContextRow({
 }) {
   const theme = useTheme();
   const usage = session.context_usage;
+  const legacyContextWindow = session.provider === 'claude' ? null : session.context_window;
   const percent = usage?.window ? Math.round(usage.tokens * 100 / usage.window) : null;
-  if (!usage && !session.context_window) return null;
+  if (!usage && !legacyContextWindow) return null;
   const canCompact = supportsCompaction(session.provider);
+  const source = contextSourceLabel(usage?.source);
+  const overBudget = usage?.window && usage.tokens > usage.window
+    ? usage.tokens - usage.window
+    : 0;
 
   const summary = percent != null
-    ? `context ${percent}%`
+    ? `Effective context ${percent}%${overBudget > 0 ? `, ${formatTokens(overBudget)} over budget` : ''}${source ? `, ${source}` : ''}`
     : usage
-      ? `${formatTokens(usage.tokens)} tokens`
-      : session.context_window;
+      ? `Effective context ${formatTokens(usage.tokens)} tokens${source ? `, ${source}` : ''}`
+      : legacyContextWindow;
   const content = (
     <View
       accessible={!canCompact}
@@ -442,10 +448,12 @@ function ComposerContextRow({
       accessibilityLabel={summary || 'Session context'}
       accessibilityRole={!canCompact ? 'text' : undefined}
       style={styles.contextRow}>
+      <Text style={[styles.statusText, { color: theme.textTertiary }]}>Effective context</Text>
       {percent != null && usage?.window ? (
         <>
           <Text style={[styles.statusText, { color: theme.textTertiary }]}>
             {formatTokens(usage.tokens)} / {formatTokens(usage.window)}
+            {overBudget > 0 ? ` · ${formatTokens(overBudget)} over` : ''}
           </Text>
           <ContextGauge percent={percent} />
         </>
@@ -453,7 +461,7 @@ function ComposerContextRow({
         <>
           <PaduIcon name="gauge" size={12} tintColor={theme.textTertiary} />
           <Text style={[styles.statusText, { color: theme.textTertiary }]}>
-            {usage ? formatTokens(usage.tokens) : session.context_window}
+            {usage ? formatTokens(usage.tokens) : legacyContextWindow}
           </Text>
         </>
       )}
@@ -479,6 +487,17 @@ function ComposerContextRow({
       {content}
     </Pressable>
   );
+}
+
+function contextSourceLabel(source: ContextWindowSource | null | undefined) {
+  switch (source) {
+    case 'harnessEnvironment': return 'CLAUDE_CODE_AUTO_COMPACT_WINDOW';
+    case 'claudeModelOneMillion': return 'model name ([1m])';
+    case 'claudeModelDefault': return 'default for non-[1m] model';
+    case 'provider': return 'provider-reported window';
+    case 'unknown':
+    default: return 'budget unknown';
+  }
 }
 
 function formatTokens(tokens: number) {
